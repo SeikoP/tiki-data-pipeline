@@ -1,0 +1,3 @@
+# Thư mục này chứa các data pipelines
+# Tạo modules mới cho các pipeline: crawl, transform, load, etc.
+

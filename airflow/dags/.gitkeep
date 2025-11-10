@@ -1,0 +1,3 @@
+# Thư mục này chứa các Airflow DAGs
+# Tạo file .py mới trong thư mục này để thêm DAG
+
