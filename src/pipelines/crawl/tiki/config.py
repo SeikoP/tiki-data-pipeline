@@ -8,6 +8,12 @@ from typing import Dict, Any
 FIRECRAWL_API_URL = os.getenv("FIRECRAWL_API_URL", "http://api:3002")
 TIKI_BASE_URL = "https://tiki.vn"
 
+# Groq API Configuration
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_API_KEYS = os.getenv("GROQ_API_KEYS", "")  # Comma-separated multiple keys
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")  # Default Groq model
+GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+
 # Rate Limiting Configuration
 RATE_LIMIT_CONFIG = {
     "max_requests_per_minute": int(os.getenv("TIKI_MAX_REQ_PER_MIN", "30")),
@@ -51,6 +57,15 @@ AIRFLOW_CONFIG = {
     "max_active_tasks": int(os.getenv("TIKI_MAX_ACTIVE_TASKS", "50")),
 }
 
+# Groq Configuration
+GROQ_CONFIG = {
+    "api_key": GROQ_API_KEY,
+    "api_keys": GROQ_API_KEYS.split(",") if GROQ_API_KEYS else [],
+    "model": GROQ_MODEL,
+    "base_url": GROQ_BASE_URL,
+    "enabled": bool(GROQ_API_KEY or GROQ_API_KEYS),
+}
+
 def get_config() -> Dict[str, Any]:
     """Lấy toàn bộ config"""
     return {
@@ -59,5 +74,6 @@ def get_config() -> Dict[str, Any]:
         "crawl": CRAWL_CONFIG,
         "data_paths": DATA_PATHS,
         "airflow": AIRFLOW_CONFIG,
+        "groq": GROQ_CONFIG,
     }
 

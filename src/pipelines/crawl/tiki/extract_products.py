@@ -28,13 +28,18 @@ TIKI_BASE_URL = "https://tiki.vn"
 
 
 def extract_product_id(url: str) -> Optional[str]:
-    """Extract product ID từ URL (pattern: /p123456 hoặc ?id=123456)"""
+    """Extract product ID từ URL (pattern: /p123456 hoặc ?id=123456 hoặc -p123456.html)"""
     # Pattern 1: /p123456
     match = re.search(r'/p(\d+)', url)
     if match:
         return match.group(1)
     
-    # Pattern 2: ?id=123456
+    # Pattern 2: -p123456 or -p123456.html (Tiki product URL format)
+    match = re.search(r'-p(\d+)', url)
+    if match:
+        return match.group(1)
+    
+    # Pattern 3: ?id=123456
     parsed = urlparse(url)
     query_params = parse_qs(parsed.query)
     if 'id' in query_params:

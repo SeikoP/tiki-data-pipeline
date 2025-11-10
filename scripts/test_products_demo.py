@@ -18,6 +18,40 @@ from pipelines.crawl.tiki.extract_products import (
 )
 from pipelines.crawl.tiki.extract_category_link import load_categories_from_json
 
+
+def extract_leaf_categories(hierarchical_categories, max_leaf_categories=None):
+    """
+    Extract leaf categories (categories mà không có sub_categories)
+    từ hierarchical structure
+    
+    Args:
+        hierarchical_categories: List hierarchical categories từ JSON
+        max_leaf_categories: Giới hạn số leaf categories (None = tất cả)
+    
+    Returns:
+        List leaf categories (categories chi tiết nhất để crawl sản phẩm)
+    """
+    leaf_categories = []
+    
+    def traverse(categories, parent_info=None):
+        for cat in categories:
+            sub_cats = cat.get('sub_categories', [])
+            
+            # Nếu không có sub_categories, đây là leaf category
+            if not sub_cats:
+                leaf_categories.append(cat)
+            else:
+                # Nếu có sub_categories, traverse vào
+                traverse(sub_cats, cat)
+    
+    traverse(hierarchical_categories)
+    
+    # Giới hạn nếu cần
+    if max_leaf_categories and len(leaf_categories) > max_leaf_categories:
+        leaf_categories = leaf_categories[:max_leaf_categories]
+    
+    return leaf_categories
+
 # Fix encoding on Windows
 if sys.platform == "win32":
     try:
@@ -63,45 +97,47 @@ def print_product_info(product, indent=0):
 
 
 def demo_load_categories():
-    """Load demo categories"""
-    print_section("BƯỚC 1: Load Demo Categories")
+    """Load demo categories từ hierarchical JSON"""
+    print_section("BƯỚC 1: Load Demo Categories (Leaf Categories)")
     
-    # Load từ demo files
-    demo_categories_file = "data/raw/demo/demo_categories.json"
-    demo_sub_categories_file = "data/raw/demo/demo_sub_categories.json"
+    # Load từ hierarchical file
+    demo_hierarchical_file = "data/raw/demo/demo_hierarchical.json"
     
-    categories = []
-    
-    # Load root categories
-    if os.path.exists(demo_categories_file):
-        root_cats = load_categories_from_json(demo_categories_file)
-        categories.extend(root_cats)
-        safe_print(f"✓ Đã load {len(root_cats)} root categories")
-    
-    # Load sub-categories (chỉ lấy một vài để demo nhanh)
-    if os.path.exists(demo_sub_categories_file):
-        sub_cats = load_categories_from_json(demo_sub_categories_file)
-        # Chỉ lấy 2-3 sub-categories đầu để demo nhanh
-        demo_sub_cats = sub_cats[:3]
-        categories.extend(demo_sub_cats)
-        safe_print(f"✓ Đã load {len(demo_sub_cats)} sub-categories (từ {len(sub_cats)} total)")
-    
-    if not categories:
-        safe_print("⚠️  Không tìm thấy demo categories")
+    if not os.path.exists(demo_hierarchical_file):
+        safe_print("⚠️  Không tìm thấy demo hierarchical file")
         return []
     
-    safe_print(f"\n📊 Tổng cộng: {len(categories)} categories để crawl products")
+    try:
+        with open(demo_hierarchical_file, 'r', encoding='utf-8') as f:
+            hierarchical_categories = json.load(f)
+        safe_print(f"✓ Đã load hierarchical categories từ: {demo_hierarchical_file}")
+    except json.JSONDecodeError as e:
+        safe_print(f"⚠️  Lỗi khi parse JSON: {e}")
+        return []
+    
+    # Extract leaf categories (categories chi tiết nhất)
+    leaf_categories = extract_leaf_categories(hierarchical_categories)
+    
+    safe_print(f"✓ Tìm thấy {len(leaf_categories)} leaf categories (danh mục chi tiết nhất)")
+    
+    if not leaf_categories:
+        safe_print("⚠️  Không tìm thấy leaf categories")
+        return []
+    
+    safe_print(f"\n📊 Tổng cộng: {len(leaf_categories)} leaf categories để crawl products")
     
     # Hiển thị sample
-    safe_print("\n📋 Sample categories:")
-    for i, cat in enumerate(categories[:3], 1):
-        safe_print(f"  {i}. {cat.get('name', 'N/A')} (ID: {cat.get('category_id', 'N/A')})")
-        safe_print(f"     URL: {cat.get('url', 'N/A')}")
+    safe_print("\n📋 Sample leaf categories:")
+    for i, cat in enumerate(leaf_categories[:5], 1):
+        name = cat.get('name', 'N/A')
+        cat_id = cat.get('category_id', 'N/A')
+        level = cat.get('level', 'N/A')
+        safe_print(f"  {i}. {name} (ID: {cat_id}, Level: {level})")
     
-    if len(categories) > 3:
-        safe_print(f"  ... và {len(categories) - 3} categories khác")
+    if len(leaf_categories) > 5:
+        safe_print(f"  ... và {len(leaf_categories) - 5} leaf categories khác")
     
-    return categories
+    return leaf_categories
 
 
 def demo_crawl_products(categories, use_cache=True, max_categories=2, max_products_per_category=5):
@@ -228,7 +264,8 @@ def main():
     safe_print("=" * 70)
     safe_print(f"Thời gian: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     safe_print("\n💡 Đây là demo với dữ liệu nhỏ để chạy nhanh")
-    safe_print("   - Chỉ crawl từ 2 categories đầu tiên")
+    safe_print("   - Crawl từ leaf categories (danh mục chi tiết nhất)")
+    safe_print("   - Chỉ crawl từ 2 leaf categories đầu tiên")
     safe_print("   - Max 5 products mỗi category")
     safe_print("   - Sử dụng cache để tránh crawl lại")
     
