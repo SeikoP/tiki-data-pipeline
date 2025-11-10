@@ -42,6 +42,7 @@ htmlcov/
 # These can be large; tracked only if intentionally committed.
 data/raw/
 data/processed/
+.github
 
 # Logs and runtime files
 logs/
@@ -68,6 +69,7 @@ nuq-postgres-volume/
 *.key
 secrets/
 credentials/
+
 
 # IDEs and editors
 .vscode/

@@ -10,36 +10,21 @@ Repository này được thiết kế để sử dụng như một **template** 
 2. Click nút **"Use this template"** (màu xanh)
 3. Chọn **"Create a new repository"**
 4. Đặt tên repository mới cho dự án của bạn
-5. Clone repository mới về máy với submodules:
-   ```bash
-   git clone --recursive <repository-url>
-   cd <project-name>
-   ```
-   
-   **Lưu ý**: Nếu đã clone mà chưa có `--recursive`, chạy:
-   ```bash
-   git submodule init
-   git submodule update --recursive
-   ```
+5. Clone repository mới về máy
 
 ### Option 2: Fork và Customize
 
 1. Fork repository này
-2. Clone về máy với submodules: `git clone --recursive <your-fork-url>`
-3. Khởi tạo submodules nếu chưa có: `git submodule init && git submodule update --recursive`
-4. Đổi tên remote: `git remote rename origin upstream`
-5. Thêm remote mới cho dự án của bạn
+2. Clone về máy: `git clone <your-fork-url>`
+3. Đổi tên remote: `git remote rename origin upstream`
+4. Thêm remote mới cho dự án của bạn
 
 ### Option 3: Clone và Setup thủ công
 
 ```bash
-# Clone repository với submodules
-git clone --recursive https://github.com/your-username/tiki-data-pipeline.git my-new-project
+# Clone repository
+git clone https://github.com/your-username/tiki-data-pipeline.git my-new-project
 cd my-new-project
-
-# Nếu chưa có submodules, khởi tạo:
-git submodule init
-git submodule update --recursive
 
 # Xóa git history cũ (nếu muốn bắt đầu mới)
 rm -rf .git
@@ -52,14 +37,6 @@ git remote add origin https://github.com/your-username/my-new-project.git
 ```
 
 ## Setup cho dự án mới
-
-### 0. Khởi tạo Submodules (nếu chưa có)
-
-```bash
-# Nếu clone mà chưa có --recursive, chạy:
-git submodule init
-git submodule update --recursive
-```
 
 ### 1. Cấu hình môi trường
 
@@ -116,7 +93,6 @@ tiki-data-pipeline/
 
 ## Lưu ý
 
-- **Submodules**: Repository này sử dụng submodule `firecrawl`. Khi clone, nhớ dùng `--recursive` hoặc chạy `git submodule init && git submodule update --recursive` sau khi clone
 - File `.env` không được commit (đã có trong .gitignore)
 - Thay đổi mật khẩu mặc định cho production
 - Cân nhắc tách databases nếu cần isolation cao

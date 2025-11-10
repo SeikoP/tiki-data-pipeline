@@ -4,8 +4,8 @@ Example Airflow DAG - Template để tạo DAG mới
 Đây là một DAG mẫu để bạn có thể tham khảo và tạo DAG mới.
 """
 from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.operators.bash import BashOperator
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.providers.standard.operators.bash import BashOperator
 from datetime import datetime, timedelta
 
 # Default arguments cho DAG
@@ -23,7 +23,7 @@ with DAG(
     'example_dag',
     default_args=default_args,
     description='Example DAG template',
-    schedule_interval=timedelta(days=1),  # Chạy hàng ngày
+    schedule=timedelta(days=1),  # Chạy hàng ngày (Airflow 3.x dùng 'schedule' thay vì 'schedule_interval')
     start_date=datetime(2024, 1, 1),
     catchup=False,  # Không chạy lại các task đã bỏ lỡ
     tags=['example', 'template'],
