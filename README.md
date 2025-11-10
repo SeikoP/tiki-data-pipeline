@@ -30,8 +30,15 @@ Xem file [TEMPLATE.md](docs/TEMPLATE.md) để biết cách sử dụng reposito
 ### 1. Clone repository
 
 ```bash
-git clone [<repository-url>](https://github.com/SeikoP/airflow-firecrawl-data-pipeline)
+# Clone repository với submodules
+git clone --recursive [<repository-url>](https://github.com/SeikoP/airflow-firecrawl-data-pipeline)
 cd airflow-firecrawl-data-pipeline
+```
+
+**Lưu ý**: Nếu đã clone mà chưa có `--recursive`, chạy lệnh sau để khởi tạo submodules:
+```bash
+git submodule init
+git submodule update --recursive
 ```
 
 ### 2. Cấu hình môi trường
