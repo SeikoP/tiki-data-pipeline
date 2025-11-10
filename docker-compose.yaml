@@ -411,6 +411,8 @@ services:
 
   api:
     <<: *common-service
+    env_file:
+      - ${ENV_FILE_PATH:-.env}
     environment:
       <<: *common-env
       HOST: "0.0.0.0"
@@ -418,6 +420,12 @@ services:
       EXTRACT_WORKER_PORT: ${EXTRACT_WORKER_PORT:-3004}
       WORKER_PORT: ${WORKER_PORT:-3005}
       ENV: local
+      # Disable Ollama for LLM extraction - use Groq instead
+      OLLAMA_BASE_URL: ""
+      # Configure Groq for schema analysis in extraction
+      ANTHROPIC_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_API_KEYS: ${GROQ_API_KEYS:-}
     depends_on:
       redis:
         condition: service_healthy

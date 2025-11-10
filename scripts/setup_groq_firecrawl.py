@@ -24,7 +24,7 @@ def print_section(title):
 
 def check_groq_config():
     """Kiểm tra Groq config hiện tại"""
-    print_section("KIỂM TRA GROQ CONFIG")
+    print_section("KI M TRA GROQ CONFIG")
     
     groq_key = os.getenv("GROQ_API_KEY", "")
     groq_keys = os.getenv("GROQ_API_KEYS", "")
@@ -44,7 +44,7 @@ def check_groq_config():
 
 def setup_firecrawl_groq():
     """Setup Firecrawl để sử dụng Groq"""
-    print_section("SETUP FIRECRAWL VỚI GROQ")
+    print_section("SETUP FIRECRAWL VOI GROQ")
     
     # Firecrawl sử dụng GROQ_API_KEY environment variable
     groq_key = os.getenv("GROQ_API_KEY", "")
@@ -77,7 +77,7 @@ def setup_firecrawl_groq():
 
 def show_usage_example():
     """Hiển thị ví dụ sử dụng"""
-    print_section("VÍ DỤ SỬ DỤNG")
+    print_section("VI DU SU DUNG")
     
     example_code = '''
 # Trong Python code, sử dụng Groq key manager:
@@ -101,19 +101,19 @@ def main():
     print("=" * 70)
     
     if not check_groq_config():
-        print("\n❌ Setup không thành công - thiếu Groq API keys")
+        print("\nX Setup khong thanh cong - thieu Groq API keys")
         return
     
     if setup_firecrawl_groq():
         show_usage_example()
         print_section("NEXT STEPS")
-        print("1. Đảm bảo .env file có GROQ_API_KEY hoặc GROQ_API_KEYS")
+        print("1. Dam bao .env file co GROQ_API_KEY hoac GROQ_API_KEYS")
         print("2. Restart Firecrawl service:")
         print("   docker-compose restart api")
-        print("3. Test với: python scripts/test_groq_config.py")
-        print("\n✅ Setup hoàn tất!")
+        print("3. Test voi: python scripts/test_groq_config.py")
+        print("\nOK Setup hoan tat!")
     else:
-        print("\n❌ Setup không thành công")
+        print("\nX Setup khong thanh cong")
     
     print("\n" + "=" * 70)
 

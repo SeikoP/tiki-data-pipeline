@@ -4,14 +4,44 @@ Cấu hình cho Tiki Crawler Pipeline
 import os
 from typing import Dict, Any
 
+# Load .env file
+try:
+    from dotenv import load_dotenv
+    # Load .env từ project root
+    import sys
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    env_path = os.path.join(project_root, '.env')
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+    else:
+        # Try current directory
+        load_dotenv()
+except ImportError:
+    # python-dotenv not installed, skip
+    pass
+
 # API Configuration
-FIRECRAWL_API_URL = os.getenv("FIRECRAWL_API_URL", "http://api:3002")
+# Auto-detect: use localhost for host machine, api for Docker container
+def _get_firecrawl_url():
+    """Auto-detect Firecrawl URL based on environment"""
+    env_url = os.getenv("FIRECRAWL_API_URL")
+    if env_url:
+        return env_url
+    
+    # If running in Docker, use api:3002
+    # Otherwise (Windows/host machine), use localhost:3002
+    if os.path.exists("/.dockerenv"):
+        return "http://api:3002"
+    else:
+        return "http://localhost:3002"
+
+FIRECRAWL_API_URL = _get_firecrawl_url()
 TIKI_BASE_URL = "https://tiki.vn"
 
 # Groq API Configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_API_KEYS = os.getenv("GROQ_API_KEYS", "")  # Comma-separated multiple keys
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")  # Default Groq model
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")  # Default Groq model
 GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
 # Rate Limiting Configuration
