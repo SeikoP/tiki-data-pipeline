@@ -239,21 +239,33 @@ def build_hierarchical_structure(categories):
         return []
     
     # ===== BƯỚC 0: REMOVE DUPLICATES =====
+    # Giữ lại TOÀN BỘ dữ liệu, chỉ remove duplicates
     seen_ids = set()
     unique_categories = []
     duplicates_removed = 0
+    skipped_no_id = 0
     
     for cat in categories:
         cat_id = cat.get('category_id')
-        if not cat_id or cat_id in seen_ids:
-            if cat_id:
-                duplicates_removed += 1
+        
+        # Categories không có category_id - vẫn giữ lại nhưng track
+        if not cat_id:
+            skipped_no_id += 1
+            unique_categories.append(cat)  # Keep it for manual review
             continue
+        
+        # Duplicate - skip
+        if cat_id in seen_ids:
+            duplicates_removed += 1
+            continue
+        
         seen_ids.add(cat_id)
         unique_categories.append(cat)
     
     if duplicates_removed > 0:
         print(f"  ⚠️  Removed {duplicates_removed} duplicate categories (kept latest)")
+    if skipped_no_id > 0:
+        print(f"  ⚠️  Found {skipped_no_id} categories without category_id (kept for review)")
     
     categories = unique_categories
     
@@ -308,28 +320,34 @@ def build_hierarchical_structure(categories):
         
         return False
     
-    # Validate và loại bỏ circular references
+    # Validate và GIỮ LẠI tất cả categories hợp lệ
     validated_categories = []
+    rejected_categories = []
+    
     for cat in categories:
         cat_id = cat.get('category_id')
         parent_id = cat.get('parent_id')
         
+        # Categories không có category_id - giữ lại với warning
         if not cat_id:
+            issues['orphaned'].append(f"No category_id: {cat}")
+            validated_categories.append(cat)  # Keep it
             continue
         
-        # Skip self-references
+        # Self-references - REJECT (không thể fix)
         if parent_id == cat_id:
             issues['circular_refs'].append(f"Self-reference: {cat_id} -> {cat_id}")
+            rejected_categories.append((cat, f"Self-reference: {cat_id}"))
             continue
         
-        # Check circular references
+        # Circular references - REJECT (không thể fix)
         if parent_id and has_circular_reference(parent_id, cat_id):
             issues['circular_refs'].append(f"Circular: {parent_id} <-> {cat_id}")
+            rejected_categories.append((cat, f"Circular ref with {parent_id}"))
             continue
         
-        # Check if parent exists
+        # Missing parent - KEEP NHƯ ROOT (có thể fix bằng cách treat as root)
         if parent_id and parent_id not in categories_dict:
-            # Parent không tồn tại, thêm vào root
             issues['missing_parents'].append(f"Missing parent {parent_id} for {cat_id}, treating as root")
             cat_copy = cat.copy()
             cat_copy['parent_id'] = None
@@ -339,37 +357,57 @@ def build_hierarchical_structure(categories):
             validated_categories.append(cat_copy)
             root_category_ids.add(cat_id)
         else:
+            # All other valid categories
             validated_categories.append(cat)
     
     # ===== BƯỚC 3: XÂY DỰNG QUAN HỆ PARENT-CHILD =====
     categories_dict = {}
+    orphaned_categories = []  # Track categories without ID
+    
     for cat in validated_categories:
         cat_id = cat.get('category_id')
         if cat_id:
             cat_copy = cat.copy()
             cat_copy['sub_categories'] = []
             categories_dict[cat_id] = cat_copy
+        else:
+            # Keep track of categories without ID (orphaned)
+            orphaned_categories.append(cat)
     
-    # Xây dựng parent-child relationships
+    # Xây dựng parent-child relationships - GIỮ LẠI toàn bộ dữ liệu hợp lệ
     for cat in validated_categories:
         cat_id = cat.get('category_id')
         parent_id = cat.get('parent_id')
         
-        if not cat_id or not parent_id:
-            continue
+        # Skip chỉ nếu không có cat_id hoặc không có parent_id (là root)
+        if not cat_id:
+            continue  # Không thể xử lý, bỏ qua
+        
+        if not parent_id:
+            continue  # Là root, đã xử lý ở bước 1
         
         # Thêm cat vào sub_categories của parent
-        if parent_id in categories_dict and cat_id in categories_dict:
+        if cat_id in categories_dict and parent_id in categories_dict:
             # Check xem đã có chưa để tránh duplicate
             existing_ids = {sc.get('category_id') for sc in categories_dict[parent_id]['sub_categories']}
             if cat_id not in existing_ids:
                 categories_dict[parent_id]['sub_categories'].append(categories_dict[cat_id])
+        elif cat_id in categories_dict and parent_id not in categories_dict:
+            # Parent không tồn tại nhưng category có ID - đã được treat as root ở bước trước
+            pass  # OK, đã xử lý
     
     # ===== BƯỚC 4: EXTRACT ROOT CATEGORIES =====
     root_categories = []
     for cat_id in root_category_ids:
         if cat_id in categories_dict:
             root_categories.append(categories_dict[cat_id])
+    
+    # Thêm orphaned categories (không có category_id) vào root
+    # để không mất dữ liệu
+    for orphan in orphaned_categories:
+        orphan_copy = orphan.copy()
+        orphan_copy['sub_categories'] = []
+        root_categories.append(orphan_copy)
     
     # ===== BƯỚC 5: SẮP XẾP =====
     def get_sort_key(cat):

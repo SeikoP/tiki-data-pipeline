@@ -388,7 +388,7 @@ def main():
     USE_CACHE = True          # Sử dụng cache nếu có (True = nhanh hơn)
     SKIP_CRAWL = False        # True = chỉ hiển thị dữ liệu đã có, không crawl
     MAX_CATEGORIES = 1        # Chỉ crawl 1 category (giảm để nhanh)
-    MAX_DEPTH = 2             # Chỉ crawl 2 levels (giảm để nhanh)
+    MAX_DEPTH = 5            # Chỉ crawl 2 levels (giảm để nhanh)
     MAX_CATEGORIES_PER_LEVEL = 5  # Giới hạn 5 categories/level
     RECURSIVE = True          # Bật crawl đệ quy
     SKIP_BUILD_HIERARCHICAL = False  # True = bỏ qua bước build hierarchical
