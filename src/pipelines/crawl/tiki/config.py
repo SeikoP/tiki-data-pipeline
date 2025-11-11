@@ -37,6 +37,8 @@ def _get_firecrawl_url():
 
 FIRECRAWL_API_URL = _get_firecrawl_url()
 TIKI_BASE_URL = "https://tiki.vn"
+TIKI_API_BASE_URL = "https://api.tiki.vn/integration/v2"
+TIKI_API_TOKEN = os.getenv("TIKI_API_TOKEN", "")  # Seller token key từ Tiki
 
 # Groq API Configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
