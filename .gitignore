@@ -46,7 +46,7 @@ htmlcov/
 # These can be large; tracked only if intentionally committed.
 data/raw/
 data/processed/
-.github
+# Note: .github/ should be committed (contains workflows, templates, etc.)
 
 # Logs and runtime files
 logs/

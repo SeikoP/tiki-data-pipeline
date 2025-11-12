@@ -461,6 +461,39 @@ Chúng tôi hoan nghênh mọi đóng góp! 🎉
 
 ---
 
+## 🔄 Sync to Other Repository
+
+Tự động đồng bộ `docker-compose.yaml` và `scripts/` sang repository khác.
+
+### Setup
+
+1. **Tạo GitHub Personal Access Token:**
+   - Vào GitHub → Settings → Developer settings → Personal access tokens
+   - Tạo token với quyền `repo`
+   - Copy token
+
+2. **Thêm Secret vào Repository:**
+   - Vào repository settings → Secrets and variables → Actions
+   - Thêm secret: `SYNC_REPO_TOKEN` với value là token vừa tạo
+
+3. **Workflow sẽ tự động chạy khi:**
+   - Có push vào branch `main` hoặc `master`
+   - Có thay đổi ở `docker-compose.yaml` hoặc `scripts/`
+
+### Manual Sync
+
+```bash
+# Linux/Mac
+bash scripts/utils/sync_to_other_repo.sh
+
+# Windows (PowerShell)
+.\scripts\utils\sync_to_other_repo.ps1
+```
+
+**Xem hướng dẫn chi tiết:** [docs/SYNC_TO_OTHER_REPO.md](docs/SYNC_TO_OTHER_REPO.md)
+
+---
+
 ## 🔗 Links & Resources
 
 <div align="center">

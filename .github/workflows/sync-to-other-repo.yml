@@ -1,0 +1,131 @@
+name: Sync to Other Repository
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'docker-compose.yaml'
+      - 'scripts/**'
+      - '.github/workflows/sync-to-other-repo.yml'
+  workflow_dispatch:
+    inputs:
+      force_sync:
+        description: 'Force sync all files even if not changed'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  sync-to-other-repo:
+    runs-on: ubuntu-latest
+    name: Sync files to airflow-firecrawl-data-pipeline
+    
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Checkout target repository
+        run: |
+          git clone https://${{ secrets.SYNC_REPO_TOKEN }}@github.com/SeikoP/airflow-firecrawl-data-pipeline.git target-repo
+        env:
+          SYNC_REPO_TOKEN: ${{ secrets.SYNC_REPO_TOKEN }}
+
+      - name: Sync docker-compose.yaml
+        run: |
+          if [ -f "docker-compose.yaml" ]; then
+            echo "Syncing docker-compose.yaml..."
+            cp docker-compose.yaml target-repo/docker-compose.yaml
+            echo "✓ docker-compose.yaml synced"
+          else
+            echo "⚠ docker-compose.yaml not found, skipping..."
+          fi
+
+      - name: Sync scripts directory
+        run: |
+          if [ -d "scripts" ]; then
+            echo "Syncing scripts directory..."
+            # Remove existing scripts directory in target repo if exists
+            rm -rf target-repo/scripts
+            # Copy entire scripts directory
+            cp -r scripts target-repo/scripts
+            echo "✓ scripts directory synced"
+          else
+            echo "⚠ scripts directory not found, skipping..."
+          fi
+
+      - name: Update .gitignore in target repo (if needed)
+        run: |
+          # Ensure .gitignore exists in target repo
+          if [ ! -f "target-repo/.gitignore" ]; then
+            echo "Creating .gitignore in target repo..."
+            touch target-repo/.gitignore
+          fi
+          
+          # Add scripts/__pycache__ to .gitignore if not already there
+          if ! grep -q "scripts/__pycache__" target-repo/.gitignore; then
+            echo "" >> target-repo/.gitignore
+            echo "# Python cache in scripts" >> target-repo/.gitignore
+            echo "scripts/__pycache__/" >> target-repo/.gitignore
+            echo "scripts/**/__pycache__/" >> target-repo/.gitignore
+            echo "*.pyc" >> target-repo/.gitignore
+          fi
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          cd target-repo
+          git add -A
+          if git diff --staged --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes to sync"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Changes detected, will commit and push"
+            git status
+          fi
+
+      - name: Commit and push changes
+        if: steps.check-changes.outputs.changed == 'true'
+        run: |
+          cd target-repo
+          git add -A
+          git commit -m "chore: Sync docker-compose.yaml and scripts from source repo
+          
+          Synced from: ${{ github.repository }}@${{ github.sha }}
+          Triggered by: ${{ github.actor }}
+          Workflow: ${{ github.workflow }}
+          Run ID: ${{ github.run_id }}"
+          git push origin main || git push origin master
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Source Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Source Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Repository:** SeikoP/airflow-firecrawl-data-pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.check-changes.outputs.changed }}" == "true" ]; then
+            echo "✅ **Status:** Changes synced successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ **Status:** No changes to sync" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Synced Files:" >> $GITHUB_STEP_SUMMARY
+          echo "- docker-compose.yaml" >> $GITHUB_STEP_SUMMARY
+          echo "- scripts/ (entire directory)" >> $GITHUB_STEP_SUMMARY
+
