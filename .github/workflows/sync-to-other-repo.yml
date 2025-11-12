@@ -35,10 +35,17 @@ jobs:
           git config --global user.email "actions@github.com"
 
       - name: Checkout target repository
-        run: |
-          git clone https://${{ secrets.SYNC_REPO_TOKEN }}@github.com/SeikoP/airflow-firecrawl-data-pipeline.git target-repo
         env:
           SYNC_REPO_TOKEN: ${{ secrets.SYNC_REPO_TOKEN }}
+        run: |
+          if [ -z "$SYNC_REPO_TOKEN" ]; then
+            echo "⚠️ SYNC_REPO_TOKEN secret is not set!"
+            echo "Please add SYNC_REPO_TOKEN to repository secrets."
+            exit 1
+          fi
+          
+          echo "Cloning target repository..."
+          git clone https://${SYNC_REPO_TOKEN}@github.com/SeikoP/airflow-firecrawl-data-pipeline.git target-repo
 
       - name: Sync docker-compose.yaml
         run: |
@@ -96,8 +103,14 @@ jobs:
 
       - name: Commit and push changes
         if: steps.check-changes.outputs.changed == 'true'
+        env:
+          SYNC_REPO_TOKEN: ${{ secrets.SYNC_REPO_TOKEN }}
         run: |
           cd target-repo
+          
+          # Configure git with token for push
+          git remote set-url origin https://${SYNC_REPO_TOKEN}@github.com/SeikoP/airflow-firecrawl-data-pipeline.git
+          
           git add -A
           git commit -m "chore: Sync docker-compose.yaml and scripts from source repo
           
@@ -105,7 +118,9 @@ jobs:
           Triggered by: ${{ github.actor }}
           Workflow: ${{ github.workflow }}
           Run ID: ${{ github.run_id }}"
-          git push origin main || git push origin master
+          
+          # Try push to main first, then master
+          git push origin main 2>&1 || git push origin master 2>&1
 
       - name: Create summary
         if: always()
