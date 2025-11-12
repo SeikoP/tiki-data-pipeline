@@ -10,6 +10,15 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from bs4 import BeautifulSoup
 
+# Helper function để chọn parser (lxml nếu có, html.parser nếu không)
+def get_html_parser():
+    """Get best available HTML parser for BeautifulSoup"""
+    try:
+        import lxml
+        return 'lxml'
+    except ImportError:
+        return 'html.parser'
+
 # Fix encoding on Windows
 if sys.platform == "win32":
     import io
@@ -494,7 +503,9 @@ def extract_ai_summary_from_html(html_content: str) -> Optional[Dict[str, Any]]:
         return None
     
     try:
-        soup = BeautifulSoup(html_content, 'lxml')
+        # Sử dụng parser tốt nhất có sẵn (lxml nếu có, html.parser nếu không)
+        parser = get_html_parser()
+        soup = BeautifulSoup(html_content, parser)
         
         # Tìm div với id="ai-summary"
         ai_summary_div = soup.find('div', id='ai-summary')
@@ -599,10 +610,13 @@ def extract_ai_summary_from_html(html_content: str) -> Optional[Dict[str, Any]]:
         return None
         
     except Exception as e:
-        try:
-            print(f"⚠️  Lỗi parse AI summary từ HTML: {str(e)[:100]}")
-        except:
-            pass
+        # Chỉ log warning nếu lỗi không phải do parser
+        error_msg = str(e)
+        if 'tree builder' not in error_msg.lower() and 'lxml' not in error_msg.lower():
+            try:
+                print(f"⚠️  Lỗi parse AI summary từ HTML: {error_msg[:100]}")
+            except:
+                pass
         return None
 
 
@@ -620,7 +634,9 @@ def extract_detailed_info_from_html(html_content: str) -> Optional[str]:
         return None
     
     try:
-        soup = BeautifulSoup(html_content, 'lxml')
+        # Sử dụng parser tốt nhất có sẵn (lxml nếu có, html.parser nếu không)
+        parser = get_html_parser()
+        soup = BeautifulSoup(html_content, parser)
         
         # Tìm phần "Thông tin chi tiết" bằng nhiều cách:
         # 1. Tìm heading/tiêu đề chứa "Thông tin chi tiết"
@@ -728,10 +744,13 @@ def extract_detailed_info_from_html(html_content: str) -> Optional[str]:
         return None
         
     except Exception as e:
-        try:
-            print(f"⚠️  Lỗi parse detailed info từ HTML: {str(e)[:100]}")
-        except:
-            pass
+        # Chỉ log warning nếu lỗi không phải do parser
+        error_msg = str(e)
+        if 'tree builder' not in error_msg.lower() and 'lxml' not in error_msg.lower():
+            try:
+                print(f"⚠️  Lỗi parse detailed info từ HTML: {error_msg[:100]}")
+            except:
+                pass
         return None
 
 

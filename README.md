@@ -465,20 +465,39 @@ Chúng tôi hoan nghênh mọi đóng góp! 🎉
 
 Tự động đồng bộ `docker-compose.yaml` và `scripts/` sang repository khác.
 
-### Setup
+### ⚠️ Setup (Bắt buộc)
 
-1. **Tạo GitHub Personal Access Token:**
-   - Vào GitHub → Settings → Developer settings → Personal access tokens
-   - Tạo token với quyền `repo`
-   - Copy token
+**Lưu ý:** Workflow sẽ **KHÔNG** hoạt động nếu chưa setup secret!
 
-2. **Thêm Secret vào Repository:**
-   - Vào repository settings → Secrets and variables → Actions
-   - Thêm secret: `SYNC_REPO_TOKEN` với value là token vừa tạo
+#### 1. Tạo GitHub Personal Access Token
 
-3. **Workflow sẽ tự động chạy khi:**
-   - Có push vào branch `main` hoặc `master`
-   - Có thay đổi ở `docker-compose.yaml` hoặc `scripts/`
+1. Vào GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
+2. Click "Generate new token (classic)"
+3. Đặt tên token (ví dụ: `sync-repo-token`)
+4. Chọn scope: **`repo`** (Full control of private repositories) - **BẮT BUỘC**
+5. Click "Generate token"
+6. **Copy token ngay lập tức** (chỉ hiển thị một lần!)
+
+#### 2. Thêm Secret vào Repository
+
+1. Vào repository settings → **Secrets and variables** → **Actions**
+2. Click "New repository secret"
+3. **Name**: `SYNC_REPO_TOKEN` (phải đúng tên này, không có khoảng trắng!)
+4. **Value**: Paste token đã tạo ở bước 1
+5. Click "Add secret"
+
+#### 3. Kiểm tra Secret
+
+1. Vào repository settings → **Secrets and variables** → **Actions**
+2. Xem secret `SYNC_REPO_TOKEN` trong danh sách
+3. Đảm bảo secret có tên đúng: `SYNC_REPO_TOKEN`
+
+**Xem hướng dẫn chi tiết:** [docs/SETUP_SYNC_SECRET.md](docs/SETUP_SYNC_SECRET.md)
+
+### Workflow tự động chạy khi:
+
+- Có push vào branch `main` hoặc `master`
+- Có thay đổi ở `docker-compose.yaml` hoặc `scripts/`
 
 ### Manual Sync
 

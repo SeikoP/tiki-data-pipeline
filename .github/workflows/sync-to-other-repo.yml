@@ -39,8 +39,22 @@ jobs:
           SYNC_REPO_TOKEN: ${{ secrets.SYNC_REPO_TOKEN }}
         run: |
           if [ -z "$SYNC_REPO_TOKEN" ]; then
-            echo "⚠️ SYNC_REPO_TOKEN secret is not set!"
-            echo "Please add SYNC_REPO_TOKEN to repository secrets."
+            echo "::error::SYNC_REPO_TOKEN secret is not set!"
+            echo ""
+            echo "Please follow these steps:"
+            echo "1. Go to repository Settings → Secrets and variables → Actions"
+            echo "2. Click 'New repository secret'"
+            echo "3. Name: SYNC_REPO_TOKEN"
+            echo "4. Value: Your GitHub Personal Access Token with 'repo' scope"
+            echo "5. Click 'Add secret'"
+            echo ""
+            echo "For detailed instructions, see: docs/SETUP_SYNC_SECRET.md"
+            echo ""
+            echo "To create a token:"
+            echo "1. Go to GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)"
+            echo "2. Click 'Generate new token (classic)'"
+            echo "3. Select 'repo' scope (Full control of private repositories)"
+            echo "4. Copy token and add it to repository secrets"
             exit 1
           fi
           

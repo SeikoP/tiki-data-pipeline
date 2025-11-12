@@ -3,7 +3,13 @@ import json
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../src'))
+# Thêm path để import modules
+# Tính toán đường dẫn tuyệt đối đến src từ script hiện tại
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.abspath(os.path.join(_script_dir, '..', '..'))
+_src_path = os.path.join(_project_root, 'src')
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
 
 from pipelines.crawl.tiki.extract_category_link import build_hierarchical_structure
 
