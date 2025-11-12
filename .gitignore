@@ -25,9 +25,11 @@ venv.bak/
 .pytest_cache/
 .cache/
 .mypy_cache/
+.ruff_cache/
 
 # Coverage
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
 
@@ -36,6 +38,8 @@ htmlcov/
 
 # Environment variables and local config
 .env
+.env.local
+.env.*.local
 *.local
 
 # Data directories (ingest / processed outputs)
@@ -80,3 +84,24 @@ credentials/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Additional cache and build files (already covered above, but explicitly listed)
+# Cache directories
+.pytest_cache/
+.mypy_cache/
+.cache/
+.ruff_cache/
+
+# Coverage files
+.coverage.*
+htmlcov/
+
+# Log files
+*.log
+
+# Environment files (already covered, but explicit)
+.env.local
+.env.*.local
+
+# Firecrawl (optional - keep if needed for development)
+# firecrawl/

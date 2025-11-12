@@ -118,6 +118,29 @@ docker-compose ps
 - **Firecrawl API**: http://localhost:3002
   - Docs: http://localhost:3002/docs
 
+#### 5. Chạy test scripts
+
+```bash
+# Test crawling demo
+python scripts/tests/test_crawl_demo.py
+
+# Validate hierarchical structure
+python scripts/tests/validate_hierarchical.py
+
+# Test API endpoints
+python scripts/tests/test_firecrawl_endpoints.py
+```
+
+#### 6. Setup scripts
+
+```bash
+# Add Groq configuration to .env
+python scripts/setup/add_groq_to_env.py
+
+# Fix environment encoding issues
+python scripts/setup/fix_env_encoding.py
+```
+
 </details>
 
 ---
@@ -187,20 +210,47 @@ tiki-data-pipeline/
 │   ├── QUICK_START.md         # Quick start guide
 │   ├── TEMPLATE.md            # Template usage
 │   ├── SETUP_GITHUB.md        # GitHub setup
-│   └── CONTRIBUTING.md        # Contributing guide
-├── 🔧 scripts/                 # Utility scripts
-│   ├── init-multiple-databases.sh
-│   └── setup-new-project.sh
+│   ├── CONTRIBUTING.md        # Contributing guide
+│   ├── INDEX.md               # Documentation index/navigation
+│   ├── FINAL_REPORT.md        # Final project report
+│   ├── OPTIMIZATION_SUMMARY.md # Optimization details
+│   ├── IMPROVEMENTS.md        # Improvements log
+│   ├── DIAGNOSIS.md           # Troubleshooting guide
+│   ├── TROUBLESHOOTING.md     # Extended troubleshooting
+│   ├── QUICK_FIX.md           # Quick fixes
+│   ├── GROQ_CONFIG.md         # Groq configuration guide
+│   ├── COMPLETION_SUMMARY.txt  # Completion summary
+│   ├── STRUCTURE_GUIDE.txt    # Data structure guide
+│   └── CLEANUP_REPORT.md      # Cleanup report
+├── 🔧 scripts/                 # Utility scripts (organized by type)
+│   ├── tests/                 # Test scripts
+│   │   ├── test_*.py          # Test files
+│   │   └── validate_*.py     # Validation scripts
+│   ├── setup/                 # Setup/init scripts
+│   │   ├── setup_*.py         # Setup scripts
+│   │   ├── init_*.py          # Initialization scripts
+│   │   ├── init-*.sh          # Shell init scripts
+│   │   ├── add_groq_to_env.py # Groq env setup
+│   │   └── fix_env_encoding.py # Env encoding fix
+│   ├── utils/                 # Utility scripts
+│   │   ├── analyze_*.py       # Analysis scripts
+│   │   ├── check_*.py         # Check scripts
+│   │   └── verify_*.py        # Verification scripts
+│   └── shell/                 # Shell scripts
+│       ├── *.sh               # Shell scripts
+│       └── *.bat              # Batch scripts
 ├── ☁️ airflow/                  # Airflow configuration
 │   ├── dags/                  # Your DAGs here
 │   ├── logs/                  # Airflow logs
 │   ├── config/                # Airflow config
 │   └── plugins/               # Airflow plugins
-├── 🕷️ firecrawl/               # Firecrawl source
+├── 🕷️ firecrawl/               # Firecrawl source (reserved)
 └── 💻 src/                     # Your source code
     ├── pipelines/             # Data pipelines
-    ├── models/                # Data models
-    └── utils/                 # Utilities
+    │   └── crawl/            # Crawling pipelines
+    │       └── tiki/         # Tiki-specific crawlers
+    ├── backend/              # Backend code
+    └── utils/                # Utilities
 ```
 
 ---
@@ -215,7 +265,20 @@ tiki-data-pipeline/
 | **Template Guide** | Cách sử dụng như template | [📄 docs/TEMPLATE.md](docs/TEMPLATE.md) |
 | **GitHub Setup** | Setup template repository | [📄 docs/SETUP_GITHUB.md](docs/SETUP_GITHUB.md) |
 | **Contributing** | Hướng dẫn contribute | [📄 docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) |
+| **Documentation Index** | Mục lục và hướng dẫn điều hướng | [📄 docs/INDEX.md](docs/INDEX.md) |
 | **Full Docs** | Tổng quan tài liệu | [📄 docs/README.md](docs/README.md) |
+
+**Tài liệu bổ sung**:
+- [📄 Documentation Index](docs/INDEX.md) - Mục lục và hướng dẫn điều hướng
+- [📄 Final Report](docs/FINAL_REPORT.md) - Báo cáo tổng kết dự án
+- [📄 Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Hướng dẫn xử lý sự cố
+- [📄 Optimization Summary](docs/OPTIMIZATION_SUMMARY.md) - Tóm tắt tối ưu hóa
+- [📄 Improvements Log](docs/IMPROVEMENTS.md) - Nhật ký cải tiến
+- [📄 Diagnosis Guide](docs/DIAGNOSIS.md) - Hướng dẫn chẩn đoán
+- [📄 Quick Fix Guide](docs/QUICK_FIX.md) - Hướng dẫn sửa lỗi nhanh
+- [📄 Groq Configuration](docs/GROQ_CONFIG.md) - Cấu hình Groq API
+- [📄 Structure Guide](docs/STRUCTURE_GUIDE.txt) - Hướng dẫn cấu trúc dữ liệu
+- [📄 Cleanup Report](docs/CLEANUP_REPORT.md) - Báo cáo dọn dẹp dự án
 
 </div>
 
