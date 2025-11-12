@@ -139,6 +139,35 @@ python scripts/setup/add_groq_to_env.py
 
 # Fix environment encoding issues
 python scripts/setup/fix_env_encoding.py
+
+# Initialize databases
+python scripts/setup/init_nuq_db.py
+```
+
+#### 7. Utility scripts
+
+```bash
+# Verify services status
+python scripts/utils/verify_services.py
+
+# Analyze filtering issues
+python scripts/utils/analyze_filtering.py
+
+# Check filter issues
+python scripts/utils/check_filter_issues.py
+```
+
+#### 8. Shell scripts
+
+```bash
+# Quick check services (Linux/Mac)
+bash scripts/shell/quick-check.sh
+
+# Fix services (Linux/Mac)
+bash scripts/shell/fix-services.sh
+
+# Run tests (Windows)
+scripts\shell\run_test.bat
 ```
 
 </details>
@@ -205,13 +234,14 @@ tiki-data-pipeline/
 ├── 📄 LICENSE                  # MIT License
 ├── 📄 .env.example             # Environment variables template
 ├── 🐳 docker-compose.yaml      # Main configuration
+├── 📄 requirements.txt         # Python dependencies
 ├── 📚 docs/                    # Documentation
-│   ├── README.md              # Documentation index
+│   ├── INDEX.md               # Documentation index/navigation
+│   ├── README.md              # Documentation overview
 │   ├── QUICK_START.md         # Quick start guide
 │   ├── TEMPLATE.md            # Template usage
 │   ├── SETUP_GITHUB.md        # GitHub setup
 │   ├── CONTRIBUTING.md        # Contributing guide
-│   ├── INDEX.md               # Documentation index/navigation
 │   ├── FINAL_REPORT.md        # Final project report
 │   ├── OPTIMIZATION_SUMMARY.md # Optimization details
 │   ├── IMPROVEMENTS.md        # Improvements log
@@ -231,18 +261,20 @@ tiki-data-pipeline/
 │   │   ├── init_*.py          # Initialization scripts
 │   │   ├── init-*.sh          # Shell init scripts
 │   │   ├── add_groq_to_env.py # Groq env setup
-│   │   └── fix_env_encoding.py # Env encoding fix
+│   │   ├── fix_env_encoding.py # Env encoding fix
+│   │   └── nuq_init.sql       # Database init SQL
 │   ├── utils/                 # Utility scripts
 │   │   ├── analyze_*.py       # Analysis scripts
 │   │   ├── check_*.py         # Check scripts
 │   │   └── verify_*.py        # Verification scripts
 │   └── shell/                 # Shell scripts
-│       ├── *.sh               # Shell scripts
-│       └── *.bat              # Batch scripts
+│       ├── *.sh               # Shell scripts (Linux/Mac)
+│       └── *.bat              # Batch scripts (Windows)
 ├── ☁️ airflow/                  # Airflow configuration
 │   ├── dags/                  # Your DAGs here
 │   ├── logs/                  # Airflow logs
 │   ├── config/                # Airflow config
+│   │   └── airflow.cfg        # Airflow configuration file
 │   └── plugins/               # Airflow plugins
 ├── 🕷️ firecrawl/               # Firecrawl source (reserved)
 └── 💻 src/                     # Your source code
@@ -329,6 +361,74 @@ tiki-data-pipeline/
 **Total Estimated**: ~4-6 CPU cores, ~6-8GB RAM
 
 </div>
+
+---
+
+## 🔧 Scripts Organization
+
+### Test Scripts (`scripts/tests/`)
+
+```bash
+# Test crawling demo
+python scripts/tests/test_crawl_demo.py
+
+# Validate hierarchical structure
+python scripts/tests/validate_hierarchical.py
+
+# Test API endpoints
+python scripts/tests/test_firecrawl_endpoints.py
+
+# Test products extraction
+python scripts/tests/test_extract_products_logic.py
+```
+
+### Setup Scripts (`scripts/setup/`)
+
+```bash
+# Add Groq configuration to .env
+python scripts/setup/add_groq_to_env.py
+
+# Fix environment encoding issues
+python scripts/setup/fix_env_encoding.py
+
+# Initialize NUQ database
+python scripts/setup/init_nuq_db.py
+
+# Setup Groq Firecrawl
+python scripts/setup/setup_groq_firecrawl.py
+
+# Setup Tiki pool
+python scripts/setup/setup_tiki_pool.py
+```
+
+### Utility Scripts (`scripts/utils/`)
+
+```bash
+# Verify services status
+python scripts/utils/verify_services.py
+
+# Analyze filtering issues
+python scripts/utils/analyze_filtering.py
+
+# Check filter issues
+python scripts/utils/check_filter_issues.py
+```
+
+### Shell Scripts (`scripts/shell/`)
+
+```bash
+# Quick check services (Linux/Mac)
+bash scripts/shell/quick-check.sh
+
+# Fix services (Linux/Mac)
+bash scripts/shell/fix-services.sh
+
+# Setup new project (Linux/Mac)
+bash scripts/shell/setup-new-project.sh
+
+# Run tests (Windows)
+scripts\shell\run_test.bat
+```
 
 ---
 
@@ -423,3 +523,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
     <img src="https://img.shields.io/github/watchers/your-username/tiki-data-pipeline?style=social&label=Watch"/>
   </p>
 </div>
+
