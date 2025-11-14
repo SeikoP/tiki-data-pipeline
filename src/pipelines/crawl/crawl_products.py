@@ -72,12 +72,21 @@ except ImportError:
 try:
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     HAS_SELENIUM = True
+    
+    # Thử import webdriver-manager
+    try:
+        from webdriver_manager.chrome import ChromeDriverManager
+        HAS_WEBDRIVER_MANAGER = True
+    except ImportError:
+        HAS_WEBDRIVER_MANAGER = False
 except ImportError:
     HAS_SELENIUM = False
+    HAS_WEBDRIVER_MANAGER = False
     print("⚠️  Khuyến nghị cài đặt selenium: pip install selenium")
 
 # Tạo thư mục output
@@ -118,7 +127,15 @@ def get_page_with_selenium(url, timeout=30):
     }
     chrome_options.add_experimental_option("prefs", prefs)
     
-    driver = webdriver.Chrome(options=chrome_options)
+    # Sử dụng webdriver-manager nếu có
+    if HAS_SELENIUM and HAS_WEBDRIVER_MANAGER:
+        try:
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+        except Exception:
+            driver = webdriver.Chrome(options=chrome_options)
+    else:
+        driver = webdriver.Chrome(options=chrome_options)
     try:
         driver.set_page_load_timeout(timeout)
         driver.get(url)

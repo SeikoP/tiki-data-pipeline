@@ -1,20 +1,34 @@
 <!-- SEO -->
-<!-- Keywords: Data Pipeline, Airflow, Firecrawl, Docker, Data Engineering, ETL, Web Scraping, Self-Hosted -->
+<!-- Keywords: Tiki Data Pipeline, Airflow, Selenium, Docker, Data Engineering, ETL, Web Scraping, Tiki.vn -->
 
 <div align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,0A192F,172A45,64FFDA&height=200&section=header&text=Tiki%20Data%20Pipeline&fontSize=60&fontColor=fff&animation=twinkling&fontAlignY=35&desc=Automated%20Tiki%20Product%20Crawling%20with%20Airflow%20%2B%20Selenium&descAlignY=55&descAlign=50"/>
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,0A192F,172A45,64FFDA&height=200&section=header&text=Tiki%20Data%20Pipeline&fontSize=60&fontColor=fff&animation=twinkling&fontAlignY=35&desc=Automated%20Tiki.vn%20Product%20Crawling%20with%20Airflow%20%2B%20Selenium&descAlignY=55&descAlign=50"/>
 </div>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Version-1.0.0-blue?style=for-the-badge&logo=github&logoColor=white"/>
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white"/>
   <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge&logo=checkmarx&logoColor=white"/>
-  <img src="https://img.shields.io/badge/Python-3.x-blue?style=for-the-badge&logo=python&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=white"/>
 </p>
 
 <p align="center">
   <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=24&duration=3000&pause=1000&color=64FFDA&center=true&vCenter=true&width=700&lines=🛍️+Tiki+Product+Crawler;⚡+Airflow+%2B+Selenium+Automation;📊+Category+%26+Product+Details;🔄+Dynamic+Task+Mapping+Optimized" alt="Typing SVG" />
 </p>
+
+---
+
+## 📖 Giới thiệu
+
+**Tiki Data Pipeline** là một hệ thống tự động hóa để crawl dữ liệu sản phẩm từ Tiki.vn sử dụng Apache Airflow và Selenium. Dự án cung cấp:
+
+- ✅ Crawl danh mục sản phẩm đệ quy từ Tiki.vn
+- ✅ Crawl danh sách sản phẩm từ các danh mục
+- ✅ Crawl chi tiết sản phẩm (giá, đánh giá, mô tả, thông số kỹ thuật, hình ảnh, v.v.)
+- ✅ Tự động hóa workflow với Airflow DAG
+- ✅ Xử lý song song với Dynamic Task Mapping
+- ✅ Caching và rate limiting để tối ưu hiệu suất
+- ✅ Export dữ liệu dưới dạng JSON
 
 ---
 
@@ -24,10 +38,10 @@
 
 | 🎯 Feature | 📝 Description |
 |:---------:|:-------------|
-| 🛍️ **Tiki Product Crawler** | Crawl tự động sản phẩm từ Tiki.vn |
+| 🛍️ **Tiki Product Crawler** | Crawl tự động sản phẩm từ Tiki.vn với Selenium |
 | 🔄 **Apache Airflow 3.1.2** | Workflow orchestration với Dynamic Task Mapping |
-| 🕷️ **Selenium Automation** | Crawl dynamic content với Selenium WebDriver |
-| 📊 **Category & Product Details** | Crawl danh mục, danh sách sản phẩm và chi tiết |
+| 🕷️ **Selenium Automation** | Crawl dynamic content với Selenium WebDriver + Chrome |
+| 📊 **Category & Product Details** | Crawl đầy đủ: danh mục, danh sách sản phẩm và chi tiết |
 | ⚡ **Optimized Performance** | Caching, rate limiting, batch processing |
 | 🔄 **Dynamic Task Mapping** | Crawl song song nhiều categories/products |
 | 💾 **Data Export** | JSON output với đầy đủ thông tin sản phẩm |
@@ -40,20 +54,20 @@
 ## 🛠️ Tech Stack
 
 <p align="center">
-  <img src="https://skillicons.dev/icons?i=docker,kubernetes,postgres,redis,python,airflow,git,github&theme=dark&perline=8"/>
+  <img src="https://skillicons.dev/icons?i=docker,postgres,redis,python,airflow,git,github&theme=dark&perline=7"/>
 </p>
 
 <div align="center">
   
 | Category | Technologies |
 |:--------:|:-----------:|
-| **Orchestration** | Apache Airflow 3.1.2, Celery |
-| **Web Scraping** | Selenium WebDriver, BeautifulSoup |
+| **Orchestration** | Apache Airflow 3.1.2, Celery Executor |
+| **Web Scraping** | Selenium WebDriver 4.0+, BeautifulSoup4 |
 | **Databases** | PostgreSQL 16, Redis 7.2 |
 | **Containerization** | Docker, Docker Compose |
-| **Languages** | Python 3.x |
+| **Languages** | Python 3.8+ |
 | **Data Format** | JSON |
-| **Tools** | Git, GitHub Actions |
+| **Tools** | Git, GitHub |
 
 </div>
 
@@ -69,39 +83,30 @@
 ✅ RAM: 4GB+ (8GB recommended)
 ✅ CPU: 2+ cores
 ✅ Disk: 10GB+ free space
+✅ Chrome/Chromium (được cài tự động trong Docker)
 ```
 
 ### Installation
 
-<details>
-<summary><b>📋 Click để xem hướng dẫn chi tiết</b></summary>
-
 #### 1. Clone Repository
 
 ```bash
-# Sử dụng như template
-gh repo create my-project --template your-username/tiki-data-pipeline
-
-# Hoặc clone trực tiếp
 git clone https://github.com/your-username/tiki-data-pipeline.git
 cd tiki-data-pipeline
 ```
 
-#### 2. Cấu hình môi trường
+#### 2. Cấu hình môi trường (Optional)
 
 ```bash
-# Copy file mẫu
-cp .env.example .env
-
-# Chỉnh sửa các biến môi trường
-nano .env  # hoặc dùng editor khác
+# Tạo file .env nếu cần (không bắt buộc)
+# Các biến môi trường có thể được set trong docker-compose.yaml
 ```
 
-#### 3. Khởi động services
+#### 3. Khởi động Airflow Services
 
 ```bash
-# Build và khởi động
-docker-compose up -d
+# Build và khởi động tất cả services
+docker-compose up -d --build
 
 # Xem logs
 docker-compose logs -f
@@ -110,69 +115,33 @@ docker-compose logs -f
 docker-compose ps
 ```
 
-#### 4. Truy cập services
+#### 4. Truy cập Airflow Web UI
 
-- **Airflow Web UI**: http://localhost:8080
-  - Username: `airflow`
-  - Password: `airflow`
-  
+- **URL**: http://localhost:8080
+- **Username**: `airflow`
+- **Password**: `airflow`
 
-#### 5. Chạy pipeline crawl Tiki
+#### 5. Chạy Pipeline
+
+**Cách 1: Sử dụng Airflow DAG (Khuyến nghị)**
+
+1. Mở Airflow Web UI: http://localhost:8080
+2. Tìm DAG `tiki_crawl_products`
+3. Click "Play" để trigger DAG
+4. Xem progress trong Graph View
+
+**Cách 2: Chạy script trực tiếp**
 
 ```bash
-# Crawl categories (đệ quy)
+# Crawl categories
 python src/pipelines/crawl/crawl_categories_recursive.py
 
 # Crawl products từ categories
 python src/pipelines/crawl/crawl_products.py
 
-# Crawl product detail (test)
+# Crawl product details (test)
 python src/pipelines/crawl/crawl_products_detail.py
-
-# Hoặc sử dụng Airflow DAG
-# Truy cập http://localhost:8080 và trigger DAG: tiki_crawl_products
 ```
-
-#### 6. Setup scripts
-
-```bash
-# Add Groq configuration to .env
-python scripts/setup/add_groq_to_env.py
-
-# Fix environment encoding issues
-python scripts/setup/fix_env_encoding.py
-
-# Initialize databases
-python scripts/setup/init_nuq_db.py
-```
-
-#### 7. Utility scripts
-
-```bash
-# Verify services status
-python scripts/utils/verify_services.py
-
-# Analyze filtering issues
-python scripts/utils/analyze_filtering.py
-
-# Check filter issues
-python scripts/utils/check_filter_issues.py
-```
-
-#### 8. Shell scripts
-
-```bash
-# Quick check services (Linux/Mac)
-bash scripts/shell/quick-check.sh
-
-# Fix services (Linux/Mac)
-bash scripts/shell/fix-services.sh
-
-# Run tests (Windows)
-scripts\shell\run_test.bat
-```
-
-</details>
 
 ---
 
@@ -190,41 +159,44 @@ graph TB
         E[DAG Processor]
     end
     
-    subgraph "Firecrawl Services"
-        F[Firecrawl API]
-        G[Playwright Service]
-    end
-    
     subgraph "Databases"
-        H[(PostgreSQL)]
-        I[(Redis)]
+        F[(PostgreSQL)]
+        G[(Redis)]
     end
     
-    A --> H
-    A --> I
-    B --> H
-    C --> I
-    C --> H
-    F --> I
-    F --> H
-    F --> G
+    subgraph "Crawling Pipeline"
+        H[Crawl Categories]
+        I[Crawl Products]
+        J[Crawl Product Details]
+    end
     
-    style H fill:#336791
-    style I fill:#DC382D
+    A --> F
+    A --> G
+    B --> F
+    C --> G
+    C --> F
+    C --> H
+    C --> I
+    C --> J
+    
+    style F fill:#336791
+    style G fill:#DC382D
     style A fill:#017CEE
-    style F fill:#FF6B35
 ```
 
 </div>
 
-### Database Architecture
+### Services Overview
 
-| Service | Database | Purpose |
-|:-------:|:--------:|:-------|
-| **Airflow** | PostgreSQL `airflow` | Metadata, DAGs, Task states |
-| **Airflow** | Redis DB `0` | Celery message broker |
-| **Firecrawl** | PostgreSQL `nuq` | NUQ database |
-| **Firecrawl** | Redis DB `1` | Queue & rate limiting |
+| Service | Purpose | Port |
+|:-------:|:--------|:----:|
+| **PostgreSQL** | Airflow metadata database | 5432 (internal) |
+| **Redis** | Celery message broker | 6379 (internal) |
+| **Airflow API Server** | Web UI và REST API | 8080 |
+| **Airflow Scheduler** | Schedule và trigger DAGs | - |
+| **Airflow Worker** | Execute tasks | - |
+| **Airflow DAG Processor** | Parse và load DAGs | - |
+| **Airflow Triggerer** | Handle deferrable tasks | - |
 
 ---
 
@@ -232,150 +204,44 @@ graph TB
 
 ```
 tiki-data-pipeline/
-├── 📄 README.md                 # File này
-├── 📄 LICENSE                  # MIT License
-├── 📄 .env.example             # Environment variables template
-├── 🐳 docker-compose.yaml      # Main configuration
-├── 📄 requirements.txt         # Python dependencies
-├── 📚 docs/                    # Documentation
-│   ├── INDEX.md               # Documentation index/navigation
-│   ├── README.md              # Documentation overview
-│   ├── QUICK_START.md         # Quick start guide
-│   ├── TEMPLATE.md            # Template usage
-│   ├── SETUP_GITHUB.md        # GitHub setup
-│   ├── CONTRIBUTING.md        # Contributing guide
-│   ├── FINAL_REPORT.md        # Final project report
-│   ├── OPTIMIZATION_SUMMARY.md # Optimization details
-│   ├── IMPROVEMENTS.md        # Improvements log
-│   ├── DIAGNOSIS.md           # Troubleshooting guide
-│   ├── TROUBLESHOOTING.md     # Extended troubleshooting
-│   ├── QUICK_FIX.md           # Quick fixes
-│   ├── GROQ_CONFIG.md         # Groq configuration guide
-│   ├── COMPLETION_SUMMARY.txt  # Completion summary
-│   ├── STRUCTURE_GUIDE.txt    # Data structure guide
-│   └── CLEANUP_REPORT.md      # Cleanup report
-├── 🔧 scripts/                 # Utility scripts (organized by type)
-│   ├── tests/                 # Test scripts
-│   │   ├── test_*.py          # Test files
-│   │   └── validate_*.py     # Validation scripts
-│   ├── setup/                 # Setup/init scripts
-│   │   ├── setup_*.py         # Setup scripts
-│   │   ├── init_*.py          # Initialization scripts
-│   │   ├── init-*.sh          # Shell init scripts
-│   │   ├── add_groq_to_env.py # Groq env setup
-│   │   ├── fix_env_encoding.py # Env encoding fix
-│   │   └── nuq_init.sql       # Database init SQL
-│   ├── utils/                 # Utility scripts
-│   │   ├── analyze_*.py       # Analysis scripts
-│   │   ├── check_*.py         # Check scripts
-│   │   └── verify_*.py        # Verification scripts
-│   └── shell/                 # Shell scripts
-│       ├── *.sh               # Shell scripts (Linux/Mac)
-│       └── *.bat              # Batch scripts (Windows)
-├── ☁️ airflow/                  # Airflow configuration
-│   ├── dags/                  # Your DAGs here
-│   ├── logs/                  # Airflow logs
-│   ├── config/                # Airflow config
-│   │   └── airflow.cfg        # Airflow configuration file
-│   └── plugins/               # Airflow plugins
-├── 🕷️ firecrawl/               # Firecrawl source (reserved)
-└── 💻 src/                     # Source code
-    └── pipelines/             # Data pipelines
-        └── crawl/            # Crawling pipelines
-            ├── crawl_categories_recursive.py    # Crawl categories đệ quy
-            ├── crawl_products.py                # Crawl danh sách sản phẩm
-            ├── crawl_products_detail.py         # Crawl chi tiết sản phẩm
-            ├── extract_category_link_selenium.py # Extract category links
-            ├── build_category_tree.py           # Xây dựng category tree
-            └── config.py                        # Configuration
-├── 📊 data/                    # Dữ liệu crawl
-    ├── raw/                   # Raw data
-    │   ├── categories_recursive_optimized.json  # Danh mục đã crawl
-    │   ├── categories_tree.json                 # Category tree
-    │   └── products/          # Products data
-    │       ├── products.json                    # Danh sách sản phẩm
-    │       ├── products_with_detail.json        # Sản phẩm với chi tiết
-    │       └── cache/          # Cache files
-    ├── demo/                  # Demo/test data
-    └── test_output/           # Test outputs
+├── 📄 README.md                    # File này
+├── 📄 LICENSE                      # MIT License
+├── 🐳 docker-compose.yaml          # Docker Compose configuration
+├── 📄 requirements.txt             # Python dependencies
+├── 📚 docs/                        # Documentation
+├── 🔧 scripts/                     # Utility scripts
+│   ├── setup/                     # Setup scripts
+│   ├── utils/                     # Utility scripts
+│   └── shell/                     # Shell scripts
+├── ☁️ airflow/                     # Airflow configuration
+│   ├── dags/                      # Airflow DAGs
+│   │   └── tiki_crawl_products_dag.py
+│   ├── logs/                      # Airflow logs
+│   ├── config/                    # Airflow config
+│   ├── plugins/                   # Airflow plugins
+│   ├── setup/                     # Setup scripts
+│   │   └── init-airflow-db.sh     # Database init script
+│   └── Dockerfile                 # Custom Airflow image với Chrome
+├── 💻 src/                         # Source code
+│   └── pipelines/
+│       └── crawl/                 # Crawling pipelines
+│           ├── crawl_categories_recursive.py    # Crawl categories đệ quy
+│           ├── crawl_products.py                 # Crawl danh sách sản phẩm
+│           ├── crawl_products_detail.py          # Crawl chi tiết sản phẩm
+│           ├── extract_category_link_selenium.py # Extract category links
+│           ├── build_category_tree.py            # Xây dựng category tree
+│           └── config.py                         # Configuration
+└── 📊 data/                        # Dữ liệu crawl
+    ├── raw/                        # Raw data
+    │   ├── categories_recursive_optimized.json   # Danh mục đã crawl
+    │   ├── categories_tree.json                  # Category tree
+    │   └── products/              # Products data
+    │       ├── products.json                      # Danh sách sản phẩm
+    │       ├── products_with_detail.json         # Sản phẩm với chi tiết
+    │       └── cache/                             # Cache files
+    ├── demo/                      # Demo/test data
+    └── test_output/              # Test outputs
 ```
-
----
-
-## 📚 Documentation
-
-<div align="center">
-
-| 📖 Document | 📝 Description | 🔗 Link |
-|:----------:|:-------------:|:------:|
-| **Quick Start** | Hướng dẫn nhanh để bắt đầu | [📄 docs/QUICK_START.md](docs/QUICK_START.md) |
-| **Template Guide** | Cách sử dụng như template | [📄 docs/TEMPLATE.md](docs/TEMPLATE.md) |
-| **GitHub Setup** | Setup template repository | [📄 docs/SETUP_GITHUB.md](docs/SETUP_GITHUB.md) |
-| **Contributing** | Hướng dẫn contribute | [📄 docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) |
-| **Documentation Index** | Mục lục và hướng dẫn điều hướng | [📄 docs/INDEX.md](docs/INDEX.md) |
-| **Full Docs** | Tổng quan tài liệu | [📄 docs/README.md](docs/README.md) |
-
-**Tài liệu bổ sung**:
-- [📄 Documentation Index](docs/INDEX.md) - Mục lục và hướng dẫn điều hướng
-- [📄 Final Report](docs/FINAL_REPORT.md) - Báo cáo tổng kết dự án
-- [📄 Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Hướng dẫn xử lý sự cố
-- [📄 Optimization Summary](docs/OPTIMIZATION_SUMMARY.md) - Tóm tắt tối ưu hóa
-- [📄 Improvements Log](docs/IMPROVEMENTS.md) - Nhật ký cải tiến
-- [📄 Diagnosis Guide](docs/DIAGNOSIS.md) - Hướng dẫn chẩn đoán
-- [📄 Quick Fix Guide](docs/QUICK_FIX.md) - Hướng dẫn sửa lỗi nhanh
-- [📄 Groq Configuration](docs/GROQ_CONFIG.md) - Cấu hình Groq API
-- [📄 Structure Guide](docs/STRUCTURE_GUIDE.txt) - Hướng dẫn cấu trúc dữ liệu
-- [📄 Cleanup Report](docs/CLEANUP_REPORT.md) - Báo cáo dọn dẹp dự án
-
-</div>
-
----
-
-## 🎯 Use Cases
-
-<div align="center">
-
-| Use Case | Description | Example |
-|:--------:|:-----------|:--------|
-| 🛍️ **Product Monitoring** | Theo dõi sản phẩm Tiki | Price tracking, Stock monitoring |
-| 📊 **Market Analysis** | Phân tích thị trường | Category trends, Sales analysis |
-| 💰 **Price Comparison** | So sánh giá sản phẩm | Competitor analysis |
-| 📈 **Data Analytics** | Phân tích dữ liệu sản phẩm | Product performance, Reviews analysis |
-| 🔄 **Automated Data Collection** | Thu thập dữ liệu tự động | Daily product updates |
-
-</div>
-
----
-
-## 🏆 Best Practices
-
-<div align="center">
-
-✅ **Resource Management** - Tất cả services có resource limits  
-✅ **Health Monitoring** - Automatic health checks cho tất cả services  
-✅ **Security** - Environment variables cho sensitive data  
-✅ **Scalability** - Dễ dàng scale từng service độc lập  
-✅ **Documentation** - Comprehensive docs cho mọi use case  
-✅ **Template Ready** - One-click setup cho dự án mới  
-
-</div>
-
----
-
-## 📈 Performance & Resources
-
-<div align="center">
-
-| Component | CPU Limit | Memory Limit | Status |
-|:---------:|:---------:|:------------:|:------:|
-| **PostgreSQL** | 1 core | 1GB | ✅ Optimized |
-| **Redis** | 0.5 core | 512MB | ✅ Optimized |
-| **Airflow Services** | 0.5-2 cores | 256MB-2GB | ✅ Optimized |
-| **Firecrawl Services** | 0.5-2 cores | 512MB-2GB | ✅ Optimized |
-
-**Total Estimated**: ~4-6 CPU cores, ~6-8GB RAM
-
-</div>
 
 ---
 
@@ -383,52 +249,15 @@ tiki-data-pipeline/
 
 ### 1. Crawl Categories
 
+Crawl danh mục sản phẩm đệ quy từ Tiki.vn:
+
 ```bash
-# Crawl categories đệ quy từ Tiki
 python src/pipelines/crawl/crawl_categories_recursive.py
-
-# Output: data/raw/categories_recursive_optimized.json
 ```
 
-### 2. Crawl Products
+**Output**: `data/raw/categories_recursive_optimized.json`
 
-```bash
-# Crawl danh sách sản phẩm từ categories
-python src/pipelines/crawl/crawl_products.py
-
-# Output: data/raw/products/products.json
-# Bao gồm: product_id, name, url, image_url, sales_count
-```
-
-### 3. Crawl Product Details
-
-```bash
-# Crawl chi tiết sản phẩm (test)
-python src/pipelines/crawl/crawl_products_detail.py
-
-# Hoặc sử dụng Airflow DAG để crawl tự động
-# Output: data/raw/products/products_with_detail.json
-# Bao gồm: price, rating, description, specifications, images, brand, seller, etc.
-```
-
-### 4. Airflow DAG
-
-```bash
-# DAG tự động chạy:
-# 1. Load categories
-# 2. Crawl products từ categories (Dynamic Task Mapping)
-# 3. Merge và save products
-# 4. Crawl product details (Dynamic Task Mapping)
-# 5. Merge details và save
-# 6. Validate data
-
-# Truy cập: http://localhost:8080
-# DAG ID: tiki_crawl_products
-```
-
-## 📊 Data Structure
-
-### Categories JSON
+**Cấu trúc dữ liệu**:
 ```json
 {
   "name": "Tên danh mục",
@@ -440,7 +269,17 @@ python src/pipelines/crawl/crawl_products_detail.py
 }
 ```
 
-### Products JSON
+### 2. Crawl Products
+
+Crawl danh sách sản phẩm từ các danh mục:
+
+```bash
+python src/pipelines/crawl/crawl_products.py
+```
+
+**Output**: `data/raw/products/products.json`
+
+**Cấu trúc dữ liệu**:
 ```json
 {
   "product_id": "123456789",
@@ -453,7 +292,17 @@ python src/pipelines/crawl/crawl_products_detail.py
 }
 ```
 
-### Products with Detail JSON
+### 3. Crawl Product Details
+
+Crawl chi tiết sản phẩm (giá, đánh giá, mô tả, thông số kỹ thuật, v.v.):
+
+```bash
+python src/pipelines/crawl/crawl_products_detail.py
+```
+
+**Output**: `data/raw/products/products_with_detail.json`
+
+**Cấu trúc dữ liệu**:
 ```json
 {
   "product_id": "123456789",
@@ -478,171 +327,26 @@ python src/pipelines/crawl/crawl_products_detail.py
 }
 ```
 
----
+### 4. Airflow DAG
 
-## 🔧 Scripts Organization
+DAG tự động hóa toàn bộ quy trình:
 
-### Setup Scripts (`scripts/setup/`)
+1. **Load Categories**: Load danh sách categories từ file
+2. **Crawl Products**: Crawl products từ categories (Dynamic Task Mapping)
+3. **Merge Products**: Merge và lưu danh sách products
+4. **Crawl Product Details**: Crawl chi tiết products (Dynamic Task Mapping)
+5. **Merge Details**: Merge details vào products
+6. **Save Final Data**: Lưu dữ liệu cuối cùng
+7. **Validate Data**: Validate dữ liệu đã crawl
 
-```bash
-# Add Groq configuration to .env
-python scripts/setup/add_groq_to_env.py
-
-# Fix environment encoding issues
-python scripts/setup/fix_env_encoding.py
-
-# Initialize NUQ database
-python scripts/setup/init_nuq_db.py
-
-# Setup Groq Firecrawl
-python scripts/setup/setup_groq_firecrawl.py
-
-# Setup Tiki pool
-python scripts/setup/setup_tiki_pool.py
-```
-
-### Utility Scripts (`scripts/utils/`)
-
-```bash
-# Verify services status
-python scripts/utils/verify_services.py
-
-# Analyze filtering issues
-python scripts/utils/analyze_filtering.py
-
-# Check filter issues
-python scripts/utils/check_filter_issues.py
-```
-
-### Shell Scripts (`scripts/shell/`)
-
-```bash
-# Quick check services (Linux/Mac)
-bash scripts/shell/quick-check.sh
-
-# Fix services (Linux/Mac)
-bash scripts/shell/fix-services.sh
-
-# Setup new project (Linux/Mac)
-bash scripts/shell/setup-new-project.sh
-
-# Run tests (Windows)
-scripts\shell\run_test.bat
-```
+**Truy cập**: http://localhost:8080  
+**DAG ID**: `tiki_crawl_products`
 
 ---
 
-## 🤝 Contributing
+## ⚙️ Configuration
 
-<div align="center">
-
-Chúng tôi hoan nghênh mọi đóng góp! 🎉
-
-[📖 Contributing Guidelines](docs/CONTRIBUTING.md) | [🐛 Report Bug](https://github.com/your-username/tiki-data-pipeline/issues) | [💡 Request Feature](https://github.com/your-username/tiki-data-pipeline/issues)
-
-</div>
-
----
-
-## 📊 Project Stats
-
-<div align="center">
-
-<p align="center">
-  <img src="https://github-readme-stats.vercel.app/api?username=your-username&show_icons=true&theme=github_dark&hide_border=true&title_color=64FFDA&icon_color=64FFDA&text_color=c9d1d9&bg_color=0A192F" width="47%"/>
-  <img src="https://github-readme-stats.vercel.app/api/top-langs/?username=your-username&layout=compact&hide_border=true&theme=github_dark&title_color=64FFDA&text_color=c9d1d9&langs_count=8&card_width=420&bg_color=0A192F" width="47%"/>
-</p>
-
-<p align="center">
-  <img width="100%" src="https://github-readme-activity-graph.vercel.app/graph?username=your-username&custom_title=Contribution%20Graph&bg_color=0A192F&color=64FFDA&line=64FFDA&point=FFFFFF&area_color=64FFDA30&title_color=64FFDA&area=true&hide_border=true&radius=16" alt="Contribution Graph"/>
-</p>
-
-</div>
-
----
-
-## 🔄 Sync to Other Repository
-
-Tự động đồng bộ `docker-compose.yaml` và `scripts/` sang repository khác.
-
-### ⚠️ Setup (Bắt buộc)
-
-**Lưu ý:** Workflow sẽ **KHÔNG** hoạt động nếu chưa setup secret!
-
-#### 1. Tạo GitHub Personal Access Token
-
-1. Vào GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
-2. Click "Generate new token (classic)"
-3. Đặt tên token (ví dụ: `sync-repo-token`)
-4. Chọn scope: **`repo`** (Full control of private repositories) - **BẮT BUỘC**
-5. Click "Generate token"
-6. **Copy token ngay lập tức** (chỉ hiển thị một lần!)
-
-#### 2. Thêm Secret vào Repository
-
-1. Vào repository settings → **Secrets and variables** → **Actions**
-2. Click "New repository secret"
-3. **Name**: `SYNC_REPO_TOKEN` (phải đúng tên này, không có khoảng trắng!)
-4. **Value**: Paste token đã tạo ở bước 1
-5. Click "Add secret"
-
-#### 3. Kiểm tra Secret
-
-1. Vào repository settings → **Secrets and variables** → **Actions**
-2. Xem secret `SYNC_REPO_TOKEN` trong danh sách
-3. Đảm bảo secret có tên đúng: `SYNC_REPO_TOKEN`
-
-**Xem hướng dẫn chi tiết:** [docs/SETUP_SYNC_SECRET.md](docs/SETUP_SYNC_SECRET.md)
-
-### Workflow tự động chạy khi:
-
-- Có push vào branch `main` hoặc `master`
-- Có thay đổi ở `docker-compose.yaml` hoặc `scripts/`
-
-### Manual Sync
-
-```bash
-# Linux/Mac
-bash scripts/utils/sync_to_other_repo.sh
-
-# Windows (PowerShell)
-.\scripts\utils\sync_to_other_repo.ps1
-```
-
-**Xem hướng dẫn chi tiết:** [docs/SYNC_TO_OTHER_REPO.md](docs/SYNC_TO_OTHER_REPO.md)
-
----
-
-## 🔗 Links & Resources
-
-<div align="center">
-
-| Resource | Link |
-|:--------:|:----|
-| **Apache Airflow** | [Documentation](https://airflow.apache.org/docs/) |
-| **Firecrawl** | [Self-Host Guide](https://docs.firecrawl.dev/self-hosting) |
-| **Docker Compose** | [Documentation](https://docs.docker.com/compose/) |
-| **Issues** | [GitHub Issues](https://github.com/your-username/tiki-data-pipeline/issues) |
-| **Discussions** | [GitHub Discussions](https://github.com/your-username/tiki-data-pipeline/discussions) |
-
-</div>
-
----
-
-## ⚠️ Important Notes
-
-<div align="center">
-
-> ⚠️ **Rate Limiting**: Tiki có thể rate limit, sử dụng delay giữa các requests  
-> 🔒 **Selenium**: Cần Chrome/Chromium driver để chạy Selenium  
-> 📊 **Data Volume**: Với hàng nghìn sản phẩm, cần đủ disk space  
-> 🐳 **Docker**: Đảm bảo đủ tài nguyên hệ thống (RAM, CPU)  
-> ⏱️ **Timeout**: Cấu hình timeout phù hợp cho từng task  
-> 💾 **Cache**: Sử dụng cache để tránh crawl lại dữ liệu đã có  
-
-</div>
-
-## 🔧 Airflow Variables
+### Airflow Variables
 
 Cấu hình các biến sau trong Airflow UI (Admin → Variables):
 
@@ -659,6 +363,138 @@ Cấu hình các biến sau trong Airflow UI (Admin → Variables):
 | `TIKI_DETAIL_RATE_LIMIT_DELAY` | `2.0` | Delay cho detail crawl (giây) |
 | `TIKI_DETAIL_CRAWL_TIMEOUT` | `60` | Timeout crawl detail (giây) |
 | `TIKI_SAVE_BATCH_SIZE` | `10000` | Số sản phẩm mỗi batch khi save |
+
+### Environment Variables
+
+Các biến môi trường có thể được set trong `.env` hoặc `docker-compose.yaml`:
+
+```bash
+# Airflow
+AIRFLOW_UID=50000
+AIRFLOW_PROJ_DIR=.
+
+# Python packages (sẽ được cài tự động)
+_PIP_ADDITIONAL_REQUIREMENTS=selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0
+```
+
+---
+
+## 🎯 Use Cases
+
+<div align="center">
+
+| Use Case | Description | Example |
+|:--------:|:-----------|:--------|
+| 🛍️ **Product Monitoring** | Theo dõi sản phẩm Tiki | Price tracking, Stock monitoring |
+| 📊 **Market Analysis** | Phân tích thị trường | Category trends, Sales analysis |
+| 💰 **Price Comparison** | So sánh giá sản phẩm | Competitor analysis |
+| 📈 **Data Analytics** | Phân tích dữ liệu sản phẩm | Product performance, Reviews analysis |
+| 🔄 **Automated Data Collection** | Thu thập dữ liệu tự động | Daily product updates |
+
+</div>
+
+---
+
+## 🏆 Best Practices
+
+<div align="center">
+
+✅ **Rate Limiting** - Delay giữa các requests để tránh bị block  
+✅ **Caching** - Cache dữ liệu đã crawl để tránh crawl lại  
+✅ **Error Handling** - Retry mechanism và error logging  
+✅ **Resource Management** - Giới hạn tài nguyên cho từng service  
+✅ **Data Validation** - Validate dữ liệu trước khi lưu  
+✅ **Atomic Writes** - Ghi file an toàn để tránh corruption  
+
+</div>
+
+---
+
+## 📈 Performance & Resources
+
+<div align="center">
+
+| Component | CPU Limit | Memory Limit | Status |
+|:---------:|:---------:|:------------:|:------:|
+| **PostgreSQL** | 2 cores | 2GB | ✅ Optimized |
+| **Redis** | 1 core | 1GB | ✅ Optimized |
+| **Airflow Services** | 0.5-2 cores | 256MB-2GB | ✅ Optimized |
+
+**Total Estimated**: ~4-6 CPU cores, ~6-8GB RAM
+
+</div>
+
+---
+
+## ⚠️ Important Notes
+
+<div align="center">
+
+> ⚠️ **Rate Limiting**: Tiki có thể rate limit, sử dụng delay giữa các requests  
+> 🔒 **Selenium**: Cần Chrome/Chromium driver để chạy Selenium (được cài tự động trong Docker)  
+> 📊 **Data Volume**: Với hàng nghìn sản phẩm, cần đủ disk space  
+> 🐳 **Docker**: Đảm bảo đủ tài nguyên hệ thống (RAM, CPU)  
+> ⏱️ **Timeout**: Cấu hình timeout phù hợp cho từng task  
+> 💾 **Cache**: Sử dụng cache để tránh crawl lại dữ liệu đã có  
+
+</div>
+
+---
+
+## 🐛 Troubleshooting
+
+### Lỗi: ModuleNotFoundError: No module named 'selenium'
+
+**Giải pháp**: Rebuild Docker images để cài packages:
+
+```bash
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+### Lỗi: Chrome/ChromeDriver không tìm thấy
+
+**Giải pháp**: Custom Dockerfile đã cài Chrome tự động. Nếu vẫn lỗi:
+
+```bash
+# Rebuild Airflow image
+docker-compose build airflow-worker airflow-scheduler
+docker-compose up -d
+```
+
+### Lỗi: DAG không hiển thị trong Airflow UI
+
+**Giải pháp**: 
+1. Kiểm tra DAG file có trong `airflow/dags/`
+2. Kiểm tra syntax errors: `docker-compose exec airflow-scheduler airflow dags list`
+3. Restart DAG processor: `docker-compose restart airflow-dag-processor`
+
+### Lỗi: Connection timeout khi crawl
+
+**Giải pháp**: 
+1. Tăng timeout trong Airflow Variables
+2. Kiểm tra network connection
+3. Giảm rate limit delay nếu quá chậm
+
+---
+
+## 📚 Documentation
+
+- [Airflow Documentation](https://airflow.apache.org/docs/)
+- [Selenium Documentation](https://www.selenium.dev/documentation/)
+- [Docker Compose Documentation](https://docs.docker.com/compose/)
+
+---
+
+## 🤝 Contributing
+
+<div align="center">
+
+Chúng tôi hoan nghênh mọi đóng góp! 🎉
+
+[📖 Contributing Guidelines](docs/CONTRIBUTING.md) | [🐛 Report Bug](https://github.com/your-username/tiki-data-pipeline/issues) | [💡 Request Feature](https://github.com/your-username/tiki-data-pipeline/issues)
+
+</div>
 
 ---
 
@@ -695,4 +531,3 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
     <img src="https://img.shields.io/github/watchers/your-username/tiki-data-pipeline?style=social&label=Watch"/>
   </p>
 </div>
-

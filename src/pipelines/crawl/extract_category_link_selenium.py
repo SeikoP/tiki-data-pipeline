@@ -3,11 +3,19 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 import time
 import json
 import re
 import sys
 from bs4 import BeautifulSoup
+
+# Thử import webdriver-manager
+try:
+    from webdriver_manager.chrome import ChromeDriverManager
+    HAS_WEBDRIVER_MANAGER = True
+except ImportError:
+    HAS_WEBDRIVER_MANAGER = False
 
 # Set UTF-8 encoding cho stdout trên Windows
 if sys.platform == 'win32':
@@ -38,7 +46,17 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
     }
     chrome_options.add_experimental_option("prefs", prefs)
     
-    driver = webdriver.Chrome(options=chrome_options)
+    # Sử dụng webdriver-manager nếu có
+    if HAS_WEBDRIVER_MANAGER:
+        try:
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+        except Exception as e:
+            if verbose:
+                print(f"[Selenium] Không thể dùng webdriver-manager: {e}, thử Chrome mặc định")
+            driver = webdriver.Chrome(options=chrome_options)
+    else:
+        driver = webdriver.Chrome(options=chrome_options)
     
     try:
         if verbose:

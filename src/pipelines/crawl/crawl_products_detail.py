@@ -3,6 +3,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from bs4 import BeautifulSoup
 import time
 import json
@@ -10,6 +11,13 @@ import re
 import sys
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
+
+# Thử import webdriver-manager để tự động quản lý Chrome driver
+try:
+    from webdriver_manager.chrome import ChromeDriverManager
+    HAS_WEBDRIVER_MANAGER = True
+except ImportError:
+    HAS_WEBDRIVER_MANAGER = False
 
 # Set UTF-8 encoding cho stdout trên Windows
 if sys.platform == 'win32':
@@ -31,9 +39,21 @@ def crawl_product_detail_with_selenium(url, save_html=False, verbose=True):
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-software-rasterizer")
+    chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
-    driver = webdriver.Chrome(options=chrome_options)
+    # Sử dụng webdriver-manager nếu có, nếu không dùng Chrome mặc định
+    if HAS_WEBDRIVER_MANAGER:
+        try:
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+        except Exception as e:
+            if verbose:
+                print(f"[Selenium] Không thể dùng webdriver-manager: {e}, thử Chrome mặc định")
+            driver = webdriver.Chrome(options=chrome_options)
+    else:
+        driver = webdriver.Chrome(options=chrome_options)
     
     try:
         if verbose:

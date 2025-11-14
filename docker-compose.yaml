@@ -1,85 +1,29 @@
 name: tiki-data-pipeline
 
 # ============================================
-# PHIÊN BẢN TỐI ƯU: Dùng chung Redis và Postgres
+# TIKI DATA PIPELINE - Airflow với Selenium
 # ============================================
-# Ưu điểm:
-# - Tiết kiệm tài nguyên (1 Redis + 1 Postgres thay vì 2+2)
-# - Dễ quản lý và monitor
-# - Phù hợp cho development/staging
-# 
-# Lưu ý:
-# - Production: cân nhắc tách riêng nếu cần isolation cao
-# - Redis: Airflow dùng DB 0, Firecrawl dùng DB 1
-# - Postgres: Tạo 2 databases riêng (airflow, nuq)
+# Services:
+# - PostgreSQL: Database cho Airflow metadata
+# - Redis: Celery message broker cho Airflow
+# - Airflow: Scheduler, Worker, API Server, DAG Processor, Triggerer
 # ============================================
-
-x-common-service: &common-service
-  build: ./firecrawl/apps/api
-  ulimits:
-    nofile:
-      soft: 65535
-      hard: 65535
-  networks:
-    - backend
-  extra_hosts:
-    - "host.docker.internal:host-gateway"
-  restart: unless-stopped
-  deploy:
-    resources:
-      limits:
-        cpus: '2'
-        memory: 2G
-      reservations:
-        cpus: '0.5'
-        memory: 512M
-
-x-common-env: &common-env
-  # Redis: Firecrawl dùng database 1 (Airflow dùng database 0)
-  REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
-  REDIS_RATE_LIMIT_URL: ${REDIS_URL:-redis://redis:6379/1}
-  PLAYWRIGHT_MICROSERVICE_URL: ${PLAYWRIGHT_MICROSERVICE_URL:-http://playwright-service:3000/scrape}
-  # Postgres: Dùng chung instance, database riêng
-  NUQ_DATABASE_URL: postgres://postgres:postgres@postgres:5432/nuq
-  USE_DB_AUTHENTICATION: ${USE_DB_AUTHENTICATION}
-  OPENAI_API_KEY: ${OPENAI_API_KEY}
-  OPENAI_BASE_URL: ${OPENAI_BASE_URL}
-  MODEL_NAME: ${MODEL_NAME}
-  MODEL_EMBEDDING_NAME: ${MODEL_EMBEDDING_NAME} 
-  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
-  # Groq API Configuration (for AI extraction)
-  GROQ_API_KEY: ${GROQ_API_KEY}
-  GROQ_API_KEYS: ${GROQ_API_KEYS}
-  GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-70b-versatile} 
-  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
-  BULL_AUTH_KEY: ${BULL_AUTH_KEY}
-  TEST_API_KEY: ${TEST_API_KEY}
-  POSTHOG_API_KEY: ${POSTHOG_API_KEY}
-  POSTHOG_HOST: ${POSTHOG_HOST}
-  SUPABASE_ANON_TOKEN: ${SUPABASE_ANON_TOKEN}
-  SUPABASE_URL: ${SUPABASE_URL}
-  SUPABASE_SERVICE_TOKEN: ${SUPABASE_SERVICE_TOKEN}
-  SELF_HOSTED_WEBHOOK_URL: ${SELF_HOSTED_WEBHOOK_URL}
-  SERPER_API_KEY: ${SERPER_API_KEY}
-  SEARCHAPI_API_KEY: ${SEARCHAPI_API_KEY}
-  LOGGING_LEVEL: ${LOGGING_LEVEL}
-  PROXY_SERVER: ${PROXY_SERVER}
-  PROXY_USERNAME: ${PROXY_USERNAME}
-  PROXY_PASSWORD: ${PROXY_PASSWORD}
-  SEARXNG_ENDPOINT: ${SEARXNG_ENDPOINT}
-  SEARXNG_ENGINES: ${SEARXNG_ENGINES}
-  SEARXNG_CATEGORIES: ${SEARXNG_CATEGORIES}
 
 x-airflow-common:
   &airflow-common
-  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:3.1.2}
+  # Sử dụng custom Dockerfile nếu có để cài Chrome, nếu không dùng image mặc định
+  # Build sẽ được thử trước, nếu fail sẽ fallback về image
+  build:
+    context: ${AIRFLOW_PROJ_DIR:-.}
+    dockerfile: airflow/Dockerfile
+  image: ${AIRFLOW_IMAGE_NAME:-tiki-airflow:3.1.2}
   env_file:
     - ${ENV_FILE_PATH:-.env}
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-    # Postgres: Dùng chung instance, database airflow
+    # Postgres: Database airflow
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     # Redis: Airflow dùng database 0
@@ -89,7 +33,7 @@ x-airflow-common:
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0}
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/airflow/dags:/opt/airflow/dags
@@ -111,7 +55,7 @@ x-airflow-common:
 
 services:
   # ============================================
-  # SHARED POSTGRES - Dùng chung cho cả 2 modules
+  # POSTGRES - Database cho Airflow
   # ============================================
   postgres:
     image: postgres:16
@@ -120,8 +64,8 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - postgres-shared-volume:/var/lib/postgresql/data
-      # Script để tự động tạo databases (chạy khi init lần đầu)
-      - ./airflow/setup/init-multiple-databases.sh:/docker-entrypoint-initdb.d/01-init-multiple-databases.sh:ro
+      # Script để tự động tạo database airflow (chạy khi init lần đầu)
+      - ./airflow/setup/init-airflow-db.sh:/docker-entrypoint-initdb.d/01-init-airflow-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -141,7 +85,7 @@ services:
       - backend
 
   # ============================================
-  # SHARED REDIS - Dùng chung cho cả 2 modules
+  # REDIS - Celery message broker cho Airflow
   # ============================================
   redis:
     image: redis:7.2-alpine
@@ -163,9 +107,6 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
-    # Redis databases:
-    # - DB 0: Airflow Celery broker
-    # - DB 1: Firecrawl queue & rate limiting
 
   # ============================================
   # AIRFLOW SERVICES
@@ -380,71 +321,8 @@ services:
       _AIRFLOW_WWW_USER_CREATE: 'true'
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
-      _PIP_ADDITIONAL_REQUIREMENTS: ''
+      _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0}
     user: "0:0"
-
-  # ============================================
-  # FIRECRAWL SERVICES
-  # ============================================
-  playwright-service:
-    build: ./firecrawl/apps/playwright-service-ts
-    environment:
-      PORT: 3000
-      PROXY_SERVER: ${PROXY_SERVER}
-      PROXY_USERNAME: ${PROXY_USERNAME}
-      PROXY_PASSWORD: ${PROXY_PASSWORD}
-      BLOCK_MEDIA: ${BLOCK_MEDIA}
-    networks:
-      - backend
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-
-  api:
-    <<: *common-service
-    env_file:
-      - ${ENV_FILE_PATH:-.env}
-    environment:
-      <<: *common-env
-      HOST: "0.0.0.0"
-      PORT: ${INTERNAL_PORT:-3002}
-      EXTRACT_WORKER_PORT: ${EXTRACT_WORKER_PORT:-3004}
-      WORKER_PORT: ${WORKER_PORT:-3005}
-      ENV: local
-      # Disable Ollama for LLM extraction - use Groq instead
-      OLLAMA_BASE_URL: ""
-      # Configure Groq for schema analysis in extraction
-      ANTHROPIC_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_API_KEYS: ${GROQ_API_KEYS:-}
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      playwright-service:
-        condition: service_healthy
-    ports:
-      - "${PORT:-3002}:${INTERNAL_PORT:-3002}"
-    command: node dist/src/harness.js --start-docker
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3002/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
 networks:
   backend:
