@@ -8,21 +8,56 @@ from threading import Lock
 from collections import defaultdict
 from urllib.parse import urljoin, urlparse, parse_qs
 import requests
-from bs4 import BeautifulSoup
+# Lazy import BeautifulSoup để tránh timeout khi load DAG
+# from bs4 import BeautifulSoup  # Moved to function level
 
-# Set UTF-8 encoding cho stdout trên Windows
-if sys.platform == 'win32':
-    try:
-        import io
-        if hasattr(sys.stdout, 'buffer') and not sys.stdout.closed:
-            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except:
-        try:
-            import io
-            if hasattr(sys.stdout, 'buffer'):
-                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-        except:
-            pass
+# Import shared utilities - hỗ trợ cả relative và absolute import
+try:
+    # Thử relative import trước (khi chạy như package)
+    from .utils import (
+        setup_utf8_encoding,
+        parse_sales_count,
+        parse_price,
+        ensure_dir,
+        atomic_write_json,
+        safe_read_json,
+        extract_product_id_from_url,
+        normalize_url,
+        RateLimiter,
+        DEFAULT_DATA_DIR,
+        DEFAULT_CACHE_DIR
+    )
+except ImportError:
+    # Fallback: absolute import (khi được load qua importlib)
+    import sys
+    import os
+    # Tìm utils.py trong cùng thư mục
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    utils_path = os.path.join(current_dir, 'utils.py')
+    if os.path.exists(utils_path):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
+        if spec and spec.loader:
+            utils_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(utils_module)
+            setup_utf8_encoding = utils_module.setup_utf8_encoding
+            parse_sales_count = utils_module.parse_sales_count
+            parse_price = utils_module.parse_price
+            ensure_dir = utils_module.ensure_dir
+            atomic_write_json = utils_module.atomic_write_json
+            safe_read_json = utils_module.safe_read_json
+            extract_product_id_from_url = utils_module.extract_product_id_from_url
+            normalize_url = utils_module.normalize_url
+            RateLimiter = utils_module.RateLimiter
+            DEFAULT_DATA_DIR = utils_module.DEFAULT_DATA_DIR
+            DEFAULT_CACHE_DIR = utils_module.DEFAULT_CACHE_DIR
+        else:
+            raise ImportError(f"Không thể load utils từ {utils_path}")
+    else:
+        raise ImportError(f"Không tìm thấy utils.py tại {utils_path}")
+
+# Setup UTF-8 encoding
+setup_utf8_encoding()
 
 # Thử import tqdm
 try:
@@ -68,26 +103,32 @@ except ImportError:
         def set_postfix(self, postfix=None):
             pass
 
-# Import Selenium nếu cần
-try:
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    HAS_SELENIUM = True
+# Lazy import Selenium và webdriver_manager để tránh timeout khi load DAG
+# Không import ở top level - sẽ import trong functions khi cần
+HAS_SELENIUM = None  # Sẽ được check khi cần
+HAS_WEBDRIVER_MANAGER = None  # Sẽ được check khi cần
+
+def _check_selenium_available():
+    """Check xem Selenium có sẵn không (lazy check)"""
+    global HAS_SELENIUM, HAS_WEBDRIVER_MANAGER
+    if HAS_SELENIUM is not None:
+        return HAS_SELENIUM
     
-    # Thử import webdriver-manager
     try:
-        from webdriver_manager.chrome import ChromeDriverManager
-        HAS_WEBDRIVER_MANAGER = True
+        from selenium import webdriver
+        HAS_SELENIUM = True
+        
+        # Thử import webdriver-manager
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            HAS_WEBDRIVER_MANAGER = True
+        except ImportError:
+            HAS_WEBDRIVER_MANAGER = False
     except ImportError:
+        HAS_SELENIUM = False
         HAS_WEBDRIVER_MANAGER = False
-except ImportError:
-    HAS_SELENIUM = False
-    HAS_WEBDRIVER_MANAGER = False
-    print("⚠️  Khuyến nghị cài đặt selenium: pip install selenium")
+    
+    return HAS_SELENIUM
 
 # Tạo thư mục output
 os.makedirs('data/demo/products', exist_ok=True)
@@ -110,7 +151,13 @@ stats = {
 
 def get_page_with_selenium(url, timeout=30):
     """Lấy HTML của trang với Selenium (cho dynamic content)"""
-    if not HAS_SELENIUM:
+    # Lazy import để tránh timeout khi load DAG
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    
+    # Check Selenium availability
+    if not _check_selenium_available():
         raise ImportError("Selenium chưa được cài đặt")
     
     chrome_options = Options()
@@ -127,15 +174,31 @@ def get_page_with_selenium(url, timeout=30):
     }
     chrome_options.add_experimental_option("prefs", prefs)
     
-    # Sử dụng webdriver-manager nếu có
-    if HAS_SELENIUM and HAS_WEBDRIVER_MANAGER:
-        try:
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-        except Exception:
-            driver = webdriver.Chrome(options=chrome_options)
-    else:
+    # Ưu tiên dùng ChromeDriver có sẵn trong PATH (nhanh nhất)
+    try:
         driver = webdriver.Chrome(options=chrome_options)
+    except Exception as e:
+        # Nếu không có ChromeDriver trong PATH, thử webdriver-manager
+        error_msg = str(e).lower()
+        if 'chromedriver' in error_msg or 'driver' in error_msg:
+            if HAS_WEBDRIVER_MANAGER:
+                try:
+                    from webdriver_manager.chrome import ChromeDriverManager
+                    # Tắt log của webdriver_manager để giảm noise
+                    import logging
+                    wdm_logger = logging.getLogger('WDM')
+                    wdm_logger.setLevel(logging.WARNING)
+                    
+                    service = Service(ChromeDriverManager().install())
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                except Exception:
+                    # Nếu webdriver-manager cũng fail, raise lỗi gốc
+                    raise e
+            else:
+                raise e
+        else:
+            # Lỗi khác, raise ngay
+            raise
     try:
         driver.set_page_load_timeout(timeout)
         driver.get(url)
@@ -179,6 +242,9 @@ def get_page_with_requests(url, max_retries=3):
 
 def parse_products_from_next_data(html_content):
     """Parse sản phẩm từ __NEXT_DATA__ (Next.js)"""
+    # Lazy import để tránh timeout khi load DAG
+    from bs4 import BeautifulSoup
+    
     products = []
     
     try:
@@ -265,41 +331,17 @@ def parse_products_from_next_data(html_content):
                     # Lấy image (để có thể dùng preview)
                     image_url = item.get('image_url') or item.get('thumbnail_url') or item.get('images', [{}])[0].get('url', '') if isinstance(item.get('images'), list) else ''
                     
-                    # Extract số lượng bán
-                    sales_count = None
-                    # Thử các key có thể chứa số lượng bán
-                    sales_count = (item.get('sales_count') or 
-                                  item.get('quantity_sold') or 
-                                  item.get('sold_count') or 
-                                  item.get('total_sold') or 
-                                  item.get('order_count') or 
-                                  item.get('sales_quantity') or
-                                  item.get('quantity') or
-                                  item.get('sold') or
-                                  item.get('total_quantity_sold'))
-                    
-                    # Nếu là số, giữ nguyên; nếu là string, parse số
-                    if sales_count is not None:
-                        if isinstance(sales_count, str):
-                            # Tìm số trong string (ví dụ: "2k" -> 2000, "1.5k" -> 1500)
-                            sales_match = re.search(r'([\d.]+)\s*([km]?)', sales_count.lower())
-                            if sales_match:
-                                num = float(sales_match.group(1))
-                                unit = sales_match.group(2)
-                                if unit == 'k':
-                                    sales_count = int(num * 1000)
-                                elif unit == 'm':
-                                    sales_count = int(num * 1000000)
-                                else:
-                                    sales_count = int(num)
-                            else:
-                                # Thử parse số trực tiếp
-                                try:
-                                    sales_count = int(re.sub(r'[^\d]', '', sales_count))
-                                except:
-                                    sales_count = None
-                        elif isinstance(sales_count, (int, float)):
-                            sales_count = int(sales_count)
+                    # Extract số lượng bán - dùng shared utility
+                    sales_count_raw = (item.get('sales_count') or 
+                                      item.get('quantity_sold') or 
+                                      item.get('sold_count') or 
+                                      item.get('total_sold') or 
+                                      item.get('order_count') or 
+                                      item.get('sales_quantity') or
+                                      item.get('quantity') or
+                                      item.get('sold') or
+                                      item.get('total_quantity_sold'))
+                    sales_count = parse_sales_count(sales_count_raw)
                     
                     product = {
                         'product_id': product_id,
@@ -323,6 +365,9 @@ def parse_products_from_next_data(html_content):
 
 def parse_products_from_html(html_content, category_url):
     """Parse danh sách sản phẩm từ HTML"""
+    # Lazy import để tránh timeout khi load DAG
+    from bs4 import BeautifulSoup
+    
     soup = BeautifulSoup(html_content, 'html.parser')
     products = []
     
@@ -413,25 +458,8 @@ def parse_products_from_html(html_content, category_url):
                     break
             
             if sales_text:
-                # Parse số từ text (ví dụ: "Đã bán 2k", "1.5k đã bán")
-                sales_match = re.search(r'([\d.]+)\s*([km]?)', sales_text.lower())
-                if sales_match:
-                    num = float(sales_match.group(1))
-                    unit = sales_match.group(2)
-                    if unit == 'k':
-                        sales_count = int(num * 1000)
-                    elif unit == 'm':
-                        sales_count = int(num * 1000000)
-                    else:
-                        sales_count = int(num)
-                else:
-                    # Thử tìm số trực tiếp
-                    numbers = re.findall(r'\d+', sales_text)
-                    if numbers:
-                        try:
-                            sales_count = int(numbers[0])
-                        except:
-                            pass
+                # Parse số từ text - dùng shared utility
+                sales_count = parse_sales_count(sales_text)
             
             # Tạo object sản phẩm
             product = {
@@ -456,6 +484,9 @@ def parse_products_from_html(html_content, category_url):
 
 def get_total_pages(html_content):
     """Lấy tổng số trang từ HTML"""
+    # Lazy import để tránh timeout khi load DAG
+    from bs4 import BeautifulSoup
+    
     soup = BeautifulSoup(html_content, 'html.parser')
     
     # Tìm phần phân trang
@@ -511,28 +542,24 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
     
     all_products = []
     
-    # Kiểm tra cache
+    # Kiểm tra cache - dùng safe_read_json
     cache_file = None
     if cache_dir:
         import hashlib
         url_hash = hashlib.md5(category_url.encode()).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
         
-        if os.path.exists(cache_file):
-            try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    cached_data = json.load(f)
-                    cached_products = cached_data.get('products', [])
-                    if cached_products:  # Chỉ return cache nếu có sản phẩm
-                        return cached_products
-            except:
-                pass
+        cached_data = safe_read_json(cache_file)
+        if cached_data:
+            cached_products = cached_data.get('products', [])
+            if cached_products:  # Chỉ return cache nếu có sản phẩm
+                return cached_products
     
     try:
         # Lấy trang đầu để xác định số trang
         html = None
         if use_selenium:
-            if HAS_SELENIUM:
+            if _check_selenium_available():
                 html = get_page_with_selenium(category_url)
             else:
                 print(f"⚠️  Selenium chưa được cài đặt, dùng requests thay thế")
@@ -542,7 +569,7 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
             # Nếu không tìm thấy sản phẩm với requests, thử Selenium
             if html:
                 products_test = parse_products_from_html(html, category_url)
-                if not products_test and HAS_SELENIUM:
+                if not products_test and _check_selenium_available():
                     print(f"⚠️  Không tìm thấy sản phẩm với requests, thử Selenium...")
                     html = get_page_with_selenium(category_url)
                     use_selenium = True  # Đánh dấu đã dùng Selenium
@@ -578,7 +605,7 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
         for page in range(2, total_pages + 1):
             try:
                 page_url = get_category_page_url(category_url, page)
-                if use_selenium and HAS_SELENIUM:
+                if use_selenium and _check_selenium_available():
                     html = get_page_with_selenium(page_url)
                 else:
                     html = get_page_with_requests(page_url)

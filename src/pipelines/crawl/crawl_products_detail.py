@@ -1,10 +1,9 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from bs4 import BeautifulSoup
+# Lazy import Selenium và BeautifulSoup để tránh timeout khi load DAG
+# from selenium import webdriver
+# from selenium.webdriver.common.by import By
+# from selenium.webdriver.support.ui import WebDriverWait
+# from selenium.webdriver.support import expected_conditions as EC
+# from bs4 import BeautifulSoup
 import time
 import json
 import re
@@ -12,116 +11,176 @@ import sys
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 
-# Thử import webdriver-manager để tự động quản lý Chrome driver
+# Import shared utilities - hỗ trợ cả relative và absolute import
 try:
-    from webdriver_manager.chrome import ChromeDriverManager
-    HAS_WEBDRIVER_MANAGER = True
+    # Thử relative import trước (khi chạy như package)
+    from .utils import (
+        setup_utf8_encoding,
+        parse_sales_count,
+        parse_price,
+        extract_product_id_from_url,
+        create_selenium_driver,
+        atomic_write_json,
+        ensure_dir
+    )
 except ImportError:
-    HAS_WEBDRIVER_MANAGER = False
+    # Fallback: absolute import (khi được load qua importlib)
+    import sys
+    import os
+    # Tìm utils.py trong cùng thư mục
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    utils_path = os.path.join(current_dir, 'utils.py')
+    if os.path.exists(utils_path):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
+        if spec and spec.loader:
+            utils_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(utils_module)
+            setup_utf8_encoding = utils_module.setup_utf8_encoding
+            parse_sales_count = utils_module.parse_sales_count
+            parse_price = utils_module.parse_price
+            extract_product_id_from_url = utils_module.extract_product_id_from_url
+            create_selenium_driver = utils_module.create_selenium_driver
+            atomic_write_json = utils_module.atomic_write_json
+            ensure_dir = utils_module.ensure_dir
+        else:
+            raise ImportError(f"Không thể load utils từ {utils_path}")
+    else:
+        raise ImportError(f"Không tìm thấy utils.py tại {utils_path}")
 
-# Set UTF-8 encoding cho stdout trên Windows
-if sys.platform == 'win32':
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# Setup UTF-8 encoding
+setup_utf8_encoding()
 
 
-def crawl_product_detail_with_selenium(url, save_html=False, verbose=True):
+def crawl_product_detail_with_selenium(url, save_html=False, verbose=True, max_retries=2, timeout=30):
     """Crawl trang sản phẩm Tiki bằng Selenium để load đầy đủ dữ liệu
     
     Args:
         url: URL sản phẩm cần crawl
         save_html: Có lưu HTML vào file không
         verbose: Có in log không
+        max_retries: Số lần retry tối đa
+        timeout: Timeout cho page load (giây)
+        
+    Returns:
+        str: HTML content hoặc None nếu lỗi
+        
+    Raises:
+        Exception: Nếu không thể crawl sau max_retries lần
     """
+    driver = None
+    last_error = None
     
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    
-    # Sử dụng webdriver-manager nếu có, nếu không dùng Chrome mặc định
-    if HAS_WEBDRIVER_MANAGER:
+    for attempt in range(max_retries):
         try:
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Sử dụng shared utility để tạo driver
+            driver = create_selenium_driver(headless=True)
+            if not driver:
+                raise ImportError("Selenium chưa được cài đặt hoặc không thể tạo driver")
+            
+            # Set timeout cho page load
+            driver.set_page_load_timeout(timeout)
+            driver.implicitly_wait(10)  # Implicit wait cho elements
+            
+            if verbose:
+                print(f"[Selenium] Đang mở {url}... (attempt {attempt + 1}/{max_retries})")
+            
+            driver.get(url)
+            
+            # Chờ trang load - giảm thời gian chờ
+            time.sleep(2)  # Giảm từ 3s xuống 2s
+            
+            # Scroll để load các phần động - tối ưu
+            if verbose:
+                print("[Selenium] Đang scroll để load nội dung...")
+            
+            # Scroll nhanh hơn
+            try:
+                driver.execute_script("window.scrollTo(0, 500);")
+                time.sleep(0.5)
+                driver.execute_script("window.scrollTo(0, 1500);")
+                time.sleep(0.5)
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(1)  # Giảm từ 2s xuống 1s
+            except Exception as scroll_error:
+                if verbose:
+                    print(f"[Selenium] Warning: Lỗi khi scroll: {scroll_error}")
+                # Tiếp tục dù scroll lỗi
+            
+            # Lấy HTML đầy đủ
+            full_html = driver.page_source
+            
+            # Validate HTML
+            if not full_html or len(full_html) < 100:
+                raise ValueError(f"HTML content quá ngắn: {len(full_html) if full_html else 0} ký tự")
+            
+            # Lưu HTML nếu được yêu cầu - dùng shared utility
+            if save_html:
+                output_dir = ensure_dir('data/test_output')
+                html_file = output_dir / 'selenium_product_detail.html'
+                # Lưu HTML trực tiếp (không phải JSON)
+                with open(html_file, 'w', encoding='utf-8') as f:
+                    f.write(full_html)
+                if verbose:
+                    print(f"[Selenium] ✓ Đã lưu HTML vào {html_file}")
+            
+            # Đóng driver trước khi return
+            if driver:
+                driver.quit()
+                driver = None
+            
+            return full_html
+            
         except Exception as e:
+            last_error = e
+            error_type = type(e).__name__
+            error_msg = str(e)
+            
             if verbose:
-                print(f"[Selenium] Không thể dùng webdriver-manager: {e}, thử Chrome mặc định")
-            driver = webdriver.Chrome(options=chrome_options)
-    else:
-        driver = webdriver.Chrome(options=chrome_options)
+                print(f"[Selenium] Lỗi attempt {attempt + 1}/{max_retries} ({error_type}): {error_msg}")
+            
+            # Đóng driver nếu có lỗi
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+                driver = None
+            
+            # Nếu là lỗi không thể retry (như ImportError), raise ngay
+            if isinstance(e, ImportError):
+                raise
+            
+            # Nếu đã hết retries, raise lỗi
+            if attempt == max_retries - 1:
+                raise Exception(f"Không thể crawl sau {max_retries} lần thử. Lỗi cuối: {error_type}: {error_msg}") from e
+            
+            # Chờ một chút trước khi retry
+            time.sleep(1)
     
-    try:
-        if verbose:
-            print(f"[Selenium] Đang mở {url}...")
-        driver.get(url)
-        
-        # Chờ trang load
-        time.sleep(3)
-        
-        # Scroll để load các phần động
-        if verbose:
-            print("[Selenium] Đang scroll để load nội dung...")
-        driver.execute_script("window.scrollTo(0, 500);")
-        time.sleep(1)
-        driver.execute_script("window.scrollTo(0, 1500);")
-        time.sleep(1)
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)
-        
-        # Lấy HTML đầy đủ
-        full_html = driver.page_source
-        
-        # Lưu HTML nếu được yêu cầu
-        if save_html:
-            output_dir = 'data/test_output'
-            import os
-            os.makedirs(output_dir, exist_ok=True)
-            html_file = os.path.join(output_dir, 'selenium_product_detail.html')
-            with open(html_file, 'w', encoding='utf-8') as f:
-                f.write(full_html)
-            if verbose:
-                print(f"[Selenium] ✓ Đã lưu HTML vào {html_file}")
-        
-        return full_html
-        
-    finally:
-        driver.quit()
-
-
-def extract_product_id_from_url(url):
-    """Extract product ID từ URL Tiki"""
-    # Pattern: /p{product_id}.html hoặc -p{product_id}.html
-    match = re.search(r'[\/-]p(\d+)', url)
-    if match:
-        return match.group(1)
-    return None
-
-
-def parse_price(price_text):
-    """Parse giá từ text (ví dụ: '389.000₫' -> 389000)"""
-    if not price_text:
-        return None
+    # Không bao giờ đến đây, nhưng để an toàn
+    if driver:
+        try:
+            driver.quit()
+        except:
+            pass
     
-    # Loại bỏ ký tự không phải số
-    price_clean = re.sub(r'[^\d]', '', price_text)
-    try:
-        return int(price_clean)
-    except:
-        return None
+    raise Exception(f"Không thể crawl. Lỗi: {last_error}") if last_error else Exception("Không thể crawl")
+
+
+# Sử dụng shared utilities thay vì định nghĩa lại
+# extract_product_id_from_url và parse_price đã được import từ utils
 
 
 def extract_product_detail(html_content, url, verbose=True):
     """Extract thông tin chi tiết sản phẩm từ HTML"""
+    # Lazy import để tránh timeout khi load DAG
+    from bs4 import BeautifulSoup
     
     soup = BeautifulSoup(html_content, 'html.parser')
     product_data = {
         'url': url,
-        'product_id': extract_product_id_from_url(url),
+        'product_id': extract_product_id_from_url(url),  # Dùng shared utility
         'name': '',
         'price': {
             'current_price': None,
@@ -190,7 +249,7 @@ def extract_product_detail(html_content, url, verbose=True):
         price_elem = soup.select_one(selector)
         if price_elem:
             price_text = price_elem.get_text(strip=True)
-            product_data['price']['current_price'] = parse_price(price_text)
+            product_data['price']['current_price'] = parse_price(price_text)  # Dùng shared utility
             break
     
     # Tìm giá gốc
@@ -204,7 +263,7 @@ def extract_product_detail(html_content, url, verbose=True):
         price_elem = soup.select_one(selector)
         if price_elem:
             price_text = price_elem.get_text(strip=True)
-            product_data['price']['original_price'] = parse_price(price_text)
+            product_data['price']['original_price'] = parse_price(price_text)  # Dùng shared utility
             break
     
     # Tính phần trăm giảm giá
@@ -558,39 +617,18 @@ def extract_product_detail(html_content, url, verbose=True):
                     product_data['stock']['quantity'] = int(stock_info)
                     product_data['stock']['available'] = stock_info > 0
                 
-                # Cập nhật sales_count (số lượng đã bán)
+                # Cập nhật sales_count (số lượng đã bán) - dùng shared utility
                 if not product_data['sales_count']:
-                    sales_count = (product_from_next.get('sales_count') or 
-                                  product_from_next.get('quantity_sold') or 
-                                  product_from_next.get('sold_count') or 
-                                  product_from_next.get('total_sold') or 
-                                  product_from_next.get('order_count') or 
-                                  product_from_next.get('sales_quantity') or
-                                  product_from_next.get('quantity') or
-                                  product_from_next.get('sold') or
-                                  product_from_next.get('total_quantity_sold'))
-                    
-                    if sales_count is not None:
-                        if isinstance(sales_count, str):
-                            # Tìm số trong string (ví dụ: "2k" -> 2000, "1.5k" -> 1500)
-                            sales_match = re.search(r'([\d.]+)\s*([km]?)', sales_count.lower())
-                            if sales_match:
-                                num = float(sales_match.group(1))
-                                unit = sales_match.group(2)
-                                if unit == 'k':
-                                    product_data['sales_count'] = int(num * 1000)
-                                elif unit == 'm':
-                                    product_data['sales_count'] = int(num * 1000000)
-                                else:
-                                    product_data['sales_count'] = int(num)
-                            else:
-                                # Thử parse số trực tiếp
-                                try:
-                                    product_data['sales_count'] = int(re.sub(r'[^\d]', '', sales_count))
-                                except:
-                                    product_data['sales_count'] = None
-                        elif isinstance(sales_count, (int, float)):
-                            product_data['sales_count'] = int(sales_count)
+                    sales_count_raw = (product_from_next.get('sales_count') or 
+                                      product_from_next.get('quantity_sold') or 
+                                      product_from_next.get('sold_count') or 
+                                      product_from_next.get('total_sold') or 
+                                      product_from_next.get('order_count') or 
+                                      product_from_next.get('sales_quantity') or
+                                      product_from_next.get('quantity') or
+                                      product_from_next.get('sold') or
+                                      product_from_next.get('total_quantity_sold'))
+                    product_data['sales_count'] = parse_sales_count(sales_count_raw)
         except Exception as e:
             if verbose:
                 print(f"[Parse] Lỗi khi parse __NEXT_DATA__: {e}")

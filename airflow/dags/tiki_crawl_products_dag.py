@@ -71,6 +71,35 @@ if not crawl_module_path:
         crawl_module_path = relative_path
         crawl_products_path = test_path
 
+# Import module utils TRƯỚC (cần thiết cho crawl_products và crawl_products_detail)
+utils_path = None
+if crawl_module_path:
+    utils_path = os.path.join(crawl_module_path, 'utils.py')
+    if not os.path.exists(utils_path):
+        utils_path = None
+
+if not utils_path:
+    # Thử tìm trong các possible paths
+    for path in possible_paths:
+        test_path = os.path.join(path, 'utils.py')
+        if os.path.exists(test_path):
+            utils_path = test_path
+            break
+
+if utils_path and os.path.exists(utils_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
+    if spec and spec.loader:
+        utils_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(utils_module)
+        # Lưu vào sys.modules để các module khác có thể import
+        sys.modules['crawl_utils'] = utils_module
+        # Tạo fake package structure để relative import hoạt động
+        if 'pipelines.crawl.utils' not in sys.modules:
+            sys.modules['pipelines'] = type(sys)('pipelines')
+            sys.modules['pipelines.crawl'] = type(sys)('pipelines.crawl')
+            sys.modules['pipelines.crawl.utils'] = utils_module
+
 # Import module crawl_products
 if crawl_products_path and os.path.exists(crawl_products_path):
     # Sử dụng importlib để import trực tiếp từ file (cách đáng tin cậy nhất)
@@ -172,7 +201,7 @@ DAG_CONFIG = {
     'dag_id': 'tiki_crawl_products',
     'description': 'Crawl sản phẩm Tiki với Dynamic Task Mapping và tối ưu hóa',
     'default_args': DEFAULT_ARGS,
-    'schedule': timedelta(days=1),  # Chạy hàng ngày
+    'schedule': timedelta(days=1),  # Chạy hàng ngày - crawl một batch products mỗi ngày
     'start_date': datetime(2024, 1, 1),
     'catchup': False,
     'tags': ['tiki', 'crawl', 'products', 'data-pipeline'],
@@ -205,6 +234,8 @@ CACHE_DIR = OUTPUT_DIR / 'cache'
 DETAIL_CACHE_DIR = OUTPUT_DIR / 'detail' / 'cache'
 OUTPUT_FILE = OUTPUT_DIR / 'products.json'
 OUTPUT_FILE_WITH_DETAIL = OUTPUT_DIR / 'products_with_detail.json'
+# Progress tracking cho multi-day crawling
+PROGRESS_FILE = OUTPUT_DIR / 'crawl_progress.json'
 
 # Tạo thư mục nếu chưa có
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -546,11 +577,20 @@ def merge_products(**context) -> Dict[str, Any]:
         # Loại bỏ trùng lặp theo product_id
         seen_ids = set()
         unique_products = []
+        products_with_sales_count = 0
         for product in all_products:
             product_id = product.get('product_id')
             if product_id and product_id not in seen_ids:
                 seen_ids.add(product_id)
+                # Đảm bảo sales_count luôn có trong product (kể cả None)
+                if 'sales_count' not in product:
+                    product['sales_count'] = None
+                elif product.get('sales_count') is not None:
+                    products_with_sales_count += 1
                 unique_products.append(product)
+        
+        # Log thống kê sales_count
+        logger.info(f"📊 Products có sales_count: {products_with_sales_count}/{len(unique_products)} ({products_with_sales_count/len(unique_products)*100:.1f}%)" if unique_products else "📊 Products có sales_count: 0/0")
         
         stats['unique_products'] = len(unique_products)
         
@@ -706,17 +746,18 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
     """
     Task: Chuẩn bị danh sách products để crawl detail
     
-    Tối ưu:
+    Tối ưu cho multi-day crawling:
     - Chỉ crawl products chưa có detail
-    - Chia thành batches để xử lý song song
-    - Kiểm tra cache để tránh crawl lại
+    - Chia thành batches theo ngày (có thể crawl trong nhiều ngày)
+    - Kiểm tra cache và progress để tránh crawl lại
+    - Track progress để resume từ điểm dừng
     
     Returns:
         List[Dict]: List các dict chứa product info cho Dynamic Task Mapping
     """
     logger = get_logger(context)
     logger.info("="*70)
-    logger.info("📋 TASK: Prepare Products for Detail Crawling")
+    logger.info("📋 TASK: Prepare Products for Detail Crawling (Multi-Day Support)")
     logger.info("="*70)
     
     try:
@@ -743,48 +784,124 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
             raise ValueError("Không tìm thấy products từ XCom hoặc file")
         
         products = merge_result.get('products', [])
-        logger.info(f"Tổng số products: {len(products)}")
+        logger.info(f"📊 Tổng số products: {len(products)}")
+        
+        # Đọc progress file để biết đã crawl đến đâu
+        progress = {
+            'crawled_product_ids': set(),
+            'last_crawled_index': 0,
+            'total_crawled': 0,
+            'last_updated': None
+        }
+        
+        if PROGRESS_FILE.exists():
+            try:
+                with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
+                    saved_progress = json.load(f)
+                    progress['crawled_product_ids'] = set(saved_progress.get('crawled_product_ids', []))
+                    progress['last_crawled_index'] = saved_progress.get('last_crawled_index', 0)
+                    progress['total_crawled'] = saved_progress.get('total_crawled', 0)
+                    progress['last_updated'] = saved_progress.get('last_updated')
+                    logger.info(f"📂 Đã load progress: {len(progress['crawled_product_ids'])} products đã crawl")
+            except Exception as e:
+                logger.warning(f"⚠️  Không đọc được progress file: {e}")
         
         # Lọc products cần crawl detail
-        # Kiểm tra cache để tránh crawl lại
         products_to_crawl = []
         cache_hits = 0
+        already_crawled = 0
         
-        for product in products:
+        # Lấy cấu hình cho multi-day crawling
+        # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
+        products_per_day = int(Variable.get('TIKI_PRODUCTS_PER_DAY', default_var='280'))  # Mặc định 280 products/ngày (~30 phút)
+        max_products = int(Variable.get('TIKI_MAX_PRODUCTS_FOR_DETAIL', default_var='0'))  # 0 = không giới hạn
+        
+        logger.info(f"⚙️  Cấu hình: {products_per_day} products/ngày, max: {max_products if max_products > 0 else 'không giới hạn'}")
+        
+        # Bắt đầu từ index đã crawl
+        start_index = progress['last_crawled_index']
+        products_to_check = products[start_index:]
+        
+        logger.info(f"🔄 Bắt đầu từ index {start_index} (đã crawl {progress['total_crawled']} products)")
+        
+        for idx, product in enumerate(products_to_check):
             product_id = product.get('product_id')
             product_url = product.get('url')
             
             if not product_id or not product_url:
                 continue
             
+            # Kiểm tra xem đã crawl chưa (từ progress)
+            if product_id in progress['crawled_product_ids']:
+                already_crawled += 1
+                continue
+            
             # Kiểm tra cache
             cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
+            has_valid_cache = False
             if cache_file.exists():
                 try:
                     with open(cache_file, 'r', encoding='utf-8') as f:
                         cached_detail = json.load(f)
-                        # Nếu đã có detail đầy đủ, skip
-                        if cached_detail.get('price', {}).get('current_price'):
+                        # Kiểm tra cache có đầy đủ không: cần có price và sales_count
+                        has_price = cached_detail.get('price', {}).get('current_price')
+                        has_sales_count = cached_detail.get('sales_count') is not None
+                        
+                        # Nếu đã có detail đầy đủ (có price và sales_count), đánh dấu đã crawl
+                        if has_price and has_sales_count:
                             cache_hits += 1
-                            continue
+                            progress['crawled_product_ids'].add(product_id)
+                            already_crawled += 1
+                            has_valid_cache = True
+                        # Nếu cache thiếu sales_count, vẫn cần crawl lại
                 except:
                     pass
             
-            products_to_crawl.append({
-                'product_id': product_id,
-                'url': product_url,
-                'name': product.get('name', ''),
-                'product': product  # Giữ nguyên product data
-            })
+            # Nếu chưa có cache hợp lệ, thêm vào danh sách crawl
+            if not has_valid_cache:
+                products_to_crawl.append({
+                    'product_id': product_id,
+                    'url': product_url,
+                    'name': product.get('name', ''),
+                    'product': product,  # Giữ nguyên product data
+                    'index': start_index + idx  # Lưu index để track progress
+                })
+            
+            # Giới hạn số lượng products crawl trong ngày này
+            if len(products_to_crawl) >= products_per_day:
+                logger.info(f"✓ Đã đạt giới hạn {products_per_day} products cho ngày hôm nay")
+                break
+            
+            # Giới hạn tổng số (nếu có)
+            if max_products > 0 and len(products_to_crawl) >= max_products:
+                logger.info(f"✓ Đã đạt giới hạn tổng {max_products} products")
+                break
         
-        logger.info(f"✅ Products cần crawl detail: {len(products_to_crawl)}")
+        logger.info(f"✅ Products cần crawl hôm nay: {len(products_to_crawl)}")
         logger.info(f"📦 Cache hits: {cache_hits}")
+        logger.info(f"✓ Đã crawl trước đó: {already_crawled}")
+        logger.info(f"📈 Tổng đã crawl: {progress['total_crawled'] + already_crawled}")
+        logger.info(f"📉 Còn lại: {len(products) - (progress['total_crawled'] + already_crawled + len(products_to_crawl))}")
         
-        # Giới hạn số lượng nếu cần (để test)
-        max_products = int(Variable.get('TIKI_MAX_PRODUCTS_FOR_DETAIL', default_var='0'))
-        if max_products > 0:
-            products_to_crawl = products_to_crawl[:max_products]
-            logger.info(f"✓ Giới hạn: {len(products_to_crawl)} products")
+        # Lưu progress (sẽ được cập nhật sau khi crawl xong)
+        if products_to_crawl:
+            # Lưu index của product cuối cùng sẽ được crawl
+            last_index = products_to_crawl[-1]['index']
+            progress['last_crawled_index'] = last_index + 1
+            progress['last_updated'] = datetime.now().isoformat()
+            
+            # Lưu progress vào file
+            try:
+                with open(PROGRESS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump({
+                        'crawled_product_ids': list(progress['crawled_product_ids']),
+                        'last_crawled_index': progress['last_crawled_index'],
+                        'total_crawled': progress['total_crawled'] + already_crawled,
+                        'last_updated': progress['last_updated']
+                    }, f, ensure_ascii=False, indent=2)
+                logger.info(f"💾 Đã lưu progress: index {progress['last_crawled_index']}")
+            except Exception as e:
+                logger.warning(f"⚠️  Không lưu được progress: {e}")
         
         # Debug: Log một vài products đầu tiên
         if products_to_crawl:
@@ -792,7 +909,8 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
             for i, p in enumerate(products_to_crawl[:3]):
                 logger.info(f"  {i+1}. Product ID: {p.get('product_id')}, URL: {p.get('url')[:80]}...")
         else:
-            logger.warning("⚠️  Không có products nào cần crawl detail!")
+            logger.warning("⚠️  Không có products nào cần crawl detail hôm nay!")
+            logger.info("💡 Tất cả products đã được crawl hoặc có cache hợp lệ")
         
         logger.info(f"🔢 Trả về {len(products_to_crawl)} products cho Dynamic Task Mapping")
         
@@ -820,7 +938,23 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
     Returns:
         Dict: Kết quả crawl với detail và metadata
     """
-    logger = get_logger(context)
+    # Khởi tạo result mặc định
+    default_result = {
+        'product_id': 'unknown',
+        'url': '',
+        'status': 'failed',
+        'error': None,
+        'detail': None,
+        'crawled_at': datetime.now().isoformat()
+    }
+    
+    try:
+        logger = get_logger(context)
+    except Exception as e:
+        # Nếu không thể tạo logger, vẫn tiếp tục với default result
+        import logging
+        logger = logging.getLogger("airflow.task")
+        logger.error(f"Không thể tạo logger từ context: {e}")
     
     # Lấy product_info từ keyword argument hoặc context
     if not product_info:
@@ -835,7 +969,15 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
     
     if not product_info:
         logger.error(f"Không tìm thấy product_info. Context keys: {list(context.keys())}")
-        raise ValueError("Không tìm thấy product_info")
+        # Return result với status failed thay vì raise exception
+        return {
+            'product_id': 'unknown',
+            'url': '',
+            'status': 'failed',
+            'error': 'Không tìm thấy product_info trong context',
+            'detail': None,
+            'crawled_at': datetime.now().isoformat()
+        }
     
     product_id = product_info.get('product_id', '')
     product_url = product_info.get('url', '')
@@ -861,19 +1003,33 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
         try:
             with open(cache_file, 'r', encoding='utf-8') as f:
                 cached_detail = json.load(f)
-                # Nếu đã có detail đầy đủ, dùng cache
-                if cached_detail.get('price', {}).get('current_price'):
-                    logger.info(f"✅ Sử dụng cache cho product {product_id}")
+                # Kiểm tra cache có đầy đủ không: cần có price và sales_count
+                has_price = cached_detail.get('price', {}).get('current_price')
+                has_sales_count = cached_detail.get('sales_count') is not None
+                
+                # Nếu đã có detail đầy đủ (có price và sales_count), dùng cache
+                if has_price and has_sales_count:
+                    logger.info(f"✅ Sử dụng cache cho product {product_id} (có price và sales_count)")
                     result['detail'] = cached_detail
                     result['status'] = 'cached'
                     return result
+                elif has_price:
+                    # Cache có price nhưng thiếu sales_count → crawl lại để lấy sales_count
+                    logger.info(f"⚠️  Cache thiếu sales_count cho product {product_id}, sẽ crawl lại")
+                else:
+                    # Cache không đầy đủ → crawl lại
+                    logger.info(f"⚠️  Cache không đầy đủ cho product {product_id}, sẽ crawl lại")
         except Exception as e:
             logger.warning(f"Không đọc được cache: {e}")
     
     try:
+        # Validate URL
+        if not product_url or not product_url.startswith('http'):
+            raise ValueError(f"URL không hợp lệ: {product_url}")
+        
         # Lấy cấu hình
         rate_limit_delay = float(Variable.get('TIKI_DETAIL_RATE_LIMIT_DELAY', default_var='2.0'))  # Delay 2s cho detail
-        timeout = int(Variable.get('TIKI_DETAIL_CRAWL_TIMEOUT', default_var='60'))  # 1 phút mỗi product
+        timeout = int(Variable.get('TIKI_DETAIL_CRAWL_TIMEOUT', default_var='120'))  # 2 phút mỗi product (tăng từ 60s)
         
         # Rate limiting
         if rate_limit_delay > 0:
@@ -883,19 +1039,71 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
         start_time = time.time()
         
         # Sử dụng Selenium để crawl detail (cần thiết cho dynamic content)
-        html_content = crawl_product_detail_with_selenium(
-            product_url,
-            save_html=False,
-            verbose=False  # Không verbose trong Airflow
-        )
+        html_content = None
+        try:
+            # Thử crawl với retry và timeout ngắn hơn
+            html_content = crawl_product_detail_with_selenium(
+                product_url,
+                save_html=False,
+                verbose=False,  # Không verbose trong Airflow
+                max_retries=2,  # Retry 2 lần
+                timeout=25  # Timeout 25s (ngắn hơn để fail nhanh hơn)
+            )
+            
+            if not html_content or len(html_content) < 100:
+                raise ValueError(f"HTML content quá ngắn hoặc rỗng: {len(html_content) if html_content else 0} ký tự")
+                
+        except Exception as selenium_error:
+            # Log lỗi Selenium chi tiết
+            error_type = type(selenium_error).__name__
+            error_msg = str(selenium_error)
+            
+            # Rút gọn error message nếu quá dài
+            if len(error_msg) > 200:
+                error_msg = error_msg[:200] + "..."
+            
+            logger.error(f"❌ Lỗi Selenium ({error_type}): {error_msg}")
+            
+            # Kiểm tra các lỗi phổ biến và phân loại
+            error_msg_lower = error_msg.lower()
+            if 'chrome' in error_msg_lower or 'driver' in error_msg_lower or 'webdriver' in error_msg_lower:
+                result['error'] = f"Chrome/Driver error: {error_msg}"
+                result['status'] = 'selenium_error'
+            elif 'timeout' in error_msg_lower or 'timed out' in error_msg_lower or 'time-out' in error_msg_lower:
+                result['error'] = f"Timeout: {error_msg}"
+                result['status'] = 'timeout'
+            elif 'connection' in error_msg_lower or 'network' in error_msg_lower or 'refused' in error_msg_lower:
+                result['error'] = f"Network error: {error_msg}"
+                result['status'] = 'network_error'
+            elif 'memory' in error_msg_lower or 'out of memory' in error_msg_lower:
+                result['error'] = f"Memory error: {error_msg}"
+                result['status'] = 'memory_error'
+            else:
+                result['error'] = f"Selenium error: {error_msg}"
+                result['status'] = 'failed'
+            
+            # Không raise, return result với status failed
+            return result
         
         # Extract detail
-        detail = extract_product_detail(html_content, product_url, verbose=False)
+        try:
+            detail = extract_product_detail(html_content, product_url, verbose=False)
+            
+            if not detail:
+                raise ValueError("Không extract được detail từ HTML")
+                
+        except Exception as extract_error:
+            error_type = type(extract_error).__name__
+            error_msg = str(extract_error)
+            logger.error(f"❌ Lỗi khi extract detail ({error_type}): {error_msg}")
+            result['error'] = f"Extract error: {error_msg}"
+            result['status'] = 'extract_error'
+            return result
         
         elapsed = time.time() - start_time
         
         if elapsed > timeout:
-            raise TimeoutError(f"Crawl detail vượt quá timeout {timeout}s")
+            raise TimeoutError(f"Crawl detail vượt quá timeout {timeout}s (elapsed: {elapsed:.1f}s)")
         
         result['detail'] = detail
         result['status'] = 'success'
@@ -903,10 +1111,16 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
         
         # Lưu vào cache (atomic write)
         try:
+            # Đảm bảo thư mục cache tồn tại
+            DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            
             temp_file = cache_file.with_suffix('.tmp')
+            logger.debug(f"💾 Đang lưu cache vào: {cache_file}")
+            
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(detail, f, ensure_ascii=False, indent=2)
             
+            # Atomic move
             if os.name == 'nt':  # Windows
                 if cache_file.exists():
                     cache_file.unlink()
@@ -914,22 +1128,45 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
             else:  # Unix/Linux
                 os.rename(str(temp_file), str(cache_file))
             
-            logger.info(f"✅ Crawl thành công: {elapsed:.1f}s, đã cache")
+            # Verify cache file was created
+            if cache_file.exists():
+                logger.info(f"✅ Crawl thành công: {elapsed:.1f}s, đã cache vào {cache_file}")
+                # Log sales_count nếu có
+                if detail.get('sales_count') is not None:
+                    logger.info(f"   📊 sales_count: {detail.get('sales_count')}")
+                else:
+                    logger.warning(f"   ⚠️  sales_count: None (không tìm thấy)")
+            else:
+                logger.error(f"❌ Cache file không được tạo: {cache_file}")
         except Exception as e:
-            logger.warning(f"Không lưu được cache: {e}")
+            logger.error(f"❌ Không lưu được cache: {e}", exc_info=True)
+            # Không fail task vì đã crawl thành công, chỉ không lưu được cache
         
     except TimeoutError as e:
         result['error'] = str(e)
         result['status'] = 'timeout'
         logger.error(f"⏱️  Timeout: {e}")
         
+    except ValueError as e:
+        result['error'] = str(e)
+        result['status'] = 'validation_error'
+        logger.error(f"❌ Validation error: {e}")
+        
     except Exception as e:
         result['error'] = str(e)
         result['status'] = 'failed'
-        logger.error(f"❌ Lỗi khi crawl detail: {e}", exc_info=True)
+        error_type = type(e).__name__
+        logger.error(f"❌ Lỗi khi crawl detail ({error_type}): {e}", exc_info=True)
         # Không raise để tiếp tục với product khác
     
-    return result
+    # Đảm bảo luôn return result, không bao giờ raise exception
+    try:
+        return result
+    except Exception as e:
+        # Nếu có lỗi khi return (không thể xảy ra nhưng để an toàn)
+        logger.error(f"❌ Lỗi khi return result: {e}", exc_info=True)
+        default_result['error'] = f"Lỗi khi return result: {str(e)}"
+        return default_result
 
 
 def merge_product_details(**context) -> Dict[str, Any]:
@@ -1056,9 +1293,13 @@ def merge_product_details(**context) -> Dict[str, Any]:
                     product_with_detail['stock'] = detail['stock']
                 if detail.get('shipping'):
                     product_with_detail['shipping'] = detail['shipping']
-                # Cập nhật sales_count từ detail (nếu có)
+                # Cập nhật sales_count: ưu tiên từ detail, nếu không có thì dùng từ product gốc
+                # Chỉ cần có trong một trong hai là đủ
                 if detail.get('sales_count') is not None:
                     product_with_detail['sales_count'] = detail['sales_count']
+                elif product.get('sales_count') is not None:
+                    product_with_detail['sales_count'] = product['sales_count']
+                # Nếu cả hai đều không có, giữ None (đã có trong product gốc)
                 
                 # Thêm metadata
                 product_with_detail['detail_crawled_at'] = detail_result.get('crawled_at')
@@ -1067,6 +1308,9 @@ def merge_product_details(**context) -> Dict[str, Any]:
                 products_with_detail.append(product_with_detail)
             else:
                 # Giữ nguyên product nếu không có detail
+                # Đảm bảo sales_count có trong product (kể cả None)
+                if 'sales_count' not in product:
+                    product['sales_count'] = None
                 products_with_detail.append(product)
         
         logger.info("="*70)
@@ -1350,17 +1594,65 @@ with DAG(**DAG_CONFIG) as dag:
             ti = context['ti']
             
             # Lấy products từ prepare_products_for_detail
+            # Task này nằm trong TaskGroup 'crawl_product_details', nên task_id đầy đủ là 'crawl_product_details.prepare_products_for_detail'
             products_to_crawl = None
+            
+            # Lấy từ upstream task (prepare_products_for_detail) - cách đáng tin cậy nhất
+            # Thử lấy upstream_task_ids từ nhiều nguồn khác nhau (tương thích với các phiên bản Airflow)
+            upstream_task_ids = []
             try:
-                products_to_crawl = ti.xcom_pull(task_ids='prepare_products_for_detail')
-            except:
+                task_instance = context.get('task_instance')
+                if task_instance:
+                    # Thử với RuntimeTaskInstance (Airflow SDK mới)
+                    if hasattr(task_instance, 'upstream_task_ids'):
+                        upstream_task_ids = list(task_instance.upstream_task_ids)
+                    # Thử với ti.task (cách khác)
+                    elif hasattr(ti, 'task') and hasattr(ti.task, 'upstream_task_ids'):
+                        upstream_task_ids = list(ti.task.upstream_task_ids)
+            except (AttributeError, TypeError) as e:
+                logger.debug(f"   Không thể lấy upstream_task_ids: {e}")
+            
+            if upstream_task_ids:
+                logger.info(f"🔍 Upstream tasks: {upstream_task_ids}")
+                # Thử lấy từ tất cả upstream tasks
+                for task_id in upstream_task_ids:
+                    try:
+                        products_to_crawl = ti.xcom_pull(task_ids=task_id)
+                        if products_to_crawl:
+                            logger.info(f"✅ Lấy XCom từ upstream task: {task_id}")
+                            break
+                    except Exception as e:
+                        logger.debug(f"   Không lấy được từ {task_id}: {e}")
+                        continue
+            
+            # Nếu vẫn không lấy được, thử các cách khác
+            if not products_to_crawl:
                 try:
+                    # Thử với task_id đầy đủ (có TaskGroup prefix)
                     products_to_crawl = ti.xcom_pull(task_ids='crawl_product_details.prepare_products_for_detail')
-                except:
-                    pass
+                    logger.info(f"✅ Lấy XCom từ task_id: crawl_product_details.prepare_products_for_detail")
+                except Exception as e1:
+                    logger.warning(f"⚠️  Không lấy được với task_id đầy đủ: {e1}")
+                    try:
+                        # Thử với task_id không có prefix (fallback)
+                        products_to_crawl = ti.xcom_pull(task_ids='prepare_products_for_detail')
+                        logger.info(f"✅ Lấy XCom từ task_id: prepare_products_for_detail")
+                    except Exception as e2:
+                        logger.error(f"❌ Không thể lấy XCom với cả 2 cách: {e1}, {e2}")
             
             if not products_to_crawl:
                 logger.error("❌ Không thể lấy products từ XCom!")
+                try:
+                    task_instance = context.get('task_instance')
+                    upstream_info = []
+                    if task_instance:
+                        if hasattr(task_instance, 'upstream_task_ids'):
+                            upstream_info = list(task_instance.upstream_task_ids)
+                        elif hasattr(ti, 'task') and hasattr(ti.task, 'upstream_task_ids'):
+                            upstream_info = list(ti.task.upstream_task_ids)
+                    logger.error(f"   Upstream tasks: {upstream_info}")
+                except Exception as e:
+                    logger.error(f"   Không thể lấy thông tin upstream tasks: {e}")
                 return []
             
             if not isinstance(products_to_crawl, list):
@@ -1398,9 +1690,10 @@ with DAG(**DAG_CONFIG) as dag:
         task_crawl_product_detail = PythonOperator.partial(
             task_id='crawl_product_detail',
             python_callable=crawl_single_product_detail,
-            execution_timeout=timedelta(minutes=2),  # Timeout 2 phút mỗi product
+            execution_timeout=timedelta(minutes=3),  # Tăng timeout lên 3 phút để tránh timeout quá sớm
             pool='default_pool',
-            retries=1,  # Retry 1 lần
+            retries=2,  # Tăng retry lên 2 lần để giảm failed tasks
+            retry_delay=timedelta(seconds=30),  # Delay 30s giữa các retry
         ).expand(
             op_kwargs=task_prepare_detail_kwargs.output
         )
