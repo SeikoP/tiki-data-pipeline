@@ -27,8 +27,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.utils.task_group import TaskGroup
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.sdk import TaskGroup
 from airflow.models import Variable
 from airflow.configuration import conf
 from airflow.utils.session import provide_session
@@ -180,8 +180,22 @@ write_lock = Lock()
 
 
 def get_logger(context):
-    """Lấy logger từ context"""
-    return context.get('task_instance').log
+    """Lấy logger từ context (Airflow 3.x compatible)"""
+    try:
+        # Airflow 3.x: sử dụng logging module
+        import logging
+        ti = context.get('task_instance')
+        if ti:
+            # Tạo logger với task_id và dag_id
+            logger_name = f"airflow.task.{ti.dag_id}.{ti.task_id}"
+            return logging.getLogger(logger_name)
+        else:
+            # Fallback: dùng root logger
+            return logging.getLogger("airflow.task")
+    except Exception:
+        # Fallback: dùng root logger
+        import logging
+        return logging.getLogger("airflow.task")
 
 
 def load_categories(**context) -> List[Dict[str, Any]]:
@@ -238,7 +252,7 @@ def load_categories(**context) -> List[Dict[str, Any]]:
         raise
 
 
-def crawl_single_category(category: Dict[str, Any], **context) -> Dict[str, Any]:
+def crawl_single_category(category: Dict[str, Any] = None, **context) -> Dict[str, Any]:
     """
     Task 2: Crawl sản phẩm từ một danh mục (Dynamic Task Mapping)
     
@@ -249,12 +263,37 @@ def crawl_single_category(category: Dict[str, Any], **context) -> Dict[str, Any]
     - Timeout: giới hạn thời gian crawl
     
     Args:
-        category: Thông tin danh mục
+        category: Thông tin danh mục (từ expand_kwargs)
+        context: Airflow context
         
     Returns:
         Dict: Kết quả crawl với products và metadata
     """
     logger = get_logger(context)
+    
+    # Lấy category từ keyword argument hoặc từ op_kwargs trong context
+    # Khi sử dụng expand với op_kwargs, category sẽ được truyền qua op_kwargs
+    if not category:
+        # Thử lấy từ ti.op_kwargs (cách chính xác nhất)
+        ti = context.get('ti')
+        if ti:
+            # op_kwargs được truyền vào function thông qua ti
+            op_kwargs = getattr(ti, 'op_kwargs', {})
+            if op_kwargs:
+                category = op_kwargs.get('category')
+        
+        # Fallback: thử lấy từ context trực tiếp
+        if not category:
+            category = context.get('category') or context.get('op_kwargs', {}).get('category')
+    
+    if not category:
+        # Debug: log context để tìm lỗi
+        logger.error(f"Không tìm thấy category. Context keys: {list(context.keys())}")
+        ti = context.get('ti')
+        if ti:
+            logger.error(f"ti.op_kwargs: {getattr(ti, 'op_kwargs', 'N/A')}")
+        raise ValueError("Không tìm thấy category. Kiểm tra expand với op_kwargs.")
+    
     category_url = category.get('url', '')
     category_name = category.get('name', 'Unknown')
     category_id = category.get('id', '')
@@ -688,10 +727,54 @@ with DAG(**DAG_CONFIG) as dag:
         # Cần một task helper để lấy categories và tạo list op_kwargs
         def prepare_crawl_kwargs(**context):
             """Helper function để prepare op_kwargs cho Dynamic Task Mapping"""
+            import logging
+            logger = logging.getLogger("airflow.task")
+            
             ti = context['ti']
-            categories = ti.xcom_pull(task_ids='load_categories')
+            
+            # Thử nhiều cách lấy categories từ XCom
+            categories = None
+            
+            # Cách 1: Lấy từ task_id với TaskGroup prefix
+            try:
+                categories = ti.xcom_pull(task_ids='load_and_prepare.load_categories')
+                logger.info(f"Lấy categories từ 'load_and_prepare.load_categories': {len(categories) if categories else 0} items")
+            except Exception as e:
+                logger.warning(f"Không lấy được từ 'load_and_prepare.load_categories': {e}")
+            
+            # Cách 2: Thử không có prefix
             if not categories:
+                try:
+                    categories = ti.xcom_pull(task_ids='load_categories')
+                    logger.info(f"Lấy categories từ 'load_categories': {len(categories) if categories else 0} items")
+                except Exception as e:
+                    logger.warning(f"Không lấy được từ 'load_categories': {e}")
+            
+            # Cách 3: Thử lấy từ upstream task
+            if not categories:
+                try:
+                    # Lấy từ task trong cùng DAG run
+                    from airflow.models import TaskInstance
+                    dag_run = context['dag_run']
+                    upstream_ti = TaskInstance(
+                        task=dag.get_task('load_and_prepare.load_categories'),
+                        run_id=dag_run.run_id
+                    )
+                    categories = upstream_ti.xcom_pull(key='return_value')
+                    logger.info(f"Lấy categories từ TaskInstance: {len(categories) if categories else 0} items")
+                except Exception as e:
+                    logger.warning(f"Không lấy được từ TaskInstance: {e}")
+            
+            if not categories:
+                logger.error("❌ Không thể lấy categories từ XCom!")
                 return []
+            
+            if not isinstance(categories, list):
+                logger.error(f"❌ Categories không phải list: {type(categories)}")
+                return []
+            
+            logger.info(f"✅ Đã lấy {len(categories)} categories, tạo {len(categories)} tasks cho Dynamic Task Mapping")
+            
             # Trả về list các dict để expand
             return [{'category': cat} for cat in categories]
         
@@ -702,6 +785,7 @@ with DAG(**DAG_CONFIG) as dag:
         )
         
         # Dynamic Task Mapping với expand
+        # Sử dụng expand với op_kwargs để tránh lỗi với PythonOperator constructor
         task_crawl_category = PythonOperator.partial(
             task_id='crawl_category',
             python_callable=crawl_single_category,
