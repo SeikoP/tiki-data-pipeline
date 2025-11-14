@@ -791,7 +791,7 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=crawl_single_category,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút mỗi category
             pool='default_pool',  # Có thể tạo pool riêng nếu cần
-            retries=2,  # Retry 2 lần cho crawl task
+            retries=1,  # Retry 1 lần (tổng 2 lần thử: 1 lần đầu + 1 retry)
         ).expand(
             op_kwargs=task_prepare_crawl.output
         )
@@ -803,6 +803,7 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=merge_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool='default_pool',
+            trigger_rule='all_done',  # QUAN TRỌNG: Chạy khi tất cả upstream tasks done (success hoặc failed)
         )
         
         task_save_products = PythonOperator(
