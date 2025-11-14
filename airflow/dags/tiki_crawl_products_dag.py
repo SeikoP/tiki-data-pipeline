@@ -66,15 +66,18 @@ for path in possible_paths:
 if not crawl_module_path:
     # Nếu không tìm thấy, thử đường dẫn tương đối từ DAG file
     relative_path = os.path.abspath(os.path.join(dag_file_dir, '..', '..', 'src', 'pipelines', 'crawl'))
-    if os.path.exists(os.path.join(relative_path, 'crawl_products.py')):
+    test_path = os.path.join(relative_path, 'crawl_products.py')
+    if os.path.exists(test_path):
         crawl_module_path = relative_path
-        crawl_products_path = os.path.join(relative_path, 'crawl_products.py')
+        crawl_products_path = test_path
 
 # Import module
 if crawl_products_path and os.path.exists(crawl_products_path):
-    # Sử dụng importlib để import trực tiếp từ file
+    # Sử dụng importlib để import trực tiếp từ file (cách đáng tin cậy nhất)
     import importlib.util
     spec = importlib.util.spec_from_file_location("crawl_products", crawl_products_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Không thể load spec từ {crawl_products_path}")
     crawl_products_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(crawl_products_module)
     
@@ -96,11 +99,26 @@ else:
             get_total_pages
         )
     except ImportError as e:
+        # Debug: kiểm tra xem thư mục có tồn tại không
+        debug_info = {
+            'dag_file_dir': dag_file_dir,
+            'cwd': os.getcwd(),
+            'possible_paths': possible_paths,
+            'crawl_module_path': crawl_module_path,
+            'crawl_products_path': crawl_products_path,
+            'sys_path': sys.path[:5]  # Chỉ lấy 5 đầu tiên
+        }
+        
+        # Kiểm tra xem /opt/airflow/src có tồn tại không
+        if os.path.exists('/opt/airflow/src'):
+            try:
+                debug_info['opt_airflow_src_contents'] = os.listdir('/opt/airflow/src')
+            except:
+                pass
+        
         raise ImportError(
-            f"Không tìm thấy module crawl_products. "
-            f"Đã thử các đường dẫn: {possible_paths}. "
-            f"DAG file location: {dag_file_dir}. "
-            f"Current working directory: {os.getcwd()}. "
+            f"Không tìm thấy module crawl_products.\n"
+            f"Debug info: {debug_info}\n"
             f"Lỗi gốc: {e}"
         )
 
