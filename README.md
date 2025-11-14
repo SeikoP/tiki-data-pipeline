@@ -2,18 +2,18 @@
 <!-- Keywords: Data Pipeline, Airflow, Firecrawl, Docker, Data Engineering, ETL, Web Scraping, Self-Hosted -->
 
 <div align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,0A192F,172A45,64FFDA&height=200&section=header&text=Data%20Pipeline%20Template&fontSize=60&fontColor=fff&animation=twinkling&fontAlignY=35&desc=Apache%20Airflow%20%2B%20Firecrawl%20Self-Hosted&descAlignY=55&descAlign=50"/>
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,0A192F,172A45,64FFDA&height=200&section=header&text=Tiki%20Data%20Pipeline&fontSize=60&fontColor=fff&animation=twinkling&fontAlignY=35&desc=Automated%20Tiki%20Product%20Crawling%20with%20Airflow%20%2B%20Selenium&descAlignY=55&descAlign=50"/>
 </div>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Version-1.0.0-blue?style=for-the-badge&logo=github&logoColor=white"/>
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white"/>
   <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge&logo=checkmarx&logoColor=white"/>
-  <img src="https://img.shields.io/badge/Template-Ready-orange?style=for-the-badge&logo=template&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Python-3.x-blue?style=for-the-badge&logo=python&logoColor=white"/>
 </p>
 
 <p align="center">
-  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=24&duration=3000&pause=1000&color=64FFDA&center=true&vCenter=true&width=700&lines=🚀+Production-Ready+Template;⚡+Airflow+%2B+Firecrawl+Integration;🐳+Docker+Compose+Optimized;📊+Shared+Databases+Architecture" alt="Typing SVG" />
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=24&duration=3000&pause=1000&color=64FFDA&center=true&vCenter=true&width=700&lines=🛍️+Tiki+Product+Crawler;⚡+Airflow+%2B+Selenium+Automation;📊+Category+%26+Product+Details;🔄+Dynamic+Task+Mapping+Optimized" alt="Typing SVG" />
 </p>
 
 ---
@@ -24,14 +24,14 @@
 
 | 🎯 Feature | 📝 Description |
 |:---------:|:-------------|
-| 🔄 **Apache Airflow 3.1.2** | Workflow orchestration với Celery executor |
-| 🕷️ **Firecrawl Self-Host** | Web scraping và crawling engine |
-| 🗄️ **Shared Databases** | Tối ưu tài nguyên với 1 Redis + 1 Postgres |
-| 🐳 **Docker Compose** | One-command deployment |
-| ⚡ **Resource Limits** | Quản lý tài nguyên hiệu quả |
-| 🏥 **Health Checks** | Tự động monitoring và recovery |
-| 📚 **Full Documentation** | Hướng dẫn chi tiết từ A-Z |
-| 🎨 **Template Ready** | Sẵn sàng sử dụng cho dự án mới |
+| 🛍️ **Tiki Product Crawler** | Crawl tự động sản phẩm từ Tiki.vn |
+| 🔄 **Apache Airflow 3.1.2** | Workflow orchestration với Dynamic Task Mapping |
+| 🕷️ **Selenium Automation** | Crawl dynamic content với Selenium WebDriver |
+| 📊 **Category & Product Details** | Crawl danh mục, danh sách sản phẩm và chi tiết |
+| ⚡ **Optimized Performance** | Caching, rate limiting, batch processing |
+| 🔄 **Dynamic Task Mapping** | Crawl song song nhiều categories/products |
+| 💾 **Data Export** | JSON output với đầy đủ thông tin sản phẩm |
+| 📈 **Sales Count Tracking** | Theo dõi số lượng bán của từng sản phẩm |
 
 </div>
 
@@ -48,10 +48,11 @@
 | Category | Technologies |
 |:--------:|:-----------:|
 | **Orchestration** | Apache Airflow 3.1.2, Celery |
-| **Scraping** | Firecrawl, Playwright |
+| **Web Scraping** | Selenium WebDriver, BeautifulSoup |
 | **Databases** | PostgreSQL 16, Redis 7.2 |
 | **Containerization** | Docker, Docker Compose |
-| **Languages** | Python, TypeScript, Node.js |
+| **Languages** | Python 3.x |
+| **Data Format** | JSON |
 | **Tools** | Git, GitHub Actions |
 
 </div>
@@ -115,20 +116,21 @@ docker-compose ps
   - Username: `airflow`
   - Password: `airflow`
   
-- **Firecrawl API**: http://localhost:3002
-  - Docs: http://localhost:3002/docs
 
-#### 5. Chạy test scripts
+#### 5. Chạy pipeline crawl Tiki
 
 ```bash
-# Test crawling demo
-python scripts/tests/test_crawl_demo.py
+# Crawl categories (đệ quy)
+python src/pipelines/crawl/crawl_categories_recursive.py
 
-# Validate hierarchical structure
-python scripts/tests/validate_hierarchical.py
+# Crawl products từ categories
+python src/pipelines/crawl/crawl_products.py
 
-# Test API endpoints
-python scripts/tests/test_firecrawl_endpoints.py
+# Crawl product detail (test)
+python src/pipelines/crawl/crawl_products_detail.py
+
+# Hoặc sử dụng Airflow DAG
+# Truy cập http://localhost:8080 và trigger DAG: tiki_crawl_products
 ```
 
 #### 6. Setup scripts
@@ -277,12 +279,25 @@ tiki-data-pipeline/
 │   │   └── airflow.cfg        # Airflow configuration file
 │   └── plugins/               # Airflow plugins
 ├── 🕷️ firecrawl/               # Firecrawl source (reserved)
-└── 💻 src/                     # Your source code
-    ├── pipelines/             # Data pipelines
-    │   └── crawl/            # Crawling pipelines
-    │       └── tiki/         # Tiki-specific crawlers
-    ├── backend/              # Backend code
-    └── utils/                # Utilities
+└── 💻 src/                     # Source code
+    └── pipelines/             # Data pipelines
+        └── crawl/            # Crawling pipelines
+            ├── crawl_categories_recursive.py    # Crawl categories đệ quy
+            ├── crawl_products.py                # Crawl danh sách sản phẩm
+            ├── crawl_products_detail.py         # Crawl chi tiết sản phẩm
+            ├── extract_category_link_selenium.py # Extract category links
+            ├── build_category_tree.py           # Xây dựng category tree
+            └── config.py                        # Configuration
+├── 📊 data/                    # Dữ liệu crawl
+    ├── raw/                   # Raw data
+    │   ├── categories_recursive_optimized.json  # Danh mục đã crawl
+    │   ├── categories_tree.json                 # Category tree
+    │   └── products/          # Products data
+    │       ├── products.json                    # Danh sách sản phẩm
+    │       ├── products_with_detail.json        # Sản phẩm với chi tiết
+    │       └── cache/          # Cache files
+    ├── demo/                  # Demo/test data
+    └── test_output/           # Test outputs
 ```
 
 ---
@@ -322,11 +337,11 @@ tiki-data-pipeline/
 
 | Use Case | Description | Example |
 |:--------:|:-----------|:--------|
-| 📊 **ETL Pipelines** | Extract, Transform, Load data | Data warehouse ingestion |
-| 🕷️ **Web Scraping** | Automated web data collection | Price monitoring, News aggregation |
-| 📈 **Data Processing** | Batch và streaming processing | Analytics, Reporting |
-| 🔄 **Workflow Automation** | Complex task orchestration | Multi-step data pipelines |
-| 📱 **API Integration** | Connect multiple services | Third-party data sync |
+| 🛍️ **Product Monitoring** | Theo dõi sản phẩm Tiki | Price tracking, Stock monitoring |
+| 📊 **Market Analysis** | Phân tích thị trường | Category trends, Sales analysis |
+| 💰 **Price Comparison** | So sánh giá sản phẩm | Competitor analysis |
+| 📈 **Data Analytics** | Phân tích dữ liệu sản phẩm | Product performance, Reviews analysis |
+| 🔄 **Automated Data Collection** | Thu thập dữ liệu tự động | Daily product updates |
 
 </div>
 
@@ -364,23 +379,108 @@ tiki-data-pipeline/
 
 ---
 
-## 🔧 Scripts Organization
+## 🔧 Pipeline Workflow
 
-### Test Scripts (`scripts/tests/`)
+### 1. Crawl Categories
 
 ```bash
-# Test crawling demo
-python scripts/tests/test_crawl_demo.py
+# Crawl categories đệ quy từ Tiki
+python src/pipelines/crawl/crawl_categories_recursive.py
 
-# Validate hierarchical structure
-python scripts/tests/validate_hierarchical.py
-
-# Test API endpoints
-python scripts/tests/test_firecrawl_endpoints.py
-
-# Test products extraction
-python scripts/tests/test_extract_products_logic.py
+# Output: data/raw/categories_recursive_optimized.json
 ```
+
+### 2. Crawl Products
+
+```bash
+# Crawl danh sách sản phẩm từ categories
+python src/pipelines/crawl/crawl_products.py
+
+# Output: data/raw/products/products.json
+# Bao gồm: product_id, name, url, image_url, sales_count
+```
+
+### 3. Crawl Product Details
+
+```bash
+# Crawl chi tiết sản phẩm (test)
+python src/pipelines/crawl/crawl_products_detail.py
+
+# Hoặc sử dụng Airflow DAG để crawl tự động
+# Output: data/raw/products/products_with_detail.json
+# Bao gồm: price, rating, description, specifications, images, brand, seller, etc.
+```
+
+### 4. Airflow DAG
+
+```bash
+# DAG tự động chạy:
+# 1. Load categories
+# 2. Crawl products từ categories (Dynamic Task Mapping)
+# 3. Merge và save products
+# 4. Crawl product details (Dynamic Task Mapping)
+# 5. Merge details và save
+# 6. Validate data
+
+# Truy cập: http://localhost:8080
+# DAG ID: tiki_crawl_products
+```
+
+## 📊 Data Structure
+
+### Categories JSON
+```json
+{
+  "name": "Tên danh mục",
+  "slug": "ten-danh-muc",
+  "url": "https://tiki.vn/...",
+  "image_url": "...",
+  "parent_url": "...",
+  "level": 1
+}
+```
+
+### Products JSON
+```json
+{
+  "product_id": "123456789",
+  "name": "Tên sản phẩm",
+  "url": "https://tiki.vn/...",
+  "image_url": "...",
+  "sales_count": 2000,
+  "category_url": "...",
+  "crawled_at": "2024-01-01 12:00:00"
+}
+```
+
+### Products with Detail JSON
+```json
+{
+  "product_id": "123456789",
+  "name": "Tên sản phẩm",
+  "price": {
+    "current_price": 100000,
+    "original_price": 150000,
+    "discount_percent": 33.3,
+    "currency": "VND"
+  },
+  "rating": {
+    "average": 4.5,
+    "total_reviews": 100
+  },
+  "description": "...",
+  "specifications": {...},
+  "images": [...],
+  "brand": {...},
+  "seller": {...},
+  "stock": {...},
+  "shipping": {...}
+}
+```
+
+---
+
+## 🔧 Scripts Organization
 
 ### Setup Scripts (`scripts/setup/`)
 
@@ -533,12 +633,32 @@ bash scripts/utils/sync_to_other_repo.sh
 
 <div align="center">
 
-> ⚠️ **Security**: File `.env` chứa thông tin nhạy cảm, **KHÔNG** commit lên Git  
-> 🔒 **Production**: Thay đổi mật khẩu mặc định và sử dụng secrets management  
-> 📊 **Scaling**: Cân nhắc tách riêng databases nếu cần isolation cao  
-> 🐳 **Docker**: Đảm bảo đủ tài nguyên hệ thống trước khi chạy  
+> ⚠️ **Rate Limiting**: Tiki có thể rate limit, sử dụng delay giữa các requests  
+> 🔒 **Selenium**: Cần Chrome/Chromium driver để chạy Selenium  
+> 📊 **Data Volume**: Với hàng nghìn sản phẩm, cần đủ disk space  
+> 🐳 **Docker**: Đảm bảo đủ tài nguyên hệ thống (RAM, CPU)  
+> ⏱️ **Timeout**: Cấu hình timeout phù hợp cho từng task  
+> 💾 **Cache**: Sử dụng cache để tránh crawl lại dữ liệu đã có  
 
 </div>
+
+## 🔧 Airflow Variables
+
+Cấu hình các biến sau trong Airflow UI (Admin → Variables):
+
+| Variable | Default | Description |
+|:--------:|:------:|:-----------|
+| `TIKI_MAX_CATEGORIES` | `0` | Số danh mục tối đa (0 = tất cả) |
+| `TIKI_MAX_PAGES_PER_CATEGORY` | `20` | Số trang tối đa mỗi danh mục |
+| `TIKI_MIN_CATEGORY_LEVEL` | `2` | Level danh mục tối thiểu |
+| `TIKI_MAX_CATEGORY_LEVEL` | `4` | Level danh mục tối đa |
+| `TIKI_USE_SELENIUM` | `false` | Có dùng Selenium cho category crawl |
+| `TIKI_CRAWL_TIMEOUT` | `300` | Timeout crawl category (giây) |
+| `TIKI_RATE_LIMIT_DELAY` | `1.0` | Delay giữa requests (giây) |
+| `TIKI_MAX_PRODUCTS_FOR_DETAIL` | `0` | Số products tối đa crawl detail (0 = tất cả) |
+| `TIKI_DETAIL_RATE_LIMIT_DELAY` | `2.0` | Delay cho detail crawl (giây) |
+| `TIKI_DETAIL_CRAWL_TIMEOUT` | `60` | Timeout crawl detail (giây) |
+| `TIKI_SAVE_BATCH_SIZE` | `10000` | Số sản phẩm mỗi batch khi save |
 
 ---
 

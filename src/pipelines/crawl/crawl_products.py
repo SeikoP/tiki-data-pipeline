@@ -248,12 +248,48 @@ def parse_products_from_next_data(html_content):
                     # Lấy image (để có thể dùng preview)
                     image_url = item.get('image_url') or item.get('thumbnail_url') or item.get('images', [{}])[0].get('url', '') if isinstance(item.get('images'), list) else ''
                     
-                    # Loại bỏ: price, rating, review_count, sales_count - để crawl detail sau
+                    # Extract số lượng bán
+                    sales_count = None
+                    # Thử các key có thể chứa số lượng bán
+                    sales_count = (item.get('sales_count') or 
+                                  item.get('quantity_sold') or 
+                                  item.get('sold_count') or 
+                                  item.get('total_sold') or 
+                                  item.get('order_count') or 
+                                  item.get('sales_quantity') or
+                                  item.get('quantity') or
+                                  item.get('sold') or
+                                  item.get('total_quantity_sold'))
+                    
+                    # Nếu là số, giữ nguyên; nếu là string, parse số
+                    if sales_count is not None:
+                        if isinstance(sales_count, str):
+                            # Tìm số trong string (ví dụ: "2k" -> 2000, "1.5k" -> 1500)
+                            sales_match = re.search(r'([\d.]+)\s*([km]?)', sales_count.lower())
+                            if sales_match:
+                                num = float(sales_match.group(1))
+                                unit = sales_match.group(2)
+                                if unit == 'k':
+                                    sales_count = int(num * 1000)
+                                elif unit == 'm':
+                                    sales_count = int(num * 1000000)
+                                else:
+                                    sales_count = int(num)
+                            else:
+                                # Thử parse số trực tiếp
+                                try:
+                                    sales_count = int(re.sub(r'[^\d]', '', sales_count))
+                                except:
+                                    sales_count = None
+                        elif isinstance(sales_count, (int, float)):
+                            sales_count = int(sales_count)
+                    
                     product = {
                         'product_id': product_id,
                         'name': name,
                         'url': url,
-                        'image_url': image_url
+                        'image_url': image_url,
+                        'sales_count': sales_count
                     }
                     
                     if product_id and name:
@@ -343,14 +379,48 @@ def parse_products_from_html(html_content, category_url):
                     elif image_url.startswith('/'):
                         image_url = urljoin('https://tiki.vn', image_url)
             
-            # Loại bỏ: price, rating, review_count, sales_count - để crawl detail sau
-            # Tạo object sản phẩm (chỉ giữ thông tin cơ bản)
+            # Extract số lượng bán từ HTML
+            sales_count = None
+            # Tìm text chứa "đã bán", "bán", "sold"
+            sales_text = ''
+            sales_elem = parent.find(string=re.compile(r'đã\s*bán|bán|sold', re.I))
+            if sales_elem:
+                sales_text = sales_elem.strip()
+            else:
+                # Tìm trong các thẻ con
+                for elem in parent.find_all(['span', 'div', 'p'], string=re.compile(r'đã\s*bán|bán|sold', re.I)):
+                    sales_text = elem.get_text(strip=True)
+                    break
+            
+            if sales_text:
+                # Parse số từ text (ví dụ: "Đã bán 2k", "1.5k đã bán")
+                sales_match = re.search(r'([\d.]+)\s*([km]?)', sales_text.lower())
+                if sales_match:
+                    num = float(sales_match.group(1))
+                    unit = sales_match.group(2)
+                    if unit == 'k':
+                        sales_count = int(num * 1000)
+                    elif unit == 'm':
+                        sales_count = int(num * 1000000)
+                    else:
+                        sales_count = int(num)
+                else:
+                    # Thử tìm số trực tiếp
+                    numbers = re.findall(r'\d+', sales_text)
+                    if numbers:
+                        try:
+                            sales_count = int(numbers[0])
+                        except:
+                            pass
+            
+            # Tạo object sản phẩm
             product = {
                 'product_id': product_id,
                 'name': name,
                 'url': product_url,
                 'category_url': category_url,
                 'image_url': image_url,
+                'sales_count': sales_count,
                 'crawled_at': time.strftime('%Y-%m-%d %H:%M:%S')
             }
             
@@ -671,14 +741,14 @@ def crawl_products_from_categories(categories_file, output_file=None, max_catego
         output_file = 'data/demo/products/products.json'
     
     print(f"\n💾 Đang lưu kết quả vào: {output_file}")
-    print(f"📝 Lưu ý: Chỉ crawl thông tin cơ bản (ID, tên, URL, hình)")
-    print(f"          Giá, đánh giá, số lượng bán sẽ được crawl detail sau")
+    print(f"📝 Lưu ý: Crawl thông tin cơ bản (ID, tên, URL, hình, số lượng bán)")
+    print(f"          Giá, đánh giá chi tiết sẽ được crawl detail sau")
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump({
             'total_products': len(unique_products),
             'total_categories': stats['total_categories'],
             'crawled_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'note': 'Chỉ crawl thông tin cơ bản - detail (giá, đánh giá, số lượng bán) sẽ crawl sau',
+            'note': 'Crawl thông tin cơ bản bao gồm số lượng bán - giá và đánh giá chi tiết sẽ crawl sau',
             'products': unique_products
         }, f, ensure_ascii=False, indent=2)
     

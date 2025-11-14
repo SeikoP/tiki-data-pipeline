@@ -71,7 +71,7 @@ if not crawl_module_path:
         crawl_module_path = relative_path
         crawl_products_path = test_path
 
-# Import module
+# Import module crawl_products
 if crawl_products_path and os.path.exists(crawl_products_path):
     # Sử dụng importlib để import trực tiếp từ file (cách đáng tin cậy nhất)
     import importlib.util
@@ -122,6 +122,39 @@ else:
             f"Lỗi gốc: {e}"
         )
 
+# Import module crawl_products_detail
+crawl_products_detail_path = None
+for path in possible_paths:
+    test_path = os.path.join(path, 'crawl_products_detail.py')
+    if os.path.exists(test_path):
+        crawl_products_detail_path = test_path
+        break
+
+if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("crawl_products_detail", crawl_products_detail_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Không thể load spec từ {crawl_products_detail_path}")
+    crawl_products_detail_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(crawl_products_detail_module)
+    
+    # Extract các functions cần thiết
+    crawl_product_detail_with_selenium = crawl_products_detail_module.crawl_product_detail_with_selenium
+    extract_product_detail = crawl_products_detail_module.extract_product_detail
+else:
+    # Fallback: thử import thông thường
+    try:
+        from crawl_products_detail import (
+            crawl_product_detail_with_selenium,
+            extract_product_detail
+        )
+    except ImportError as e:
+        raise ImportError(
+            f"Không tìm thấy module crawl_products_detail.\n"
+            f"Path: {crawl_products_detail_path}\n"
+            f"Lỗi gốc: {e}"
+        )
+
 # Cấu hình mặc định
 DEFAULT_ARGS = {
     'owner': 'data-team',
@@ -169,11 +202,14 @@ if not DATA_DIR:
 CATEGORIES_FILE = DATA_DIR / 'raw' / 'categories_recursive_optimized.json'
 OUTPUT_DIR = DATA_DIR / 'raw' / 'products'
 CACHE_DIR = OUTPUT_DIR / 'cache'
+DETAIL_CACHE_DIR = OUTPUT_DIR / 'detail' / 'cache'
 OUTPUT_FILE = OUTPUT_DIR / 'products.json'
+OUTPUT_FILE_WITH_DETAIL = OUTPUT_DIR / 'products_with_detail.json'
 
 # Tạo thư mục nếu chưa có
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Thread-safe lock cho atomic writes
 write_lock = Lock()
@@ -666,6 +702,438 @@ def save_products(**context) -> str:
         raise
 
 
+def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
+    """
+    Task: Chuẩn bị danh sách products để crawl detail
+    
+    Tối ưu:
+    - Chỉ crawl products chưa có detail
+    - Chia thành batches để xử lý song song
+    - Kiểm tra cache để tránh crawl lại
+    
+    Returns:
+        List[Dict]: List các dict chứa product info cho Dynamic Task Mapping
+    """
+    logger = get_logger(context)
+    logger.info("="*70)
+    logger.info("📋 TASK: Prepare Products for Detail Crawling")
+    logger.info("="*70)
+    
+    try:
+        ti = context['ti']
+        
+        # Lấy products từ task save_products
+        merge_result = None
+        try:
+            merge_result = ti.xcom_pull(task_ids='process_and_save.merge_products')
+        except:
+            try:
+                merge_result = ti.xcom_pull(task_ids='merge_products')
+            except:
+                pass
+        
+        if not merge_result:
+            # Thử lấy từ file output
+            if OUTPUT_FILE.exists():
+                with open(OUTPUT_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    merge_result = {'products': data.get('products', [])}
+        
+        if not merge_result:
+            raise ValueError("Không tìm thấy products từ XCom hoặc file")
+        
+        products = merge_result.get('products', [])
+        logger.info(f"Tổng số products: {len(products)}")
+        
+        # Lọc products cần crawl detail
+        # Kiểm tra cache để tránh crawl lại
+        products_to_crawl = []
+        cache_hits = 0
+        
+        for product in products:
+            product_id = product.get('product_id')
+            product_url = product.get('url')
+            
+            if not product_id or not product_url:
+                continue
+            
+            # Kiểm tra cache
+            cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
+            if cache_file.exists():
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        cached_detail = json.load(f)
+                        # Nếu đã có detail đầy đủ, skip
+                        if cached_detail.get('price', {}).get('current_price'):
+                            cache_hits += 1
+                            continue
+                except:
+                    pass
+            
+            products_to_crawl.append({
+                'product_id': product_id,
+                'url': product_url,
+                'name': product.get('name', ''),
+                'product': product  # Giữ nguyên product data
+            })
+        
+        logger.info(f"✅ Products cần crawl detail: {len(products_to_crawl)}")
+        logger.info(f"📦 Cache hits: {cache_hits}")
+        
+        # Giới hạn số lượng nếu cần (để test)
+        max_products = int(Variable.get('TIKI_MAX_PRODUCTS_FOR_DETAIL', default_var='0'))
+        if max_products > 0:
+            products_to_crawl = products_to_crawl[:max_products]
+            logger.info(f"✓ Giới hạn: {len(products_to_crawl)} products")
+        
+        return products_to_crawl
+        
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi prepare products: {e}", exc_info=True)
+        raise
+
+
+def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) -> Dict[str, Any]:
+    """
+    Task: Crawl detail cho một product (Dynamic Task Mapping)
+    
+    Tối ưu:
+    - Sử dụng cache để tránh crawl lại
+    - Rate limiting
+    - Error handling: tiếp tục với product khác khi lỗi
+    - Atomic write cache
+    
+    Args:
+        product_info: Thông tin product (từ expand_kwargs)
+        context: Airflow context
+        
+    Returns:
+        Dict: Kết quả crawl với detail và metadata
+    """
+    logger = get_logger(context)
+    
+    # Lấy product_info từ keyword argument hoặc context
+    if not product_info:
+        ti = context.get('ti')
+        if ti:
+            op_kwargs = getattr(ti, 'op_kwargs', {})
+            if op_kwargs:
+                product_info = op_kwargs.get('product_info')
+        
+        if not product_info:
+            product_info = context.get('product_info') or context.get('op_kwargs', {}).get('product_info')
+    
+    if not product_info:
+        logger.error(f"Không tìm thấy product_info. Context keys: {list(context.keys())}")
+        raise ValueError("Không tìm thấy product_info")
+    
+    product_id = product_info.get('product_id', '')
+    product_url = product_info.get('url', '')
+    product_name = product_info.get('name', 'Unknown')
+    
+    logger.info("="*70)
+    logger.info(f"🔍 TASK: Crawl Product Detail - {product_name}")
+    logger.info(f"🔗 URL: {product_url}")
+    logger.info("="*70)
+    
+    result = {
+        'product_id': product_id,
+        'url': product_url,
+        'status': 'failed',
+        'error': None,
+        'detail': None,
+        'crawled_at': datetime.now().isoformat()
+    }
+    
+    # Kiểm tra cache trước
+    cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
+    if cache_file.exists():
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cached_detail = json.load(f)
+                # Nếu đã có detail đầy đủ, dùng cache
+                if cached_detail.get('price', {}).get('current_price'):
+                    logger.info(f"✅ Sử dụng cache cho product {product_id}")
+                    result['detail'] = cached_detail
+                    result['status'] = 'cached'
+                    return result
+        except Exception as e:
+            logger.warning(f"Không đọc được cache: {e}")
+    
+    try:
+        # Lấy cấu hình
+        rate_limit_delay = float(Variable.get('TIKI_DETAIL_RATE_LIMIT_DELAY', default_var='2.0'))  # Delay 2s cho detail
+        timeout = int(Variable.get('TIKI_DETAIL_CRAWL_TIMEOUT', default_var='60'))  # 1 phút mỗi product
+        
+        # Rate limiting
+        if rate_limit_delay > 0:
+            time.sleep(rate_limit_delay)
+        
+        # Crawl với timeout
+        start_time = time.time()
+        
+        # Sử dụng Selenium để crawl detail (cần thiết cho dynamic content)
+        html_content = crawl_product_detail_with_selenium(
+            product_url,
+            save_html=False,
+            verbose=False  # Không verbose trong Airflow
+        )
+        
+        # Extract detail
+        detail = extract_product_detail(html_content, product_url, verbose=False)
+        
+        elapsed = time.time() - start_time
+        
+        if elapsed > timeout:
+            raise TimeoutError(f"Crawl detail vượt quá timeout {timeout}s")
+        
+        result['detail'] = detail
+        result['status'] = 'success'
+        result['elapsed_time'] = elapsed
+        
+        # Lưu vào cache (atomic write)
+        try:
+            temp_file = cache_file.with_suffix('.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(detail, f, ensure_ascii=False, indent=2)
+            
+            if os.name == 'nt':  # Windows
+                if cache_file.exists():
+                    cache_file.unlink()
+                shutil.move(str(temp_file), str(cache_file))
+            else:  # Unix/Linux
+                os.rename(str(temp_file), str(cache_file))
+            
+            logger.info(f"✅ Crawl thành công: {elapsed:.1f}s, đã cache")
+        except Exception as e:
+            logger.warning(f"Không lưu được cache: {e}")
+        
+    except TimeoutError as e:
+        result['error'] = str(e)
+        result['status'] = 'timeout'
+        logger.error(f"⏱️  Timeout: {e}")
+        
+    except Exception as e:
+        result['error'] = str(e)
+        result['status'] = 'failed'
+        logger.error(f"❌ Lỗi khi crawl detail: {e}", exc_info=True)
+        # Không raise để tiếp tục với product khác
+    
+    return result
+
+
+def merge_product_details(**context) -> Dict[str, Any]:
+    """
+    Task: Merge product details vào products list
+    
+    Returns:
+        Dict: Products với detail đã merge
+    """
+    logger = get_logger(context)
+    logger.info("="*70)
+    logger.info("🔄 TASK: Merge Product Details")
+    logger.info("="*70)
+    
+    try:
+        ti = context['ti']
+        
+        # Lấy products gốc
+        merge_result = None
+        try:
+            merge_result = ti.xcom_pull(task_ids='process_and_save.merge_products')
+        except:
+            try:
+                merge_result = ti.xcom_pull(task_ids='merge_products')
+            except:
+                pass
+        
+        if not merge_result:
+            # Thử lấy từ file
+            if OUTPUT_FILE.exists():
+                with open(OUTPUT_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    merge_result = {'products': data.get('products', [])}
+        
+        if not merge_result:
+            raise ValueError("Không tìm thấy products từ XCom hoặc file")
+        
+        products = merge_result.get('products', [])
+        logger.info(f"Tổng số products: {len(products)}")
+        
+        # Lấy detail results từ Dynamic Task Mapping
+        task_id = 'crawl_product_details.crawl_product_detail'
+        all_detail_results = []
+        
+        # Thử lấy từ XCom
+        try:
+            detail_results = ti.xcom_pull(task_ids=task_id, key='return_value')
+            
+            if isinstance(detail_results, list):
+                all_detail_results = detail_results
+            elif isinstance(detail_results, dict):
+                all_detail_results = list(detail_results.values()) if detail_results else []
+            elif detail_results:
+                all_detail_results = [detail_results]
+        except Exception as e:
+            logger.warning(f"Không lấy được từ XCom: {e}")
+            # Thử lấy từng map_index
+            for map_index in range(len(products)):
+                try:
+                    result = ti.xcom_pull(
+                        task_ids=task_id,
+                        key='return_value',
+                        map_indexes=[map_index]
+                    )
+                    if result:
+                        all_detail_results.append(result)
+                except:
+                    pass
+        
+        logger.info(f"Lấy được {len(all_detail_results)} detail results")
+        
+        # Tạo dict để lookup nhanh
+        detail_dict = {}
+        stats = {
+            'total_products': len(products),
+            'with_detail': 0,
+            'cached': 0,
+            'failed': 0,
+            'timeout': 0
+        }
+        
+        for detail_result in all_detail_results:
+            if detail_result and isinstance(detail_result, dict):
+                product_id = detail_result.get('product_id')
+                if product_id:
+                    detail_dict[product_id] = detail_result
+                    status = detail_result.get('status', 'failed')
+                    if status == 'success':
+                        stats['with_detail'] += 1
+                    elif status == 'cached':
+                        stats['cached'] += 1
+                    elif status == 'timeout':
+                        stats['timeout'] += 1
+                    else:
+                        stats['failed'] += 1
+        
+        # Merge detail vào products
+        products_with_detail = []
+        for product in products:
+            product_id = product.get('product_id')
+            detail_result = detail_dict.get(product_id)
+            
+            if detail_result and detail_result.get('detail'):
+                # Merge detail vào product
+                detail = detail_result['detail']
+                product_with_detail = {**product}
+                
+                # Update các trường từ detail
+                if detail.get('price'):
+                    product_with_detail['price'] = detail['price']
+                if detail.get('rating'):
+                    product_with_detail['rating'] = detail['rating']
+                if detail.get('description'):
+                    product_with_detail['description'] = detail['description']
+                if detail.get('specifications'):
+                    product_with_detail['specifications'] = detail['specifications']
+                if detail.get('images'):
+                    product_with_detail['images'] = detail['images']
+                if detail.get('brand'):
+                    product_with_detail['brand'] = detail['brand']
+                if detail.get('seller'):
+                    product_with_detail['seller'] = detail['seller']
+                if detail.get('stock'):
+                    product_with_detail['stock'] = detail['stock']
+                if detail.get('shipping'):
+                    product_with_detail['shipping'] = detail['shipping']
+                
+                # Thêm metadata
+                product_with_detail['detail_crawled_at'] = detail_result.get('crawled_at')
+                product_with_detail['detail_status'] = detail_result.get('status')
+                
+                products_with_detail.append(product_with_detail)
+            else:
+                # Giữ nguyên product nếu không có detail
+                products_with_detail.append(product)
+        
+        logger.info("="*70)
+        logger.info("📊 THỐNG KÊ MERGE DETAIL")
+        logger.info("="*70)
+        logger.info(f"📦 Tổng products: {stats['total_products']}")
+        logger.info(f"✅ Có detail: {stats['with_detail']}")
+        logger.info(f"📦 Cache: {stats['cached']}")
+        logger.info(f"❌ Failed: {stats['failed']}")
+        logger.info(f"⏱️  Timeout: {stats['timeout']}")
+        logger.info("="*70)
+        
+        result = {
+            'products': products_with_detail,
+            'stats': stats,
+            'merged_at': datetime.now().isoformat()
+        }
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi merge details: {e}", exc_info=True)
+        raise
+
+
+def save_products_with_detail(**context) -> str:
+    """
+    Task: Lưu products với detail vào file
+    
+    Returns:
+        str: Đường dẫn file đã lưu
+    """
+    logger = get_logger(context)
+    logger.info("="*70)
+    logger.info("💾 TASK: Save Products with Detail")
+    logger.info("="*70)
+    
+    try:
+        ti = context['ti']
+        
+        # Lấy kết quả merge
+        merge_result = None
+        try:
+            merge_result = ti.xcom_pull(task_ids='crawl_product_details.merge_product_details')
+        except:
+            try:
+                merge_result = ti.xcom_pull(task_ids='merge_product_details')
+            except:
+                pass
+        
+        if not merge_result:
+            raise ValueError("Không tìm thấy merge result từ XCom")
+        
+        products = merge_result.get('products', [])
+        stats = merge_result.get('stats', {})
+        
+        logger.info(f"Đang lưu {len(products)} products với detail...")
+        
+        # Chuẩn bị dữ liệu
+        output_data = {
+            'total_products': len(products),
+            'stats': stats,
+            'crawled_at': datetime.now().isoformat(),
+            'note': 'Crawl từ Airflow DAG với product details',
+            'products': products
+        }
+        
+        # Atomic write
+        output_file = str(OUTPUT_FILE_WITH_DETAIL)
+        atomic_write_file(output_file, output_data, **context)
+        
+        logger.info(f"✅ Đã lưu {len(products)} products với detail vào: {output_file}")
+        
+        return output_file
+        
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi save products with detail: {e}", exc_info=True)
+        raise
+
+
 def validate_data(**context) -> Dict[str, Any]:
     """
     Task 5: Validate dữ liệu đã crawl
@@ -859,6 +1327,79 @@ with DAG(**DAG_CONFIG) as dag:
             pool='default_pool',
         )
     
+    # TaskGroup: Crawl Product Details (Dynamic Task Mapping)
+    with TaskGroup('crawl_product_details', tooltip='Crawl chi tiết sản phẩm') as detail_group:
+        def prepare_detail_kwargs(**context):
+            """Helper function để prepare op_kwargs cho Dynamic Task Mapping detail"""
+            import logging
+            logger = logging.getLogger("airflow.task")
+            
+            ti = context['ti']
+            
+            # Lấy products từ prepare_products_for_detail
+            products_to_crawl = None
+            try:
+                products_to_crawl = ti.xcom_pull(task_ids='prepare_products_for_detail')
+            except:
+                try:
+                    products_to_crawl = ti.xcom_pull(task_ids='crawl_product_details.prepare_products_for_detail')
+                except:
+                    pass
+            
+            if not products_to_crawl:
+                logger.error("❌ Không thể lấy products từ XCom!")
+                return []
+            
+            if not isinstance(products_to_crawl, list):
+                logger.error(f"❌ Products không phải list: {type(products_to_crawl)}")
+                return []
+            
+            logger.info(f"✅ Đã lấy {len(products_to_crawl)} products, tạo {len(products_to_crawl)} tasks cho detail crawling")
+            
+            # Trả về list các dict để expand
+            return [{'product_info': product} for product in products_to_crawl]
+        
+        task_prepare_detail = PythonOperator(
+            task_id='prepare_products_for_detail',
+            python_callable=prepare_products_for_detail,
+            execution_timeout=timedelta(minutes=5),
+        )
+        
+        task_prepare_detail_kwargs = PythonOperator(
+            task_id='prepare_detail_kwargs',
+            python_callable=prepare_detail_kwargs,
+            execution_timeout=timedelta(minutes=1),
+        )
+        
+        # Dynamic Task Mapping cho crawl detail
+        task_crawl_product_detail = PythonOperator.partial(
+            task_id='crawl_product_detail',
+            python_callable=crawl_single_product_detail,
+            execution_timeout=timedelta(minutes=2),  # Timeout 2 phút mỗi product
+            pool='default_pool',
+            retries=1,  # Retry 1 lần
+        ).expand(
+            op_kwargs=task_prepare_detail_kwargs.output
+        )
+        
+        task_merge_product_details = PythonOperator(
+            task_id='merge_product_details',
+            python_callable=merge_product_details,
+            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            pool='default_pool',
+            trigger_rule='all_done',  # Chạy khi tất cả upstream tasks done
+        )
+        
+        task_save_products_with_detail = PythonOperator(
+            task_id='save_products_with_detail',
+            python_callable=save_products_with_detail,
+            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            pool='default_pool',
+        )
+        
+        # Dependencies trong detail group
+        task_prepare_detail >> task_prepare_detail_kwargs >> task_crawl_product_detail >> task_merge_product_details >> task_save_products_with_detail
+    
     # TaskGroup: Validate
     with TaskGroup('validate', tooltip='Validate dữ liệu') as validate_group:
         task_validate_data = PythonOperator(
@@ -869,5 +1410,7 @@ with DAG(**DAG_CONFIG) as dag:
         )
     
     # Định nghĩa dependencies
-    task_load_categories >> task_prepare_crawl >> task_crawl_category >> task_merge_products >> task_save_products >> task_validate_data
+    # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Validate
+    task_load_categories >> task_prepare_crawl >> task_crawl_category >> task_merge_products >> task_save_products
+    task_save_products >> task_prepare_detail >> task_prepare_detail_kwargs >> task_crawl_product_detail >> task_merge_product_details >> task_save_products_with_detail >> task_validate_data
 
