@@ -317,7 +317,7 @@ def crawl_single_category(category: Dict[str, Any] = None, **context) -> Dict[st
     
     try:
         # Lấy cấu hình từ Airflow Variables
-        max_pages = int(Variable.get('TIKI_MAX_PAGES_PER_CATEGORY', default_var='0'))
+        max_pages = int(Variable.get('TIKI_MAX_PAGES_PER_CATEGORY', default_var='20'))  # Mặc định 20 trang để tránh timeout
         use_selenium = Variable.get('TIKI_USE_SELENIUM', default_var='false').lower() == 'true'
         timeout = int(Variable.get('TIKI_CRAWL_TIMEOUT', default_var='300'))  # 5 phút mặc định
         rate_limit_delay = float(Variable.get('TIKI_RATE_LIMIT_DELAY', default_var='1.0'))  # Delay 1s giữa các request
@@ -382,8 +382,24 @@ def merge_products(**context) -> Dict[str, Any]:
         ti = context['ti']
         dag_run = context['dag_run']
         
-        # Lấy categories từ task load_categories
-        categories = ti.xcom_pull(task_ids='load_categories')
+        # Lấy categories từ task load_categories (trong TaskGroup load_and_prepare)
+        # Thử nhiều cách để lấy categories
+        categories = None
+        
+        # Cách 1: Lấy từ task_id với TaskGroup prefix
+        try:
+            categories = ti.xcom_pull(task_ids='load_and_prepare.load_categories')
+            logger.info(f"Lấy categories từ 'load_and_prepare.load_categories': {len(categories) if categories else 0} items")
+        except Exception as e:
+            logger.warning(f"Không lấy được từ 'load_and_prepare.load_categories': {e}")
+        
+        # Cách 2: Thử không có prefix
+        if not categories:
+            try:
+                categories = ti.xcom_pull(task_ids='load_categories')
+                logger.info(f"Lấy categories từ 'load_categories': {len(categories) if categories else 0} items")
+            except Exception as e:
+                logger.warning(f"Không lấy được từ 'load_categories': {e}")
         
         if not categories:
             raise ValueError("Không tìm thấy categories từ XCom")
@@ -582,9 +598,24 @@ def save_products(**context) -> str:
     logger.info("="*70)
     
     try:
-        # Lấy kết quả từ task merge_products
+        # Lấy kết quả từ task merge_products (trong TaskGroup process_and_save)
         ti = context['ti']
-        merge_result = ti.xcom_pull(task_ids='merge_products')
+        merge_result = None
+        
+        # Cách 1: Lấy từ task_id với TaskGroup prefix
+        try:
+            merge_result = ti.xcom_pull(task_ids='process_and_save.merge_products')
+            logger.info(f"Lấy merge_result từ 'process_and_save.merge_products'")
+        except Exception as e:
+            logger.warning(f"Không lấy được từ 'process_and_save.merge_products': {e}")
+        
+        # Cách 2: Thử không có prefix
+        if not merge_result:
+            try:
+                merge_result = ti.xcom_pull(task_ids='merge_products')
+                logger.info(f"Lấy merge_result từ 'merge_products'")
+            except Exception as e:
+                logger.warning(f"Không lấy được từ 'merge_products': {e}")
         
         if not merge_result:
             raise ValueError("Không tìm thấy kết quả merge từ XCom")
@@ -649,7 +680,22 @@ def validate_data(**context) -> Dict[str, Any]:
     
     try:
         ti = context['ti']
-        output_file = ti.xcom_pull(task_ids='save_products')
+        output_file = None
+        
+        # Cách 1: Lấy từ task_id với TaskGroup prefix
+        try:
+            output_file = ti.xcom_pull(task_ids='process_and_save.save_products')
+            logger.info(f"Lấy output_file từ 'process_and_save.save_products': {output_file}")
+        except Exception as e:
+            logger.warning(f"Không lấy được từ 'process_and_save.save_products': {e}")
+        
+        # Cách 2: Thử không có prefix
+        if not output_file:
+            try:
+                output_file = ti.xcom_pull(task_ids='save_products')
+                logger.info(f"Lấy output_file từ 'save_products': {output_file}")
+            except Exception as e:
+                logger.warning(f"Không lấy được từ 'save_products': {e}")
         
         if not output_file or not os.path.exists(output_file):
             raise FileNotFoundError(f"Không tìm thấy file output: {output_file}")
