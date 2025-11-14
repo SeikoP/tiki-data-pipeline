@@ -329,10 +329,13 @@ def parse_products_from_html(html_content, category_url):
     # Cách 1: Parse từ __NEXT_DATA__ (ưu tiên)
     next_data_products = parse_products_from_next_data(html_content)
     if next_data_products:
-        # Thêm category_url vào mỗi product
+        # Thêm category_url và đảm bảo sales_count có trong mỗi product
         for product in next_data_products:
             product['category_url'] = category_url
             product['crawled_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
+            # Đảm bảo sales_count luôn có (kể cả None)
+            if 'sales_count' not in product:
+                product['sales_count'] = None
         products.extend(next_data_products)
         return products
     
@@ -760,12 +763,18 @@ def crawl_products_from_categories(categories_file, output_file=None, max_catego
     print(f"\n💾 Đang lưu kết quả vào: {output_file}")
     print(f"📝 Lưu ý: Crawl thông tin cơ bản (ID, tên, URL, hình, số lượng bán)")
     print(f"          Giá, đánh giá chi tiết sẽ được crawl detail sau")
+    
+    # Đảm bảo tất cả products có sales_count (kể cả None)
+    for product in unique_products:
+        if 'sales_count' not in product:
+            product['sales_count'] = None
+    
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump({
             'total_products': len(unique_products),
             'total_categories': stats['total_categories'],
             'crawled_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'note': 'Crawl thông tin cơ bản bao gồm số lượng bán - giá và đánh giá chi tiết sẽ crawl sau',
+            'note': 'Crawl thông tin cơ bản bao gồm số lượng bán (sales_count) - giá và đánh giá chi tiết sẽ crawl sau',
             'products': unique_products
         }, f, ensure_ascii=False, indent=2)
     

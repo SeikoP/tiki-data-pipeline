@@ -145,6 +145,7 @@ def extract_product_detail(html_content, url, verbose=True):
         'category_path': [],
         'brand': '',
         'warranty': '',
+        'sales_count': None,  # Số lượng sản phẩm đã bán
         'stock': {
             'available': True,
             'quantity': 0,
@@ -556,6 +557,40 @@ def extract_product_detail(html_content, url, verbose=True):
                 elif isinstance(stock_info, (int, float)):
                     product_data['stock']['quantity'] = int(stock_info)
                     product_data['stock']['available'] = stock_info > 0
+                
+                # Cập nhật sales_count (số lượng đã bán)
+                if not product_data['sales_count']:
+                    sales_count = (product_from_next.get('sales_count') or 
+                                  product_from_next.get('quantity_sold') or 
+                                  product_from_next.get('sold_count') or 
+                                  product_from_next.get('total_sold') or 
+                                  product_from_next.get('order_count') or 
+                                  product_from_next.get('sales_quantity') or
+                                  product_from_next.get('quantity') or
+                                  product_from_next.get('sold') or
+                                  product_from_next.get('total_quantity_sold'))
+                    
+                    if sales_count is not None:
+                        if isinstance(sales_count, str):
+                            # Tìm số trong string (ví dụ: "2k" -> 2000, "1.5k" -> 1500)
+                            sales_match = re.search(r'([\d.]+)\s*([km]?)', sales_count.lower())
+                            if sales_match:
+                                num = float(sales_match.group(1))
+                                unit = sales_match.group(2)
+                                if unit == 'k':
+                                    product_data['sales_count'] = int(num * 1000)
+                                elif unit == 'm':
+                                    product_data['sales_count'] = int(num * 1000000)
+                                else:
+                                    product_data['sales_count'] = int(num)
+                            else:
+                                # Thử parse số trực tiếp
+                                try:
+                                    product_data['sales_count'] = int(re.sub(r'[^\d]', '', sales_count))
+                                except:
+                                    product_data['sales_count'] = None
+                        elif isinstance(sales_count, (int, float)):
+                            product_data['sales_count'] = int(sales_count)
         except Exception as e:
             if verbose:
                 print(f"[Parse] Lỗi khi parse __NEXT_DATA__: {e}")

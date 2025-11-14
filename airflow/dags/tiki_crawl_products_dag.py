@@ -786,6 +786,16 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
             products_to_crawl = products_to_crawl[:max_products]
             logger.info(f"✓ Giới hạn: {len(products_to_crawl)} products")
         
+        # Debug: Log một vài products đầu tiên
+        if products_to_crawl:
+            logger.info(f"📋 Sample products (first 3):")
+            for i, p in enumerate(products_to_crawl[:3]):
+                logger.info(f"  {i+1}. Product ID: {p.get('product_id')}, URL: {p.get('url')[:80]}...")
+        else:
+            logger.warning("⚠️  Không có products nào cần crawl detail!")
+        
+        logger.info(f"🔢 Trả về {len(products_to_crawl)} products cho Dynamic Task Mapping")
+        
         return products_to_crawl
         
     except Exception as e:
@@ -1046,6 +1056,9 @@ def merge_product_details(**context) -> Dict[str, Any]:
                     product_with_detail['stock'] = detail['stock']
                 if detail.get('shipping'):
                     product_with_detail['shipping'] = detail['shipping']
+                # Cập nhật sales_count từ detail (nếu có)
+                if detail.get('sales_count') is not None:
+                    product_with_detail['sales_count'] = detail['sales_count']
                 
                 # Thêm metadata
                 product_with_detail['detail_crawled_at'] = detail_result.get('crawled_at')
@@ -1352,12 +1365,22 @@ with DAG(**DAG_CONFIG) as dag:
             
             if not isinstance(products_to_crawl, list):
                 logger.error(f"❌ Products không phải list: {type(products_to_crawl)}")
+                logger.error(f"   Value: {products_to_crawl}")
                 return []
             
-            logger.info(f"✅ Đã lấy {len(products_to_crawl)} products, tạo {len(products_to_crawl)} tasks cho detail crawling")
+            logger.info(f"✅ Đã lấy {len(products_to_crawl)} products từ XCom")
             
             # Trả về list các dict để expand
-            return [{'product_info': product} for product in products_to_crawl]
+            op_kwargs_list = [{'product_info': product} for product in products_to_crawl]
+            
+            logger.info(f"🔢 Tạo {len(op_kwargs_list)} op_kwargs cho Dynamic Task Mapping")
+            if op_kwargs_list:
+                logger.info(f"📋 Sample op_kwargs (first 2):")
+                for i, kwargs in enumerate(op_kwargs_list[:2]):
+                    product_info = kwargs.get('product_info', {})
+                    logger.info(f"  {i+1}. Product ID: {product_info.get('product_id')}, URL: {product_info.get('url', '')[:60]}...")
+            
+            return op_kwargs_list
         
         task_prepare_detail = PythonOperator(
             task_id='prepare_products_for_detail',
