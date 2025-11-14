@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+full_page.html
+
 # C extensions
 *.so
 
