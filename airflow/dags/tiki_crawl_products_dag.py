@@ -29,7 +29,35 @@ from threading import Lock
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import TaskGroup
-from airflow.models import Variable
+# Import Variable với suppress warning
+import warnings
+try:
+    # Thử import từ airflow.sdk (Airflow 2.x+)
+    from airflow.sdk import Variable
+    _Variable = Variable  # Alias để dùng wrapper
+except ImportError:
+    # Fallback: dùng airflow.models (deprecated nhưng vẫn hoạt động)
+    from airflow.models import Variable as _Variable
+
+# Wrapper function để suppress deprecation warning khi gọi Variable.get()
+def get_variable(key, default_var=None):
+    """Wrapper cho Variable.get() để suppress deprecation warning"""
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=DeprecationWarning, module='airflow.models.variable')
+        return _Variable.get(key, default=default_var)
+
+# Alias Variable để code cũ vẫn hoạt động, nhưng dùng wrapper
+class VariableWrapper:
+    """Wrapper cho Variable để suppress warnings"""
+    @staticmethod
+    def get(key, default_var=None):
+        return get_variable(key, default_var)
+    
+    @staticmethod
+    def set(key, value):
+        return _Variable.set(key, value)
+
+Variable = VariableWrapper
 from airflow.configuration import conf
 from airflow.utils.session import provide_session
 

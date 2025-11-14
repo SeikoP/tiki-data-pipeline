@@ -59,49 +59,52 @@ except ImportError:
 # Setup UTF-8 encoding
 setup_utf8_encoding()
 
-# Thử import tqdm
-try:
-    from tqdm import tqdm
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
-    print("⚠️  Khuyến nghị cài đặt tqdm: pip install tqdm")
-    class tqdm:
-        def __init__(self, iterable=None, total=None, desc="", **kwargs):
-            self.iterable = iterable
-            self.total = total or (len(iterable) if iterable else 0)
-            self.desc = desc
-            self.n = 0
-            self.start_time = time.time()
-        
-        def __enter__(self):
-            return self
-        
-        def __exit__(self, *args):
-            pass
-        
-        def __iter__(self):
-            if self.iterable:
-                for item in self.iterable:
-                    self.n += 1
-                    self.update(1)
-                    yield item
-            else:
+# Lazy import tqdm để tránh timeout khi load DAG
+# Sẽ import trong functions khi cần
+def _get_tqdm():
+    """Lazy import tqdm - chỉ import khi cần"""
+    try:
+        from tqdm import tqdm
+        return tqdm
+    except ImportError:
+        # Fallback: tạo fake tqdm class nếu không có
+        class FakeTqdm:
+            def __init__(self, iterable=None, total=None, desc="", **kwargs):
+                self.iterable = iterable
+                self.total = total or (len(iterable) if iterable else 0)
+                self.desc = desc
+                self.n = 0
+                self.start_time = time.time()
+            
+            def __enter__(self):
                 return self
-        
-        def update(self, n=1):
-            self.n += n
-            if self.total > 0:
-                pct = (self.n / self.total) * 100
-                elapsed = time.time() - self.start_time
-                if self.n > 0:
-                    rate = self.n / elapsed if elapsed > 0 else 0
-                    eta = (self.total - self.n) / rate if rate > 0 else 0
-                    print(f"\r{self.desc} {self.n}/{self.total} ({pct:.1f}%) | "
-                          f"Tốc độ: {rate:.2f}/s | ETA: {eta:.0f}s", end='', flush=True)
-        
-        def set_postfix(self, postfix=None):
-            pass
+            
+            def __exit__(self, *args):
+                pass
+            
+            def __iter__(self):
+                if self.iterable:
+                    for item in self.iterable:
+                        self.n += 1
+                        self.update(1)
+                        yield item
+                else:
+                    return self
+            
+            def update(self, n=1):
+                self.n += n
+                if self.total > 0:
+                    pct = (self.n / self.total) * 100
+                    elapsed = time.time() - self.start_time
+                    if self.n > 0:
+                        rate = self.n / elapsed if elapsed > 0 else 0
+                        eta = (self.total - self.n) / rate if rate > 0 else 0
+                        print(f"\r{self.desc} {self.n}/{self.total} ({pct:.1f}%) | "
+                              f"Tốc độ: {rate:.2f}/s | ETA: {eta:.0f}s", end='', flush=True)
+            
+            def set_postfix(self, postfix=None):
+                pass
+        return FakeTqdm
 
 # Lazy import Selenium và webdriver_manager để tránh timeout khi load DAG
 # Không import ở top level - sẽ import trong functions khi cần
@@ -737,6 +740,8 @@ def crawl_products_from_categories(categories_file, output_file=None, max_catego
     all_products = []
     category_results = {}
     
+    # Lazy import tqdm
+    tqdm = _get_tqdm()
     with tqdm(total=len(categories), desc="Crawl danh mục", unit="danh mục") as pbar:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit tasks
