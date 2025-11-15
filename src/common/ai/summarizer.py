@@ -76,17 +76,66 @@ class AISummarizer:
 
     def _create_prompt(self, data_summary: dict[str, Any]) -> str:
         """Tạo prompt cho AI từ dữ liệu tổng hợp"""
+        # Lấy thống kê và làm rõ số liệu quan trọng
+        stats = data_summary.get("statistics", {})
+        total_products = stats.get("total_products", 0)
+        crawled_count = stats.get("crawled_count", 0)  # Số products được crawl detail
+        with_detail = stats.get("with_detail", 0)
+        failed = stats.get("failed", 0)
+        timeout = stats.get("timeout", 0)
+        
+        # Tính toán các tỷ lệ
+        success_rate = (with_detail / crawled_count * 100) if crawled_count > 0 else 0.0
+        timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0.0
+        failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0.0
+        total_error_rate = ((timeout + failed) / crawled_count * 100) if crawled_count > 0 else 0.0
+        
+        # Tạo context rõ ràng cho AI
+        context_note = ""
+        if crawled_count > 0:
+            context_note = f"""
+**LƯU Ý QUAN TRỌNG:**
+- Tổng số sản phẩm từ danh sách: {total_products:,}
+- Số lượng sản phẩm ĐÃ ĐƯỢC CRAWL DETAIL: {crawled_count:,} (đây là số liệu quan trọng để phân tích)
+- Tỷ lệ thành công crawl detail: {success_rate:.1f}% ({with_detail}/{crawled_count})
+- Khi phân tích, hãy SO SÁNH với số lượng ĐÃ CRAWL ({crawled_count:,}) chứ KHÔNG phải tổng số ({total_products:,})
+"""
+        
         prompt = f"""Bạn là một chuyên gia phân tích dữ liệu. Hãy phân tích và tổng hợp thông tin sau về dữ liệu sản phẩm Tiki:
+
+{context_note}
 
 {json.dumps(data_summary, ensure_ascii=False, indent=2)}
 
-Hãy tạo một bản tổng hợp ngắn gọn, dễ hiểu bằng tiếng Việt với các điểm chính:
-1. Tổng quan về dữ liệu (số lượng sản phẩm, thời gian crawl)
-2. Phân tích thống kê (giá trung bình, rating, discount)
-3. Các vấn đề hoặc lỗi nếu có
-4. Nhận xét và đề xuất
+Hãy tạo một bản tổng hợp ngắn gọn, dễ hiểu bằng tiếng Việt với format nhất quán:
 
-Hãy viết một cách tự nhiên, không quá kỹ thuật, phù hợp để gửi thông báo qua Discord."""
+**1. Tổng quan về dữ liệu:**
+- Số lượng sản phẩm đã được crawl detail: {crawled_count:,} (KHÔNG phải tổng số {total_products:,})
+- Tỷ lệ thành công: {success_rate:.1f}% ({with_detail}/{crawled_count} products)
+- Thời gian crawl: [từ metadata]
+
+**2. Phân tích thống kê (chỉ cho {with_detail} sản phẩm có detail):**
+- Giá trung bình: [min - max, trung bình]
+- Rating trung bình: [dựa trên số sản phẩm có rating]
+- Discount trung bình: [min - max, trung bình]
+- Top 5 danh mục: [danh sách với số lượng, format: "Danh mục X: Y sản phẩm"]
+- Top 5 seller: [danh sách với số lượng, format: "Seller X: Y sản phẩm"]
+
+**3. Các vấn đề / lỗi:**
+- Timeout: {timeout} products ({timeout_rate:.1f}%)
+- Failed: {failed} products ({failed_rate:.1f}%)
+- Tổng lỗi: {timeout + failed} products ({total_error_rate:.1f}% của {crawled_count:,} đã crawl)
+
+**4. Nhận xét & Đề xuất:**
+- Đánh giá hiệu quả crawl (dựa trên tỷ lệ thành công {success_rate:.1f}%)
+- Đề xuất cải thiện nếu tỷ lệ thành công thấp (< 50%)
+
+**QUAN TRỌNG:**
+- KHÔNG sử dụng bảng markdown (| | |) vì khó đọc trong Discord
+- Sử dụng format danh sách với bullet points (- hoặc •)
+- Khi nói về "số lượng sản phẩm" hoặc tính tỷ lệ, LUÔN sử dụng số lượng ĐÃ CRAWL DETAIL ({crawled_count:,}) chứ KHÔNG phải tổng số ({total_products:,})
+- Viết ngắn gọn, tự nhiên, dễ đọc trong Discord embed
+- Format số với dấu phẩy (ví dụ: 1,234 thay vì 1234)"""
 
         return prompt
 

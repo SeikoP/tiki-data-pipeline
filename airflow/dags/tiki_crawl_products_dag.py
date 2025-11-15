@@ -609,6 +609,7 @@ tiki_degradation = service_health.register_service(
 analytics_path = None
 ai_path = None
 notifications_path = None
+config_path = None
 
 # Thử nhiều đường dẫn có thể cho các modules ở common/
 common_base_paths = [
@@ -628,6 +629,7 @@ for common_base in common_base_paths:
     test_analytics = os.path.join(common_base, "analytics", "aggregator.py")
     test_ai = os.path.join(common_base, "ai", "summarizer.py")
     test_notifications = os.path.join(common_base, "notifications", "discord.py")
+    test_config = os.path.join(common_base, "config.py")
 
     if os.path.exists(test_analytics):
         analytics_path = test_analytics
@@ -635,9 +637,33 @@ for common_base in common_base_paths:
         ai_path = test_ai
     if os.path.exists(test_notifications):
         notifications_path = test_notifications
+    if os.path.exists(test_config):
+        config_path = test_config
 
-    if analytics_path and ai_path and notifications_path:
+    if analytics_path and ai_path and notifications_path and config_path:
         break
+
+# IMPORTANT: Load config.py TRƯỚC để đảm bảo .env được load
+# Điều này đảm bảo các biến môi trường từ .env được set trước khi các module khác import
+if config_path and os.path.exists(config_path):
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("common.config", config_path)
+        if spec is not None and spec.loader is not None:
+            config_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(config_module)
+            # Config module sẽ tự động load .env khi được import
+            import warnings
+
+            warnings.warn(
+                f"✅ Đã load common.config từ {config_path}, .env sẽ được load tự động",
+                stacklevel=2,
+            )
+    except Exception as e:
+        import warnings
+
+        warnings.warn(f"⚠️  Không thể load common.config: {e}", stacklevel=2)
 
 # Import DataAggregator từ common/analytics/
 if analytics_path and os.path.exists(analytics_path):
@@ -1661,8 +1687,8 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
             Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default_var="2.0")
         )  # Delay 2s cho detail
         timeout = int(
-            Variable.get("TIKI_DETAIL_CRAWL_TIMEOUT", default_var="120")
-        )  # 2 phút mỗi product (tăng từ 60s)
+            Variable.get("TIKI_DETAIL_CRAWL_TIMEOUT", default_var="180")
+        )  # 3 phút mỗi product (tăng từ 120s để tránh timeout)
 
         # Rate limiting
         if rate_limit_delay > 0:
@@ -1681,8 +1707,8 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
                     product_url,
                     save_html=False,
                     verbose=False,  # Không verbose trong Airflow
-                    max_retries=2,  # Retry 2 lần
-                    timeout=25,  # Timeout 25s (ngắn hơn để fail nhanh hơn)
+                    max_retries=3,  # Retry 3 lần (tăng từ 2)
+                    timeout=60,  # Timeout 60s (tăng từ 25s để đủ thời gian cho Selenium)
                     use_redis_cache=True,  # Sử dụng Redis cache
                     use_rate_limiting=True,  # Sử dụng rate limiting
                 )
@@ -2286,6 +2312,7 @@ def merge_product_details(**context) -> dict[str, Any]:
         detail_dict = {}
         stats = {
             "total_products": len(products),
+            "crawled_count": 0,  # Số lượng products thực sự được crawl detail
             "with_detail": 0,
             "cached": 0,
             "failed": 0,
@@ -2310,6 +2337,10 @@ def merge_product_details(**context) -> dict[str, Any]:
                     status = detail_result.get("status", "failed")
                     error = detail_result.get("error")
 
+                    # Đếm số lượng products được crawl (tất cả các status trừ "not_crawled")
+                    if status in ["success", "cached", "failed", "timeout", "degraded", "circuit_breaker_open", "selenium_error", "network_error", "extract_error", "validation_error", "memory_error"]:
+                        stats["crawled_count"] += 1
+                    
                     if status == "success":
                         stats["with_detail"] += 1
                     elif status == "cached":
@@ -2472,6 +2503,7 @@ def merge_product_details(**context) -> dict[str, Any]:
         logger.info("📊 THỐNG KÊ MERGE DETAIL")
         logger.info("=" * 70)
         logger.info(f"📦 Tổng products ban đầu: {stats['total_products']}")
+        logger.info(f"🔄 Products được crawl detail: {stats['crawled_count']}")
         logger.info(f"✅ Có detail (success): {stats['with_detail']}")
         logger.info(f"📦 Có detail (cached): {stats['cached']}")
         logger.info(f"⚠️  Degraded: {stats['degraded']}")
@@ -2481,10 +2513,19 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         # Tính tổng có detail (success + cached)
         total_with_detail = stats["with_detail"] + stats["cached"]
+        
+        # Tỷ lệ thành công dựa trên số lượng được crawl (quan trọng hơn)
+        if stats["crawled_count"] > 0:
+            success_rate = (stats["with_detail"] / stats["crawled_count"]) * 100
+            logger.info(
+                f"📈 Tỷ lệ thành công (dựa trên crawled): {stats['with_detail']}/{stats['crawled_count']} ({success_rate:.1f}%)"
+            )
+        
+        # Tỷ lệ có detail trong tổng products (để tham khảo)
         if stats["total_products"] > 0:
             detail_coverage = total_with_detail / stats["total_products"] * 100
             logger.info(
-                f"📈 Tỷ lệ có detail: {total_with_detail}/{stats['total_products']} ({detail_coverage:.1f}%)"
+                f"📊 Tỷ lệ có detail (trong tổng products): {total_with_detail}/{stats['total_products']} ({detail_coverage:.1f}%)"
             )
 
         logger.info("=" * 70)
@@ -2518,6 +2559,7 @@ def merge_product_details(**context) -> dict[str, Any]:
             "products": [],
             "stats": {
                 "total_products": 0,
+                "crawled_count": 0,  # Số lượng products được crawl detail
                 "with_detail": 0,
                 "cached": 0,
                 "failed": 0,
@@ -2572,6 +2614,17 @@ def save_products_with_detail(**context) -> str:
         note = merge_result.get("note", "Crawl từ Airflow DAG với product details")
 
         logger.info(f"💾 Đang lưu {len(products)} products với detail...")
+        
+        # Log thông tin về crawl detail
+        crawled_count = stats.get("crawled_count", 0)
+        if crawled_count > 0:
+            logger.info(f"🔄 Products được crawl detail: {crawled_count}")
+            logger.info(f"✅ Products có detail (success): {stats.get('with_detail', 0)}")
+            if stats.get("timeout", 0) > 0:
+                logger.info(f"⏱️  Products timeout: {stats.get('timeout', 0)}")
+            if stats.get("failed", 0) > 0:
+                logger.info(f"❌ Products failed: {stats.get('failed', 0)}")
+        
         if stats.get("products_skipped"):
             logger.info(f"🚫 Đã bỏ qua {stats.get('products_skipped')} products không có detail")
 
@@ -2635,7 +2688,14 @@ def transform_products(**context) -> dict[str, Any]:
             data = json.load(f)
 
         products = data.get("products", [])
-        logger.info(f"📊 Tổng số products: {len(products)}")
+        stats = data.get("stats", {})
+        logger.info(f"📊 Tổng số products trong file: {len(products)}")
+        
+        # Log thông tin về crawl detail nếu có
+        crawled_count = stats.get("crawled_count", 0)
+        if crawled_count > 0:
+            logger.info(f"🔄 Products được crawl detail: {crawled_count}")
+            logger.info(f"✅ Products có detail (success): {stats.get('with_detail', 0)}")
 
         # Import DataTransformer
         try:
@@ -2868,18 +2928,35 @@ def validate_data(**context) -> dict[str, Any]:
         ti = context["ti"]
         output_file = None
 
+        # Ưu tiên: Lấy từ save_products_with_detail (có detail)
         # Cách 1: Lấy từ task_id với TaskGroup prefix
         try:
-            output_file = ti.xcom_pull(task_ids="process_and_save.save_products")
-            logger.info(f"Lấy output_file từ 'process_and_save.save_products': {output_file}")
+            output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
+            logger.info(f"Lấy output_file từ 'crawl_product_details.save_products_with_detail': {output_file}")
         except Exception as e:
-            logger.warning(f"Không lấy được từ 'process_and_save.save_products': {e}")
+            logger.warning(f"Không lấy được từ 'crawl_product_details.save_products_with_detail': {e}")
 
         # Cách 2: Thử không có prefix
         if not output_file:
             try:
+                output_file = ti.xcom_pull(task_ids="save_products_with_detail")
+                logger.info(f"Lấy output_file từ 'save_products_with_detail': {output_file}")
+            except Exception as e:
+                logger.warning(f"Không lấy được từ 'save_products_with_detail': {e}")
+
+        # Fallback: Lấy từ save_products (không có detail) nếu không có file với detail
+        if not output_file:
+            try:
+                output_file = ti.xcom_pull(task_ids="process_and_save.save_products")
+                logger.info(f"Lấy output_file từ 'process_and_save.save_products' (fallback): {output_file}")
+            except Exception as e:
+                logger.warning(f"Không lấy được từ 'process_and_save.save_products': {e}")
+
+        # Cách 3: Thử không có prefix
+        if not output_file:
+            try:
                 output_file = ti.xcom_pull(task_ids="save_products")
-                logger.info(f"Lấy output_file từ 'save_products': {output_file}")
+                logger.info(f"Lấy output_file từ 'save_products' (fallback): {output_file}")
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'save_products': {e}")
 
@@ -2892,11 +2969,13 @@ def validate_data(**context) -> dict[str, Any]:
             data = json.load(f)
 
         products = data.get("products", [])
+        stats = data.get("stats", {})
 
         # Validation
         validation_result = {
             "file_exists": True,
             "total_products": len(products),
+            "crawled_count": stats.get("crawled_count", 0),  # Số lượng products được crawl detail
             "valid_products": 0,
             "invalid_products": 0,
             "errors": [],
@@ -2928,6 +3007,18 @@ def validate_data(**context) -> dict[str, Any]:
         logger.info("=" * 70)
         logger.info("📊 VALIDATION RESULTS")
         logger.info("=" * 70)
+        logger.info(f"📦 Tổng số products trong file: {validation_result['total_products']}")
+        
+        # Log thông tin về crawl detail nếu có
+        crawled_count = stats.get("crawled_count", 0)
+        if crawled_count > 0:
+            logger.info(f"🔄 Products được crawl detail: {crawled_count}")
+            logger.info(f"✅ Products có detail (success): {stats.get('with_detail', 0)}")
+            if stats.get("timeout", 0) > 0:
+                logger.info(f"⏱️  Products timeout: {stats.get('timeout', 0)}")
+            if stats.get("failed", 0) > 0:
+                logger.info(f"❌ Products failed: {stats.get('failed', 0)}")
+        
         logger.info(f"✅ Valid products: {validation_result['valid_products']}")
         logger.info(f"❌ Invalid products: {validation_result['invalid_products']}")
         logger.info("=" * 70)
@@ -3003,10 +3094,24 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 
                     # Log thống kê
                     stats = summary.get("statistics", {})
-                    logger.info(f"   📦 Tổng sản phẩm: {stats.get('total_products', 0)}")
-                    logger.info(f"   ✅ Có chi tiết: {stats.get('with_detail', 0)}")
-                    logger.info(f"   ❌ Thất bại: {stats.get('failed', 0)}")
-                    logger.info(f"   ⏱️  Timeout: {stats.get('timeout', 0)}")
+                    total_products = stats.get('total_products', 0)
+                    crawled_count = stats.get('crawled_count', 0)
+                    with_detail = stats.get('with_detail', 0)
+                    failed = stats.get('failed', 0)
+                    timeout = stats.get('timeout', 0)
+                    
+                    logger.info(f"   📦 Tổng sản phẩm: {total_products}")
+                    logger.info(f"   🔄 Products được crawl detail: {crawled_count}")
+                    logger.info(f"   ✅ Có chi tiết (success): {with_detail}")
+                    logger.info(f"   ❌ Thất bại: {failed}")
+                    logger.info(f"   ⏱️  Timeout: {timeout}")
+                    
+                    # Tính và hiển thị tỷ lệ thành công
+                    if crawled_count > 0:
+                        success_rate = (with_detail / crawled_count) * 100
+                        logger.info(f"   📈 Tỷ lệ thành công: {with_detail}/{crawled_count} ({success_rate:.1f}%)")
+                    else:
+                        logger.warning("   ⚠️  Không có products nào được crawl detail")
                 else:
                     logger.error("❌ Không thể load dữ liệu để tổng hợp")
             except Exception as e:
@@ -3040,6 +3145,9 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                 if result.get("ai_summary"):
                     # Gửi với AI summary
                     stats = result.get("summary", {}).get("statistics", {})
+                    crawled_at = result.get("summary", {}).get("metadata", {}).get("crawled_at", "")
+                    footer_text = f"Crawl lúc: {crawled_at}" if crawled_at else "Tiki Data Pipeline"
+                    
                     success = notifier.send_summary(
                         ai_summary=result["ai_summary"],
                         stats=stats,
@@ -3050,23 +3158,91 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                     else:
                         logger.warning("⚠️  Không thể gửi thông báo qua Discord")
                 elif result.get("summary"):
-                    # Gửi với summary thông thường (không có AI)
+                    # Gửi với summary thông thường (không có AI) - sử dụng fields thay vì text
                     stats = result.get("summary", {}).get("statistics", {})
-                    content = f"""📊 **Tổng hợp dữ liệu Tiki**
-
-**Thống kê:**
-- 📦 Tổng sản phẩm: {stats.get('total_products', 0)}
-- ✅ Có chi tiết: {stats.get('with_detail', 0)}
-- ❌ Thất bại: {stats.get('failed', 0)}
-- ⏱️ Timeout: {stats.get('timeout', 0)}
-- 💾 Đã lưu: {stats.get('products_saved', 0)}
-
-**Thời gian crawl:** {result.get('summary', {}).get('metadata', {}).get('crawled_at', 'N/A')}
-"""
+                    total_products = stats.get('total_products', 0)
+                    crawled_count = stats.get('crawled_count', 0)
+                    with_detail = stats.get('with_detail', 0)
+                    failed = stats.get('failed', 0)
+                    timeout = stats.get('timeout', 0)
+                    products_saved = stats.get('products_saved', 0)
+                    crawled_at = result.get("summary", {}).get("metadata", {}).get("crawled_at", "N/A")
+                    
+                    # Tính tỷ lệ thành công để chọn màu
+                    if crawled_count > 0:
+                        success_rate = (with_detail / crawled_count) * 100
+                        if success_rate >= 80:
+                            color = 0x00FF00  # Xanh lá
+                        elif success_rate >= 50:
+                            color = 0xFFA500  # Cam
+                        else:
+                            color = 0xFF0000  # Đỏ
+                    else:
+                        color = 0x808080  # Xám
+                        success_rate = 0
+                    
+                    # Tạo fields cho Discord embed
+                    fields = []
+                    
+                    # Row 1: Tổng quan
+                    if total_products > 0:
+                        fields.append({
+                            "name": "📦 Tổng sản phẩm",
+                            "value": f"**{total_products:,}**",
+                            "inline": True,
+                        })
+                    
+                    if crawled_count > 0:
+                        fields.append({
+                            "name": "🔄 Đã crawl detail",
+                            "value": f"**{crawled_count:,}**",
+                            "inline": True,
+                        })
+                    
+                    if products_saved > 0:
+                        fields.append({
+                            "name": "💾 Đã lưu",
+                            "value": f"**{products_saved:,}**",
+                            "inline": True,
+                        })
+                    
+                    # Row 2: Kết quả crawl
+                    if crawled_count > 0:
+                        fields.append({
+                            "name": "✅ Thành công",
+                            "value": f"**{with_detail:,}** ({success_rate:.1f}%)",
+                            "inline": True,
+                        })
+                    
+                    if timeout > 0:
+                        timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0
+                        fields.append({
+                            "name": "⏱️ Timeout",
+                            "value": f"**{timeout:,}** ({timeout_rate:.1f}%)",
+                            "inline": True,
+                        })
+                    
+                    if failed > 0:
+                        failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0
+                        fields.append({
+                            "name": "❌ Thất bại",
+                            "value": f"**{failed:,}** ({failed_rate:.1f}%)",
+                            "inline": True,
+                        })
+                    
+                    # Tạo content ngắn gọn
+                    content = "📊 **Tổng hợp dữ liệu crawl từ Tiki.vn**\n\n"
+                    if crawled_count > 0:
+                        content += f"Tỷ lệ thành công: **{success_rate:.1f}%** ({with_detail}/{crawled_count} products)"
+                    else:
+                        content += "Chưa có products nào được crawl detail."
+                    
                     success = notifier.send_message(
                         content=content,
                         title="📊 Tổng hợp dữ liệu Tiki",
-                        color=0x3498DB,
+                        color=color,
+                        fields=fields if fields else None,
+                        footer=f"Crawl lúc: {crawled_at}",
                     )
                     if success:
                         result["discord_notification_success"] = True
@@ -3328,11 +3504,11 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="crawl_product_detail",
             python_callable=crawl_single_product_detail,
             execution_timeout=timedelta(
-                minutes=7
-            ),  # Tăng timeout lên 7 phút để đủ thời gian cho Selenium driver khởi động
+                minutes=15
+            ),  # Tăng timeout lên 15 phút để đủ thời gian cho Selenium và xử lý
             pool="default_pool",
-            retries=2,  # Tăng retry lên 2 lần để giảm failed tasks
-            retry_delay=timedelta(seconds=30),  # Delay 30s giữa các retry
+            retries=3,  # Tăng retry lên 3 lần để giảm failed tasks
+            retry_delay=timedelta(minutes=1),  # Delay 1 phút giữa các retry
         ).expand(op_kwargs=task_prepare_detail_kwargs.output)
 
         task_merge_product_details = PythonOperator(

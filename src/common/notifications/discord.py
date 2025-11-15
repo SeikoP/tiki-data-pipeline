@@ -42,6 +42,7 @@ class DiscordNotifier:
         title: str | None = None,
         color: int = 0x00FF00,  # Màu xanh lá mặc định
         fields: list | None = None,
+        footer: str | None = None,
     ) -> bool:
         """
         Gửi thông báo qua Discord webhook
@@ -51,6 +52,7 @@ class DiscordNotifier:
             title: Tiêu đề embed (optional)
             color: Màu của embed (hex color code)
             fields: Danh sách các field để hiển thị (optional)
+            footer: Footer text (optional)
 
         Returns:
             True nếu gửi thành công, False nếu có lỗi
@@ -60,7 +62,7 @@ class DiscordNotifier:
             return False
 
         try:
-            # Tạo embed
+            # Tạo embed với format đẹp hơn
             embed = {
                 "title": title or "📊 Tổng hợp dữ liệu Tiki",
                 "description": content,
@@ -70,6 +72,9 @@ class DiscordNotifier:
 
             if fields:
                 embed["fields"] = fields
+            
+            if footer:
+                embed["footer"] = {"text": footer}
 
             payload = {"embeds": [embed]}
 
@@ -124,45 +129,91 @@ class DiscordNotifier:
             logger.warning("⚠️  Không có nội dung tổng hợp để gửi")
             return False
 
-        # Tạo fields từ stats
+        # Tính toán tỷ lệ thành công để chọn màu phù hợp
+        crawled_count = stats.get("crawled_count", 0)
+        with_detail = stats.get("with_detail", 0)
+        failed = stats.get("failed", 0)
+        timeout = stats.get("timeout", 0)
+        
+        # Chọn màu dựa trên tỷ lệ thành công
+        if crawled_count > 0:
+            success_rate = (with_detail / crawled_count) * 100
+            if success_rate >= 80:
+                color = 0x00FF00  # Xanh lá - thành công tốt
+            elif success_rate >= 50:
+                color = 0xFFA500  # Cam - cảnh báo
+            else:
+                color = 0xFF0000  # Đỏ - cần chú ý
+
+        # Tạo fields từ stats - tối ưu layout
         fields = []
         if stats:
-            # Thêm các thống kê quan trọng
-            if "total_products" in stats:
+            total_products = stats.get("total_products", 0)
+            products_saved = stats.get("products_saved", 0)
+            
+            # Row 1: Tổng quan
+            if total_products > 0:
                 fields.append(
                     {
                         "name": "📦 Tổng sản phẩm",
-                        "value": str(stats.get("total_products", 0)),
+                        "value": f"**{total_products:,}**",
                         "inline": True,
                     }
                 )
-
-            if "with_detail" in stats:
+            
+            if crawled_count > 0:
                 fields.append(
                     {
-                        "name": "✅ Có chi tiết",
-                        "value": str(stats.get("with_detail", 0)),
+                        "name": "🔄 Đã crawl detail",
+                        "value": f"**{crawled_count:,}**",
                         "inline": True,
                     }
                 )
-
-            if "failed" in stats:
+            
+            if products_saved > 0:
                 fields.append(
                     {
-                        "name": "❌ Thất bại",
-                        "value": str(stats.get("failed", 0)),
+                        "name": "💾 Đã lưu",
+                        "value": f"**{products_saved:,}**",
                         "inline": True,
                     }
                 )
-
-            if "timeout" in stats:
+            
+            # Row 2: Kết quả crawl detail
+            if crawled_count > 0:
+                success_rate = (with_detail / crawled_count) * 100
+                fields.append(
+                    {
+                        "name": "✅ Thành công",
+                        "value": f"**{with_detail:,}** ({success_rate:.1f}%)",
+                        "inline": True,
+                    }
+                )
+            
+            if timeout > 0:
+                timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0
                 fields.append(
                     {
                         "name": "⏱️ Timeout",
-                        "value": str(stats.get("timeout", 0)),
+                        "value": f"**{timeout:,}** ({timeout_rate:.1f}%)",
                         "inline": True,
                     }
                 )
+            
+            if failed > 0:
+                failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0
+                fields.append(
+                    {
+                        "name": "❌ Thất bại",
+                        "value": f"**{failed:,}** ({failed_rate:.1f}%)",
+                        "inline": True,
+                    }
+                )
+
+        # Giới hạn độ dài AI summary để tránh vượt quá Discord limit (2000 chars cho description)
+        max_summary_length = 1800  # Để lại chỗ cho format
+        if len(ai_summary) > max_summary_length:
+            ai_summary = ai_summary[:max_summary_length] + "...\n\n*(Đã cắt ngắn do giới hạn độ dài)*"
 
         return self.send_message(
             content=ai_summary,

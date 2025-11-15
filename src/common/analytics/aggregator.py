@@ -81,6 +81,7 @@ class DataAggregator:
         stats = self.data.get("stats", {})
         summary["statistics"] = {
             "total_products": stats.get("total_products", 0),
+            "crawled_count": stats.get("crawled_count", 0),  # Số lượng products được crawl detail
             "with_detail": stats.get("with_detail", 0),
             "failed": stats.get("failed", 0),
             "timeout": stats.get("timeout", 0),
