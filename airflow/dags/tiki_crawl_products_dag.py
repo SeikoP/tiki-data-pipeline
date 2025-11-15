@@ -3250,7 +3250,6 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=transform_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
-            ins=[PRODUCTS_WITH_DETAIL_DATASET] if PRODUCTS_WITH_DETAIL_DATASET else [],  # Asset input
             outlets=[TRANSFORMED_PRODUCTS_DATASET] if TRANSFORMED_PRODUCTS_DATASET else [],  # Asset output
         )
 
@@ -3259,7 +3258,6 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=load_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
-            ins=[TRANSFORMED_PRODUCTS_DATASET] if TRANSFORMED_PRODUCTS_DATASET else [],  # Asset input
             outlets=[FINAL_PRODUCTS_DATASET] if FINAL_PRODUCTS_DATASET else [],  # Asset output
         )
 
