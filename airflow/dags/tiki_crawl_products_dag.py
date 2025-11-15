@@ -3,6 +3,7 @@ DAG Airflow để crawl sản phẩm Tiki với tối ưu hóa cho dữ liệu l
 
 Tính năng:
 - Dynamic Task Mapping: crawl song song nhiều danh mục
+- Asset-aware Scheduling: sử dụng Dataset để track data dependencies
 - Chia nhỏ tasks: mỗi task một chức năng riêng
 - XCom: chia sẻ dữ liệu giữa các tasks
 - Retry: tự động retry khi lỗi
@@ -12,6 +13,12 @@ Tính năng:
 - Atomic writes: ghi file an toàn, tránh corrupt
 - TaskGroup: nhóm các tasks liên quan
 - Tối ưu: batch processing, rate limiting, caching
+
+Asset/Dataset Tracking:
+- tiki://products/raw: Raw products từ crawl
+- tiki://products/with_detail: Products với chi tiết
+- tiki://products/transformed: Products đã transform
+- tiki://products/final: Products đã load vào database
 """
 
 import json
@@ -28,6 +35,15 @@ from typing import Any
 from airflow.providers.standard.operators.python import PythonOperator
 
 from airflow import DAG
+
+# Import Dataset cho Asset-aware scheduling (Airflow 2.7+)
+try:
+    from airflow.datasets import Dataset
+    DATASET_AVAILABLE = True
+except ImportError:
+    # Fallback cho Airflow < 2.7
+    DATASET_AVAILABLE = False
+    Dataset = None
 
 # Import Variable và TaskGroup với suppress warning
 try:
@@ -265,6 +281,209 @@ else:
             f"Lỗi gốc: {e}"
         ) from e
 
+# Import resilience patterns
+# Import trực tiếp từng module con để tránh vấn đề relative imports
+resilience_module_path = None
+for path in possible_paths:
+    test_path = os.path.join(path, "resilience", "__init__.py")
+    if os.path.exists(test_path):
+        resilience_module_path = os.path.join(path, "resilience")
+        break
+
+if resilience_module_path and os.path.exists(resilience_module_path):
+    try:
+        import importlib.util
+        import sys
+
+        # Thêm parent path (pipelines/crawl) vào sys.path
+        parent_path = os.path.dirname(resilience_module_path)  # .../crawl
+        if parent_path not in sys.path:
+            sys.path.insert(0, parent_path)
+
+        # Thêm grandparent path (pipelines) vào sys.path
+        grandparent_path = os.path.dirname(parent_path)  # .../pipelines
+        if grandparent_path not in sys.path:
+            sys.path.insert(0, grandparent_path)
+
+        # Import trực tiếp từng module con với tên module đầy đủ
+        # Điều này đảm bảo các module có thể import lẫn nhau nếu cần
+        
+        # Tạo package structure trong sys.modules
+        import types
+        if "pipelines" not in sys.modules:
+            sys.modules["pipelines"] = types.ModuleType("pipelines")
+        if "pipelines.crawl" not in sys.modules:
+            sys.modules["pipelines.crawl"] = types.ModuleType("pipelines.crawl")
+        if "pipelines.crawl.resilience" not in sys.modules:
+            sys.modules["pipelines.crawl.resilience"] = types.ModuleType("pipelines.crawl.resilience")
+        
+        # Đảm bảo utils module đã được import (cần thiết cho dead_letter_queue)
+        # utils module đã được import ở trên (dòng 137-156)
+        # Nếu chưa có, tạo fake module
+        if "pipelines.crawl.utils" not in sys.modules and "crawl_utils" in sys.modules:
+            sys.modules["pipelines.crawl.utils"] = sys.modules["crawl_utils"]
+        
+        # 1. Import exceptions trước (không có dependency)
+        exceptions_path = os.path.join(resilience_module_path, "exceptions.py")
+        if os.path.exists(exceptions_path):
+            spec = importlib.util.spec_from_file_location(
+                "pipelines.crawl.resilience.exceptions", exceptions_path
+            )
+            if spec and spec.loader:
+                exceptions_module = importlib.util.module_from_spec(spec)
+                sys.modules["pipelines.crawl.resilience.exceptions"] = exceptions_module
+                spec.loader.exec_module(exceptions_module)
+                CrawlError = exceptions_module.CrawlError
+                classify_error = exceptions_module.classify_error
+            else:
+                raise ImportError(f"Không thể load exceptions module từ {exceptions_path}")
+        else:
+            raise ImportError(f"Không tìm thấy exceptions.py tại {exceptions_path}")
+
+        # 2. Import circuit_breaker (không có dependency)
+        circuit_breaker_path = os.path.join(resilience_module_path, "circuit_breaker.py")
+        if os.path.exists(circuit_breaker_path):
+            spec = importlib.util.spec_from_file_location(
+                "pipelines.crawl.resilience.circuit_breaker", circuit_breaker_path
+            )
+            if spec and spec.loader:
+                circuit_breaker_module = importlib.util.module_from_spec(spec)
+                sys.modules["pipelines.crawl.resilience.circuit_breaker"] = circuit_breaker_module
+                spec.loader.exec_module(circuit_breaker_module)
+                CircuitBreaker = circuit_breaker_module.CircuitBreaker
+                CircuitBreakerOpenError = circuit_breaker_module.CircuitBreakerOpenError
+            else:
+                raise ImportError(f"Không thể load circuit_breaker module")
+        else:
+            raise ImportError(f"Không tìm thấy circuit_breaker.py")
+
+        # 3. Import dead_letter_queue (có thể import từ utils)
+        dlq_path = os.path.join(resilience_module_path, "dead_letter_queue.py")
+        if os.path.exists(dlq_path):
+            spec = importlib.util.spec_from_file_location(
+                "pipelines.crawl.resilience.dead_letter_queue", dlq_path
+            )
+            if spec and spec.loader:
+                dlq_module = importlib.util.module_from_spec(spec)
+                sys.modules["pipelines.crawl.resilience.dead_letter_queue"] = dlq_module
+                spec.loader.exec_module(dlq_module)
+                DeadLetterQueue = dlq_module.DeadLetterQueue
+                get_dlq = dlq_module.get_dlq
+            else:
+                raise ImportError(f"Không thể load dead_letter_queue module")
+        else:
+            raise ImportError(f"Không tìm thấy dead_letter_queue.py")
+
+        # 4. Import graceful_degradation (không có dependency)
+        degradation_path = os.path.join(resilience_module_path, "graceful_degradation.py")
+        if os.path.exists(degradation_path):
+            spec = importlib.util.spec_from_file_location(
+                "pipelines.crawl.resilience.graceful_degradation", degradation_path
+            )
+            if spec and spec.loader:
+                degradation_module = importlib.util.module_from_spec(spec)
+                sys.modules["pipelines.crawl.resilience.graceful_degradation"] = degradation_module
+                spec.loader.exec_module(degradation_module)
+                GracefulDegradation = degradation_module.GracefulDegradation
+                DegradationLevel = degradation_module.DegradationLevel
+                get_service_health = degradation_module.get_service_health
+            else:
+                raise ImportError(f"Không thể load graceful_degradation module")
+        else:
+            raise ImportError(f"Không tìm thấy graceful_degradation.py")
+
+    except Exception as e:
+        # Nếu import lỗi, tạo dummy classes để tránh NameError
+        import warnings
+
+        warnings.warn(f"Không thể import resilience module: {e}", stacklevel=2)
+
+        # Tạo dummy classes
+        class CircuitBreaker:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def call(self, func, *args, **kwargs):
+                return func(*args, **kwargs)
+
+        class CircuitBreakerOpenError(Exception):
+            pass
+
+        class DeadLetterQueue:
+            def add(self, *args, **kwargs):
+                pass
+
+        def get_dlq(*args, **kwargs):
+            return DeadLetterQueue()
+
+        class GracefulDegradation:
+            def should_skip(self):
+                return False
+
+            def record_success(self):
+                pass
+
+            def record_failure(self):
+                pass
+
+        class DegradationLevel:
+            FULL = "full"
+            REDUCED = "reduced"
+            MINIMAL = "minimal"
+            FAILED = "failed"
+
+        def get_service_health():
+            return type("ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()})()
+
+        def classify_error(error, **kwargs):
+            return error
+
+        class CrawlError(Exception):
+            pass
+else:
+    # Fallback: tạo dummy classes
+    class CircuitBreaker:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def call(self, func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+    class CircuitBreakerOpenError(Exception):
+        pass
+
+    class DeadLetterQueue:
+        def add(self, *args, **kwargs):
+            pass
+
+    def get_dlq(*args, **kwargs):
+        return DeadLetterQueue()
+
+    class GracefulDegradation:
+        def should_skip(self):
+            return False
+
+        def record_success(self):
+            pass
+
+        def record_failure(self):
+            pass
+
+    class DegradationLevel:
+        FULL = "full"
+        REDUCED = "reduced"
+        MINIMAL = "minimal"
+        FAILED = "failed"
+
+    def get_service_health():
+        return type("ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()})()
+
+    def classify_error(error, **kwargs):
+        return error
+
+    class CrawlError(Exception):
+        pass
+
 # Cấu hình mặc định
 DEFAULT_ARGS = {
     "owner": "data-team",
@@ -299,16 +518,25 @@ else:
     )
     dag_tags = ["tiki", "crawl", "products", "data-pipeline", "manual"]
 
+# Cấu hình DAG với Asset-aware scheduling (nếu có Dataset)
+# Có thể schedule dựa trên Dataset hoặc schedule thời gian
+dag_schedule_config = dag_schedule
+if DATASET_AVAILABLE and Variable.get("TIKI_USE_ASSET_SCHEDULING", default_var="false").lower() == "true":
+    # Nếu enable asset scheduling, có thể schedule dựa trên upstream datasets
+    # Ví dụ: chạy khi có categories mới (nếu có categories dataset)
+    # Hiện tại giữ schedule thời gian, nhưng có thể thêm dataset dependencies
+    pass
+
 DAG_CONFIG = {
     "dag_id": "tiki_crawl_products",
     "description": dag_description,
     "default_args": DEFAULT_ARGS,
-    "schedule": dag_schedule,
+    "schedule": dag_schedule_config,
     "start_date": datetime(2025, 11, 1),  # Ngày cố định trong quá khứ
     "catchup": False,  # Không chạy lại các task đã bỏ lỡ
     "tags": dag_tags,
     "max_active_runs": 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
-    "max_active_tasks": 20,  # Tối đa 20 tasks song song
+    "max_active_tasks": 10,  # Giảm xuống 10 tasks song song để tránh quá tải khi tạo Selenium driver
 }
 
 # Thư mục dữ liệu
@@ -339,6 +567,26 @@ OUTPUT_FILE_WITH_DETAIL = OUTPUT_DIR / "products_with_detail.json"
 # Progress tracking cho multi-day crawling
 PROGRESS_FILE = OUTPUT_DIR / "crawl_progress.json"
 
+# Định nghĩa Datasets/Assets cho Asset-aware scheduling
+if DATASET_AVAILABLE:
+    # Raw products dataset (từ crawl)
+    RAW_PRODUCTS_DATASET = Dataset("tiki://products/raw")
+    
+    # Products with detail dataset (sau khi crawl detail)
+    PRODUCTS_WITH_DETAIL_DATASET = Dataset("tiki://products/with_detail")
+    
+    # Transformed products dataset (sau transform)
+    TRANSFORMED_PRODUCTS_DATASET = Dataset("tiki://products/transformed")
+    
+    # Final products dataset (sau load vào database)
+    FINAL_PRODUCTS_DATASET = Dataset("tiki://products/final")
+else:
+    # Fallback: tạo None objects nếu Dataset không available
+    RAW_PRODUCTS_DATASET = None
+    PRODUCTS_WITH_DETAIL_DATASET = None
+    TRANSFORMED_PRODUCTS_DATASET = None
+    FINAL_PRODUCTS_DATASET = None
+
 # Tạo thư mục nếu chưa có
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -346,6 +594,126 @@ DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Thread-safe lock cho atomic writes
 write_lock = Lock()
+
+# Khởi tạo resilience patterns
+# Circuit breaker cho Tiki API
+tiki_circuit_breaker = CircuitBreaker(
+    failure_threshold=int(Variable.get("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default_var="5")),
+    recovery_timeout=int(Variable.get("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default_var="60")),
+    expected_exception=Exception,
+    name="tiki_api",
+)
+
+# Dead Letter Queue
+try:
+    # Thử dùng Redis nếu có
+    redis_url = Variable.get("REDIS_URL", default_var="redis://redis:6379/3")
+    tiki_dlq = get_dlq(storage_type="redis", redis_url=redis_url)
+except Exception:
+    # Fallback về file-based
+    try:
+        dlq_path = DATA_DIR / "dlq"
+        tiki_dlq = get_dlq(storage_type="file", storage_path=str(dlq_path))
+    except Exception:
+        # Nếu không tạo được, dùng default
+        tiki_dlq = get_dlq()
+
+# Graceful Degradation cho Tiki service
+service_health = get_service_health()
+tiki_degradation = service_health.register_service(
+    name="tiki",
+    failure_threshold=int(Variable.get("TIKI_DEGRADATION_FAILURE_THRESHOLD", default_var="3")),
+    recovery_threshold=int(Variable.get("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default_var="5")),
+)
+
+# Import modules cho AI summarization và Discord notification
+# Tìm các thư mục: analytics/, ai/, notifications/ ở common/ (sau src/)
+analytics_path = None
+ai_path = None
+notifications_path = None
+
+# Thử nhiều đường dẫn có thể cho các modules ở common/
+common_base_paths = [
+    # Từ /opt/airflow (Docker default - ưu tiên)
+    "/opt/airflow/src/common",
+    # Từ airflow/dags/ lên 2 cấp đến root (local development)
+    os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src", "common")),
+    # Từ airflow/dags/ lên 1 cấp (nếu airflow/ là root)
+    os.path.abspath(os.path.join(dag_file_dir, "..", "src", "common")),
+    # Từ workspace root (nếu mount vào /workspace)
+    "/workspace/src/common",
+    # Từ current working directory
+    os.path.join(os.getcwd(), "src", "common"),
+]
+
+for common_base in common_base_paths:
+    test_analytics = os.path.join(common_base, "analytics", "aggregator.py")
+    test_ai = os.path.join(common_base, "ai", "summarizer.py")
+    test_notifications = os.path.join(common_base, "notifications", "discord.py")
+    
+    if os.path.exists(test_analytics):
+        analytics_path = test_analytics
+    if os.path.exists(test_ai):
+        ai_path = test_ai
+    if os.path.exists(test_notifications):
+        notifications_path = test_notifications
+    
+    if analytics_path and ai_path and notifications_path:
+        break
+
+# Import DataAggregator từ common/analytics/
+if analytics_path and os.path.exists(analytics_path):
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("common.analytics.aggregator", analytics_path)
+        if spec is not None and spec.loader is not None:
+            aggregator_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(aggregator_module)
+            DataAggregator = aggregator_module.DataAggregator
+        else:
+            DataAggregator = None
+    except Exception as e:
+        import warnings
+        warnings.warn(f"Không thể import common.analytics.aggregator module: {e}", stacklevel=2)
+        DataAggregator = None
+else:
+    DataAggregator = None
+
+# Import AISummarizer từ common/ai/
+if ai_path and os.path.exists(ai_path):
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("common.ai.summarizer", ai_path)
+        if spec is not None and spec.loader is not None:
+            ai_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(ai_module)
+            AISummarizer = ai_module.AISummarizer
+        else:
+            AISummarizer = None
+    except Exception as e:
+        import warnings
+        warnings.warn(f"Không thể import common.ai.summarizer module: {e}", stacklevel=2)
+        AISummarizer = None
+else:
+    AISummarizer = None
+
+# Import DiscordNotifier từ common/notifications/
+if notifications_path and os.path.exists(notifications_path):
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("common.notifications.discord", notifications_path)
+        if spec is not None and spec.loader is not None:
+            notifications_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(notifications_module)
+            DiscordNotifier = notifications_module.DiscordNotifier
+        else:
+            DiscordNotifier = None
+    except Exception as e:
+        import warnings
+        warnings.warn(f"Không thể import common.notifications.discord module: {e}", stacklevel=2)
+        DiscordNotifier = None
+else:
+    DiscordNotifier = None
 
 
 def get_logger(context):
@@ -486,6 +854,13 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
     }
 
     try:
+        # Kiểm tra graceful degradation
+        if tiki_degradation.should_skip():
+            result["error"] = "Service đang ở trạng thái FAILED, skip crawl"
+            result["status"] = "degraded"
+            logger.warning(f"⚠️  Service degraded, skip category {category_name}")
+            return result
+
         # Lấy cấu hình từ Airflow Variables
         max_pages = int(
             Variable.get("TIKI_MAX_PAGES_PER_CATEGORY", default_var="20")
@@ -500,17 +875,47 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
         if rate_limit_delay > 0:
             time.sleep(rate_limit_delay)
 
-        # Crawl với timeout
+        # Crawl với timeout và circuit breaker
         start_time = time.time()
 
-        products = crawl_category_products(
-            category_url,
-            max_pages=max_pages if max_pages > 0 else None,
-            use_selenium=use_selenium,
-            cache_dir=str(CACHE_DIR),
-            use_redis_cache=True,  # Sử dụng Redis cache
-            use_rate_limiting=True,  # Sử dụng rate limiting
-        )
+        def _crawl_with_params():
+            """Wrapper function để gọi với circuit breaker"""
+            return crawl_category_products(
+                category_url,
+                max_pages=max_pages if max_pages > 0 else None,
+                use_selenium=use_selenium,
+                cache_dir=str(CACHE_DIR),
+                use_redis_cache=True,  # Sử dụng Redis cache
+                use_rate_limiting=True,  # Sử dụng rate limiting
+            )
+
+        try:
+            # Gọi với circuit breaker
+            products = tiki_circuit_breaker.call(_crawl_with_params)
+            tiki_degradation.record_success()
+        except CircuitBreakerOpenError as e:
+            # Circuit breaker đang mở
+            result["error"] = f"Circuit breaker open: {str(e)}"
+            result["status"] = "circuit_breaker_open"
+            logger.warning(f"⚠️  Circuit breaker open cho category {category_name}: {e}")
+            # Thêm vào DLQ
+            try:
+                crawl_error = classify_error(e, context={"category_url": category_url, "category_id": category_id})
+                tiki_dlq.add(
+                    task_id=f"crawl_category_{category_id}",
+                    task_type="crawl_category",
+                    error=crawl_error,
+                    context={"category_url": category_url, "category_name": category_name, "category_id": category_id},
+                    retry_count=0,
+                )
+                logger.info(f"📬 Đã thêm vào DLQ: crawl_category_{category_id}")
+            except Exception as dlq_error:
+                logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
+            return result
+        except Exception as e:
+            # Ghi nhận failure
+            tiki_degradation.record_failure()
+            raise  # Re-raise để xử lý bên dưới
 
         elapsed = time.time() - start_time
 
@@ -527,13 +932,41 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
     except TimeoutError as e:
         result["error"] = str(e)
         result["status"] = "timeout"
+        tiki_degradation.record_failure()
         logger.error(f"⏱️  Timeout: {e}")
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"category_url": category_url, "category_id": category_id})
+            tiki_dlq.add(
+                task_id=f"crawl_category_{category_id}",
+                task_type="crawl_category",
+                error=crawl_error,
+                context={"category_url": category_url, "category_name": category_name, "category_id": category_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_category_{category_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
         # Không raise để tiếp tục với danh mục khác
 
     except Exception as e:
         result["error"] = str(e)
         result["status"] = "failed"
+        tiki_degradation.record_failure()
         logger.error(f"❌ Lỗi khi crawl category {category_name}: {e}", exc_info=True)
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"category_url": category_url, "category_id": category_id})
+            tiki_dlq.add(
+                task_id=f"crawl_category_{category_id}",
+                task_type="crawl_category",
+                error=crawl_error,
+                context={"category_url": category_url, "category_name": category_name, "category_id": category_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_category_{category_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
         # Không raise để tiếp tục với danh mục khác
 
     return result
@@ -935,7 +1368,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Lấy cấu hình cho multi-day crawling
         # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
-            Variable.get("TIKI_PRODUCTS_PER_DAY", default_var="280")
+            Variable.get("TIKI_PRODUCTS_PER_DAY", default_var="245")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
             Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default_var="0")
@@ -1208,6 +1641,13 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
             logger.warning(f"Không đọc được cache: {e}")
 
     try:
+        # Kiểm tra graceful degradation
+        if tiki_degradation.should_skip():
+            result["error"] = "Service đang ở trạng thái FAILED, skip crawl"
+            result["status"] = "degraded"
+            logger.warning(f"⚠️  Service degraded, skip product {product_id}")
+            return result
+
         # Validate URL
         if not product_url or not product_url.startswith("http"):
             raise ValueError(f"URL không hợp lệ: {product_url}")
@@ -1224,22 +1664,52 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         if rate_limit_delay > 0:
             time.sleep(rate_limit_delay)
 
-        # Crawl với timeout
+        # Crawl với timeout và circuit breaker
         start_time = time.time()
 
         # Sử dụng Selenium để crawl detail (cần thiết cho dynamic content)
         html_content = None
         try:
-            # Thử crawl với retry và timeout ngắn hơn
-            html_content = crawl_product_detail_with_selenium(
-                product_url,
-                save_html=False,
-                verbose=False,  # Không verbose trong Airflow
-                max_retries=2,  # Retry 2 lần
-                timeout=25,  # Timeout 25s (ngắn hơn để fail nhanh hơn)
-                use_redis_cache=True,  # Sử dụng Redis cache
-                use_rate_limiting=True,  # Sử dụng rate limiting
-            )
+            # Wrapper function để gọi với circuit breaker
+            def _crawl_detail_with_params():
+                """Wrapper function để gọi với circuit breaker"""
+                return crawl_product_detail_with_selenium(
+                    product_url,
+                    save_html=False,
+                    verbose=False,  # Không verbose trong Airflow
+                    max_retries=2,  # Retry 2 lần
+                    timeout=25,  # Timeout 25s (ngắn hơn để fail nhanh hơn)
+                    use_redis_cache=True,  # Sử dụng Redis cache
+                    use_rate_limiting=True,  # Sử dụng rate limiting
+                )
+
+            try:
+                # Gọi với circuit breaker
+                html_content = tiki_circuit_breaker.call(_crawl_detail_with_params)
+                tiki_degradation.record_success()
+            except CircuitBreakerOpenError as e:
+                # Circuit breaker đang mở
+                result["error"] = f"Circuit breaker open: {str(e)}"
+                result["status"] = "circuit_breaker_open"
+                logger.warning(f"⚠️  Circuit breaker open cho product {product_id}: {e}")
+                # Thêm vào DLQ
+                try:
+                    crawl_error = classify_error(e, context={"product_url": product_url, "product_id": product_id})
+                    tiki_dlq.add(
+                        task_id=f"crawl_detail_{product_id}",
+                        task_type="crawl_product_detail",
+                        error=crawl_error,
+                        context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                        retry_count=0,
+                    )
+                    logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+                except Exception as dlq_error:
+                    logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
+                return result
+            except Exception as e:
+                # Ghi nhận failure
+                tiki_degradation.record_failure()
+                raise  # Re-raise để xử lý bên dưới
 
             if not html_content or len(html_content) < 100:
                 raise ValueError(
@@ -1287,6 +1757,20 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
                 result["error"] = f"Selenium error: {error_msg}"
                 result["status"] = "failed"
 
+            # Ghi nhận failure và thêm vào DLQ
+            tiki_degradation.record_failure()
+            try:
+                crawl_error = classify_error(selenium_error, context={"product_url": product_url, "product_id": product_id})
+                tiki_dlq.add(
+                    task_id=f"crawl_detail_{product_id}",
+                    task_type="crawl_product_detail",
+                    error=crawl_error,
+                    context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                    retry_count=0,
+                )
+                logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+            except Exception as dlq_error:
+                logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
             # Không raise, return result với status failed
             return result
 
@@ -1303,6 +1787,20 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
             logger.error(f"❌ Lỗi khi extract detail ({error_type}): {error_msg}")
             result["error"] = f"Extract error: {error_msg}"
             result["status"] = "extract_error"
+            # Ghi nhận failure và thêm vào DLQ
+            tiki_degradation.record_failure()
+            try:
+                crawl_error = classify_error(extract_error, context={"product_url": product_url, "product_id": product_id})
+                tiki_dlq.add(
+                    task_id=f"crawl_detail_{product_id}",
+                    task_type="crawl_product_detail",
+                    error=crawl_error,
+                    context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                    retry_count=0,
+                )
+                logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+            except Exception as dlq_error:
+                logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
             return result
 
         elapsed = time.time() - start_time
@@ -1361,18 +1859,60 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
     except TimeoutError as e:
         result["error"] = str(e)
         result["status"] = "timeout"
+        tiki_degradation.record_failure()
         logger.error(f"⏱️  Timeout: {e}")
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"product_url": product_url, "product_id": product_id})
+            tiki_dlq.add(
+                task_id=f"crawl_detail_{product_id}",
+                task_type="crawl_product_detail",
+                error=crawl_error,
+                context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
 
     except ValueError as e:
         result["error"] = str(e)
         result["status"] = "validation_error"
+        tiki_degradation.record_failure()
         logger.error(f"❌ Validation error: {e}")
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"product_url": product_url, "product_id": product_id})
+            tiki_dlq.add(
+                task_id=f"crawl_detail_{product_id}",
+                task_type="crawl_product_detail",
+                error=crawl_error,
+                context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
 
     except Exception as e:
         result["error"] = str(e)
         result["status"] = "failed"
+        tiki_degradation.record_failure()
         error_type = type(e).__name__
         logger.error(f"❌ Lỗi khi crawl detail ({error_type}): {e}", exc_info=True)
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"product_url": product_url, "product_id": product_id})
+            tiki_dlq.add(
+                task_id=f"crawl_detail_{product_id}",
+                task_type="crawl_product_detail",
+                error=crawl_error,
+                context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
         # Không raise để tiếp tục với product khác
 
     # Đảm bảo luôn return result, không bao giờ raise exception
@@ -1452,17 +1992,24 @@ def merge_product_details(**context) -> dict[str, Any]:
             max_found_index = -1
 
             # Binary search để tìm map_index cao nhất có XCom (tối ưu hơn linear search)
-            # Nhưng để đơn giản, thử từ cuối về đầu với step size lớn
+            # Thử một số điểm để tìm max index
+            logger.info(f"🔍 Đang phát hiện số lượng map_index thực tế (dự kiến: {expected_crawl_count})...")
             test_indices = []
             if expected_crawl_count > 1000:
-                # Với số lượng lớn, test một số điểm
+                # Với số lượng lớn, test một số điểm để tìm max
                 step = max(100, expected_crawl_count // 20)
+                test_indices = list(range(0, expected_crawl_count, step))
+                test_indices.append(expected_crawl_count - 1)
+            elif expected_crawl_count > 100:
+                # Với số lượng trung bình, test nhiều điểm hơn
+                step = max(50, expected_crawl_count // 10)
                 test_indices = list(range(0, expected_crawl_count, step))
                 test_indices.append(expected_crawl_count - 1)
             else:
                 # Với số lượng nhỏ, test tất cả
                 test_indices = list(range(expected_crawl_count))
 
+            # Tìm từ cuối về đầu để tìm max index nhanh hơn
             for test_idx in reversed(test_indices):
                 try:
                     result = ti.xcom_pull(
@@ -1470,21 +2017,30 @@ def merge_product_details(**context) -> dict[str, Any]:
                     )
                     if result:
                         max_found_index = test_idx
+                        logger.info(f"✅ Tìm thấy XCom tại map_index {test_idx}")
                         break
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"   Không có XCom tại map_index {test_idx}: {e}")
                     pass
 
             if max_found_index >= 0:
                 # Tìm chính xác map_index cao nhất bằng cách tìm từ max_found_index
-                # Thử từ max_found_index đến expected_crawl_count
-                for idx in range(max_found_index, min(max_found_index + 200, expected_crawl_count)):
+                # Chỉ thử thêm tối đa 200 map_index tiếp theo để tránh quá lâu
+                logger.info(f"🔍 Đang tìm chính xác max index từ {max_found_index}...")
+                search_range = min(max_found_index + 200, expected_crawl_count)
+                for idx in range(max_found_index + 1, search_range):
                     try:
                         result = ti.xcom_pull(
                             task_ids=task_id, key="return_value", map_indexes=[idx]
                         )
                         if result:
                             max_found_index = idx
-                    except Exception:
+                        else:
+                            # Nếu không có result, dừng lại (có thể đã đến cuối)
+                            break
+                    except Exception as e:
+                        # Nếu exception, có thể là hết map_index
+                        logger.debug(f"   Không có XCom tại map_index {idx}: {e}")
                         break
 
                 actual_crawl_count = max_found_index + 1
@@ -1493,8 +2049,10 @@ def merge_product_details(**context) -> dict[str, Any]:
                 )
             else:
                 logger.warning(
-                    f"⚠️  Không tìm thấy XCom nào, sử dụng expected_crawl_count: {expected_crawl_count}"
+                    f"⚠️  Không tìm thấy XCom nào, sử dụng expected_crawl_count: {expected_crawl_count}. "
+                    f"Có thể tất cả tasks đã fail hoặc chưa chạy xong."
                 )
+                actual_crawl_count = expected_crawl_count
 
         if actual_crawl_count == 0:
             logger.warning("⚠️  Không có products nào được crawl detail, bỏ qua merge detail")
@@ -1521,9 +2079,16 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         # Lấy theo batch để tối ưu
         batch_size = 100
-        for start_idx in range(0, actual_crawl_count, batch_size):
+        total_batches = (actual_crawl_count + batch_size - 1) // batch_size
+        logger.info(f"📦 Sẽ lấy {actual_crawl_count} results trong {total_batches} batches (mỗi batch {batch_size})")
+        
+        for batch_num, start_idx in enumerate(range(0, actual_crawl_count, batch_size), 1):
             end_idx = min(start_idx + batch_size, actual_crawl_count)
             batch_map_indexes = list(range(start_idx, end_idx))
+
+            # Heartbeat: log mỗi batch để Airflow biết task vẫn đang chạy
+            if batch_num % 5 == 0 or batch_num == 1:
+                logger.info(f"💓 [Heartbeat] Đang xử lý batch {batch_num}/{total_batches} (index {start_idx}-{end_idx-1})...")
 
             try:
                 batch_results = ti.xcom_pull(
@@ -1543,11 +2108,14 @@ def merge_product_details(**context) -> dict[str, Any]:
                         # Single result
                         all_detail_results.append(batch_results)
 
-                if (start_idx // batch_size + 1) % 10 == 0:
-                    logger.info(f"Đã lấy {len(all_detail_results)}/{actual_crawl_count} results...")
+                # Log progress mỗi 5 batches hoặc mỗi 10% progress
+                if batch_num % max(5, total_batches // 10) == 0:
+                    progress_pct = (len(all_detail_results) / actual_crawl_count * 100) if actual_crawl_count > 0 else 0
+                    logger.info(f"📊 Đã lấy {len(all_detail_results)}/{actual_crawl_count} results ({progress_pct:.1f}%)...")
             except Exception as e:
-                logger.warning(f"Lỗi khi lấy batch {start_idx}-{end_idx}: {e}")
-                # Thử lấy từng map_index riêng lẻ
+                logger.warning(f"⚠️  Lỗi khi lấy batch {start_idx}-{end_idx}: {e}")
+                logger.warning(f"   Sẽ thử lấy từng map_index riêng lẻ trong batch này...")
+                # Thử lấy từng map_index riêng lẻ trong batch này
                 for map_index in batch_map_indexes:
                     try:
                         result = ti.xcom_pull(
@@ -1562,43 +2130,86 @@ def merge_product_details(**context) -> dict[str, Any]:
                                 all_detail_results.append(result)
                     except Exception as e2:
                         # Bỏ qua nếu không lấy được (có thể task chưa chạy xong hoặc failed)
-                        logger.debug(f"Không lấy được map_index {map_index}: {e2}")
+                        logger.debug(f"   Không lấy được map_index {map_index}: {e2}")
                         pass
 
         logger.info(
-            f"Lấy được {len(all_detail_results)} detail results (mong đợi {actual_crawl_count})"
+            f"✅ Lấy được {len(all_detail_results)} detail results qua batch (mong đợi {actual_crawl_count})"
         )
 
-        # Nếu không lấy đủ, thử lấy từng map_index một (chỉ trong phạm vi actual_crawl_count)
+        # Nếu không lấy đủ hoặc có lỗi khi lấy batch, thử lấy từng map_index một để bù vào phần thiếu
+        # KHÔNG reset all_detail_results, chỉ lấy thêm những map_index chưa có
         if len(all_detail_results) < actual_crawl_count * 0.8:  # Nếu thiếu hơn 20%
+            # Log cảnh báo nếu thiếu nhiều
+            missing_pct = ((actual_crawl_count - len(all_detail_results)) / actual_crawl_count * 100) if actual_crawl_count > 0 else 0
+            if missing_pct > 30:
+                logger.warning(
+                    f"⚠️  Thiếu {missing_pct:.1f}% results ({actual_crawl_count - len(all_detail_results)}/{actual_crawl_count}), "
+                    f"có thể do nhiều tasks failed hoặc timeout"
+                )
             logger.warning(
-                f"Chỉ lấy được {len(all_detail_results)}/{actual_crawl_count} results, thử lấy từng map_index..."
+                f"⚠️  Chỉ lấy được {len(all_detail_results)}/{actual_crawl_count} results qua batch, "
+                f"thử lấy từng map_index để bù vào phần thiếu..."
             )
-            all_detail_results = []  # Reset và lấy lại
+            
+            # Tạo set các product_id đã có để tránh duplicate
+            existing_product_ids = set()
+            for result in all_detail_results:
+                if isinstance(result, dict) and result.get("product_id"):
+                    existing_product_ids.add(result.get("product_id"))
+            
+            missing_count = actual_crawl_count - len(all_detail_results)
+            logger.info(f"📊 Cần lấy thêm ~{missing_count} results từ {actual_crawl_count} map_indexes")
+            
+            # Heartbeat: log thường xuyên trong vòng lặp dài
+            fetched_count = 0
             for map_index in range(actual_crawl_count):  # CHỈ lấy từ 0 đến actual_crawl_count - 1
+                # Heartbeat mỗi 100 items để tránh timeout
+                if map_index % 100 == 0 and map_index > 0:
+                    logger.info(
+                        f"💓 [Heartbeat] Đang lấy từng map_index: {map_index}/{actual_crawl_count} "
+                        f"(đã lấy {len(all_detail_results)}/{actual_crawl_count})..."
+                    )
+                
                 try:
                     result = ti.xcom_pull(
                         task_ids=task_id, key="return_value", map_indexes=[map_index]
                     )
                     if result:
-                        if isinstance(result, list):
-                            all_detail_results.extend([r for r in result if r])
-                        elif isinstance(result, dict):
-                            # Nếu là dict, có thể là dict chứa result
-                            all_detail_results.append(result)
-                        else:
-                            all_detail_results.append(result)
+                        # Chỉ thêm nếu chưa có (tránh duplicate)
+                        product_id_to_check = None
+                        if isinstance(result, dict):
+                            product_id_to_check = result.get("product_id")
+                        elif isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
+                            product_id_to_check = result[0].get("product_id")
+                        
+                        # Chỉ thêm nếu product_id chưa có trong danh sách
+                        if not product_id_to_check or product_id_to_check not in existing_product_ids:
+                            if isinstance(result, list):
+                                for r in result:
+                                    if isinstance(r, dict) and r.get("product_id"):
+                                        existing_product_ids.add(r.get("product_id"))
+                                all_detail_results.extend([r for r in result if r])
+                            elif isinstance(result, dict):
+                                if product_id_to_check:
+                                    existing_product_ids.add(product_id_to_check)
+                                all_detail_results.append(result)
+                            else:
+                                all_detail_results.append(result)
+                            fetched_count += 1
 
-                    if (map_index + 1) % 500 == 0:
+                    # Log progress mỗi 200 items
+                    if (map_index + 1) % 200 == 0:
+                        progress_pct = (len(all_detail_results) / actual_crawl_count * 100) if actual_crawl_count > 0 else 0
                         logger.info(
-                            f"Đã lấy {len(all_detail_results)}/{actual_crawl_count} results (từng map_index)..."
+                            f"📊 Đã lấy tổng {len(all_detail_results)}/{actual_crawl_count} results ({progress_pct:.1f}%) từng map_index..."
                         )
                 except Exception as e:
                     # Bỏ qua nếu không lấy được (có thể task chưa chạy xong hoặc failed)
-                    logger.debug(f"Không lấy được map_index {map_index}: {e}")
+                    logger.debug(f"   Không lấy được map_index {map_index}: {e}")
                     pass
 
-            logger.info(f"Sau khi lấy từng map_index: {len(all_detail_results)} detail results")
+            logger.info(f"✅ Sau khi lấy từng map_index: tổng {len(all_detail_results)} detail results (lấy thêm {fetched_count})")
 
         # Tạo dict để lookup nhanh
         detail_dict = {}
@@ -1608,93 +2219,220 @@ def merge_product_details(**context) -> dict[str, Any]:
             "cached": 0,
             "failed": 0,
             "timeout": 0,
+            "degraded": 0,
+            "circuit_breaker_open": 0,
         }
 
+        logger.info(f"📊 Đang xử lý {len(all_detail_results)} detail results...")
+        
+        # Kiểm tra nếu có quá nhiều kết quả None hoặc invalid
+        valid_results = 0
+        error_details = {}  # Thống kê chi tiết các loại lỗi
+        failed_products = []  # Danh sách products bị fail để phân tích
+        
         for detail_result in all_detail_results:
             if detail_result and isinstance(detail_result, dict):
                 product_id = detail_result.get("product_id")
                 if product_id:
                     detail_dict[product_id] = detail_result
+                    valid_results += 1
                     status = detail_result.get("status", "failed")
+                    error = detail_result.get("error")
+                    
                     if status == "success":
                         stats["with_detail"] += 1
                     elif status == "cached":
                         stats["cached"] += 1
                     elif status == "timeout":
                         stats["timeout"] += 1
+                        error_details["timeout"] = error_details.get("timeout", 0) + 1
+                        failed_products.append({"product_id": product_id, "status": status, "error": error})
+                    elif status == "degraded":
+                        stats["degraded"] += 1
+                        error_details["degraded"] = error_details.get("degraded", 0) + 1
+                        failed_products.append({"product_id": product_id, "status": status, "error": error})
+                    elif status == "circuit_breaker_open":
+                        stats["circuit_breaker_open"] += 1
+                        error_details["circuit_breaker_open"] = error_details.get("circuit_breaker_open", 0) + 1
+                        failed_products.append({"product_id": product_id, "status": status, "error": error})
+                    elif status == "selenium_error":
+                        stats["failed"] += 1
+                        error_details["selenium_error"] = error_details.get("selenium_error", 0) + 1
+                        failed_products.append({"product_id": product_id, "status": status, "error": error})
+                    elif status == "extract_error":
+                        stats["failed"] += 1
+                        error_details["extract_error"] = error_details.get("extract_error", 0) + 1
+                        failed_products.append({"product_id": product_id, "status": status, "error": error})
+                    elif status == "network_error":
+                        stats["failed"] += 1
+                        error_details["network_error"] = error_details.get("network_error", 0) + 1
+                        failed_products.append({"product_id": product_id, "status": status, "error": error})
+                    elif status == "memory_error":
+                        stats["failed"] += 1
+                        error_details["memory_error"] = error_details.get("memory_error", 0) + 1
+                        failed_products.append({"product_id": product_id, "status": status, "error": error})
+                    elif status == "validation_error":
+                        stats["failed"] += 1
+                        error_details["validation_error"] = error_details.get("validation_error", 0) + 1
+                        failed_products.append({"product_id": product_id, "status": status, "error": error})
                     else:
                         stats["failed"] += 1
+                        error_type = status if status else "unknown"
+                        error_details[error_type] = error_details.get(error_type, 0) + 1
+                        failed_products.append({"product_id": product_id, "status": status, "error": error})
+        
+        logger.info(f"📊 Có {valid_results} detail results hợp lệ từ {len(all_detail_results)} results")
+        
+        if valid_results < len(all_detail_results):
+            logger.warning(
+                f"⚠️  Có {len(all_detail_results) - valid_results} results không hợp lệ hoặc thiếu product_id"
+            )
+        
+        # Log chi tiết về các lỗi
+        if error_details:
+            logger.info("=" * 70)
+            logger.info("📋 PHÂN TÍCH CÁC LOẠI LỖI")
+            logger.info("=" * 70)
+            for error_type, count in sorted(error_details.items(), key=lambda x: x[1], reverse=True):
+                logger.info(f"  ❌ {error_type}: {count} products")
+            logger.info("=" * 70)
+            
+            # Log một số products bị fail đầu tiên để phân tích
+            if failed_products:
+                logger.info(f"📝 Mẫu {min(10, len(failed_products))} products bị fail đầu tiên:")
+                for i, failed in enumerate(failed_products[:10], 1):
+                    logger.info(f"  {i}. Product ID: {failed['product_id']}, Status: {failed['status']}, Error: {failed.get('error', 'N/A')[:100]}")
+        
+        # Lưu thông tin lỗi vào stats để phân tích sau
+        stats["error_details"] = error_details
+        stats["failed_products_count"] = len(failed_products)
 
         # Merge detail vào products
+        # CHỈ lưu products có detail VÀ status == "success" (không lưu cached hoặc failed)
         products_with_detail = []
+        products_without_detail = 0
+        products_cached = 0
+        products_failed = 0
+        
         for product in products:
             product_id = product.get("product_id")
             detail_result = detail_dict.get(product_id)
 
             if detail_result and detail_result.get("detail"):
-                # Merge detail vào product
-                detail = detail_result["detail"]
-                product_with_detail = {**product}
+                status = detail_result.get("status", "failed")
+                
+                # CHỈ lưu products có status == "success" (đã crawl thành công, không phải từ cache)
+                if status == "success":
+                    # Merge detail vào product
+                    detail = detail_result["detail"]
+                    product_with_detail = {**product}
 
-                # Update các trường từ detail
-                if detail.get("price"):
-                    product_with_detail["price"] = detail["price"]
-                if detail.get("rating"):
-                    product_with_detail["rating"] = detail["rating"]
-                if detail.get("description"):
-                    product_with_detail["description"] = detail["description"]
-                if detail.get("specifications"):
-                    product_with_detail["specifications"] = detail["specifications"]
-                if detail.get("images"):
-                    product_with_detail["images"] = detail["images"]
-                if detail.get("brand"):
-                    product_with_detail["brand"] = detail["brand"]
-                if detail.get("seller"):
-                    product_with_detail["seller"] = detail["seller"]
-                if detail.get("stock"):
-                    product_with_detail["stock"] = detail["stock"]
-                if detail.get("shipping"):
-                    product_with_detail["shipping"] = detail["shipping"]
-                # Cập nhật sales_count: ưu tiên từ detail, nếu không có thì dùng từ product gốc
-                # Chỉ cần có trong một trong hai là đủ
-                if detail.get("sales_count") is not None:
-                    product_with_detail["sales_count"] = detail["sales_count"]
-                elif product.get("sales_count") is not None:
-                    product_with_detail["sales_count"] = product["sales_count"]
-                # Nếu cả hai đều không có, giữ None (đã có trong product gốc)
+                    # Update các trường từ detail
+                    if detail.get("price"):
+                        product_with_detail["price"] = detail["price"]
+                    if detail.get("rating"):
+                        product_with_detail["rating"] = detail["rating"]
+                    if detail.get("description"):
+                        product_with_detail["description"] = detail["description"]
+                    if detail.get("specifications"):
+                        product_with_detail["specifications"] = detail["specifications"]
+                    if detail.get("images"):
+                        product_with_detail["images"] = detail["images"]
+                    if detail.get("brand"):
+                        product_with_detail["brand"] = detail["brand"]
+                    if detail.get("seller"):
+                        product_with_detail["seller"] = detail["seller"]
+                    if detail.get("stock"):
+                        product_with_detail["stock"] = detail["stock"]
+                    if detail.get("shipping"):
+                        product_with_detail["shipping"] = detail["shipping"]
+                    # Cập nhật sales_count: ưu tiên từ detail, nếu không có thì dùng từ product gốc
+                    # Chỉ cần có trong một trong hai là đủ
+                    if detail.get("sales_count") is not None:
+                        product_with_detail["sales_count"] = detail["sales_count"]
+                    elif product.get("sales_count") is not None:
+                        product_with_detail["sales_count"] = product["sales_count"]
+                    # Nếu cả hai đều không có, giữ None (đã có trong product gốc)
 
-                # Thêm metadata
-                product_with_detail["detail_crawled_at"] = detail_result.get("crawled_at")
-                product_with_detail["detail_status"] = detail_result.get("status")
+                    # Thêm metadata
+                    product_with_detail["detail_crawled_at"] = detail_result.get("crawled_at")
+                    product_with_detail["detail_status"] = status
 
-                products_with_detail.append(product_with_detail)
+                    products_with_detail.append(product_with_detail)
+                elif status == "cached":
+                    # Không lưu products từ cache (chỉ lưu products đã crawl mới)
+                    products_cached += 1
+                else:
+                    # Không lưu products bị fail
+                    products_failed += 1
             else:
-                # Giữ nguyên product nếu không có detail
-                # Đảm bảo sales_count có trong product (kể cả None)
-                if "sales_count" not in product:
-                    product["sales_count"] = None
-                products_with_detail.append(product)
+                # Không lưu products không có detail
+                products_without_detail += 1
 
         logger.info("=" * 70)
         logger.info("📊 THỐNG KÊ MERGE DETAIL")
         logger.info("=" * 70)
-        logger.info(f"📦 Tổng products: {stats['total_products']}")
-        logger.info(f"✅ Có detail: {stats['with_detail']}")
-        logger.info(f"📦 Cache: {stats['cached']}")
+        logger.info(f"📦 Tổng products ban đầu: {stats['total_products']}")
+        logger.info(f"✅ Có detail (success): {stats['with_detail']}")
+        logger.info(f"📦 Có detail (cached): {stats['cached']}")
+        logger.info(f"⚠️  Degraded: {stats['degraded']}")
+        logger.info(f"⚡ Circuit breaker open: {stats['circuit_breaker_open']}")
         logger.info(f"❌ Failed: {stats['failed']}")
         logger.info(f"⏱️  Timeout: {stats['timeout']}")
+        
+        # Tính tổng có detail (success + cached)
+        total_with_detail = stats['with_detail'] + stats['cached']
+        if stats['total_products'] > 0:
+            detail_coverage = (total_with_detail / stats['total_products'] * 100)
+            logger.info(f"📈 Tỷ lệ có detail: {total_with_detail}/{stats['total_products']} ({detail_coverage:.1f}%)")
+        
+        logger.info("=" * 70)
+        logger.info(f"💾 Products được lưu vào file: {len(products_with_detail)} (chỉ lưu products có status='success')")
+        logger.info(f"📦 Products từ cache (đã bỏ qua): {products_cached}")
+        logger.info(f"❌ Products bị fail (đã bỏ qua): {products_failed}")
+        logger.info(f"🚫 Products không có detail (đã bỏ qua): {products_without_detail}")
         logger.info("=" * 70)
 
+        # Cập nhật stats để phản ánh số lượng products thực tế được lưu
+        stats["products_saved"] = len(products_with_detail)
+        stats["products_skipped"] = products_without_detail
+        stats["products_cached_skipped"] = products_cached
+        stats["products_failed_skipped"] = products_failed
+        
         result = {
             "products": products_with_detail,
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
+            "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_without_detail} không có detail)",
         }
 
         return result
 
+    except ValueError as e:
+        logger.error(f"❌ Validation error khi merge details: {e}", exc_info=True)
+        # Nếu là validation error (thiếu products), return empty result thay vì raise
+        return {
+            "products": [],
+            "stats": {
+                "total_products": 0,
+                "with_detail": 0,
+                "cached": 0,
+                "failed": 0,
+                "timeout": 0,
+            },
+            "merged_at": datetime.now().isoformat(),
+            "error": str(e),
+        }
     except Exception as e:
         logger.error(f"❌ Lỗi khi merge details: {e}", exc_info=True)
+        # Log chi tiết context để debug
+        logger.error(f"   Context keys: {list(context.keys()) if context else 'None'}")
+        try:
+            ti = context.get("ti")
+            if ti:
+                logger.error(f"   Task ID: {ti.task_id}, DAG ID: {ti.dag_id}, Run ID: {ti.run_id}")
+        except Exception:
+            pass
         raise
 
 
@@ -1728,15 +2466,18 @@ def save_products_with_detail(**context) -> str:
 
         products = merge_result.get("products", [])
         stats = merge_result.get("stats", {})
+        note = merge_result.get("note", "Crawl từ Airflow DAG với product details")
 
-        logger.info(f"Đang lưu {len(products)} products với detail...")
+        logger.info(f"💾 Đang lưu {len(products)} products với detail...")
+        if stats.get("products_skipped"):
+            logger.info(f"🚫 Đã bỏ qua {stats.get('products_skipped')} products không có detail")
 
         # Chuẩn bị dữ liệu
         output_data = {
             "total_products": len(products),
             "stats": stats,
             "crawled_at": datetime.now().isoformat(),
-            "note": "Crawl từ Airflow DAG với product details",
+            "note": note,
             "products": products,
         }
 
@@ -1750,6 +2491,253 @@ def save_products_with_detail(**context) -> str:
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi save products with detail: {e}", exc_info=True)
+        raise
+
+
+def transform_products(**context) -> dict[str, Any]:
+    """
+    Task: Transform dữ liệu sản phẩm (normalize, validate, compute fields)
+
+    Returns:
+        Dict: Kết quả transform với transformed products và stats
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("🔄 TASK: Transform Products")
+    logger.info("=" * 70)
+
+    try:
+        ti = context["ti"]
+        
+        # Lấy file từ save_products_with_detail
+        output_file = None
+        try:
+            output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
+        except Exception:
+            try:
+                output_file = ti.xcom_pull(task_ids="save_products_with_detail")
+            except Exception:
+                pass
+
+        if not output_file:
+            output_file = str(OUTPUT_FILE_WITH_DETAIL)
+
+        if not os.path.exists(output_file):
+            raise FileNotFoundError(f"Không tìm thấy file: {output_file}")
+
+        logger.info(f"📂 Đang đọc file: {output_file}")
+
+        # Đọc products từ file
+        with open(output_file, encoding="utf-8") as f:
+            data = json.load(f)
+        
+        products = data.get("products", [])
+        logger.info(f"📊 Tổng số products: {len(products)}")
+
+        # Import DataTransformer
+        try:
+            # Tìm đường dẫn transform module
+            transform_paths = [
+                "/opt/airflow/src/pipelines/transform/transformer.py",
+                os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "transform", "transformer.py")),
+                os.path.join(os.getcwd(), "src", "pipelines", "transform", "transformer.py"),
+            ]
+            
+            transformer_path = None
+            for path in transform_paths:
+                if os.path.exists(path):
+                    transformer_path = path
+                    break
+            
+            if not transformer_path:
+                raise ImportError("Không tìm thấy transformer.py")
+
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("transformer", transformer_path)
+            transformer_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(transformer_module)
+            DataTransformer = transformer_module.DataTransformer
+
+            # Transform products
+            transformer = DataTransformer(
+                strict_validation=False,
+                remove_invalid=True,
+                normalize_fields=True
+            )
+
+            transformed_products, transform_stats = transformer.transform_products(
+                products, validate=True
+            )
+
+            logger.info("=" * 70)
+            logger.info("📊 TRANSFORM RESULTS")
+            logger.info("=" * 70)
+            logger.info(f"✅ Valid products: {transform_stats['valid_products']}")
+            logger.info(f"❌ Invalid products: {transform_stats['invalid_products']}")
+            logger.info(f"🔄 Duplicates removed: {transform_stats['duplicates_removed']}")
+            logger.info("=" * 70)
+
+            # Lưu transformed products vào file
+            processed_dir = DATA_DIR / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            transformed_file = processed_dir / "products_transformed.json"
+
+            output_data = {
+                "transformed_at": datetime.now().isoformat(),
+                "source_file": output_file,
+                "total_products": len(products),
+                "transform_stats": transform_stats,
+                "products": transformed_products,
+            }
+
+            atomic_write_file(str(transformed_file), output_data, **context)
+            logger.info(f"✅ Đã lưu {len(transformed_products)} transformed products vào: {transformed_file}")
+
+            return {
+                "transformed_file": str(transformed_file),
+                "transformed_count": len(transformed_products),
+                "transform_stats": transform_stats,
+            }
+
+        except ImportError as e:
+            logger.error(f"❌ Không thể import DataTransformer: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi transform products: {e}", exc_info=True)
+            raise
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi trong transform_products task: {e}", exc_info=True)
+        raise
+
+
+def load_products(**context) -> dict[str, Any]:
+    """
+    Task: Load dữ liệu đã transform vào database
+
+    Returns:
+        Dict: Kết quả load với stats
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("💾 TASK: Load Products to Database")
+    logger.info("=" * 70)
+
+    try:
+        ti = context["ti"]
+        
+        # Lấy transformed file từ transform_products task
+        transform_result = None
+        try:
+            transform_result = ti.xcom_pull(task_ids="transform_and_load.transform_products")
+        except Exception:
+            try:
+                transform_result = ti.xcom_pull(task_ids="transform_products")
+            except Exception:
+                pass
+
+        if not transform_result:
+            # Fallback: tìm file transformed
+            processed_dir = DATA_DIR / "processed"
+            transformed_file = processed_dir / "products_transformed.json"
+            if transformed_file.exists():
+                transform_result = {"transformed_file": str(transformed_file)}
+            else:
+                raise ValueError("Không tìm thấy transform result từ XCom hoặc file")
+
+        transformed_file = transform_result.get("transformed_file")
+        if not transformed_file or not os.path.exists(transformed_file):
+            raise FileNotFoundError(f"Không tìm thấy file transformed: {transformed_file}")
+
+        logger.info(f"📂 Đang đọc transformed file: {transformed_file}")
+
+        # Đọc transformed products
+        with open(transformed_file, encoding="utf-8") as f:
+            data = json.load(f)
+        
+        products = data.get("products", [])
+        logger.info(f"📊 Tổng số products để load: {len(products)}")
+
+        # Import DataLoader
+        try:
+            # Tìm đường dẫn load module
+            load_paths = [
+                "/opt/airflow/src/pipelines/load/loader.py",
+                os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "load", "loader.py")),
+                os.path.join(os.getcwd(), "src", "pipelines", "load", "loader.py"),
+            ]
+            
+            loader_path = None
+            for path in load_paths:
+                if os.path.exists(path):
+                    loader_path = path
+                    break
+            
+            if not loader_path:
+                raise ImportError("Không tìm thấy loader.py")
+
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("loader", loader_path)
+            loader_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(loader_module)
+            DataLoader = loader_module.DataLoader
+
+            # Lấy database config từ Airflow Variables
+            db_host = Variable.get("POSTGRES_HOST", default_var="postgres")
+            db_port = int(Variable.get("POSTGRES_PORT", default_var="5432"))
+            db_name = Variable.get("POSTGRES_DB", default_var="crawl_data")
+            db_user = Variable.get("POSTGRES_USER", default_var="airflow")
+            db_password = Variable.get("POSTGRES_PASSWORD", default_var="airflow")
+
+            # Load vào database
+            loader = DataLoader(
+                host=db_host,
+                port=db_port,
+                database=db_name,
+                user=db_user,
+                password=db_password,
+                batch_size=100,
+                enable_db=True,
+            )
+
+            try:
+                # Lưu vào processed directory
+                processed_dir = DATA_DIR / "processed"
+                processed_dir.mkdir(parents=True, exist_ok=True)
+                final_file = processed_dir / "products_final.json"
+
+                load_stats = loader.load_products(
+                    products,
+                    save_to_file=str(final_file),
+                    upsert=True,
+                    validate_before_load=True,
+                )
+
+                logger.info("=" * 70)
+                logger.info("📊 LOAD RESULTS")
+                logger.info("=" * 70)
+                logger.info(f"✅ DB loaded: {load_stats['db_loaded']}")
+                logger.info(f"✅ File loaded: {load_stats['file_loaded']}")
+                logger.info(f"❌ Failed: {load_stats['failed_count']}")
+                logger.info("=" * 70)
+
+                return {
+                    "final_file": str(final_file),
+                    "load_stats": load_stats,
+                }
+
+            finally:
+                loader.close()
+
+        except ImportError as e:
+            logger.error(f"❌ Không thể import DataLoader: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi load products: {e}", exc_info=True)
+            raise
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi trong load_products task: {e}", exc_info=True)
         raise
 
 
@@ -1842,6 +2830,155 @@ def validate_data(**context) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"❌ Lỗi khi validate data: {e}", exc_info=True)
         raise
+
+
+def aggregate_and_notify(**context) -> dict[str, Any]:
+    """
+    Task: Tổng hợp dữ liệu với AI và gửi thông báo qua Discord
+
+    Returns:
+        Dict: Kết quả tổng hợp và gửi thông báo
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("🤖 TASK: Aggregate Data and Send Discord Notification")
+    logger.info("=" * 70)
+
+    result = {
+        "aggregation_success": False,
+        "ai_summary_success": False,
+        "discord_notification_success": False,
+        "summary": None,
+        "ai_summary": None,
+    }
+
+    try:
+        # Lấy đường dẫn file products_with_detail.json
+        output_file = str(OUTPUT_FILE_WITH_DETAIL)
+        
+        if not os.path.exists(output_file):
+            logger.warning(f"⚠️  File không tồn tại: {output_file}")
+            logger.info("   Thử lấy từ XCom...")
+            
+            ti = context["ti"]
+            try:
+                output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
+                logger.info(f"   Lấy từ XCom: {output_file}")
+            except Exception:
+                try:
+                    output_file = ti.xcom_pull(task_ids="save_products_with_detail")
+                    logger.info(f"   Lấy từ XCom (không có prefix): {output_file}")
+                except Exception as e:
+                    logger.warning(f"   Không lấy được từ XCom: {e}")
+
+        if not output_file or not os.path.exists(output_file):
+            raise FileNotFoundError(f"Không tìm thấy file output: {output_file}")
+
+        logger.info(f"📊 Đang tổng hợp dữ liệu từ: {output_file}")
+
+        # 1. Tổng hợp dữ liệu
+        if DataAggregator is None:
+            logger.warning("⚠️  DataAggregator module chưa được import, bỏ qua tổng hợp")
+        else:
+            try:
+                aggregator = DataAggregator(output_file)
+                if aggregator.load_data():
+                    summary = aggregator.aggregate()
+                    result["summary"] = summary
+                    result["aggregation_success"] = True
+                    logger.info("✅ Tổng hợp dữ liệu thành công")
+                    
+                    # Log thống kê
+                    stats = summary.get("statistics", {})
+                    logger.info(f"   📦 Tổng sản phẩm: {stats.get('total_products', 0)}")
+                    logger.info(f"   ✅ Có chi tiết: {stats.get('with_detail', 0)}")
+                    logger.info(f"   ❌ Thất bại: {stats.get('failed', 0)}")
+                    logger.info(f"   ⏱️  Timeout: {stats.get('timeout', 0)}")
+                else:
+                    logger.error("❌ Không thể load dữ liệu để tổng hợp")
+            except Exception as e:
+                logger.error(f"❌ Lỗi khi tổng hợp dữ liệu: {e}", exc_info=True)
+
+        # 2. Tổng hợp với AI
+        if AISummarizer is None:
+            logger.warning("⚠️  AISummarizer module chưa được import, bỏ qua tổng hợp AI")
+        elif result.get("summary"):
+            try:
+                summarizer = AISummarizer()
+                ai_summary = summarizer.summarize_data(result["summary"])
+                if ai_summary:
+                    result["ai_summary"] = ai_summary
+                    result["ai_summary_success"] = True
+                    logger.info("✅ Tổng hợp với AI thành công")
+                    logger.info(f"   Độ dài summary: {len(ai_summary)} ký tự")
+                else:
+                    logger.warning("⚠️  Không nhận được summary từ AI")
+            except Exception as e:
+                logger.error(f"❌ Lỗi khi tổng hợp với AI: {e}", exc_info=True)
+
+        # 3. Gửi thông báo qua Discord
+        if DiscordNotifier is None:
+            logger.warning("⚠️  DiscordNotifier module chưa được import, bỏ qua gửi thông báo")
+        else:
+            try:
+                notifier = DiscordNotifier()
+                
+                # Chuẩn bị nội dung
+                if result.get("ai_summary"):
+                    # Gửi với AI summary
+                    stats = result.get("summary", {}).get("statistics", {})
+                    success = notifier.send_summary(
+                        ai_summary=result["ai_summary"],
+                        stats=stats,
+                    )
+                    if success:
+                        result["discord_notification_success"] = True
+                        logger.info("✅ Đã gửi thông báo qua Discord (với AI summary)")
+                    else:
+                        logger.warning("⚠️  Không thể gửi thông báo qua Discord")
+                elif result.get("summary"):
+                    # Gửi với summary thông thường (không có AI)
+                    stats = result.get("summary", {}).get("statistics", {})
+                    content = f"""📊 **Tổng hợp dữ liệu Tiki**
+
+**Thống kê:**
+- 📦 Tổng sản phẩm: {stats.get('total_products', 0)}
+- ✅ Có chi tiết: {stats.get('with_detail', 0)}
+- ❌ Thất bại: {stats.get('failed', 0)}
+- ⏱️ Timeout: {stats.get('timeout', 0)}
+- 💾 Đã lưu: {stats.get('products_saved', 0)}
+
+**Thời gian crawl:** {result.get('summary', {}).get('metadata', {}).get('crawled_at', 'N/A')}
+"""
+                    success = notifier.send_message(
+                        content=content,
+                        title="📊 Tổng hợp dữ liệu Tiki",
+                        color=0x3498DB,
+                    )
+                    if success:
+                        result["discord_notification_success"] = True
+                        logger.info("✅ Đã gửi thông báo qua Discord (không có AI)")
+                    else:
+                        logger.warning("⚠️  Không thể gửi thông báo qua Discord")
+                else:
+                    logger.warning("⚠️  Không có dữ liệu để gửi thông báo")
+            except Exception as e:
+                logger.error(f"❌ Lỗi khi gửi thông báo Discord: {e}", exc_info=True)
+
+        logger.info("=" * 70)
+        logger.info("📊 KẾT QUẢ TỔNG HỢP VÀ THÔNG BÁO")
+        logger.info("=" * 70)
+        logger.info(f"✅ Tổng hợp dữ liệu: {'Thành công' if result['aggregation_success'] else 'Thất bại'}")
+        logger.info(f"✅ Tổng hợp AI: {'Thành công' if result['ai_summary_success'] else 'Thất bại'}")
+        logger.info(f"✅ Gửi Discord: {'Thành công' if result['discord_notification_success'] else 'Thất bại'}")
+        logger.info("=" * 70)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi tổng hợp và gửi thông báo: {e}", exc_info=True)
+        # Không fail task, chỉ log lỗi
+        return result
 
 
 # Tạo DAG duy nhất với schedule có thể config qua Variable
@@ -1955,6 +3092,7 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=save_products,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
             pool="default_pool",
+            outlets=[RAW_PRODUCTS_DATASET] if RAW_PRODUCTS_DATASET else [],  # Asset output
         )
 
     # TaskGroup: Crawl Product Details (Dynamic Task Mapping)
@@ -2082,9 +3220,10 @@ with DAG(**DAG_CONFIG) as dag:
         task_merge_product_details = PythonOperator(
             task_id="merge_product_details",
             python_callable=merge_product_details,
-            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=60),  # Tăng timeout lên 60 phút cho nhiều products
             pool="default_pool",
             trigger_rule="all_done",  # Chạy khi tất cả upstream tasks done
+            # Tăng heartbeat interval để tránh timeout khi xử lý nhiều dữ liệu
         )
 
         task_save_products_with_detail = PythonOperator(
@@ -2092,6 +3231,7 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=save_products_with_detail,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
             pool="default_pool",
+            outlets=[PRODUCTS_WITH_DETAIL_DATASET] if PRODUCTS_WITH_DETAIL_DATASET else [],  # Asset output
         )
 
         # Dependencies trong detail group
@@ -2103,6 +3243,29 @@ with DAG(**DAG_CONFIG) as dag:
             >> task_save_products_with_detail
         )
 
+    # TaskGroup: Transform and Load
+    with TaskGroup("transform_and_load", tooltip="Transform và Load dữ liệu vào database") as transform_load_group:
+        task_transform_products = PythonOperator(
+            task_id="transform_products",
+            python_callable=transform_products,
+            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            pool="default_pool",
+            ins=[PRODUCTS_WITH_DETAIL_DATASET] if PRODUCTS_WITH_DETAIL_DATASET else [],  # Asset input
+            outlets=[TRANSFORMED_PRODUCTS_DATASET] if TRANSFORMED_PRODUCTS_DATASET else [],  # Asset output
+        )
+
+        task_load_products = PythonOperator(
+            task_id="load_products",
+            python_callable=load_products,
+            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            pool="default_pool",
+            ins=[TRANSFORMED_PRODUCTS_DATASET] if TRANSFORMED_PRODUCTS_DATASET else [],  # Asset input
+            outlets=[FINAL_PRODUCTS_DATASET] if FINAL_PRODUCTS_DATASET else [],  # Asset output
+        )
+
+        # Dependencies trong transform_load group
+        task_transform_products >> task_load_products
+
     # TaskGroup: Validate
     with TaskGroup("validate", tooltip="Validate dữ liệu") as validate_group:
         task_validate_data = PythonOperator(
@@ -2112,8 +3275,18 @@ with DAG(**DAG_CONFIG) as dag:
             pool="default_pool",
         )
 
+    # TaskGroup: Aggregate and Notify
+    with TaskGroup("aggregate_and_notify", tooltip="Tổng hợp dữ liệu và gửi thông báo") as aggregate_group:
+        task_aggregate_and_notify = PythonOperator(
+            task_id="aggregate_and_notify",
+            python_callable=aggregate_and_notify,
+            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            pool="default_pool",
+            trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
+        )
+
     # Định nghĩa dependencies
-    # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Validate
+    # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Transform -> Load -> Validate -> Aggregate
 
     # Dependencies giữa các TaskGroup
     # Load categories trước, sau đó prepare crawl kwargs
@@ -2128,9 +3301,8 @@ with DAG(**DAG_CONFIG) as dag:
     # Merge -> save products
     task_merge_products >> task_save_products
 
-    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> validate
+    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> validate -> aggregate and notify
     task_save_products >> task_prepare_detail
     # Dependencies trong detail group đã được định nghĩa ở dòng 1800
-    # Chỉ cần thêm dependency từ save_products -> prepare_detail (đã có ở trên)
-    # và từ save_products_with_detail -> validate
-    task_save_products_with_detail >> task_validate_data
+    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify
+    task_save_products_with_detail >> task_transform_products >> task_load_products >> task_validate_data >> task_aggregate_and_notify

@@ -20,15 +20,15 @@
 
 ## 📖 Giới thiệu
 
-**Tiki Data Pipeline** là một hệ thống tự động hóa để crawl dữ liệu sản phẩm từ Tiki.vn sử dụng Apache Airflow và Selenium. Dự án cung cấp:
+**Tiki Data Pipeline** là một hệ thống ETL (Extract, Transform, Load) hoàn chỉnh để crawl, xử lý và lưu trữ dữ liệu sản phẩm từ Tiki.vn. Dự án cung cấp:
 
-- ✅ Crawl danh mục sản phẩm đệ quy từ Tiki.vn
-- ✅ Crawl danh sách sản phẩm từ các danh mục
-- ✅ Crawl chi tiết sản phẩm (giá, đánh giá, mô tả, thông số kỹ thuật, hình ảnh, v.v.)
-- ✅ Tự động hóa workflow với Airflow DAG
-- ✅ Xử lý song song với Dynamic Task Mapping
-- ✅ Caching và rate limiting để tối ưu hiệu suất
-- ✅ Export dữ liệu dưới dạng JSON
+- ✅ **Extract**: Crawl danh mục, danh sách sản phẩm và chi tiết từ Tiki.vn
+- ✅ **Transform**: Normalize, validate và tính toán các trường dữ liệu
+- ✅ **Load**: Lưu dữ liệu vào PostgreSQL database và file JSON
+- ✅ **Orchestration**: Tự động hóa workflow với Apache Airflow DAG
+- ✅ **Asset-aware Scheduling**: Data-aware scheduling với Dataset/Asset tracking
+- ✅ **Performance**: Xử lý song song, caching, rate limiting
+- ✅ **Data Quality**: Validation, error handling, computed fields
 
 ---
 
@@ -38,14 +38,15 @@
 
 | 🎯 Feature | 📝 Description |
 |:---------:|:-------------|
-| 🛍️ **Tiki Product Crawler** | Crawl tự động sản phẩm từ Tiki.vn với Selenium |
-| 🔄 **Apache Airflow 3.1.2** | Workflow orchestration với Dynamic Task Mapping |
-| 🕷️ **Selenium Automation** | Crawl dynamic content với Selenium WebDriver + Chrome |
-| 📊 **Category & Product Details** | Crawl đầy đủ: danh mục, danh sách sản phẩm và chi tiết |
-| ⚡ **Optimized Performance** | Caching, rate limiting, batch processing |
-| 🔄 **Dynamic Task Mapping** | Crawl song song nhiều categories/products |
-| 💾 **Data Export** | JSON output với đầy đủ thông tin sản phẩm |
-| 📈 **Sales Count Tracking** | Theo dõi số lượng bán của từng sản phẩm |
+| 🛍️ **Product Crawler** | Crawl tự động sản phẩm từ Tiki.vn với Selenium |
+| 🔄 **Data Transformer** | Normalize, validate và tính computed fields |
+| 💾 **Data Loader** | Load dữ liệu vào PostgreSQL database |
+| ⚡ **Airflow DAG** | Workflow orchestration với Dynamic Task Mapping |
+| 📊 **Asset Tracking** | Data-aware scheduling với Dataset/Asset dependencies |
+| 🕷️ **Selenium Automation** | Crawl dynamic content với Selenium WebDriver |
+| 📊 **Full Pipeline** | Crawl → Transform → Load end-to-end |
+| ⚡ **Performance** | Caching, rate limiting, batch processing |
+| 🔍 **Data Quality** | Validation, error handling, duplicate removal |
 
 </div>
 
@@ -159,47 +160,150 @@ python src/pipelines/crawl/crawl_products_detail.py
 
 ```mermaid
 graph TB
-    subgraph "Airflow Services"
-        A[Airflow Scheduler]
-        B[Airflow API Server]
-        C[Airflow Worker]
-        D[Airflow Triggerer]
-        E[DAG Processor]
+    subgraph "🌐 External Source"
+        TIKI[Tiki.vn<br/>Website]
     end
     
-    subgraph "Databases"
-        F[(PostgreSQL)]
-        G[(Redis)]
+    subgraph "☁️ Airflow Orchestration"
+        SCHEDULER[Airflow Scheduler<br/>Schedule & Trigger]
+        API[Airflow API Server<br/>Web UI :8080]
+        WORKER[Airflow Worker<br/>Execute Tasks]
+        PROCESSOR[DAG Processor<br/>Parse DAGs]
     end
     
-    subgraph "Crawling Pipeline"
-        H[Crawl Categories]
-        I[Crawl Products]
-        J[Crawl Product Details]
+    subgraph "💾 Storage Layer"
+        POSTGRES[(PostgreSQL<br/>Metadata + Products Data)]
+        REDIS[(Redis<br/>Cache + Message Broker)]
     end
     
-    A --> F
-    A --> G
-    B --> F
-    C --> G
-    C --> F
-    C --> H
-    C --> I
-    C --> J
+    subgraph "📥 Extract Pipeline"
+        CRAWL_CAT[Crawl Categories<br/>Recursive]
+        CRAWL_PROD[Crawl Products<br/>Dynamic Task Mapping]
+        CRAWL_DETAIL[Crawl Details<br/>Selenium]
+    end
     
-    style F fill:#336791
-    style G fill:#DC382D
-    style A fill:#017CEE
+    subgraph "🔄 Transform Pipeline"
+        TRANSFORM[Transform Products<br/>Normalize + Validate]
+        COMPUTE[Compute Fields<br/>Revenue, Popularity]
+    end
+    
+    subgraph "📤 Load Pipeline"
+        LOAD[Load to Database<br/>PostgreSQL + JSON]
+    end
+    
+    subgraph "📊 Data Storage"
+        RAW_JSON[Raw Data<br/>JSON Files]
+        PROCESSED_JSON[Processed Data<br/>JSON Files]
+        DB_TABLE[(Products Table<br/>PostgreSQL)]
+    end
+    
+    subgraph "📈 Asset Tracking"
+        ASSET_RAW[tiki://products/raw<br/>Dataset]
+        ASSET_DETAIL[tiki://products/with_detail<br/>Dataset]
+        ASSET_TRANS[tiki://products/transformed<br/>Dataset]
+        ASSET_FINAL[tiki://products/final<br/>Dataset]
+    end
+    
+    subgraph "✅ Validation & Analytics"
+        VALIDATE[Validate Data]
+        AGGREGATE[Aggregate & Notify]
+    end
+    
+    %% External to Crawl
+    TIKI -->|HTTP/HTTPS| CRAWL_CAT
+    TIKI -->|HTTP/HTTPS| CRAWL_PROD
+    TIKI -->|Selenium| CRAWL_DETAIL
+    
+    %% Airflow Orchestration
+    SCHEDULER --> POSTGRES
+    SCHEDULER --> REDIS
+    API --> POSTGRES
+    WORKER --> REDIS
+    WORKER --> POSTGRES
+    PROCESSOR --> SCHEDULER
+    
+    %% Extract Flow
+    SCHEDULER --> CRAWL_CAT
+    CRAWL_CAT --> CRAWL_PROD
+    CRAWL_PROD --> RAW_JSON
+    CRAWL_PROD --> ASSET_RAW
+    CRAWL_PROD --> CRAWL_DETAIL
+    CRAWL_DETAIL --> RAW_JSON
+    CRAWL_DETAIL --> ASSET_DETAIL
+    
+    %% Transform Flow
+    ASSET_DETAIL -.->|Asset Trigger| TRANSFORM
+    TRANSFORM --> COMPUTE
+    COMPUTE --> PROCESSED_JSON
+    COMPUTE --> ASSET_TRANS
+    
+    %% Load Flow
+    ASSET_TRANS -.->|Asset Trigger| LOAD
+    LOAD --> DB_TABLE
+    LOAD --> PROCESSED_JSON
+    LOAD --> ASSET_FINAL
+    
+    %% Validation
+    ASSET_FINAL -.->|Asset Trigger| VALIDATE
+    VALIDATE --> AGGREGATE
+    
+    %% Cache
+    REDIS -.->|Cache| CRAWL_DETAIL
+    REDIS -.->|Cache| CRAWL_PROD
+    
+    %% Styling
+    classDef external fill:#FF6B6B,stroke:#C92A2A,stroke-width:2px,color:#fff
+    classDef airflow fill:#017CEE,stroke:#0056B3,stroke-width:2px,color:#fff
+    classDef storage fill:#336791,stroke:#1E4A6B,stroke-width:2px,color:#fff
+    classDef extract fill:#51CF66,stroke:#2F9E44,stroke-width:2px,color:#fff
+    classDef transform fill:#FFD43B,stroke:#F59F00,stroke-width:2px,color:#000
+    classDef load fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
+    classDef data fill:#845EF7,stroke:#5F3DC4,stroke-width:2px,color:#fff
+    classDef asset fill:#90EE90,stroke:#2F9E44,stroke-width:2px,color:#000
+    classDef validate fill:#FF8787,stroke:#C92A2A,stroke-width:2px,color:#fff
+    
+    class TIKI external
+    class SCHEDULER,API,WORKER,PROCESSOR airflow
+    class POSTGRES,REDIS storage
+    class CRAWL_CAT,CRAWL_PROD,CRAWL_DETAIL extract
+    class TRANSFORM,COMPUTE transform
+    class LOAD load
+    class RAW_JSON,PROCESSED_JSON,DB_TABLE data
+    class ASSET_RAW,ASSET_DETAIL,ASSET_TRANS,ASSET_FINAL asset
+    class VALIDATE,AGGREGATE validate
 ```
 
+**📥 Download diagram files để import vào các tool:**
+- [Mermaid format](docs/architecture.mmd) - Import vào [Mermaid Live Editor](https://mermaid.live), VS Code, hoặc GitHub
+- [PlantUML format](docs/architecture.puml) - Import vào [PlantUML Online](http://www.plantuml.com/plantuml/uml/), IntelliJ IDEA, hoặc VS Code
+- [Draw.io format](docs/architecture.drawio.xml) - Import vào [Draw.io](https://app.diagrams.net/) hoặc [diagrams.net](https://app.diagrams.net/)
+
+Xem thêm: [Architecture Documentation](docs/ARCHITECTURE.md)
+
 </div>
+
+### ETL Pipeline Flow
+
+```
+1. Extract (Crawl)
+   ├── Categories → Products → Product Details
+   └── Output: Raw JSON files + Asset: tiki://products/raw, tiki://products/with_detail
+
+2. Transform
+   ├── Normalize, Validate, Compute Fields
+   └── Output: Transformed JSON + Asset: tiki://products/transformed
+
+3. Load
+   ├── PostgreSQL Database + JSON Backup
+   └── Output: Final Data + Asset: tiki://products/final
+```
 
 ### Services Overview
 
 | Service | Purpose | Port |
 |:-------:|:--------|:----:|
-| **PostgreSQL** | Airflow metadata database | 5432 (internal) |
-| **Redis** | Celery message broker | 6379 (internal) |
+| **PostgreSQL** | Airflow metadata + Products data | 5432 (internal) |
+| **Redis** | Celery message broker + Cache | 6379 (internal) |
 | **Airflow API Server** | Web UI và REST API | 8080 |
 | **Airflow Scheduler** | Schedule và trigger DAGs | - |
 | **Airflow Worker** | Execute tasks | - |
@@ -232,23 +336,29 @@ tiki-data-pipeline/
 │   └── Dockerfile                 # Custom Airflow image với Chrome
 ├── 💻 src/                         # Source code
 │   └── pipelines/
-│       └── crawl/                 # Crawling pipelines
-│           ├── crawl_categories_recursive.py    # Crawl categories đệ quy
-│           ├── crawl_products.py                 # Crawl danh sách sản phẩm
-│           ├── crawl_products_detail.py          # Crawl chi tiết sản phẩm
-│           ├── extract_category_link_selenium.py # Extract category links
-│           ├── build_category_tree.py            # Xây dựng category tree
-│           └── config.py                         # Configuration
-└── 📊 data/                        # Dữ liệu crawl
-    ├── raw/                        # Raw data
-    │   ├── categories_recursive_optimized.json   # Danh mục đã crawl
-    │   ├── categories_tree.json                  # Category tree
-    │   └── products/              # Products data
-    │       ├── products.json                      # Danh sách sản phẩm
-    │       ├── products_with_detail.json         # Sản phẩm với chi tiết
-    │       └── cache/                             # Cache files
-    ├── demo/                      # Demo/test data
-    └── test_output/              # Test outputs
+│       ├── crawl/                 # Crawling pipelines
+│       │   ├── crawl_categories_recursive.py    # Crawl categories đệ quy
+│       │   ├── crawl_products.py                 # Crawl danh sách sản phẩm
+│       │   ├── crawl_products_detail.py          # Crawl chi tiết sản phẩm
+│       │   └── config.py                         # Configuration
+│       ├── transform/             # Transform pipeline
+│       │   └── transformer.py                    # Data transformer
+│       └── load/                  # Load pipeline
+│           └── loader.py                         # Data loader
+├── 📊 data/                        # Dữ liệu
+│   ├── raw/                        # Raw data (từ crawl)
+│   │   ├── categories_recursive_optimized.json
+│   │   └── products/
+│   │       ├── products.json
+│   │       └── products_with_detail.json
+│   └── processed/                 # Processed data (sau transform)
+│       ├── products_transformed.json
+│       └── products_final.json
+└── 📚 demos/                       # Demo files
+    ├── demo_step1_crawl.py         # Demo crawl
+    ├── demo_step2_transform.py     # Demo transform
+    ├── demo_step3_load.py           # Demo load
+    └── demo_e2e_full.py            # Demo full pipeline
 ```
 
 ---
@@ -335,20 +445,75 @@ python src/pipelines/crawl/crawl_products_detail.py
 }
 ```
 
-### 4. Airflow DAG
+### 4. Transform Products
 
-DAG tự động hóa toàn bộ quy trình:
+Transform dữ liệu sản phẩm đã crawl:
+
+```bash
+python src/pipelines/transform/transformer.py
+```
+
+**Chức năng**:
+- Normalize fields (trim, parse numbers, format)
+- Flatten nested structures (price, rating, seller)
+- Validate dữ liệu
+- Tính computed fields (revenue, popularity score, value score)
+
+**Output**: `data/processed/products_transformed.json`
+
+### 5. Load Products
+
+Load dữ liệu đã transform vào database:
+
+```bash
+python src/pipelines/load/loader.py
+```
+
+**Chức năng**:
+- Load vào PostgreSQL database
+- Lưu vào file JSON (backup)
+- Batch processing
+- Upsert (update nếu đã tồn tại)
+
+**Output**: `data/processed/products_final.json`
+
+### 6. Airflow DAG (Full Pipeline)
+
+DAG tự động hóa toàn bộ quy trình ETL với **Asset-aware Scheduling**:
 
 1. **Load Categories**: Load danh sách categories từ file
 2. **Crawl Products**: Crawl products từ categories (Dynamic Task Mapping)
 3. **Merge Products**: Merge và lưu danh sách products
+   - 📊 Tạo Asset: `tiki://products/raw`
 4. **Crawl Product Details**: Crawl chi tiết products (Dynamic Task Mapping)
 5. **Merge Details**: Merge details vào products
-6. **Save Final Data**: Lưu dữ liệu cuối cùng
-7. **Validate Data**: Validate dữ liệu đã crawl
+   - 📊 Tạo Asset: `tiki://products/with_detail`
+6. **Transform Products**: Normalize, validate và tính computed fields
+   - 📊 Tạo Asset: `tiki://products/transformed`
+7. **Load Products**: Load vào PostgreSQL database
+   - 📊 Tạo Asset: `tiki://products/final`
+8. **Validate Data**: Validate dữ liệu đã load
 
 **Truy cập**: http://localhost:8080  
 **DAG ID**: `tiki_crawl_products`
+
+**Asset Tracking**: DAG sử dụng Dataset/Asset để track data dependencies. Xem thêm: [docs/ASSET_SCHEDULING.md](docs/ASSET_SCHEDULING.md)
+
+### 7. Demo Files (Quick Start)
+
+Chạy từng bước hoặc toàn bộ pipeline:
+
+```bash
+# Chạy từng bước
+python demos/demo_step1_crawl.py      # Crawl
+python demos/demo_step2_transform.py   # Transform
+python demos/demo_step3_load.py        # Load
+
+# Hoặc chạy toàn bộ
+python demos/demo_e2e_full.py
+```
+
+Xem thêm: [demos/README.md](demos/README.md)
 
 ---
 
@@ -371,6 +536,12 @@ Cấu hình các biến sau trong Airflow UI (Admin → Variables):
 | `TIKI_DETAIL_RATE_LIMIT_DELAY` | `2.0` | Delay cho detail crawl (giây) |
 | `TIKI_DETAIL_CRAWL_TIMEOUT` | `60` | Timeout crawl detail (giây) |
 | `TIKI_SAVE_BATCH_SIZE` | `10000` | Số sản phẩm mỗi batch khi save |
+| `POSTGRES_HOST` | `postgres` | PostgreSQL host |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_DB` | `crawl_data` | Database name |
+| `POSTGRES_USER` | `airflow` | Database user |
+| `POSTGRES_PASSWORD` | `airflow` | Database password |
+| `TIKI_USE_ASSET_SCHEDULING` | `false` | Enable Asset-aware scheduling |
 
 ### Environment Variables
 
@@ -380,6 +551,13 @@ Các biến môi trường có thể được set trong `.env` hoặc `docker-co
 # Airflow
 AIRFLOW_UID=50000
 AIRFLOW_PROJ_DIR=.
+
+# Database (cho Transform & Load)
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=crawl_data
+POSTGRES_USER=airflow
+POSTGRES_PASSWORD=airflow
 
 # Python packages (sẽ được cài tự động)
 _PIP_ADDITIONAL_REQUIREMENTS=selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0
@@ -393,11 +571,12 @@ _PIP_ADDITIONAL_REQUIREMENTS=selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.
 
 | Use Case | Description | Example |
 |:--------:|:-----------|:--------|
-| 🛍️ **Product Monitoring** | Theo dõi sản phẩm Tiki | Price tracking, Stock monitoring |
-| 📊 **Market Analysis** | Phân tích thị trường | Category trends, Sales analysis |
-| 💰 **Price Comparison** | So sánh giá sản phẩm | Competitor analysis |
-| 📈 **Data Analytics** | Phân tích dữ liệu sản phẩm | Product performance, Reviews analysis |
-| 🔄 **Automated Data Collection** | Thu thập dữ liệu tự động | Daily product updates |
+| 🛍️ **Product Monitoring** | Theo dõi sản phẩm Tiki | Price tracking, Stock monitoring, Sales trends |
+| 📊 **Market Analysis** | Phân tích thị trường | Category trends, Sales analysis, Popularity metrics |
+| 💰 **Price Comparison** | So sánh giá sản phẩm | Competitor analysis, Discount tracking |
+| 📈 **Data Analytics** | Phân tích dữ liệu sản phẩm | Product performance, Reviews analysis, Revenue estimation |
+| 🔄 **Automated ETL** | Thu thập và xử lý dữ liệu tự động | Daily product updates, Data transformation, Database loading |
+| 📊 **Business Intelligence** | Báo cáo và dashboard | Product insights, Market trends, Performance metrics |
 
 </div>
 
@@ -408,11 +587,14 @@ _PIP_ADDITIONAL_REQUIREMENTS=selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.
 <div align="center">
 
 ✅ **Rate Limiting** - Delay giữa các requests để tránh bị block  
-✅ **Caching** - Cache dữ liệu đã crawl để tránh crawl lại  
-✅ **Error Handling** - Retry mechanism và error logging  
+✅ **Caching** - Multi-level caching (Redis + File) để tối ưu performance  
+✅ **Error Handling** - Retry mechanism, circuit breaker, dead letter queue  
 ✅ **Resource Management** - Giới hạn tài nguyên cho từng service  
-✅ **Data Validation** - Validate dữ liệu trước khi lưu  
+✅ **Data Validation** - Validate dữ liệu ở mọi stage (crawl, transform, load)  
 ✅ **Atomic Writes** - Ghi file an toàn để tránh corruption  
+✅ **Asset Tracking** - Sử dụng Dataset/Asset để track data dependencies  
+✅ **Batch Processing** - Xử lý dữ liệu theo batch để tối ưu memory  
+✅ **Data Quality** - Normalize, validate và compute fields tự động  
 
 </div>
 
@@ -440,102 +622,24 @@ _PIP_ADDITIONAL_REQUIREMENTS=selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.
 
 > ⚠️ **Rate Limiting**: Tiki có thể rate limit, sử dụng delay giữa các requests  
 > 🔒 **Selenium**: Cần Chrome/Chromium driver để chạy Selenium (được cài tự động trong Docker)  
-> 📊 **Data Volume**: Với hàng nghìn sản phẩm, cần đủ disk space  
-> 🐳 **Docker**: Đảm bảo đủ tài nguyên hệ thống (RAM, CPU)  
-> ⏱️ **Timeout**: Cấu hình timeout phù hợp cho từng task  
-> 💾 **Cache**: Sử dụng cache để tránh crawl lại dữ liệu đã có  
+> 📊 **Data Volume**: Với hàng nghìn sản phẩm, cần đủ disk space (10GB+ recommended)  
+> 🐳 **Docker**: Đảm bảo đủ tài nguyên hệ thống (RAM 8GB+, CPU 4+ cores)  
+> ⏱️ **Timeout**: Cấu hình timeout phù hợp cho từng task (crawl, transform, load)  
+> 💾 **Cache**: Sử dụng multi-level cache (Redis + File) để tránh crawl lại  
+> 📊 **Asset Tracking**: Sử dụng Dataset/Asset để track data flow và dependencies  
+> 🔄 **ETL Pipeline**: Pipeline hoàn chỉnh từ Extract → Transform → Load  
 
 </div>
-
----
-
-## 🐛 Troubleshooting
-
-### Lỗi: ModuleNotFoundError: No module named 'selenium'
-
-**Giải pháp**: Rebuild Docker images để cài packages:
-
-```bash
-docker-compose build --no-cache
-docker-compose up -d
-```
-
-### Lỗi: Chrome/ChromeDriver không tìm thấy
-
-**Giải pháp**: Custom Dockerfile đã cài Chrome tự động. Nếu vẫn lỗi:
-
-```bash
-# Rebuild Airflow image
-docker-compose build airflow-worker airflow-scheduler
-docker-compose up -d
-```
-
-### Lỗi: DAG không hiển thị trong Airflow UI
-
-**Giải pháp**: 
-1. Kiểm tra DAG file có trong `airflow/dags/`
-2. Kiểm tra syntax errors: `docker-compose exec airflow-scheduler airflow dags list`
-3. Restart DAG processor: `docker-compose restart airflow-dag-processor`
-
-### Lỗi: Connection timeout khi crawl
-
-**Giải pháp**: 
-1. Tăng timeout trong Airflow Variables
-2. Kiểm tra network connection
-3. Giảm rate limit delay nếu quá chậm
 
 ---
 
 ## 📚 Documentation
 
 - [Airflow Documentation](https://airflow.apache.org/docs/)
+- [Airflow Asset Scheduling](https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/asset-scheduling.html)
 - [Selenium Documentation](https://www.selenium.dev/documentation/)
 - [Docker Compose Documentation](https://docs.docker.com/compose/)
+- [Asset Scheduling Guide](docs/ASSET_SCHEDULING.md) - Hướng dẫn sử dụng Asset-aware scheduling
 
 ---
 
-## 🤝 Contributing
-
-<div align="center">
-
-Chúng tôi hoan nghênh mọi đóng góp! 🎉
-
-[📖 Contributing Guidelines](docs/CONTRIBUTING.md) | [🐛 Report Bug](https://github.com/your-username/tiki-data-pipeline/issues) | [💡 Request Feature](https://github.com/your-username/tiki-data-pipeline/issues)
-
-</div>
-
----
-
-## 📝 License
-
-<div align="center">
-
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-</div>
-
----
-
-## 🌟 Star History
-
-<div align="center">
-
-[![Star History Chart](https://api.star-history.com/svg?repos=your-username/tiki-data-pipeline&type=Date)](https://star-history.com/#your-username/tiki-data-pipeline&Date)
-
-</div>
-
----
-
-<div align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,0A192F,172A45,64FFDA&height=100&section=footer"/>
-  
-  <p>Made with ❤️ for the Data Engineering community</p>
-  
-  <p>
-    <img src="https://img.shields.io/github/stars/your-username/tiki-data-pipeline?style=social&label=Star"/>
-    <img src="https://img.shields.io/github/forks/your-username/tiki-data-pipeline?style=social&label=Fork"/>
-    <img src="https://img.shields.io/github/watchers/your-username/tiki-data-pipeline?style=social&label=Watch"/>
-  </p>
-</div>

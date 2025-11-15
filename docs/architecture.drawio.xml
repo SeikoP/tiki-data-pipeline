@@ -1,0 +1,198 @@
+<mxfile host="app.diagrams.net" modified="2025-01-15T00:00:00.000Z" agent="5.0" version="21.0.0" etag="drawio-architecture">
+  <diagram name="Tiki Data Pipeline Architecture" id="tiki-pipeline">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- External Source -->
+        <mxCell id="tiki" value="Tiki.vn&#xa;Website" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF6B6B;strokeColor=#C92A2A;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="50" y="50" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Airflow Services -->
+        <mxCell id="scheduler" value="Airflow Scheduler&#xa;Schedule &amp; Trigger" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#017CEE;strokeColor=#0056B3;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="300" y="50" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="api" value="Airflow API Server&#xa;Web UI :8080" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#017CEE;strokeColor=#0056B3;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="300" y="130" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="worker" value="Airflow Worker&#xa;Execute Tasks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#017CEE;strokeColor=#0056B3;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="300" y="210" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Storage -->
+        <mxCell id="postgres" value="PostgreSQL&#xa;Metadata + Data" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#336791;strokeColor=#1E4A6B;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="550" y="50" width="120" height="80" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="redis" value="Redis&#xa;Cache + Broker" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#DC382D;strokeColor=#B02A20;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="550" y="150" width="120" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Extract Pipeline -->
+        <mxCell id="crawl_cat" value="Crawl Categories&#xa;Recursive" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#51CF66;strokeColor=#2F9E44;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="50" y="300" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="crawl_prod" value="Crawl Products&#xa;Dynamic Task Mapping" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#51CF66;strokeColor=#2F9E44;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="50" y="380" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="crawl_detail" value="Crawl Details&#xa;Selenium" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#51CF66;strokeColor=#2F9E44;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="50" y="460" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Transform Pipeline -->
+        <mxCell id="transform" value="Transform Products&#xa;Normalize + Validate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFD43B;strokeColor=#F59F00;fontColor=#000000;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="300" y="380" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="compute" value="Compute Fields&#xa;Revenue, Popularity" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFD43B;strokeColor=#F59F00;fontColor=#000000;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="300" y="460" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Load Pipeline -->
+        <mxCell id="load" value="Load to Database&#xa;PostgreSQL + JSON" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#74C0FC;strokeColor=#1971C2;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="550" y="420" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Data Storage -->
+        <mxCell id="raw_json" value="Raw Data&#xa;JSON Files" style="shape=folder;whiteSpace=wrap;html=1;fillColor=#845EF7;strokeColor=#5F3DC4;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="800" y="300" width="120" height="80" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="processed_json" value="Processed Data&#xa;JSON Files" style="shape=folder;whiteSpace=wrap;html=1;fillColor=#845EF7;strokeColor=#5F3DC4;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="800" y="400" width="120" height="80" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="db_table" value="Products Table&#xa;PostgreSQL" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#336791;strokeColor=#1E4A6B;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="800" y="500" width="120" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Asset Tracking -->
+        <mxCell id="asset_raw" value="tiki://products/raw" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#90EE90;strokeColor=#2F9E44;fontColor=#000000;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1050" y="300" width="150" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="asset_detail" value="tiki://products/with_detail" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#90EE90;strokeColor=#2F9E44;fontColor=#000000;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1050" y="350" width="150" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="asset_trans" value="tiki://products/transformed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#90EE90;strokeColor=#2F9E44;fontColor=#000000;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1050" y="400" width="150" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="asset_final" value="tiki://products/final" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#90EE90;strokeColor=#2F9E44;fontColor=#000000;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1050" y="450" width="150" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- Validation -->
+        <mxCell id="validate" value="Validate Data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF8787;strokeColor=#C92A2A;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="550" y="600" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="aggregate" value="Aggregate &amp; Notify" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF8787;strokeColor=#C92A2A;fontColor=#FFFFFF;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="550" y="680" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Connections -->
+        <mxCell id="edge1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#000000;" edge="1" parent="1" source="tiki" target="crawl_cat">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#000000;" edge="1" parent="1" source="tiki" target="crawl_prod">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#000000;" edge="1" parent="1" source="tiki" target="crawl_detail">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#017CEE;" edge="1" parent="1" source="scheduler" target="postgres">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#017CEE;" edge="1" parent="1" source="scheduler" target="redis">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#017CEE;" edge="1" parent="1" source="worker" target="crawl_cat">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#51CF66;" edge="1" parent="1" source="crawl_cat" target="crawl_prod">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#51CF66;" edge="1" parent="1" source="crawl_prod" target="raw_json">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#51CF66;dashed=1;" edge="1" parent="1" source="crawl_prod" target="asset_raw">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#51CF66;" edge="1" parent="1" source="crawl_prod" target="crawl_detail">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#51CF66;" edge="1" parent="1" source="crawl_detail" target="raw_json">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#51CF66;dashed=1;" edge="1" parent="1" source="crawl_detail" target="asset_detail">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge13" value="Asset Trigger" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#90EE90;dashed=1;" edge="1" parent="1" source="asset_detail" target="transform">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#FFD43B;" edge="1" parent="1" source="transform" target="compute">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#FFD43B;" edge="1" parent="1" source="compute" target="processed_json">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#FFD43B;dashed=1;" edge="1" parent="1" source="compute" target="asset_trans">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge17" value="Asset Trigger" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#90EE90;dashed=1;" edge="1" parent="1" source="asset_trans" target="load">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge18" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#74C0FC;" edge="1" parent="1" source="load" target="db_table">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#74C0FC;" edge="1" parent="1" source="load" target="processed_json">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge20" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#74C0FC;dashed=1;" edge="1" parent="1" source="load" target="asset_final">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge21" value="Asset Trigger" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#90EE90;dashed=1;" edge="1" parent="1" source="asset_final" target="validate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge22" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#FF8787;" edge="1" parent="1" source="validate" target="aggregate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge23" value="Cache" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#DC382D;dashed=1;" edge="1" parent="1" source="redis" target="crawl_detail">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
+

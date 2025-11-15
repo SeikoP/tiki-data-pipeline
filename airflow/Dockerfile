@@ -3,10 +3,14 @@ FROM apache/airflow:3.1.3
 
 USER root
 
+# Cài đặt timezone và cấu hình giờ Việt Nam (UTC+7)
+ENV TZ=Asia/Ho_Chi_Minh
+
 # Cài đặt Chrome và dependencies trong một layer duy nhất để giảm kích thước image
 # Sử dụng --no-install-recommends và dọn dẹp ngay sau khi cài để tiết kiệm không gian
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    tzdata \
     wget \
     gnupg \
     ca-certificates \
@@ -35,6 +39,8 @@ RUN apt-get update && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends google-chrome-stable && \
+    # Cấu hình timezone cho giờ Việt Nam (UTC+7)
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
     # Dọn dẹp để giảm kích thước image
     apt-get remove -y wget gnupg && \
     apt-get autoremove -y && \

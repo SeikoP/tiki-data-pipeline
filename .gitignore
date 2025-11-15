@@ -3,7 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-data/test_output/*.html
+backups/
+data/test_output/*.html/
 
 airflow/config/airflow.cfg
 

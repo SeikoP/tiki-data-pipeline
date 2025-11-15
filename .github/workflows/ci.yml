@@ -63,6 +63,16 @@ jobs:
       - name: Run tests with pytest
         run: |
           pytest tests/ -v --cov=src --cov-report=xml --cov-report=term || true
+      
+      - name: Test Transform and Load modules
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, 'src')
+          from pipelines.transform.transformer import DataTransformer
+          from pipelines.load.loader import DataLoader
+          print('✅ Transform and Load modules imported successfully')
+          "
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -94,9 +104,9 @@ jobs:
       - name: Validate DAGs
         run: |
           mkdir -p airflow/dags airflow/logs airflow/config airflow/plugins
-          mkdir -p src/pipelines/crawl data/raw/products
+          mkdir -p src/pipelines/crawl src/pipelines/transform src/pipelines/load data/raw/products data/processed
           # Tạo file __init__.py nếu chưa có
-          touch src/__init__.py src/pipelines/__init__.py src/pipelines/crawl/__init__.py
+          touch src/__init__.py src/pipelines/__init__.py src/pipelines/crawl/__init__.py src/pipelines/transform/__init__.py src/pipelines/load/__init__.py
           # Tạo file categories mẫu để DAG không fail khi load
           mkdir -p data/raw
           echo '[]' > data/raw/categories_recursive_optimized.json || true
