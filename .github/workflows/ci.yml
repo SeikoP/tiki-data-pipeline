@@ -145,6 +145,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Clean up Docker before build
+        run: |
+          echo "🧹 Dọn dẹp Docker cache trước khi build..."
+          docker system df
+          docker system prune -af --volumes || true
+          docker builder prune -af --volumes || true
+          echo "📊 Không gian đĩa sau khi dọn dẹp:"
+          docker system df
+
       - name: Build Airflow Docker image
         uses: docker/build-push-action@v5
         with:
@@ -153,7 +162,7 @@ jobs:
           push: false
           tags: tiki-airflow:test
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
 
       - name: Create .env file for validation
         run: |

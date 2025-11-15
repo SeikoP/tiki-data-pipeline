@@ -26,6 +26,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Clean up Docker before build
+        run: |
+          echo "🧹 Dọn dẹp Docker cache trước khi build..."
+          docker system df
+          docker system prune -af --volumes || true
+          docker builder prune -af --volumes || true
+          echo "📊 Không gian đĩa sau khi dọn dẹp:"
+          docker system df
+
       - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
@@ -55,7 +64,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
           build-args: |
             AIRFLOW_VERSION=3.1.2
 
