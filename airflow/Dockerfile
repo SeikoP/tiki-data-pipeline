@@ -35,7 +35,7 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Cài đặt Google Chrome (cách mới, không dùng apt-key deprecated)
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg && \
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
     apt-get update && \
     apt-get install -y google-chrome-stable && \
