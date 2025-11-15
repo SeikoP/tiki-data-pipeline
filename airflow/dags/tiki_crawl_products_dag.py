@@ -519,101 +519,13 @@ else:
 # Cấu hình DAG schedule
 dag_schedule_config = dag_schedule
 
-# Documentation cho DAG với Mermaid diagram để hiển thị đẹp trong Airflow UI
-dag_doc_md = """
-# Tiki Products Crawl Pipeline
-
-## 📋 Mô tả
-DAG này crawl sản phẩm từ Tiki.vn với các tính năng:
-- **Dynamic Task Mapping**: Tự động tạo tasks cho từng danh mục
-- **Selenium**: Crawl chi tiết sản phẩm với browser automation
-- **Retry & Timeout**: Tự động retry và timeout protection
-- **Error Handling**: Xử lý lỗi và tiếp tục với các tasks khác
-
-## 🔄 Workflow
-
-```mermaid
-graph TB
-    subgraph "📥 Load & Prepare"
-        LOAD[Load Categories]
-    end
-    
-    subgraph "🕷️ Crawl Categories"
-        PREPARE_CRAWL[Prepare Crawl Args]
-        CRAWL_CAT[Crawl Categories<br/>Dynamic Task Mapping]
-    end
-    
-    subgraph "💾 Process & Save"
-        MERGE[Merge Products]
-        SAVE[Save Products]
-    end
-    
-    subgraph "🔍 Crawl Details"
-        PREPARE_DETAIL[Prepare Detail Args]
-        PREPARE_PROD[Prepare Products]
-        CRAWL_DETAIL[Crawl Product Details<br/>Dynamic Task Mapping]
-        SAVE_DETAIL[Save Products with Detail]
-    end
-    
-    subgraph "🔄 Transform & Load"
-        TRANSFORM[Transform Products]
-        LOAD_DB[Load to Database]
-    end
-    
-    subgraph "✅ Validate & Notify"
-        VALIDATE[Validate Data]
-        AGGREGATE[Aggregate & Notify]
-    end
-    
-    LOAD --> PREPARE_CRAWL
-    PREPARE_CRAWL --> CRAWL_CAT
-    CRAWL_CAT --> MERGE
-    MERGE --> SAVE
-    SAVE --> PREPARE_DETAIL
-    PREPARE_DETAIL --> PREPARE_PROD
-    PREPARE_PROD --> CRAWL_DETAIL
-    CRAWL_DETAIL --> SAVE_DETAIL
-    SAVE_DETAIL --> TRANSFORM
-    TRANSFORM --> LOAD_DB
-    LOAD_DB --> VALIDATE
-    VALIDATE --> AGGREGATE
-    
-    style LOAD fill:#51CF66,stroke:#2F9E44,stroke-width:2px,color:#fff
-    style PREPARE_CRAWL fill:#51CF66,stroke:#2F9E44,stroke-width:2px,color:#fff
-    style CRAWL_CAT fill:#51CF66,stroke:#2F9E44,stroke-width:2px,color:#fff
-    style MERGE fill:#FFD43B,stroke:#F59F00,stroke-width:2px,color:#000
-    style SAVE fill:#FFD43B,stroke:#F59F00,stroke-width:2px,color:#000
-    style PREPARE_DETAIL fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
-    style PREPARE_PROD fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
-    style CRAWL_DETAIL fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
-    style SAVE_DETAIL fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
-    style TRANSFORM fill:#845EF7,stroke:#5F3DC4,stroke-width:2px,color:#fff
-    style LOAD_DB fill:#845EF7,stroke:#5F3DC4,stroke-width:2px,color:#fff
-    style VALIDATE fill:#FF8787,stroke:#C92A2A,stroke-width:2px,color:#fff
-    style AGGREGATE fill:#FF8787,stroke:#C92A2A,stroke-width:2px,color:#fff
-```
-
-## ⚙️ Cấu hình
-
-- **Schedule**: Có thể config qua Variable `TIKI_DAG_SCHEDULE_MODE`
-  - `scheduled`: Chạy tự động hàng ngày
-  - `manual`: Chạy thủ công (mặc định)
-- **Max Active Runs**: 1 (chỉ chạy 1 instance tại một thời điểm)
-- **Max Active Tasks**: 10 (giới hạn tasks song song)
-- **Retries**: 3 lần với exponential backoff
-- **Timeout**: Tùy theo task (5-30 phút)
-
-## 🔧 Variables
-
-- `TIKI_DAG_SCHEDULE_MODE`: `scheduled` hoặc `manual`
-- `TIKI_CRAWL_CATEGORIES`: Danh sách categories (JSON array)
-- `TIKI_MAX_PRODUCTS_PER_CATEGORY`: Số lượng sản phẩm tối đa mỗi category
-"""
+# Documentation đơn giản cho DAG
+dag_doc_md = "Crawl sản phẩm từ Tiki.vn với Dynamic Task Mapping và Selenium"
 
 DAG_CONFIG = {
     "dag_id": "tiki_crawl_products",
     "description": dag_description,
-    "doc_md": dag_doc_md,  # Thêm documentation với Mermaid diagram
+    "doc_md": dag_doc_md,
     "default_args": DEFAULT_ARGS,
     "schedule": dag_schedule_config,
     "start_date": datetime(2025, 11, 1),  # Ngày cố định trong quá khứ
@@ -3191,28 +3103,17 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 # Tạo DAG duy nhất với schedule có thể config qua Variable
 with DAG(**DAG_CONFIG) as dag:
 
-    # TaskGroup: Load và Prepare - Màu xanh lá (Extract)
-    with TaskGroup(
-        "load_and_prepare",
-        tooltip="📥 Load categories và chuẩn bị dữ liệu",
-        ui_color="#51CF66",  # Xanh lá
-        ui_fgcolor="#FFFFFF",  # Chữ trắng
-    ) as load_group:
+    # TaskGroup: Load và Prepare
+    with TaskGroup("load_and_prepare") as load_group:
         task_load_categories = PythonOperator(
             task_id="load_categories",
             python_callable=load_categories,
             execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
             pool="default_pool",
-            doc_md="📥 Load categories từ file JSON và chuẩn bị dữ liệu cho crawl",
         )
 
-    # TaskGroup: Crawl Categories (Dynamic Task Mapping) - Màu xanh lá (Extract)
-    with TaskGroup(
-        "crawl_categories",
-        tooltip="🕷️ Crawl sản phẩm từ các danh mục (Dynamic Task Mapping)",
-        ui_color="#51CF66",  # Xanh lá
-        ui_fgcolor="#FFFFFF",  # Chữ trắng
-    ) as crawl_group:
+    # TaskGroup: Crawl Categories (Dynamic Task Mapping)
+    with TaskGroup("crawl_categories") as crawl_group:
         # Sử dụng expand để Dynamic Task Mapping
         # Cần một task helper để lấy categories và tạo list op_kwargs
         def prepare_crawl_kwargs(**context):
@@ -3283,7 +3184,6 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="prepare_crawl_kwargs",
             python_callable=prepare_crawl_kwargs,
             execution_timeout=timedelta(minutes=1),
-            doc_md="🔧 Chuẩn bị arguments cho Dynamic Task Mapping crawl categories",
         )
 
         # Dynamic Task Mapping với expand
@@ -3296,20 +3196,14 @@ with DAG(**DAG_CONFIG) as dag:
             retries=1,  # Retry 1 lần (tổng 2 lần thử: 1 lần đầu + 1 retry)
         ).expand(op_kwargs=task_prepare_crawl.output)
 
-    # TaskGroup: Process và Save - Màu vàng (Transform)
-    with TaskGroup(
-        "process_and_save",
-        tooltip="💾 Merge và lưu sản phẩm raw",
-        ui_color="#FFD43B",  # Vàng
-        ui_fgcolor="#000000",  # Chữ đen
-    ) as process_group:
+    # TaskGroup: Process và Save
+    with TaskGroup("process_and_save") as process_group:
         task_merge_products = PythonOperator(
             task_id="merge_products",
             python_callable=merge_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
             trigger_rule="all_done",  # QUAN TRỌNG: Chạy khi tất cả upstream tasks done (success hoặc failed)
-            doc_md="🔄 Merge tất cả products từ các categories đã crawl",
         )
 
         task_save_products = PythonOperator(
@@ -3317,16 +3211,10 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=save_products,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
             pool="default_pool",
-            doc_md="💾 Lưu products raw vào file JSON",
         )
 
-    # TaskGroup: Crawl Product Details (Dynamic Task Mapping) - Màu xanh dương (Detail)
-    with TaskGroup(
-        "crawl_product_details",
-        tooltip="🔍 Crawl chi tiết sản phẩm với Selenium (Dynamic Task Mapping)",
-        ui_color="#74C0FC",  # Xanh dương
-        ui_fgcolor="#FFFFFF",  # Chữ trắng
-    ) as detail_group:
+    # TaskGroup: Crawl Product Details (Dynamic Task Mapping)
+    with TaskGroup("crawl_product_details") as detail_group:
 
         def prepare_detail_kwargs(**context):
             """Helper function để prepare op_kwargs cho Dynamic Task Mapping detail"""
@@ -3472,19 +3360,13 @@ with DAG(**DAG_CONFIG) as dag:
             >> task_save_products_with_detail
         )
 
-    # TaskGroup: Transform and Load - Màu tím (Transform & Load)
-    with TaskGroup(
-        "transform_and_load",
-        tooltip="🔄 Transform và Load dữ liệu vào database",
-        ui_color="#845EF7",  # Tím
-        ui_fgcolor="#FFFFFF",  # Chữ trắng
-    ) as transform_load_group:
+    # TaskGroup: Transform and Load
+    with TaskGroup("transform_and_load") as transform_load_group:
         task_transform_products = PythonOperator(
             task_id="transform_products",
             python_callable=transform_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
-            doc_md="🔄 Transform và normalize dữ liệu sản phẩm",
         )
 
         task_load_products = PythonOperator(
@@ -3492,19 +3374,13 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=load_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
-            doc_md="💾 Load products đã transform vào PostgreSQL database",
         )
 
         # Dependencies trong transform_load group
         task_transform_products >> task_load_products
 
-    # TaskGroup: Validate - Màu đỏ (Validation)
-    with TaskGroup(
-        "validate",
-        tooltip="✅ Validate dữ liệu đã crawl",
-        ui_color="#FF8787",  # Đỏ nhạt
-        ui_fgcolor="#FFFFFF",  # Chữ trắng
-    ) as validate_group:
+    # TaskGroup: Validate
+    with TaskGroup("validate") as validate_group:
         task_validate_data = PythonOperator(
             task_id="validate_data",
             python_callable=validate_data,
@@ -3512,13 +3388,8 @@ with DAG(**DAG_CONFIG) as dag:
             pool="default_pool",
         )
 
-    # TaskGroup: Aggregate and Notify - Màu đỏ (Notification)
-    with TaskGroup(
-        "aggregate_and_notify",
-        tooltip="📊 Tổng hợp dữ liệu và gửi thông báo Discord",
-        ui_color="#FF8787",  # Đỏ nhạt
-        ui_fgcolor="#FFFFFF",  # Chữ trắng
-    ) as aggregate_group:
+    # TaskGroup: Aggregate and Notify
+    with TaskGroup("aggregate_and_notify") as aggregate_group:
         task_aggregate_and_notify = PythonOperator(
             task_id="aggregate_and_notify",
             python_callable=aggregate_and_notify,
