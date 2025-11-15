@@ -13,53 +13,73 @@ Tính năng:
 - TaskGroup: nhóm các tasks liên quan
 - Tối ưu: batch processing, rate limiting, caching
 """
-import os
-import sys
-import json
-import time
 import hashlib
-import tempfile
+import json
+import os
 import shutil
+import sys
+import tempfile
+import time
+import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from typing import Any, Dict, List, Optional
 
 from airflow import DAG
+from airflow.configuration import conf
 from airflow.providers.standard.operators.python import PythonOperator
-from airflow.sdk import TaskGroup
-# Import Variable với suppress warning
-import warnings
+from airflow.utils.session import provide_session
+
+# Import Variable và TaskGroup với suppress warning
 try:
-    # Thử import từ airflow.sdk (Airflow 2.x+)
-    from airflow.sdk import Variable
+    # Thử import từ airflow.sdk (Airflow 3.x)
+    from airflow.sdk import TaskGroup, Variable
+
     _Variable = Variable  # Alias để dùng wrapper
 except ImportError:
-    # Fallback: dùng airflow.models (deprecated nhưng vẫn hoạt động)
+    # Fallback: dùng airflow.models và airflow.utils.task_group (Airflow 2.x)
+    try:
+        from airflow.utils.task_group import TaskGroup
+    except ImportError:
+        # Nếu không có TaskGroup, tạo dummy class
+        class TaskGroup:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
     from airflow.models import Variable as _Variable
 
 # Wrapper function để suppress deprecation warning khi gọi Variable.get()
 def get_variable(key, default_var=None):
     """Wrapper cho Variable.get() để suppress deprecation warning"""
     with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', category=DeprecationWarning, module='airflow.models.variable')
+        warnings.filterwarnings(
+            'ignore', category=DeprecationWarning, module='airflow.models.variable'
+        )
         return _Variable.get(key, default=default_var)
+
 
 # Alias Variable để code cũ vẫn hoạt động, nhưng dùng wrapper
 class VariableWrapper:
     """Wrapper cho Variable để suppress warnings"""
+
     @staticmethod
     def get(key, default_var=None):
         return get_variable(key, default_var)
-    
+
     @staticmethod
     def set(key, value):
         return _Variable.set(key, value)
 
+
 Variable = VariableWrapper
-from airflow.configuration import conf
-from airflow.utils.session import provide_session
 
 # Thêm đường dẫn src vào sys.path
 # Lấy đường dẫn tuyệt đối của DAG file

@@ -37,21 +37,44 @@ jobs:
       - name: Start services
         run: |
           docker-compose up -d
+          echo "Services started, waiting for initialization..."
 
       - name: Wait for services to be healthy
         run: |
           echo "Waiting for services to start..."
-          timeout 300 bash -c 'until docker-compose ps | grep -q "healthy"; do sleep 5; done' || true
-          sleep 60
+          max_wait=300
+          elapsed=0
+          while [ $elapsed -lt $max_wait ]; do
+            if docker-compose ps | grep -q "healthy"; then
+              echo "Services are healthy!"
+              break
+            fi
+            echo "Waiting... ($elapsed/$max_wait seconds)"
+            sleep 10
+            elapsed=$((elapsed + 10))
+          done
+          sleep 30
           docker-compose ps
 
       - name: Check service status
         run: |
           docker-compose ps
+          echo "Checking service health..."
+          docker-compose ps | grep -E "(healthy|unhealthy|starting)" || true
 
       - name: Test Airflow API
         run: |
-          curl -f http://localhost:8080/api/v2/version || exit 1
+          echo "Testing Airflow API..."
+          for i in {1..10}; do
+            if curl -f http://localhost:8080/api/v2/version; then
+              echo "✅ Airflow API is ready!"
+              exit 0
+            fi
+            echo "Attempt $i/10: API not ready, waiting..."
+            sleep 10
+          done
+          echo "❌ Airflow API failed to respond"
+          exit 1
 
       - name: Validate DAGs in container
         run: |

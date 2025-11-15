@@ -27,15 +27,15 @@ jobs:
 
       - name: Check code formatting with Black
         run: |
-          black --check --diff src/ tests/ airflow/dags/
+          black --check --diff src/ tests/ airflow/dags/ || (echo "⚠️  Black found formatting issues. Run 'black src/ tests/ airflow/dags/' to fix." && exit 1)
 
       - name: Check import sorting with isort
         run: |
-          isort --check-only --diff src/ tests/ airflow/dags/
+          isort --check-only --diff src/ tests/ airflow/dags/ || (echo "⚠️  isort found import order issues. Run 'isort src/ tests/ airflow/dags/' to fix." && exit 1)
 
       - name: Lint with Ruff
         run: |
-          ruff check src/ tests/ airflow/dags/
+          ruff check src/ tests/ airflow/dags/ || (echo "⚠️  Ruff found linting issues. Run 'ruff check --fix src/ tests/ airflow/dags/' to fix." && exit 1)
 
       - name: Type check with mypy
         run: |
@@ -97,25 +97,37 @@ jobs:
           mkdir -p src/pipelines/crawl data/raw/products
           # Tạo file __init__.py nếu chưa có
           touch src/__init__.py src/pipelines/__init__.py src/pipelines/crawl/__init__.py
+          # Tạo file categories mẫu để DAG không fail khi load
+          mkdir -p data/raw
+          echo '[]' > data/raw/categories_recursive_optimized.json || true
           python -c "
           import sys
           import os
+          import warnings
+          warnings.filterwarnings('ignore')
           os.environ['AIRFLOW_HOME'] = 'airflow'
           # Thêm src vào path để DAG có thể import
           sys.path.insert(0, os.path.abspath('src'))
+          sys.path.insert(0, os.path.abspath('src/pipelines/crawl'))
           from airflow.models import DagBag
           
-          dag_bag = DagBag(dag_folder='airflow/dags', include_examples=False)
-          if dag_bag.import_errors:
-              print('❌ DAG Import Errors:')
-              for filename, error in dag_bag.import_errors.items():
-                  print(f'  {filename}: {error}')
+          try:
+              dag_bag = DagBag(dag_folder='airflow/dags', include_examples=False)
+              if dag_bag.import_errors:
+                  print('❌ DAG Import Errors:')
+                  for filename, error in dag_bag.import_errors.items():
+                      print(f'  {filename}: {error}')
+                  sys.exit(1)
+              else:
+                  print('✅ All DAGs validated successfully!')
+                  print(f'Found {len(dag_bag.dags)} DAG(s)')
+                  for dag_id in dag_bag.dag_ids:
+                      print(f'  - {dag_id}')
+          except Exception as e:
+              print(f'❌ Error validating DAGs: {e}')
+              import traceback
+              traceback.print_exc()
               sys.exit(1)
-          else:
-              print('✅ All DAGs validated successfully!')
-              print(f'Found {len(dag_bag.dags)} DAG(s)')
-              for dag_id in dag_bag.dag_ids:
-                  print(f'  - {dag_id}')
           "
 
   docker-build:
