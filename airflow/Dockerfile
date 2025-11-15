@@ -3,13 +3,12 @@ FROM apache/airflow:3.1.2
 
 USER root
 
-# Cài đặt Chrome/Chromium và dependencies (gộp để giảm layers)
+# Cài đặt Chrome và dependencies trong một layer duy nhất để giảm kích thước image
+# Sử dụng --no-install-recommends và dọn dẹp ngay sau khi cài để tiết kiệm không gian
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     wget \
     gnupg \
-    unzip \
-    curl \
     ca-certificates \
     fonts-liberation \
     libasound2 \
@@ -36,16 +35,17 @@ RUN apt-get update && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends google-chrome-stable && \
+    # Dọn dẹp để giảm kích thước image
+    apt-get remove -y wget gnupg && \
+    apt-get autoremove -y && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-# Hoặc cài Chromium (nhẹ hơn)
-# RUN apt-get update && \
-#     apt-get install -y chromium chromium-driver && \
-#     rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.cache /root/.wget-hsts && \
+    # Dọn dẹp Chrome cache và temporary files
+    rm -rf /opt/google/chrome/CrashReports /opt/google/chrome/swiftshader
 
 # Chuyển về user airflow
 USER airflow
 
 # Các packages Python sẽ được cài qua _PIP_ADDITIONAL_REQUIREMENTS trong docker-compose.yaml
+# Điều này cho phép cache tốt hơn và linh hoạt hơn
 

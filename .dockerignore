@@ -84,3 +84,26 @@ Thumbs.db
 tmp/
 temp/
 
+# Docker build artifacts
+.docker/
+*.dockerignore
+
+# Large binary files
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Node modules (nếu có)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Python virtual environments (đã có ở trên nhưng thêm để chắc chắn)
+.venv/
+venv/
+ENV/
+env/
+

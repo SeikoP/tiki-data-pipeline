@@ -50,8 +50,19 @@ complexity: ## Phân tích độ phức tạp với Radon
 	@echo "📈 Maintainability Index Analysis:"
 	@radon mi src/ airflow/dags/ --min B || true
 
+docker-cleanup: ## Dọn dẹp Docker cache và unused resources (giải quyết lỗi "no space left")
+	@if [ -f scripts/docker-cleanup.sh ]; then \
+		bash scripts/docker-cleanup.sh; \
+	elif [ -f scripts/docker-cleanup.ps1 ]; then \
+		powershell -ExecutionPolicy Bypass -File scripts/docker-cleanup.ps1; \
+	else \
+		echo "⚠️  Script cleanup không tìm thấy"; \
+	fi
+
 docker-build: ## Build Docker images
 	docker-compose build
+
+docker-build-clean: docker-cleanup docker-build ## Dọn dẹp và build Docker images
 
 docker-up: ## Khởi động Docker Compose services
 	docker-compose up -d
