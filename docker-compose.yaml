@@ -26,10 +26,16 @@ x-airflow-common:
     # Postgres: Database airflow
     # Sử dụng environment variables (KHÔNG hardcode default values)
     # Yêu cầu: POSTGRES_USER và POSTGRES_PASSWORD phải được set trong .env file
+    # Thêm port :5432 để force TCP/IP connection thay vì Unix socket
+    # Format: postgresql+psycopg2://user:password@host:port/database
+    # Sử dụng airflow_local_settings.py để set connect_args force TCP/IP
+    # Force TCP/IP connection bằng cách chỉ định rõ host và port trong connect_args
     # ggignore
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
     # ggignore
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONNECT_ARGS: airflow_local_settings.connect_args
+    # ggignore
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
     # Redis: Airflow dùng database 0
     # Nếu có REDIS_PASSWORD, format: redis://:REDIS_PASSWORD@redis:6379/0
     # Nếu không có REDIS_PASSWORD, format: redis://:@redis:6379/0
@@ -46,6 +52,7 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/airflow/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/airflow/plugins:/opt/airflow/plugins
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/airflow_local_settings.py:/opt/airflow/airflow_local_settings.py
     # Mount src và data để DAG có thể import modules và đọc/ghi dữ liệu
     - ${AIRFLOW_PROJ_DIR:-.}/src:/opt/airflow/src
     - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
