@@ -21,8 +21,10 @@ x-airflow-common:
     - ${ENV_FILE_PATH:-.env}
   environment:
     &airflow-common-env
+    TZ: Asia/Ho_Chi_Minh
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Ho_Chi_Minh
     # Postgres: Database airflow
     # Sử dụng environment variables (KHÔNG hardcode default values)
     # Yêu cầu: POSTGRES_USER và POSTGRES_PASSWORD phải được set trong .env file
@@ -80,6 +82,7 @@ services:
       # Nếu database đã tồn tại (volume cũ), các giá trị này sẽ BỊ BỎ QUA
       # Để thay đổi user/password sau khi database đã được tạo, cần chạy script reset password
       # POSTGRES_DB: Database mặc định được tạo khi khởi tạo (dùng cho các script init)
+      TZ: Asia/Ho_Chi_Minh
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -118,6 +121,8 @@ services:
   # - Database 2: Rate limiting & Distributed locking - Optional
   redis:
     image: redis:7.2-alpine
+    environment:
+      TZ: Asia/Ho_Chi_Minh
     networks:
       - backend
     command: >
