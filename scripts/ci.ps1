@@ -112,6 +112,14 @@ function Invoke-Test {
     } else {
         Write-Host "⚠️  Some tests failed (exit code: $LASTEXITCODE)" -ForegroundColor Yellow
     }
+    
+    Write-Host "`n🔍 Kiểm tra Transform và Load modules..." -ForegroundColor Cyan
+    python -c "import sys; sys.path.insert(0, 'src'); from pipelines.transform.transformer import DataTransformer; from pipelines.load.loader import DataLoader; print('✅ Transform and Load modules imported successfully')"
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ Transform and Load modules OK!" -ForegroundColor Green
+    } else {
+        Write-Host "⚠️  Transform and Load modules check failed" -ForegroundColor Yellow
+    }
 }
 
 function Invoke-TestFast {

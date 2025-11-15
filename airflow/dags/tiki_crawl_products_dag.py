@@ -2449,6 +2449,253 @@ def save_products_with_detail(**context) -> str:
         raise
 
 
+def transform_products(**context) -> dict[str, Any]:
+    """
+    Task: Transform dữ liệu sản phẩm (normalize, validate, compute fields)
+
+    Returns:
+        Dict: Kết quả transform với transformed products và stats
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("🔄 TASK: Transform Products")
+    logger.info("=" * 70)
+
+    try:
+        ti = context["ti"]
+        
+        # Lấy file từ save_products_with_detail
+        output_file = None
+        try:
+            output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
+        except Exception:
+            try:
+                output_file = ti.xcom_pull(task_ids="save_products_with_detail")
+            except Exception:
+                pass
+
+        if not output_file:
+            output_file = str(OUTPUT_FILE_WITH_DETAIL)
+
+        if not os.path.exists(output_file):
+            raise FileNotFoundError(f"Không tìm thấy file: {output_file}")
+
+        logger.info(f"📂 Đang đọc file: {output_file}")
+
+        # Đọc products từ file
+        with open(output_file, encoding="utf-8") as f:
+            data = json.load(f)
+        
+        products = data.get("products", [])
+        logger.info(f"📊 Tổng số products: {len(products)}")
+
+        # Import DataTransformer
+        try:
+            # Tìm đường dẫn transform module
+            transform_paths = [
+                "/opt/airflow/src/pipelines/transform/transformer.py",
+                os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "transform", "transformer.py")),
+                os.path.join(os.getcwd(), "src", "pipelines", "transform", "transformer.py"),
+            ]
+            
+            transformer_path = None
+            for path in transform_paths:
+                if os.path.exists(path):
+                    transformer_path = path
+                    break
+            
+            if not transformer_path:
+                raise ImportError("Không tìm thấy transformer.py")
+
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("transformer", transformer_path)
+            transformer_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(transformer_module)
+            DataTransformer = transformer_module.DataTransformer
+
+            # Transform products
+            transformer = DataTransformer(
+                strict_validation=False,
+                remove_invalid=True,
+                normalize_fields=True
+            )
+
+            transformed_products, transform_stats = transformer.transform_products(
+                products, validate=True
+            )
+
+            logger.info("=" * 70)
+            logger.info("📊 TRANSFORM RESULTS")
+            logger.info("=" * 70)
+            logger.info(f"✅ Valid products: {transform_stats['valid_products']}")
+            logger.info(f"❌ Invalid products: {transform_stats['invalid_products']}")
+            logger.info(f"🔄 Duplicates removed: {transform_stats['duplicates_removed']}")
+            logger.info("=" * 70)
+
+            # Lưu transformed products vào file
+            processed_dir = DATA_DIR / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            transformed_file = processed_dir / "products_transformed.json"
+
+            output_data = {
+                "transformed_at": datetime.now().isoformat(),
+                "source_file": output_file,
+                "total_products": len(products),
+                "transform_stats": transform_stats,
+                "products": transformed_products,
+            }
+
+            atomic_write_file(str(transformed_file), output_data, **context)
+            logger.info(f"✅ Đã lưu {len(transformed_products)} transformed products vào: {transformed_file}")
+
+            return {
+                "transformed_file": str(transformed_file),
+                "transformed_count": len(transformed_products),
+                "transform_stats": transform_stats,
+            }
+
+        except ImportError as e:
+            logger.error(f"❌ Không thể import DataTransformer: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi transform products: {e}", exc_info=True)
+            raise
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi trong transform_products task: {e}", exc_info=True)
+        raise
+
+
+def load_products(**context) -> dict[str, Any]:
+    """
+    Task: Load dữ liệu đã transform vào database
+
+    Returns:
+        Dict: Kết quả load với stats
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("💾 TASK: Load Products to Database")
+    logger.info("=" * 70)
+
+    try:
+        ti = context["ti"]
+        
+        # Lấy transformed file từ transform_products task
+        transform_result = None
+        try:
+            transform_result = ti.xcom_pull(task_ids="transform_and_load.transform_products")
+        except Exception:
+            try:
+                transform_result = ti.xcom_pull(task_ids="transform_products")
+            except Exception:
+                pass
+
+        if not transform_result:
+            # Fallback: tìm file transformed
+            processed_dir = DATA_DIR / "processed"
+            transformed_file = processed_dir / "products_transformed.json"
+            if transformed_file.exists():
+                transform_result = {"transformed_file": str(transformed_file)}
+            else:
+                raise ValueError("Không tìm thấy transform result từ XCom hoặc file")
+
+        transformed_file = transform_result.get("transformed_file")
+        if not transformed_file or not os.path.exists(transformed_file):
+            raise FileNotFoundError(f"Không tìm thấy file transformed: {transformed_file}")
+
+        logger.info(f"📂 Đang đọc transformed file: {transformed_file}")
+
+        # Đọc transformed products
+        with open(transformed_file, encoding="utf-8") as f:
+            data = json.load(f)
+        
+        products = data.get("products", [])
+        logger.info(f"📊 Tổng số products để load: {len(products)}")
+
+        # Import DataLoader
+        try:
+            # Tìm đường dẫn load module
+            load_paths = [
+                "/opt/airflow/src/pipelines/load/loader.py",
+                os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "load", "loader.py")),
+                os.path.join(os.getcwd(), "src", "pipelines", "load", "loader.py"),
+            ]
+            
+            loader_path = None
+            for path in load_paths:
+                if os.path.exists(path):
+                    loader_path = path
+                    break
+            
+            if not loader_path:
+                raise ImportError("Không tìm thấy loader.py")
+
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("loader", loader_path)
+            loader_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(loader_module)
+            DataLoader = loader_module.DataLoader
+
+            # Lấy database config từ Airflow Variables
+            db_host = Variable.get("POSTGRES_HOST", default_var="postgres")
+            db_port = int(Variable.get("POSTGRES_PORT", default_var="5432"))
+            db_name = Variable.get("POSTGRES_DB", default_var="crawl_data")
+            db_user = Variable.get("POSTGRES_USER", default_var="airflow")
+            db_password = Variable.get("POSTGRES_PASSWORD", default_var="airflow")
+
+            # Load vào database
+            loader = DataLoader(
+                host=db_host,
+                port=db_port,
+                database=db_name,
+                user=db_user,
+                password=db_password,
+                batch_size=100,
+                enable_db=True,
+            )
+
+            try:
+                # Lưu vào processed directory
+                processed_dir = DATA_DIR / "processed"
+                processed_dir.mkdir(parents=True, exist_ok=True)
+                final_file = processed_dir / "products_final.json"
+
+                load_stats = loader.load_products(
+                    products,
+                    save_to_file=str(final_file),
+                    upsert=True,
+                    validate_before_load=True,
+                )
+
+                logger.info("=" * 70)
+                logger.info("📊 LOAD RESULTS")
+                logger.info("=" * 70)
+                logger.info(f"✅ DB loaded: {load_stats['db_loaded']}")
+                logger.info(f"✅ File loaded: {load_stats['file_loaded']}")
+                logger.info(f"❌ Failed: {load_stats['failed_count']}")
+                logger.info("=" * 70)
+
+                return {
+                    "final_file": str(final_file),
+                    "load_stats": load_stats,
+                }
+
+            finally:
+                loader.close()
+
+        except ImportError as e:
+            logger.error(f"❌ Không thể import DataLoader: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi load products: {e}", exc_info=True)
+            raise
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi trong load_products task: {e}", exc_info=True)
+        raise
+
+
 def validate_data(**context) -> dict[str, Any]:
     """
     Task 5: Validate dữ liệu đã crawl
@@ -2949,6 +3196,25 @@ with DAG(**DAG_CONFIG) as dag:
             >> task_save_products_with_detail
         )
 
+    # TaskGroup: Transform and Load
+    with TaskGroup("transform_and_load", tooltip="Transform và Load dữ liệu vào database") as transform_load_group:
+        task_transform_products = PythonOperator(
+            task_id="transform_products",
+            python_callable=transform_products,
+            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            pool="default_pool",
+        )
+
+        task_load_products = PythonOperator(
+            task_id="load_products",
+            python_callable=load_products,
+            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            pool="default_pool",
+        )
+
+        # Dependencies trong transform_load group
+        task_transform_products >> task_load_products
+
     # TaskGroup: Validate
     with TaskGroup("validate", tooltip="Validate dữ liệu") as validate_group:
         task_validate_data = PythonOperator(
@@ -2969,7 +3235,7 @@ with DAG(**DAG_CONFIG) as dag:
         )
 
     # Định nghĩa dependencies
-    # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Validate
+    # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Transform -> Load -> Validate -> Aggregate
 
     # Dependencies giữa các TaskGroup
     # Load categories trước, sau đó prepare crawl kwargs
@@ -2984,9 +3250,8 @@ with DAG(**DAG_CONFIG) as dag:
     # Merge -> save products
     task_merge_products >> task_save_products
 
-    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> validate -> aggregate and notify
+    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> validate -> aggregate and notify
     task_save_products >> task_prepare_detail
     # Dependencies trong detail group đã được định nghĩa ở dòng 1800
-    # Chỉ cần thêm dependency từ save_products -> prepare_detail (đã có ở trên)
-    # và từ save_products_with_detail -> validate -> aggregate_and_notify
-    task_save_products_with_detail >> task_validate_data >> task_aggregate_and_notify
+    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify
+    task_save_products_with_detail >> task_transform_products >> task_load_products >> task_validate_data >> task_aggregate_and_notify

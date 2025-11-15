@@ -20,15 +20,14 @@
 
 ## 📖 Giới thiệu
 
-**Tiki Data Pipeline** là một hệ thống tự động hóa để crawl dữ liệu sản phẩm từ Tiki.vn sử dụng Apache Airflow và Selenium. Dự án cung cấp:
+**Tiki Data Pipeline** là một hệ thống ETL (Extract, Transform, Load) hoàn chỉnh để crawl, xử lý và lưu trữ dữ liệu sản phẩm từ Tiki.vn. Dự án cung cấp:
 
-- ✅ Crawl danh mục sản phẩm đệ quy từ Tiki.vn
-- ✅ Crawl danh sách sản phẩm từ các danh mục
-- ✅ Crawl chi tiết sản phẩm (giá, đánh giá, mô tả, thông số kỹ thuật, hình ảnh, v.v.)
-- ✅ Tự động hóa workflow với Airflow DAG
-- ✅ Xử lý song song với Dynamic Task Mapping
-- ✅ Caching và rate limiting để tối ưu hiệu suất
-- ✅ Export dữ liệu dưới dạng JSON
+- ✅ **Extract**: Crawl danh mục, danh sách sản phẩm và chi tiết từ Tiki.vn
+- ✅ **Transform**: Normalize, validate và tính toán các trường dữ liệu
+- ✅ **Load**: Lưu dữ liệu vào PostgreSQL database và file JSON
+- ✅ **Orchestration**: Tự động hóa workflow với Apache Airflow DAG
+- ✅ **Performance**: Xử lý song song, caching, rate limiting
+- ✅ **Data Quality**: Validation, error handling, computed fields
 
 ---
 
@@ -38,14 +37,14 @@
 
 | 🎯 Feature | 📝 Description |
 |:---------:|:-------------|
-| 🛍️ **Tiki Product Crawler** | Crawl tự động sản phẩm từ Tiki.vn với Selenium |
-| 🔄 **Apache Airflow 3.1.2** | Workflow orchestration với Dynamic Task Mapping |
-| 🕷️ **Selenium Automation** | Crawl dynamic content với Selenium WebDriver + Chrome |
-| 📊 **Category & Product Details** | Crawl đầy đủ: danh mục, danh sách sản phẩm và chi tiết |
-| ⚡ **Optimized Performance** | Caching, rate limiting, batch processing |
-| 🔄 **Dynamic Task Mapping** | Crawl song song nhiều categories/products |
-| 💾 **Data Export** | JSON output với đầy đủ thông tin sản phẩm |
-| 📈 **Sales Count Tracking** | Theo dõi số lượng bán của từng sản phẩm |
+| 🛍️ **Product Crawler** | Crawl tự động sản phẩm từ Tiki.vn với Selenium |
+| 🔄 **Data Transformer** | Normalize, validate và tính computed fields |
+| 💾 **Data Loader** | Load dữ liệu vào PostgreSQL database |
+| ⚡ **Airflow DAG** | Workflow orchestration với Dynamic Task Mapping |
+| 🕷️ **Selenium Automation** | Crawl dynamic content với Selenium WebDriver |
+| 📊 **Full Pipeline** | Crawl → Transform → Load end-to-end |
+| ⚡ **Performance** | Caching, rate limiting, batch processing |
+| 🔍 **Data Quality** | Validation, error handling, duplicate removal |
 
 </div>
 
@@ -232,23 +231,29 @@ tiki-data-pipeline/
 │   └── Dockerfile                 # Custom Airflow image với Chrome
 ├── 💻 src/                         # Source code
 │   └── pipelines/
-│       └── crawl/                 # Crawling pipelines
-│           ├── crawl_categories_recursive.py    # Crawl categories đệ quy
-│           ├── crawl_products.py                 # Crawl danh sách sản phẩm
-│           ├── crawl_products_detail.py          # Crawl chi tiết sản phẩm
-│           ├── extract_category_link_selenium.py # Extract category links
-│           ├── build_category_tree.py            # Xây dựng category tree
-│           └── config.py                         # Configuration
-└── 📊 data/                        # Dữ liệu crawl
-    ├── raw/                        # Raw data
-    │   ├── categories_recursive_optimized.json   # Danh mục đã crawl
-    │   ├── categories_tree.json                  # Category tree
-    │   └── products/              # Products data
-    │       ├── products.json                      # Danh sách sản phẩm
-    │       ├── products_with_detail.json         # Sản phẩm với chi tiết
-    │       └── cache/                             # Cache files
-    ├── demo/                      # Demo/test data
-    └── test_output/              # Test outputs
+│       ├── crawl/                 # Crawling pipelines
+│       │   ├── crawl_categories_recursive.py    # Crawl categories đệ quy
+│       │   ├── crawl_products.py                 # Crawl danh sách sản phẩm
+│       │   ├── crawl_products_detail.py          # Crawl chi tiết sản phẩm
+│       │   └── config.py                         # Configuration
+│       ├── transform/             # Transform pipeline
+│       │   └── transformer.py                    # Data transformer
+│       └── load/                  # Load pipeline
+│           └── loader.py                         # Data loader
+├── 📊 data/                        # Dữ liệu
+│   ├── raw/                        # Raw data (từ crawl)
+│   │   ├── categories_recursive_optimized.json
+│   │   └── products/
+│   │       ├── products.json
+│   │       └── products_with_detail.json
+│   └── processed/                 # Processed data (sau transform)
+│       ├── products_transformed.json
+│       └── products_final.json
+└── 📚 demos/                       # Demo files
+    ├── demo_step1_crawl.py         # Demo crawl
+    ├── demo_step2_transform.py     # Demo transform
+    ├── demo_step3_load.py           # Demo load
+    └── demo_e2e_full.py            # Demo full pipeline
 ```
 
 ---
@@ -335,20 +340,69 @@ python src/pipelines/crawl/crawl_products_detail.py
 }
 ```
 
-### 4. Airflow DAG
+### 4. Transform Products
 
-DAG tự động hóa toàn bộ quy trình:
+Transform dữ liệu sản phẩm đã crawl:
+
+```bash
+python src/pipelines/transform/transformer.py
+```
+
+**Chức năng**:
+- Normalize fields (trim, parse numbers, format)
+- Flatten nested structures (price, rating, seller)
+- Validate dữ liệu
+- Tính computed fields (revenue, popularity score, value score)
+
+**Output**: `data/processed/products_transformed.json`
+
+### 5. Load Products
+
+Load dữ liệu đã transform vào database:
+
+```bash
+python src/pipelines/load/loader.py
+```
+
+**Chức năng**:
+- Load vào PostgreSQL database
+- Lưu vào file JSON (backup)
+- Batch processing
+- Upsert (update nếu đã tồn tại)
+
+**Output**: `data/processed/products_final.json`
+
+### 6. Airflow DAG (Full Pipeline)
+
+DAG tự động hóa toàn bộ quy trình ETL:
 
 1. **Load Categories**: Load danh sách categories từ file
 2. **Crawl Products**: Crawl products từ categories (Dynamic Task Mapping)
 3. **Merge Products**: Merge và lưu danh sách products
 4. **Crawl Product Details**: Crawl chi tiết products (Dynamic Task Mapping)
 5. **Merge Details**: Merge details vào products
-6. **Save Final Data**: Lưu dữ liệu cuối cùng
-7. **Validate Data**: Validate dữ liệu đã crawl
+6. **Transform Products**: Normalize, validate và tính computed fields
+7. **Load Products**: Load vào PostgreSQL database
+8. **Validate Data**: Validate dữ liệu đã load
 
 **Truy cập**: http://localhost:8080  
 **DAG ID**: `tiki_crawl_products`
+
+### 7. Demo Files (Quick Start)
+
+Chạy từng bước hoặc toàn bộ pipeline:
+
+```bash
+# Chạy từng bước
+python demos/demo_step1_crawl.py      # Crawl
+python demos/demo_step2_transform.py   # Transform
+python demos/demo_step3_load.py        # Load
+
+# Hoặc chạy toàn bộ
+python demos/demo_e2e_full.py
+```
+
+Xem thêm: [demos/README.md](demos/README.md)
 
 ---
 
@@ -371,6 +425,11 @@ Cấu hình các biến sau trong Airflow UI (Admin → Variables):
 | `TIKI_DETAIL_RATE_LIMIT_DELAY` | `2.0` | Delay cho detail crawl (giây) |
 | `TIKI_DETAIL_CRAWL_TIMEOUT` | `60` | Timeout crawl detail (giây) |
 | `TIKI_SAVE_BATCH_SIZE` | `10000` | Số sản phẩm mỗi batch khi save |
+| `POSTGRES_HOST` | `postgres` | PostgreSQL host |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_DB` | `crawl_data` | Database name |
+| `POSTGRES_USER` | `airflow` | Database user |
+| `POSTGRES_PASSWORD` | `airflow` | Database password |
 
 ### Environment Variables
 
@@ -380,6 +439,13 @@ Các biến môi trường có thể được set trong `.env` hoặc `docker-co
 # Airflow
 AIRFLOW_UID=50000
 AIRFLOW_PROJ_DIR=.
+
+# Database (cho Transform & Load)
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=crawl_data
+POSTGRES_USER=airflow
+POSTGRES_PASSWORD=airflow
 
 # Python packages (sẽ được cài tự động)
 _PIP_ADDITIONAL_REQUIREMENTS=selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0
