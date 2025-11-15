@@ -24,13 +24,15 @@ x-airflow-common:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     # Postgres: Database airflow
-    # Sử dụng environment variables cho password (KHÔNG hardcode default values)
+    # Sử dụng environment variables (KHÔNG hardcode default values)
     # Yêu cầu: POSTGRES_USER và POSTGRES_PASSWORD phải được set trong .env file
+    # ggignore
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/airflow
+    # ggignore
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/airflow
     # Redis: Airflow dùng database 0
-    # Nếu có REDIS_PASSWORD, format: redis://:password@redis:6379/0
-    # Nếu không có password, format: redis://:@redis:6379/0
+    # Nếu có REDIS_PASSWORD, format: redis://:REDIS_PASSWORD@redis:6379/0
+    # Nếu không có REDIS_PASSWORD, format: redis://:@redis:6379/0
     AIRFLOW__CELERY__BROKER_URL: redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
@@ -73,7 +75,7 @@ services:
       # Script để tự động tạo database airflow (chạy khi init lần đầu)
       - ./airflow/setup/init-airflow-db.sh:/docker-entrypoint-initdb.d/01-init-airflow-db.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -338,6 +340,7 @@ services:
       # Yêu cầu: _AIRFLOW_WWW_USER_USERNAME và _AIRFLOW_WWW_USER_PASSWORD phải được set trong .env file
       # Xem .env.example để biết cách cấu hình
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME}
+      # ggignore
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0}
     user: "0:0"

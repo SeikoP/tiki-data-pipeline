@@ -1,0 +1,27 @@
+# GitGuardian configuration for Tiki Data Pipeline
+# This file configures GitGuardian to ignore false positives
+
+# Ignore paths that contain only placeholders, not real secrets
+paths-ignore:
+  - ".env.example"  # Template file with placeholders only
+
+# Ignore specific matches that are false positives
+matches-ignore:
+  # Ignore all placeholder values in .env.example (template file)
+  - name: "Generic Password"
+    path: ".env.example"
+  - name: "Generic Username"  
+    path: ".env.example"
+  
+  # Ignore environment variable references in docker-compose.yaml
+  # These are variable names, not actual secrets
+  - name: "Generic Password"
+    path: "docker-compose.yaml"
+    match: ".*\\$\\{.*PASSWORD.*\\}.*"  # Match ${VAR_PASSWORD} patterns
+  - name: "Generic Password"
+    path: "docker-compose.yaml"
+    match: ".*POSTGRES_PASSWORD.*"  # Match POSTGRES_PASSWORD variable references
+  - name: "Generic Password"
+    path: "docker-compose.yaml"
+    match: ".*_AIRFLOW_WWW_USER_PASSWORD.*"  # Match Airflow password variable references
+
