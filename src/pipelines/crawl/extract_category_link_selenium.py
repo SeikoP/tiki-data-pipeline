@@ -315,9 +315,7 @@ def parse_categories(html_content, parent_url=None, level=0):
             seen_urls_final.add(cat["url"])
 
     # Lọc các danh mục có URL hình ảnh
-    categories_with_images = [
-        cat for cat in unique_categories if cat.get("image_url", "").strip()
-    ]
+    categories_with_images = [cat for cat in unique_categories if cat.get("image_url", "").strip()]
 
     print(f"[Parse] ✓ Đã tìm thấy {len(unique_categories)} danh mục (sau khi loại trùng)")
     print(f"[Parse] ✓ Đã lọc được {len(categories_with_images)} danh mục có hình ảnh")

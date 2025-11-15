@@ -95,9 +95,7 @@ def test_crawl_single_category():
 
         # Nếu không tìm thấy danh mục phổ biến, lấy bất kỳ danh mục level 2-3
         if not test_categories:
-            test_categories = [
-                cat for cat in categories if 2 <= cat.get("level", 0) <= 3
-            ]
+            test_categories = [cat for cat in categories if 2 <= cat.get("level", 0) <= 3]
 
         # Nếu vẫn không có, lấy bất kỳ
         if not test_categories:
