@@ -25,3 +25,8 @@ matches-ignore:
     path: "docker-compose.yaml"
     match: ".*_AIRFLOW_WWW_USER_PASSWORD.*"  # Match Airflow password variable references
 
+# Note: Warnings from commit e9744f7 are historical false positives.
+# The commit contained example passwords in .env.example and hardcoded defaults in docker-compose.yaml.
+# These have been fixed in later commits. Please mark these as "Resolved" in GitGuardian dashboard
+# or treat them as false positives from Git history.
+
