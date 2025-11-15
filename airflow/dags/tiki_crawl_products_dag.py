@@ -265,6 +265,209 @@ else:
             f"Lỗi gốc: {e}"
         ) from e
 
+# Import resilience patterns
+# Import trực tiếp từng module con để tránh vấn đề relative imports
+resilience_module_path = None
+for path in possible_paths:
+    test_path = os.path.join(path, "resilience", "__init__.py")
+    if os.path.exists(test_path):
+        resilience_module_path = os.path.join(path, "resilience")
+        break
+
+if resilience_module_path and os.path.exists(resilience_module_path):
+    try:
+        import importlib.util
+        import sys
+
+        # Thêm parent path (pipelines/crawl) vào sys.path
+        parent_path = os.path.dirname(resilience_module_path)  # .../crawl
+        if parent_path not in sys.path:
+            sys.path.insert(0, parent_path)
+
+        # Thêm grandparent path (pipelines) vào sys.path
+        grandparent_path = os.path.dirname(parent_path)  # .../pipelines
+        if grandparent_path not in sys.path:
+            sys.path.insert(0, grandparent_path)
+
+        # Import trực tiếp từng module con với tên module đầy đủ
+        # Điều này đảm bảo các module có thể import lẫn nhau nếu cần
+        
+        # Tạo package structure trong sys.modules
+        import types
+        if "pipelines" not in sys.modules:
+            sys.modules["pipelines"] = types.ModuleType("pipelines")
+        if "pipelines.crawl" not in sys.modules:
+            sys.modules["pipelines.crawl"] = types.ModuleType("pipelines.crawl")
+        if "pipelines.crawl.resilience" not in sys.modules:
+            sys.modules["pipelines.crawl.resilience"] = types.ModuleType("pipelines.crawl.resilience")
+        
+        # Đảm bảo utils module đã được import (cần thiết cho dead_letter_queue)
+        # utils module đã được import ở trên (dòng 137-156)
+        # Nếu chưa có, tạo fake module
+        if "pipelines.crawl.utils" not in sys.modules and "crawl_utils" in sys.modules:
+            sys.modules["pipelines.crawl.utils"] = sys.modules["crawl_utils"]
+        
+        # 1. Import exceptions trước (không có dependency)
+        exceptions_path = os.path.join(resilience_module_path, "exceptions.py")
+        if os.path.exists(exceptions_path):
+            spec = importlib.util.spec_from_file_location(
+                "pipelines.crawl.resilience.exceptions", exceptions_path
+            )
+            if spec and spec.loader:
+                exceptions_module = importlib.util.module_from_spec(spec)
+                sys.modules["pipelines.crawl.resilience.exceptions"] = exceptions_module
+                spec.loader.exec_module(exceptions_module)
+                CrawlError = exceptions_module.CrawlError
+                classify_error = exceptions_module.classify_error
+            else:
+                raise ImportError(f"Không thể load exceptions module từ {exceptions_path}")
+        else:
+            raise ImportError(f"Không tìm thấy exceptions.py tại {exceptions_path}")
+
+        # 2. Import circuit_breaker (không có dependency)
+        circuit_breaker_path = os.path.join(resilience_module_path, "circuit_breaker.py")
+        if os.path.exists(circuit_breaker_path):
+            spec = importlib.util.spec_from_file_location(
+                "pipelines.crawl.resilience.circuit_breaker", circuit_breaker_path
+            )
+            if spec and spec.loader:
+                circuit_breaker_module = importlib.util.module_from_spec(spec)
+                sys.modules["pipelines.crawl.resilience.circuit_breaker"] = circuit_breaker_module
+                spec.loader.exec_module(circuit_breaker_module)
+                CircuitBreaker = circuit_breaker_module.CircuitBreaker
+                CircuitBreakerOpenError = circuit_breaker_module.CircuitBreakerOpenError
+            else:
+                raise ImportError(f"Không thể load circuit_breaker module")
+        else:
+            raise ImportError(f"Không tìm thấy circuit_breaker.py")
+
+        # 3. Import dead_letter_queue (có thể import từ utils)
+        dlq_path = os.path.join(resilience_module_path, "dead_letter_queue.py")
+        if os.path.exists(dlq_path):
+            spec = importlib.util.spec_from_file_location(
+                "pipelines.crawl.resilience.dead_letter_queue", dlq_path
+            )
+            if spec and spec.loader:
+                dlq_module = importlib.util.module_from_spec(spec)
+                sys.modules["pipelines.crawl.resilience.dead_letter_queue"] = dlq_module
+                spec.loader.exec_module(dlq_module)
+                DeadLetterQueue = dlq_module.DeadLetterQueue
+                get_dlq = dlq_module.get_dlq
+            else:
+                raise ImportError(f"Không thể load dead_letter_queue module")
+        else:
+            raise ImportError(f"Không tìm thấy dead_letter_queue.py")
+
+        # 4. Import graceful_degradation (không có dependency)
+        degradation_path = os.path.join(resilience_module_path, "graceful_degradation.py")
+        if os.path.exists(degradation_path):
+            spec = importlib.util.spec_from_file_location(
+                "pipelines.crawl.resilience.graceful_degradation", degradation_path
+            )
+            if spec and spec.loader:
+                degradation_module = importlib.util.module_from_spec(spec)
+                sys.modules["pipelines.crawl.resilience.graceful_degradation"] = degradation_module
+                spec.loader.exec_module(degradation_module)
+                GracefulDegradation = degradation_module.GracefulDegradation
+                DegradationLevel = degradation_module.DegradationLevel
+                get_service_health = degradation_module.get_service_health
+            else:
+                raise ImportError(f"Không thể load graceful_degradation module")
+        else:
+            raise ImportError(f"Không tìm thấy graceful_degradation.py")
+
+    except Exception as e:
+        # Nếu import lỗi, tạo dummy classes để tránh NameError
+        import warnings
+
+        warnings.warn(f"Không thể import resilience module: {e}", stacklevel=2)
+
+        # Tạo dummy classes
+        class CircuitBreaker:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def call(self, func, *args, **kwargs):
+                return func(*args, **kwargs)
+
+        class CircuitBreakerOpenError(Exception):
+            pass
+
+        class DeadLetterQueue:
+            def add(self, *args, **kwargs):
+                pass
+
+        def get_dlq(*args, **kwargs):
+            return DeadLetterQueue()
+
+        class GracefulDegradation:
+            def should_skip(self):
+                return False
+
+            def record_success(self):
+                pass
+
+            def record_failure(self):
+                pass
+
+        class DegradationLevel:
+            FULL = "full"
+            REDUCED = "reduced"
+            MINIMAL = "minimal"
+            FAILED = "failed"
+
+        def get_service_health():
+            return type("ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()})()
+
+        def classify_error(error, **kwargs):
+            return error
+
+        class CrawlError(Exception):
+            pass
+else:
+    # Fallback: tạo dummy classes
+    class CircuitBreaker:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def call(self, func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+    class CircuitBreakerOpenError(Exception):
+        pass
+
+    class DeadLetterQueue:
+        def add(self, *args, **kwargs):
+            pass
+
+    def get_dlq(*args, **kwargs):
+        return DeadLetterQueue()
+
+    class GracefulDegradation:
+        def should_skip(self):
+            return False
+
+        def record_success(self):
+            pass
+
+        def record_failure(self):
+            pass
+
+    class DegradationLevel:
+        FULL = "full"
+        REDUCED = "reduced"
+        MINIMAL = "minimal"
+        FAILED = "failed"
+
+    def get_service_health():
+        return type("ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()})()
+
+    def classify_error(error, **kwargs):
+        return error
+
+    class CrawlError(Exception):
+        pass
+
 # Cấu hình mặc định
 DEFAULT_ARGS = {
     "owner": "data-team",
@@ -346,6 +549,37 @@ DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Thread-safe lock cho atomic writes
 write_lock = Lock()
+
+# Khởi tạo resilience patterns
+# Circuit breaker cho Tiki API
+tiki_circuit_breaker = CircuitBreaker(
+    failure_threshold=int(Variable.get("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default_var="5")),
+    recovery_timeout=int(Variable.get("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default_var="60")),
+    expected_exception=Exception,
+    name="tiki_api",
+)
+
+# Dead Letter Queue
+try:
+    # Thử dùng Redis nếu có
+    redis_url = Variable.get("REDIS_URL", default_var="redis://redis:6379/3")
+    tiki_dlq = get_dlq(storage_type="redis", redis_url=redis_url)
+except Exception:
+    # Fallback về file-based
+    try:
+        dlq_path = DATA_DIR / "dlq"
+        tiki_dlq = get_dlq(storage_type="file", storage_path=str(dlq_path))
+    except Exception:
+        # Nếu không tạo được, dùng default
+        tiki_dlq = get_dlq()
+
+# Graceful Degradation cho Tiki service
+service_health = get_service_health()
+tiki_degradation = service_health.register_service(
+    name="tiki",
+    failure_threshold=int(Variable.get("TIKI_DEGRADATION_FAILURE_THRESHOLD", default_var="3")),
+    recovery_threshold=int(Variable.get("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default_var="5")),
+)
 
 
 def get_logger(context):
@@ -486,6 +720,13 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
     }
 
     try:
+        # Kiểm tra graceful degradation
+        if tiki_degradation.should_skip():
+            result["error"] = "Service đang ở trạng thái FAILED, skip crawl"
+            result["status"] = "degraded"
+            logger.warning(f"⚠️  Service degraded, skip category {category_name}")
+            return result
+
         # Lấy cấu hình từ Airflow Variables
         max_pages = int(
             Variable.get("TIKI_MAX_PAGES_PER_CATEGORY", default_var="20")
@@ -500,17 +741,47 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
         if rate_limit_delay > 0:
             time.sleep(rate_limit_delay)
 
-        # Crawl với timeout
+        # Crawl với timeout và circuit breaker
         start_time = time.time()
 
-        products = crawl_category_products(
-            category_url,
-            max_pages=max_pages if max_pages > 0 else None,
-            use_selenium=use_selenium,
-            cache_dir=str(CACHE_DIR),
-            use_redis_cache=True,  # Sử dụng Redis cache
-            use_rate_limiting=True,  # Sử dụng rate limiting
-        )
+        def _crawl_with_params():
+            """Wrapper function để gọi với circuit breaker"""
+            return crawl_category_products(
+                category_url,
+                max_pages=max_pages if max_pages > 0 else None,
+                use_selenium=use_selenium,
+                cache_dir=str(CACHE_DIR),
+                use_redis_cache=True,  # Sử dụng Redis cache
+                use_rate_limiting=True,  # Sử dụng rate limiting
+            )
+
+        try:
+            # Gọi với circuit breaker
+            products = tiki_circuit_breaker.call(_crawl_with_params)
+            tiki_degradation.record_success()
+        except CircuitBreakerOpenError as e:
+            # Circuit breaker đang mở
+            result["error"] = f"Circuit breaker open: {str(e)}"
+            result["status"] = "circuit_breaker_open"
+            logger.warning(f"⚠️  Circuit breaker open cho category {category_name}: {e}")
+            # Thêm vào DLQ
+            try:
+                crawl_error = classify_error(e, context={"category_url": category_url, "category_id": category_id})
+                tiki_dlq.add(
+                    task_id=f"crawl_category_{category_id}",
+                    task_type="crawl_category",
+                    error=crawl_error,
+                    context={"category_url": category_url, "category_name": category_name, "category_id": category_id},
+                    retry_count=0,
+                )
+                logger.info(f"📬 Đã thêm vào DLQ: crawl_category_{category_id}")
+            except Exception as dlq_error:
+                logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
+            return result
+        except Exception as e:
+            # Ghi nhận failure
+            tiki_degradation.record_failure()
+            raise  # Re-raise để xử lý bên dưới
 
         elapsed = time.time() - start_time
 
@@ -527,13 +798,41 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
     except TimeoutError as e:
         result["error"] = str(e)
         result["status"] = "timeout"
+        tiki_degradation.record_failure()
         logger.error(f"⏱️  Timeout: {e}")
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"category_url": category_url, "category_id": category_id})
+            tiki_dlq.add(
+                task_id=f"crawl_category_{category_id}",
+                task_type="crawl_category",
+                error=crawl_error,
+                context={"category_url": category_url, "category_name": category_name, "category_id": category_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_category_{category_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
         # Không raise để tiếp tục với danh mục khác
 
     except Exception as e:
         result["error"] = str(e)
         result["status"] = "failed"
+        tiki_degradation.record_failure()
         logger.error(f"❌ Lỗi khi crawl category {category_name}: {e}", exc_info=True)
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"category_url": category_url, "category_id": category_id})
+            tiki_dlq.add(
+                task_id=f"crawl_category_{category_id}",
+                task_type="crawl_category",
+                error=crawl_error,
+                context={"category_url": category_url, "category_name": category_name, "category_id": category_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_category_{category_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
         # Không raise để tiếp tục với danh mục khác
 
     return result
@@ -1208,6 +1507,13 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
             logger.warning(f"Không đọc được cache: {e}")
 
     try:
+        # Kiểm tra graceful degradation
+        if tiki_degradation.should_skip():
+            result["error"] = "Service đang ở trạng thái FAILED, skip crawl"
+            result["status"] = "degraded"
+            logger.warning(f"⚠️  Service degraded, skip product {product_id}")
+            return result
+
         # Validate URL
         if not product_url or not product_url.startswith("http"):
             raise ValueError(f"URL không hợp lệ: {product_url}")
@@ -1224,22 +1530,52 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         if rate_limit_delay > 0:
             time.sleep(rate_limit_delay)
 
-        # Crawl với timeout
+        # Crawl với timeout và circuit breaker
         start_time = time.time()
 
         # Sử dụng Selenium để crawl detail (cần thiết cho dynamic content)
         html_content = None
         try:
-            # Thử crawl với retry và timeout ngắn hơn
-            html_content = crawl_product_detail_with_selenium(
-                product_url,
-                save_html=False,
-                verbose=False,  # Không verbose trong Airflow
-                max_retries=2,  # Retry 2 lần
-                timeout=25,  # Timeout 25s (ngắn hơn để fail nhanh hơn)
-                use_redis_cache=True,  # Sử dụng Redis cache
-                use_rate_limiting=True,  # Sử dụng rate limiting
-            )
+            # Wrapper function để gọi với circuit breaker
+            def _crawl_detail_with_params():
+                """Wrapper function để gọi với circuit breaker"""
+                return crawl_product_detail_with_selenium(
+                    product_url,
+                    save_html=False,
+                    verbose=False,  # Không verbose trong Airflow
+                    max_retries=2,  # Retry 2 lần
+                    timeout=25,  # Timeout 25s (ngắn hơn để fail nhanh hơn)
+                    use_redis_cache=True,  # Sử dụng Redis cache
+                    use_rate_limiting=True,  # Sử dụng rate limiting
+                )
+
+            try:
+                # Gọi với circuit breaker
+                html_content = tiki_circuit_breaker.call(_crawl_detail_with_params)
+                tiki_degradation.record_success()
+            except CircuitBreakerOpenError as e:
+                # Circuit breaker đang mở
+                result["error"] = f"Circuit breaker open: {str(e)}"
+                result["status"] = "circuit_breaker_open"
+                logger.warning(f"⚠️  Circuit breaker open cho product {product_id}: {e}")
+                # Thêm vào DLQ
+                try:
+                    crawl_error = classify_error(e, context={"product_url": product_url, "product_id": product_id})
+                    tiki_dlq.add(
+                        task_id=f"crawl_detail_{product_id}",
+                        task_type="crawl_product_detail",
+                        error=crawl_error,
+                        context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                        retry_count=0,
+                    )
+                    logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+                except Exception as dlq_error:
+                    logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
+                return result
+            except Exception as e:
+                # Ghi nhận failure
+                tiki_degradation.record_failure()
+                raise  # Re-raise để xử lý bên dưới
 
             if not html_content or len(html_content) < 100:
                 raise ValueError(
@@ -1287,6 +1623,20 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
                 result["error"] = f"Selenium error: {error_msg}"
                 result["status"] = "failed"
 
+            # Ghi nhận failure và thêm vào DLQ
+            tiki_degradation.record_failure()
+            try:
+                crawl_error = classify_error(selenium_error, context={"product_url": product_url, "product_id": product_id})
+                tiki_dlq.add(
+                    task_id=f"crawl_detail_{product_id}",
+                    task_type="crawl_product_detail",
+                    error=crawl_error,
+                    context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                    retry_count=0,
+                )
+                logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+            except Exception as dlq_error:
+                logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
             # Không raise, return result với status failed
             return result
 
@@ -1303,6 +1653,20 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
             logger.error(f"❌ Lỗi khi extract detail ({error_type}): {error_msg}")
             result["error"] = f"Extract error: {error_msg}"
             result["status"] = "extract_error"
+            # Ghi nhận failure và thêm vào DLQ
+            tiki_degradation.record_failure()
+            try:
+                crawl_error = classify_error(extract_error, context={"product_url": product_url, "product_id": product_id})
+                tiki_dlq.add(
+                    task_id=f"crawl_detail_{product_id}",
+                    task_type="crawl_product_detail",
+                    error=crawl_error,
+                    context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                    retry_count=0,
+                )
+                logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+            except Exception as dlq_error:
+                logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
             return result
 
         elapsed = time.time() - start_time
@@ -1361,18 +1725,60 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
     except TimeoutError as e:
         result["error"] = str(e)
         result["status"] = "timeout"
+        tiki_degradation.record_failure()
         logger.error(f"⏱️  Timeout: {e}")
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"product_url": product_url, "product_id": product_id})
+            tiki_dlq.add(
+                task_id=f"crawl_detail_{product_id}",
+                task_type="crawl_product_detail",
+                error=crawl_error,
+                context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
 
     except ValueError as e:
         result["error"] = str(e)
         result["status"] = "validation_error"
+        tiki_degradation.record_failure()
         logger.error(f"❌ Validation error: {e}")
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"product_url": product_url, "product_id": product_id})
+            tiki_dlq.add(
+                task_id=f"crawl_detail_{product_id}",
+                task_type="crawl_product_detail",
+                error=crawl_error,
+                context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
 
     except Exception as e:
         result["error"] = str(e)
         result["status"] = "failed"
+        tiki_degradation.record_failure()
         error_type = type(e).__name__
         logger.error(f"❌ Lỗi khi crawl detail ({error_type}): {e}", exc_info=True)
+        # Thêm vào DLQ
+        try:
+            crawl_error = classify_error(e, context={"product_url": product_url, "product_id": product_id})
+            tiki_dlq.add(
+                task_id=f"crawl_detail_{product_id}",
+                task_type="crawl_product_detail",
+                error=crawl_error,
+                context={"product_url": product_url, "product_name": product_name, "product_id": product_id},
+                retry_count=0,
+            )
+            logger.info(f"📬 Đã thêm vào DLQ: crawl_detail_{product_id}")
+        except Exception as dlq_error:
+            logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
         # Không raise để tiếp tục với product khác
 
     # Đảm bảo luôn return result, không bao giờ raise exception
@@ -1521,9 +1927,16 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         # Lấy theo batch để tối ưu
         batch_size = 100
-        for start_idx in range(0, actual_crawl_count, batch_size):
+        total_batches = (actual_crawl_count + batch_size - 1) // batch_size
+        logger.info(f"📦 Sẽ lấy {actual_crawl_count} results trong {total_batches} batches (mỗi batch {batch_size})")
+        
+        for batch_num, start_idx in enumerate(range(0, actual_crawl_count, batch_size), 1):
             end_idx = min(start_idx + batch_size, actual_crawl_count)
             batch_map_indexes = list(range(start_idx, end_idx))
+
+            # Heartbeat: log mỗi batch để Airflow biết task vẫn đang chạy
+            if batch_num % 5 == 0 or batch_num == 1:
+                logger.info(f"💓 [Heartbeat] Đang xử lý batch {batch_num}/{total_batches} (index {start_idx}-{end_idx-1})...")
 
             try:
                 batch_results = ti.xcom_pull(
@@ -1543,8 +1956,10 @@ def merge_product_details(**context) -> dict[str, Any]:
                         # Single result
                         all_detail_results.append(batch_results)
 
-                if (start_idx // batch_size + 1) % 10 == 0:
-                    logger.info(f"Đã lấy {len(all_detail_results)}/{actual_crawl_count} results...")
+                # Log progress mỗi 5 batches hoặc mỗi 10% progress
+                if batch_num % max(5, total_batches // 10) == 0:
+                    progress_pct = (len(all_detail_results) / actual_crawl_count * 100) if actual_crawl_count > 0 else 0
+                    logger.info(f"📊 Đã lấy {len(all_detail_results)}/{actual_crawl_count} results ({progress_pct:.1f}%)...")
             except Exception as e:
                 logger.warning(f"Lỗi khi lấy batch {start_idx}-{end_idx}: {e}")
                 # Thử lấy từng map_index riêng lẻ
@@ -1575,7 +1990,13 @@ def merge_product_details(**context) -> dict[str, Any]:
                 f"Chỉ lấy được {len(all_detail_results)}/{actual_crawl_count} results, thử lấy từng map_index..."
             )
             all_detail_results = []  # Reset và lấy lại
+            
+            # Heartbeat: log thường xuyên trong vòng lặp dài
             for map_index in range(actual_crawl_count):  # CHỈ lấy từ 0 đến actual_crawl_count - 1
+                # Heartbeat mỗi 100 items để tránh timeout
+                if map_index % 100 == 0 and map_index > 0:
+                    logger.info(f"💓 [Heartbeat] Đang lấy từng map_index: {map_index}/{actual_crawl_count}...")
+                
                 try:
                     result = ti.xcom_pull(
                         task_ids=task_id, key="return_value", map_indexes=[map_index]
@@ -1589,9 +2010,11 @@ def merge_product_details(**context) -> dict[str, Any]:
                         else:
                             all_detail_results.append(result)
 
-                    if (map_index + 1) % 500 == 0:
+                    # Log progress mỗi 200 items
+                    if (map_index + 1) % 200 == 0:
+                        progress_pct = (len(all_detail_results) / actual_crawl_count * 100) if actual_crawl_count > 0 else 0
                         logger.info(
-                            f"Đã lấy {len(all_detail_results)}/{actual_crawl_count} results (từng map_index)..."
+                            f"📊 Đã lấy {len(all_detail_results)}/{actual_crawl_count} results ({progress_pct:.1f}%) từng map_index..."
                         )
                 except Exception as e:
                     # Bỏ qua nếu không lấy được (có thể task chưa chạy xong hoặc failed)
@@ -2082,9 +2505,10 @@ with DAG(**DAG_CONFIG) as dag:
         task_merge_product_details = PythonOperator(
             task_id="merge_product_details",
             python_callable=merge_product_details,
-            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=60),  # Tăng timeout lên 60 phút cho nhiều products
             pool="default_pool",
             trigger_rule="all_done",  # Chạy khi tất cả upstream tasks done
+            # Tăng heartbeat interval để tránh timeout khi xử lý nhiều dữ liệu
         )
 
         task_save_products_with_detail = PythonOperator(
