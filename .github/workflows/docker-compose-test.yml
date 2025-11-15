@@ -15,22 +15,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Clean up Docker (aggressive)
-        run: |
-          echo "🧹 Dọn dẹp Docker cache và unused resources..."
-          docker system df
-          docker system prune -af --volumes || true
-          docker builder prune -af --volumes || true
-          docker image prune -af || true
-          docker container prune -f || true
-          docker volume prune -f || true
-          docker network prune -f || true
-          echo "📊 Không gian đĩa sau khi dọn dẹp:"
-          docker system df
-
       - name: Create .env file
         run: |
           cat > .env << EOF
@@ -42,38 +26,6 @@ jobs:
           _AIRFLOW_WWW_USER_USERNAME=admin
           _AIRFLOW_WWW_USER_PASSWORD=admin
           EOF
-
-      - name: Build base Airflow image first
-        run: |
-          echo "🔨 Building base Airflow image..."
-          docker compose build airflow-init --progress=plain || true
-          # Dọn dẹp cache sau khi build base image
-          docker builder prune -af --volumes || true
-
-      - name: Build remaining services (one at a time to save space)
-        run: |
-          echo "🔨 Building remaining services..."
-          # Build từng service một để tiết kiệm không gian đĩa
-          docker compose build airflow-scheduler --progress=plain || true
-          docker builder prune -af --volumes || true
-          
-          docker compose build airflow-worker --progress=plain || true
-          docker builder prune -af --volumes || true
-          
-          docker compose build airflow-apiserver --progress=plain || true
-          docker builder prune -af --volumes || true
-          
-          docker compose build airflow-dag-processor --progress=plain || true
-          docker builder prune -af --volumes || true
-          
-          docker compose build airflow-triggerer --progress=plain || true
-          docker builder prune -af --volumes || true
-          
-      - name: Final cleanup
-        run: |
-          echo "🧹 Final cleanup..."
-          docker builder prune -af --volumes || true
-          docker system df
 
       - name: Start services
         run: |

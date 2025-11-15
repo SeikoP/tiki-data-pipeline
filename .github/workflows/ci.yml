@@ -135,48 +135,4 @@ jobs:
               sys.exit(1)
           "
 
-  docker-build:
-    name: Build Docker Images
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Clean up Docker before build
-        run: |
-          echo "🧹 Dọn dẹp Docker cache trước khi build..."
-          docker system df
-          docker system prune -af --volumes || true
-          docker builder prune -af --volumes || true
-          echo "📊 Không gian đĩa sau khi dọn dẹp:"
-          docker system df
-
-      - name: Build Airflow Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./airflow/Dockerfile
-          push: false
-          tags: tiki-airflow:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=min
-
-      - name: Create .env file for validation
-        run: |
-          cat > .env << EOF
-          AIRFLOW_UID=50000
-          AIRFLOW_PROJ_DIR=.
-          POSTGRES_USER=postgres
-          POSTGRES_PASSWORD=postgres
-          REDIS_PASSWORD=
-          _AIRFLOW_WWW_USER_USERNAME=admin
-          _AIRFLOW_WWW_USER_PASSWORD=admin
-          EOF
-
-      - name: Test Docker Compose
-        run: |
-          docker compose config
 
