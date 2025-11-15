@@ -3,9 +3,9 @@ FROM apache/airflow:3.1.2
 
 USER root
 
-# Cài đặt Chrome/Chromium và dependencies
+# Cài đặt Chrome/Chromium và dependencies (gộp để giảm layers)
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     wget \
     gnupg \
     unzip \
@@ -31,15 +31,13 @@ RUN apt-get update && \
     libxrandr2 \
     xdg-utils \
     libu2f-udev \
-    libvulkan1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Cài đặt Google Chrome (cách mới, không dùng apt-key deprecated)
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg && \
+    libvulkan1 && \
+    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
     apt-get update && \
-    apt-get install -y google-chrome-stable && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends google-chrome-stable && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Hoặc cài Chromium (nhẹ hơn)
 # RUN apt-get update && \
