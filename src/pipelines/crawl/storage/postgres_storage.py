@@ -324,6 +324,8 @@ class PostgresStorage:
                                 product.get("url"),
                                 product.get("image_url"),
                                 product.get("category_url"),
+                                product.get("category_id"),  # Thêm category_id
+                                Json(product.get("category_path")) if product.get("category_path") else None,  # Thêm category_path (JSONB)
                                 product.get("sales_count"),
                                 product.get("price"),
                                 product.get("original_price"),
@@ -365,7 +367,7 @@ class PostgresStorage:
                                 cur,
                                 """
                                 INSERT INTO products
-                                    (product_id, name, url, image_url, category_url, sales_count,
+                                    (product_id, name, url, image_url, category_url, category_id, category_path, sales_count,
                                      price, original_price, discount_percent, rating_average,
                                      review_count, description, specifications, images,
                                      seller_name, seller_id, seller_is_official, brand,
@@ -379,6 +381,8 @@ class PostgresStorage:
                                     url = EXCLUDED.url,
                                     image_url = EXCLUDED.image_url,
                                     category_url = EXCLUDED.category_url,
+                                    category_id = EXCLUDED.category_id,
+                                    category_path = EXCLUDED.category_path,
                                     sales_count = EXCLUDED.sales_count,
                                     price = EXCLUDED.price,
                                     original_price = EXCLUDED.original_price,
@@ -413,7 +417,7 @@ class PostgresStorage:
                                 cur,
                                 """
                                 INSERT INTO products
-                                    (product_id, name, url, image_url, category_url, sales_count,
+                                    (product_id, name, url, image_url, category_url, category_id, category_path, sales_count,
                                      price, original_price, discount_percent, rating_average,
                                      review_count, description, specifications, images,
                                      seller_name, seller_id, seller_is_official, brand,

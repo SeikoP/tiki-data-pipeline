@@ -86,6 +86,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      # Expose PostgreSQL port để kết nối từ máy local
+      # Format: "host_port:container_port"
+      - "5432:5432"
     volumes:
       # Giữ database trong Docker volume (an toàn, performance tốt hơn)
       - postgres-shared-volume:/var/lib/postgresql/data

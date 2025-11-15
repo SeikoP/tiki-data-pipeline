@@ -33,20 +33,78 @@ def serialize_for_json(obj: Any) -> Any:
 
 
 # Import PostgresStorage từ crawl storage
+# Hỗ trợ cả môi trường Airflow (importlib) và môi trường bình thường
+PostgresStorage = None
 try:
-    from ...crawl.storage.postgres_storage import PostgresStorage
+    # Thử import từ __init__.py của storage module (relative import)
+    from ...crawl.storage import PostgresStorage
 except ImportError:
     try:
-        import sys
-        from pathlib import Path
-
-        # Thêm src vào path
-        src_path = Path(__file__).parent.parent.parent.parent
-        sys.path.insert(0, str(src_path))
-        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+        # Thử import trực tiếp từ file (relative import)
+        from ...crawl.storage.postgres_storage import PostgresStorage
     except ImportError:
-        logger.warning("⚠️  Không thể import PostgresStorage, chỉ hỗ trợ load từ file")
-        PostgresStorage = None
+        try:
+            import sys
+            import os
+            import importlib.util
+            from pathlib import Path
+
+            # Tìm đường dẫn đến postgres_storage.py
+            # Lấy đường dẫn tuyệt đối của file hiện tại
+            current_file = Path(__file__).resolve()
+            
+            # Tìm đường dẫn src (có thể là parent hoặc grandparent)
+            # loader.py ở: src/pipelines/load/loader.py
+            # postgres_storage.py ở: src/pipelines/crawl/storage/postgres_storage.py
+            possible_paths = [
+                # Từ /opt/airflow/src (Docker default - ưu tiên)
+                Path("/opt/airflow/src/pipelines/crawl/storage/postgres_storage.py"),
+                # Từ current file: loader.py -> pipelines -> crawl/storage/postgres_storage.py
+                current_file.parent.parent / "crawl" / "storage" / "postgres_storage.py",
+                # Từ current file lên 1 cấp nữa (trong trường hợp đặc biệt)
+                current_file.parent.parent.parent / "pipelines" / "crawl" / "storage" / "postgres_storage.py",
+                # Từ current working directory
+                Path(os.getcwd()) / "src" / "pipelines" / "crawl" / "storage" / "postgres_storage.py",
+                # Từ workspace root
+                Path("/workspace/src/pipelines/crawl/storage/postgres_storage.py"),
+            ]
+
+            postgres_storage_path = None
+            for path in possible_paths:
+                test_path = Path(path) if isinstance(path, str) else path
+                if test_path.exists() and test_path.is_file():
+                    postgres_storage_path = test_path
+                    break
+
+            if postgres_storage_path:
+                # Sử dụng importlib để load trực tiếp từ file
+                spec = importlib.util.spec_from_file_location(
+                    "postgres_storage", postgres_storage_path
+                )
+                if spec and spec.loader:
+                    postgres_storage_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(postgres_storage_module)
+                    PostgresStorage = postgres_storage_module.PostgresStorage
+            else:
+                # Nếu không tìm thấy file, thử thêm src vào path và import absolute
+                # loader.py ở: src/pipelines/load/loader.py
+                # src ở: current_file.parent.parent.parent
+                src_path = current_file.parent.parent.parent
+                if src_path.exists() and str(src_path) not in sys.path:
+                    sys.path.insert(0, str(src_path))
+                
+                try:
+                    from pipelines.crawl.storage import PostgresStorage
+                except ImportError:
+                    try:
+                        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+                    except ImportError:
+                        raise ImportError("Không tìm thấy postgres_storage.py")
+        except Exception as e:
+            logger.warning(
+                f"⚠️  Không thể import PostgresStorage: {e}. Chỉ hỗ trợ load từ file."
+            )
+            PostgresStorage = None
 
 
 class DataLoader:
@@ -270,6 +328,106 @@ class DataLoader:
             self.stats["errors"].append(error_msg)
             logger.error(f"❌ {error_msg}")
             return self.stats
+
+    def load_categories(
+        self,
+        categories: list[dict[str, Any]],
+        save_to_file: str | None = None,
+        upsert: bool = True,
+        validate_before_load: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Load danh sách categories vào database và/hoặc file
+
+        Args:
+            categories: Danh sách categories đã transform
+            save_to_file: Đường dẫn file để lưu (nếu cần)
+            upsert: Nếu True, update nếu đã tồn tại
+            validate_before_load: Có validate trước khi load không
+
+        Returns:
+            Stats dictionary
+        """
+        self.stats = {
+            "total_loaded": len(categories),
+            "success_count": 0,
+            "failed_count": 0,
+            "db_loaded": 0,
+            "file_loaded": 0,
+            "errors": [],
+        }
+
+        if not categories:
+            logger.warning("⚠️  Danh sách categories rỗng")
+            return self.stats
+
+        # Validate trước nếu cần
+        if validate_before_load:
+            valid_categories = []
+            for cat in categories:
+                # Kiểm tra required fields
+                if not cat.get("url") or not cat.get("name"):
+                    self.stats["failed_count"] += 1
+                    self.stats["errors"].append(
+                        f"Missing required fields: url={cat.get('url')}, name={cat.get('name')}"
+                    )
+                    continue
+                valid_categories.append(cat)
+            categories = valid_categories
+
+        # Load vào database
+        if self.enable_db and self.db_storage:
+            try:
+                saved_count = self.db_storage.save_categories(
+                    categories, upsert=upsert, batch_size=self.batch_size
+                )
+                self.stats["db_loaded"] = saved_count
+                self.stats["success_count"] = saved_count
+                logger.info(f"✅ Đã load {saved_count} categories vào database")
+            except Exception as e:
+                error_msg = f"Lỗi khi load vào database: {str(e)}"
+                self.stats["errors"].append(error_msg)
+                self.stats["failed_count"] += len(categories)
+                logger.error(f"❌ {error_msg}")
+
+        # Load vào file nếu cần
+        if save_to_file:
+            try:
+                file_path = Path(save_to_file)
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # Serialize datetime objects trong categories trước khi save
+                serialized_categories = serialize_for_json(categories)
+
+                # Chuẩn bị dữ liệu để lưu
+                output_data = {
+                    "loaded_at": datetime.now().isoformat(),
+                    "total_categories": len(categories),
+                    "stats": {
+                        "db_loaded": self.stats.get("db_loaded", 0),
+                        "file_loaded": len(categories),
+                    },
+                    "categories": serialized_categories,
+                }
+
+                with open(file_path, "w", encoding="utf-8", newline="\n") as f:
+                    json.dump(output_data, f, ensure_ascii=False, indent=2, cls=DateTimeEncoder)
+
+                self.stats["file_loaded"] = len(categories)
+                logger.info(f"✅ Đã lưu {len(categories)} categories vào file: {save_to_file}")
+            except Exception as e:
+                error_msg = f"Lỗi khi lưu vào file: {str(e)}"
+                self.stats["errors"].append(error_msg)
+                logger.error(f"❌ {error_msg}")
+                import traceback
+
+                logger.debug(traceback.format_exc())
+
+        # Update success count nếu chưa có
+        if self.stats["success_count"] == 0 and self.stats["file_loaded"] > 0:
+            self.stats["success_count"] = self.stats["file_loaded"]
+
+        return self.stats
 
     def get_stats(self) -> dict[str, Any]:
         """Lấy thống kê load"""

@@ -555,6 +555,7 @@ if not DATA_DIR:
     DATA_DIR = Path(__file__).parent.parent.parent / "data"
 
 CATEGORIES_FILE = DATA_DIR / "raw" / "categories_recursive_optimized.json"
+CATEGORIES_TREE_FILE = DATA_DIR / "raw" / "categories_tree.json"
 OUTPUT_DIR = DATA_DIR / "raw" / "products"
 CACHE_DIR = OUTPUT_DIR / "cache"
 DETAIL_CACHE_DIR = OUTPUT_DIR / "detail" / "cache"
@@ -747,6 +748,138 @@ def get_logger(context):
         import logging
 
         return logging.getLogger("airflow.task")
+
+
+def extract_and_load_categories_to_db(**context) -> dict[str, Any]:
+    """
+    Task 0: Extract categories từ categories_tree.json và load vào database
+
+    Returns:
+        Dict: Stats về việc load categories
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("📁 TASK: Extract & Load Categories to Database")
+    logger.info("=" * 70)
+
+    try:
+        # Import extract và load modules
+        try:
+            # Thử import từ đường dẫn trong Docker/Airflow
+            import sys
+            import importlib.util
+            from pathlib import Path
+
+            # Tìm đường dẫn đến extract_categories.py
+            possible_paths = [
+                "/opt/airflow/src/pipelines/extract/extract_categories.py",
+                os.path.join(os.path.dirname(__file__), "..", "..", "src", "pipelines", "extract", "extract_categories.py"),
+                os.path.join(os.getcwd(), "src", "pipelines", "extract", "extract_categories.py"),
+            ]
+
+            extract_module_path = None
+            for path in possible_paths:
+                test_path = Path(path)
+                if test_path.exists():
+                    extract_module_path = test_path
+                    break
+
+            if extract_module_path:
+                spec = importlib.util.spec_from_file_location("extract_categories", extract_module_path)
+                if spec and spec.loader:
+                    extract_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(extract_module)
+                    extract_categories_from_tree_file = extract_module.extract_categories_from_tree_file
+                else:
+                    raise ImportError("Không thể load extract_categories module")
+            else:
+                raise ImportError("Không tìm thấy extract_categories.py")
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể import extract module: {e}")
+            logger.info("Thử import trực tiếp...")
+            # Fallback: thử import trực tiếp
+            try:
+                from pipelines.extract.extract_categories import extract_categories_from_tree_file
+            except ImportError:
+                # Thêm src vào path
+                dag_file_dir = os.path.dirname(os.path.abspath(__file__))
+                src_path = os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src"))
+                if src_path not in sys.path:
+                    sys.path.insert(0, src_path)
+                from pipelines.extract.extract_categories import extract_categories_from_tree_file
+
+        # Import DataLoader
+        try:
+            from pipelines.load.loader import DataLoader
+        except ImportError:
+            # Thêm src vào path nếu chưa có
+            dag_file_dir = os.path.dirname(os.path.abspath(__file__))
+            src_path = os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src"))
+            if src_path not in sys.path:
+                sys.path.insert(0, src_path)
+            from pipelines.load.loader import DataLoader
+
+        # 1. Extract categories từ tree file
+        tree_file = str(CATEGORIES_TREE_FILE)
+        logger.info(f"📖 Đang extract categories từ: {tree_file}")
+
+        if not os.path.exists(tree_file):
+            logger.warning(f"⚠️  Không tìm thấy file: {tree_file}")
+            logger.info("Bỏ qua task này, categories có thể đã được load trước đó")
+            return {
+                "total_loaded": 0,
+                "db_loaded": 0,
+                "success_count": 0,
+                "failed_count": 0,
+                "skipped": True,
+            }
+
+        categories = extract_categories_from_tree_file(tree_file)
+        logger.info(f"✅ Đã extract {len(categories)} categories")
+
+        # 2. Load vào database
+        logger.info("💾 Đang load categories vào database...")
+
+        # Lấy credentials từ environment variables
+        loader = DataLoader(
+            database=os.getenv("POSTGRES_DB", "crawl_data"),
+            host=os.getenv("POSTGRES_HOST", "postgres"),
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            user=os.getenv("POSTGRES_USER", "airflow_user"),
+            password=os.getenv("POSTGRES_PASSWORD", ""),
+            batch_size=100,
+            enable_db=True,
+        )
+
+        try:
+            stats = loader.load_categories(
+                categories,
+                save_to_file=None,  # Không lưu file, chỉ load vào DB
+                upsert=True,
+                validate_before_load=True,
+            )
+
+            logger.info(f"✅ Đã load {stats['db_loaded']} categories vào database")
+            logger.info(f"   - Tổng số: {stats['total_loaded']}")
+            logger.info(f"   - Thành công: {stats['success_count']}")
+            logger.info(f"   - Thất bại: {stats['failed_count']}")
+
+            if stats.get("errors"):
+                logger.warning(f"⚠️  Có {len(stats['errors'])} lỗi (hiển thị 5 đầu tiên):")
+                for error in stats["errors"][:5]:
+                    logger.warning(f"   - {error}")
+
+            loader.close()
+            return stats
+
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi load vào database: {e}", exc_info=True)
+            loader.close()
+            raise
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi trong extract_and_load_categories_to_db: {e}", exc_info=True)
+        raise
 
 
 def load_categories(**context) -> list[dict[str, Any]]:
@@ -2697,6 +2830,113 @@ def transform_products(**context) -> dict[str, Any]:
             logger.info(f"🔄 Products được crawl detail: {crawled_count}")
             logger.info(f"✅ Products có detail (success): {stats.get('with_detail', 0)}")
 
+        # Bổ sung category_url và category_id trước khi transform
+        logger.info("🔗 Đang bổ sung category_url và category_id...")
+        
+        # Bước 1: Load category_url mapping từ products.json (nếu có)
+        category_url_mapping = {}  # product_id -> category_url
+        products_file = OUTPUT_DIR / "products.json"
+        if products_file.exists():
+            try:
+                logger.info(f"📖 Đang đọc category_url mapping từ: {products_file}")
+                with open(products_file, encoding="utf-8") as f:
+                    products_data = json.load(f)
+                
+                products_list = []
+                if isinstance(products_data, list):
+                    products_list = products_data
+                elif isinstance(products_data, dict):
+                    if "products" in products_data:
+                        products_list = products_data["products"]
+                    elif "data" in products_data and isinstance(products_data["data"], dict):
+                        products_list = products_data["data"].get("products", [])
+                
+                for product in products_list:
+                    product_id = product.get("product_id")
+                    category_url = product.get("category_url")
+                    if product_id and category_url:
+                        category_url_mapping[product_id] = category_url
+                
+                logger.info(f"✅ Đã load {len(category_url_mapping)} category_url mappings từ products.json")
+            except Exception as e:
+                logger.warning(f"⚠️  Lỗi khi đọc products.json: {e}")
+        
+        # Bước 2: Import utility để extract category_id
+        try:
+            # Tìm đường dẫn utils module
+            utils_paths = [
+                "/opt/airflow/src/pipelines/crawl/utils.py",
+                os.path.abspath(
+                    os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "crawl", "utils.py")
+                ),
+                os.path.join(os.getcwd(), "src", "pipelines", "crawl", "utils.py"),
+            ]
+            
+            utils_path = None
+            for path in utils_paths:
+                if os.path.exists(path):
+                    utils_path = path
+                    break
+            
+            if utils_path:
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
+                utils_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(utils_module)
+                extract_category_id_from_url = utils_module.extract_category_id_from_url
+            else:
+                # Fallback: định nghĩa hàm đơn giản
+                import re
+                def extract_category_id_from_url(url: str) -> str | None:
+                    if not url:
+                        return None
+                    match = re.search(r"/c(\d+)", url)
+                    if match:
+                        return f"c{match.group(1)}"
+                    return None
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể import extract_category_id_from_url: {e}")
+            import re
+            def extract_category_id_from_url(url: str) -> str | None:
+                if not url:
+                    return None
+                match = re.search(r"/c(\d+)", url)
+                if match:
+                    return f"c{match.group(1)}"
+                return None
+        
+        # Bước 3: Bổ sung category_url, category_id và đảm bảo category_path cho products
+        updated_count = 0
+        category_id_added = 0
+        category_path_count = 0
+        
+        for product in products:
+            product_id = product.get("product_id")
+            
+            # Bổ sung category_url nếu chưa có
+            if not product.get("category_url") and product_id in category_url_mapping:
+                product["category_url"] = category_url_mapping[product_id]
+                updated_count += 1
+            
+            # Extract category_id từ category_url nếu có
+            category_url = product.get("category_url")
+            if category_url and not product.get("category_id"):
+                category_id = extract_category_id_from_url(category_url)
+                if category_id:
+                    product["category_id"] = category_id
+                    category_id_added += 1
+            
+            # Đảm bảo category_path được giữ lại (đã có từ cache, không cần xử lý)
+            if product.get("category_path"):
+                category_path_count += 1
+        
+        if updated_count > 0:
+            logger.info(f"✅ Đã bổ sung category_url cho {updated_count} products")
+        if category_id_added > 0:
+            logger.info(f"✅ Đã bổ sung category_id cho {category_id_added} products")
+        if category_path_count > 0:
+            logger.info(f"✅ Có {category_path_count} products có category_path (breadcrumb)")
+        
         # Import DataTransformer
         try:
             # Tìm đường dẫn transform module
@@ -2853,12 +3093,13 @@ def load_products(**context) -> dict[str, Any]:
             spec.loader.exec_module(loader_module)
             DataLoader = loader_module.DataLoader
 
-            # Lấy database config từ Airflow Variables
-            db_host = Variable.get("POSTGRES_HOST", default_var="postgres")
-            db_port = int(Variable.get("POSTGRES_PORT", default_var="5432"))
-            db_name = Variable.get("POSTGRES_DB", default_var="crawl_data")
-            db_user = Variable.get("POSTGRES_USER", default_var="airflow")
-            db_password = Variable.get("POSTGRES_PASSWORD", default_var="airflow")
+            # Lấy database config từ Airflow Variables hoặc environment variables
+            # Ưu tiên: Airflow Variables > Environment Variables > Default
+            db_host = Variable.get("POSTGRES_HOST", default_var=os.getenv("POSTGRES_HOST", "postgres"))
+            db_port = int(Variable.get("POSTGRES_PORT", default_var=os.getenv("POSTGRES_PORT", "5432")))
+            db_name = Variable.get("POSTGRES_DB", default_var=os.getenv("POSTGRES_DB", "crawl_data"))
+            db_user = Variable.get("POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres"))
+            db_password = Variable.get("POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres"))
 
             # Load vào database
             loader = DataLoader(
@@ -3281,12 +3522,24 @@ with DAG(**DAG_CONFIG) as dag:
 
     # TaskGroup: Load và Prepare
     with TaskGroup("load_and_prepare") as load_group:
+        # Task 0: Extract và load categories vào database (chạy đầu tiên)
+        task_extract_and_load_categories = PythonOperator(
+            task_id="extract_and_load_categories_to_db",
+            python_callable=extract_and_load_categories_to_db,
+            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            pool="default_pool",
+        )
+
+        # Task 1: Load danh sách categories từ file để crawl
         task_load_categories = PythonOperator(
             task_id="load_categories",
             python_callable=load_categories,
             execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
             pool="default_pool",
         )
+
+        # Đảm bảo extract_and_load_categories chạy trước load_categories
+        task_extract_and_load_categories >> task_load_categories
 
     # TaskGroup: Crawl Categories (Dynamic Task Mapping)
     with TaskGroup("crawl_categories") as crawl_group:

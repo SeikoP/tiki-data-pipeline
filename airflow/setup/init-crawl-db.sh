@@ -47,6 +47,25 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-pos
         description TEXT,
         specifications JSONB,
         images JSONB,
+        -- Seller fields
+        seller_name VARCHAR(500),
+        seller_id VARCHAR(255),
+        seller_is_official BOOLEAN DEFAULT FALSE,
+        -- Brand and stock fields
+        brand VARCHAR(255),
+        stock_available BOOLEAN,
+        stock_quantity INTEGER,
+        stock_status VARCHAR(50),
+        shipping JSONB,
+        -- Computed fields
+        estimated_revenue DECIMAL(15, 2),
+        price_savings DECIMAL(12, 2),
+        price_category VARCHAR(50),
+        popularity_score DECIMAL(10, 2),
+        value_score DECIMAL(10, 2),
+        discount_amount DECIMAL(12, 2),
+        sales_velocity INTEGER,
+        -- Timestamps
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );

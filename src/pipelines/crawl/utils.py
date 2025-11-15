@@ -390,6 +390,25 @@ def extract_product_id_from_url(url: str) -> str | None:
     return None
 
 
+def extract_category_id_from_url(url: str) -> str | None:
+    """
+    Extract category ID từ URL Tiki
+
+    Args:
+        url: URL danh mục (ví dụ: https://tiki.vn/amplifier/c68289)
+
+    Returns:
+        Category ID (ví dụ: c68289) hoặc None
+    """
+    if not url:
+        return None
+    # Pattern: /slug/c{category_id} hoặc /slug/c{category_id}?...
+    match = re.search(r"/c(\d+)", url)
+    if match:
+        return f"c{match.group(1)}"
+    return None
+
+
 def normalize_url(url: str, base_url: str = "https://tiki.vn") -> str:
     """
     Chuẩn hóa URL

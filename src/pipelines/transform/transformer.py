@@ -228,8 +228,20 @@ class DataTransformer:
             "url": product.get("url"),
             "image_url": product.get("image_url"),
             "category_url": product.get("category_url"),
+            "category_id": product.get("category_id"),  # Extract từ category_url nếu chưa có
+            "category_path": product.get("category_path"),  # Array để làm breadcrumb
             "sales_count": product.get("sales_count"),
         }
+        
+        # Extract category_id từ category_url nếu chưa có
+        if not db_product.get("category_id") and db_product.get("category_url"):
+            try:
+                from ..crawl.utils import extract_category_id_from_url
+                category_id = extract_category_id_from_url(db_product["category_url"])
+                if category_id:
+                    db_product["category_id"] = category_id
+            except Exception:
+                pass  # Nếu không import được, bỏ qua
 
         # Price fields (flatten từ dict)
         price = product.get("price", {})
