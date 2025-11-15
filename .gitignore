@@ -54,6 +54,11 @@ data/raw/
 data/processed/
 data/demo/
 data/test_output/
+data/postgres/  # PostgreSQL database files (nếu mount trực tiếp)
+backups/postgres/*.dump  # PostgreSQL backup files
+backups/postgres/*.sql
+backups/postgres/*.tar
+!backups/postgres/.gitkeep
 # Note: .github/ should be committed (contains workflows, templates, etc.)
 
 # Logs and runtime files

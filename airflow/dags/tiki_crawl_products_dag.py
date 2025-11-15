@@ -1144,7 +1144,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
     # Thử Redis cache trước (nhanh hơn, distributed)
     redis_cache = None
     try:
-        from pipelines.crawl.redis_cache import get_redis_cache
+        from pipelines.crawl.storage.redis_cache import get_redis_cache
 
         redis_cache = get_redis_cache("redis://redis:6379/1")
         if redis_cache:

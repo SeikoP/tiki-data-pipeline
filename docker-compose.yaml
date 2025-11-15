@@ -71,9 +71,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
+      # Giữ database trong Docker volume (an toàn, performance tốt hơn)
       - postgres-shared-volume:/var/lib/postgresql/data
-      # Script để tự động tạo database airflow (chạy khi init lần đầu)
+      # Mount thư mục backup ra local để dễ export/import
+      - ${AIRFLOW_PROJ_DIR:-.}/backups/postgres:/backups
+      # Scripts để tự động tạo databases (chạy khi init lần đầu)
       - ./airflow/setup/init-airflow-db.sh:/docker-entrypoint-initdb.d/01-init-airflow-db.sh:ro
+      - ./airflow/setup/init-crawl-db.sh:/docker-entrypoint-initdb.d/02-init-crawl-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s

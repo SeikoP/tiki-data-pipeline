@@ -177,7 +177,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
     # Thử Redis cache trước
     if use_redis_cache:
         try:
-            from pipelines.crawl.redis_cache import get_redis_cache
+            from pipelines.crawl.storage.redis_cache import get_redis_cache
 
             redis_cache = get_redis_cache("redis://redis:6379/1")
             if redis_cache:
@@ -190,7 +190,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
     # Rate limiting - kiểm tra và đợi nếu cần
     if use_rate_limiting:
         try:
-            from pipelines.crawl.redis_cache import get_redis_rate_limiter
+            from pipelines.crawl.storage.redis_cache import get_redis_rate_limiter
 
             rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
             if rate_limiter:
@@ -274,7 +274,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
         # Cache HTML vào Redis sau khi crawl thành công
         if use_redis_cache and html:
             try:
-                from pipelines.crawl.redis_cache import get_redis_cache
+                from pipelines.crawl.storage.redis_cache import get_redis_cache
 
                 redis_cache = get_redis_cache("redis://redis:6379/1")
                 if redis_cache:
@@ -299,7 +299,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
     # Thử Redis cache trước
     if use_redis_cache:
         try:
-            from pipelines.crawl.redis_cache import get_redis_cache
+            from pipelines.crawl.storage.redis_cache import get_redis_cache
 
             redis_cache = get_redis_cache("redis://redis:6379/1")
             if redis_cache:
@@ -312,7 +312,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
     # Rate limiting - kiểm tra và đợi nếu cần
     if use_rate_limiting:
         try:
-            from pipelines.crawl.redis_cache import get_redis_rate_limiter
+            from pipelines.crawl.storage.redis_cache import get_redis_rate_limiter
 
             rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
             if rate_limiter:
@@ -347,7 +347,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
             # Cache HTML vào Redis sau khi crawl thành công
             if use_redis_cache and html:
                 try:
-                    from pipelines.crawl.redis_cache import get_redis_cache
+                    from pipelines.crawl.storage.redis_cache import get_redis_cache
 
                     redis_cache = get_redis_cache("redis://redis:6379/1")
                     if redis_cache:
@@ -705,7 +705,7 @@ def crawl_category_products(
     redis_cache = None
     if use_redis_cache:
         try:
-            from pipelines.crawl.redis_cache import get_redis_cache
+            from pipelines.crawl.storage.redis_cache import get_redis_cache
 
             redis_cache = get_redis_cache("redis://redis:6379/1")
             if redis_cache:
