@@ -1858,17 +1858,24 @@ def merge_product_details(**context) -> dict[str, Any]:
             max_found_index = -1
 
             # Binary search để tìm map_index cao nhất có XCom (tối ưu hơn linear search)
-            # Nhưng để đơn giản, thử từ cuối về đầu với step size lớn
+            # Thử một số điểm để tìm max index
+            logger.info(f"🔍 Đang phát hiện số lượng map_index thực tế (dự kiến: {expected_crawl_count})...")
             test_indices = []
             if expected_crawl_count > 1000:
-                # Với số lượng lớn, test một số điểm
+                # Với số lượng lớn, test một số điểm để tìm max
                 step = max(100, expected_crawl_count // 20)
+                test_indices = list(range(0, expected_crawl_count, step))
+                test_indices.append(expected_crawl_count - 1)
+            elif expected_crawl_count > 100:
+                # Với số lượng trung bình, test nhiều điểm hơn
+                step = max(50, expected_crawl_count // 10)
                 test_indices = list(range(0, expected_crawl_count, step))
                 test_indices.append(expected_crawl_count - 1)
             else:
                 # Với số lượng nhỏ, test tất cả
                 test_indices = list(range(expected_crawl_count))
 
+            # Tìm từ cuối về đầu để tìm max index nhanh hơn
             for test_idx in reversed(test_indices):
                 try:
                     result = ti.xcom_pull(
@@ -1876,21 +1883,30 @@ def merge_product_details(**context) -> dict[str, Any]:
                     )
                     if result:
                         max_found_index = test_idx
+                        logger.info(f"✅ Tìm thấy XCom tại map_index {test_idx}")
                         break
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"   Không có XCom tại map_index {test_idx}: {e}")
                     pass
 
             if max_found_index >= 0:
                 # Tìm chính xác map_index cao nhất bằng cách tìm từ max_found_index
-                # Thử từ max_found_index đến expected_crawl_count
-                for idx in range(max_found_index, min(max_found_index + 200, expected_crawl_count)):
+                # Chỉ thử thêm tối đa 200 map_index tiếp theo để tránh quá lâu
+                logger.info(f"🔍 Đang tìm chính xác max index từ {max_found_index}...")
+                search_range = min(max_found_index + 200, expected_crawl_count)
+                for idx in range(max_found_index + 1, search_range):
                     try:
                         result = ti.xcom_pull(
                             task_ids=task_id, key="return_value", map_indexes=[idx]
                         )
                         if result:
                             max_found_index = idx
-                    except Exception:
+                        else:
+                            # Nếu không có result, dừng lại (có thể đã đến cuối)
+                            break
+                    except Exception as e:
+                        # Nếu exception, có thể là hết map_index
+                        logger.debug(f"   Không có XCom tại map_index {idx}: {e}")
                         break
 
                 actual_crawl_count = max_found_index + 1
@@ -1899,8 +1915,10 @@ def merge_product_details(**context) -> dict[str, Any]:
                 )
             else:
                 logger.warning(
-                    f"⚠️  Không tìm thấy XCom nào, sử dụng expected_crawl_count: {expected_crawl_count}"
+                    f"⚠️  Không tìm thấy XCom nào, sử dụng expected_crawl_count: {expected_crawl_count}. "
+                    f"Có thể tất cả tasks đã fail hoặc chưa chạy xong."
                 )
+                actual_crawl_count = expected_crawl_count
 
         if actual_crawl_count == 0:
             logger.warning("⚠️  Không có products nào được crawl detail, bỏ qua merge detail")
@@ -1961,8 +1979,9 @@ def merge_product_details(**context) -> dict[str, Any]:
                     progress_pct = (len(all_detail_results) / actual_crawl_count * 100) if actual_crawl_count > 0 else 0
                     logger.info(f"📊 Đã lấy {len(all_detail_results)}/{actual_crawl_count} results ({progress_pct:.1f}%)...")
             except Exception as e:
-                logger.warning(f"Lỗi khi lấy batch {start_idx}-{end_idx}: {e}")
-                # Thử lấy từng map_index riêng lẻ
+                logger.warning(f"⚠️  Lỗi khi lấy batch {start_idx}-{end_idx}: {e}")
+                logger.warning(f"   Sẽ thử lấy từng map_index riêng lẻ trong batch này...")
+                # Thử lấy từng map_index riêng lẻ trong batch này
                 for map_index in batch_map_indexes:
                     try:
                         result = ti.xcom_pull(
@@ -1977,51 +1996,86 @@ def merge_product_details(**context) -> dict[str, Any]:
                                 all_detail_results.append(result)
                     except Exception as e2:
                         # Bỏ qua nếu không lấy được (có thể task chưa chạy xong hoặc failed)
-                        logger.debug(f"Không lấy được map_index {map_index}: {e2}")
+                        logger.debug(f"   Không lấy được map_index {map_index}: {e2}")
                         pass
 
         logger.info(
-            f"Lấy được {len(all_detail_results)} detail results (mong đợi {actual_crawl_count})"
+            f"✅ Lấy được {len(all_detail_results)} detail results qua batch (mong đợi {actual_crawl_count})"
         )
 
-        # Nếu không lấy đủ, thử lấy từng map_index một (chỉ trong phạm vi actual_crawl_count)
+        # Nếu không lấy đủ hoặc có lỗi khi lấy batch, thử lấy từng map_index một để bù vào phần thiếu
+        # KHÔNG reset all_detail_results, chỉ lấy thêm những map_index chưa có
         if len(all_detail_results) < actual_crawl_count * 0.8:  # Nếu thiếu hơn 20%
+            # Log cảnh báo nếu thiếu nhiều
+            missing_pct = ((actual_crawl_count - len(all_detail_results)) / actual_crawl_count * 100) if actual_crawl_count > 0 else 0
+            if missing_pct > 30:
+                logger.warning(
+                    f"⚠️  Thiếu {missing_pct:.1f}% results ({actual_crawl_count - len(all_detail_results)}/{actual_crawl_count}), "
+                    f"có thể do nhiều tasks failed hoặc timeout"
+                )
             logger.warning(
-                f"Chỉ lấy được {len(all_detail_results)}/{actual_crawl_count} results, thử lấy từng map_index..."
+                f"⚠️  Chỉ lấy được {len(all_detail_results)}/{actual_crawl_count} results qua batch, "
+                f"thử lấy từng map_index để bù vào phần thiếu..."
             )
-            all_detail_results = []  # Reset và lấy lại
+            
+            # Tạo set các product_id đã có để tránh duplicate
+            existing_product_ids = set()
+            for result in all_detail_results:
+                if isinstance(result, dict) and result.get("product_id"):
+                    existing_product_ids.add(result.get("product_id"))
+            
+            missing_count = actual_crawl_count - len(all_detail_results)
+            logger.info(f"📊 Cần lấy thêm ~{missing_count} results từ {actual_crawl_count} map_indexes")
             
             # Heartbeat: log thường xuyên trong vòng lặp dài
+            fetched_count = 0
             for map_index in range(actual_crawl_count):  # CHỈ lấy từ 0 đến actual_crawl_count - 1
                 # Heartbeat mỗi 100 items để tránh timeout
                 if map_index % 100 == 0 and map_index > 0:
-                    logger.info(f"💓 [Heartbeat] Đang lấy từng map_index: {map_index}/{actual_crawl_count}...")
+                    logger.info(
+                        f"💓 [Heartbeat] Đang lấy từng map_index: {map_index}/{actual_crawl_count} "
+                        f"(đã lấy {len(all_detail_results)}/{actual_crawl_count})..."
+                    )
                 
                 try:
                     result = ti.xcom_pull(
                         task_ids=task_id, key="return_value", map_indexes=[map_index]
                     )
                     if result:
-                        if isinstance(result, list):
-                            all_detail_results.extend([r for r in result if r])
-                        elif isinstance(result, dict):
-                            # Nếu là dict, có thể là dict chứa result
-                            all_detail_results.append(result)
-                        else:
-                            all_detail_results.append(result)
+                        # Chỉ thêm nếu chưa có (tránh duplicate)
+                        product_id_to_check = None
+                        if isinstance(result, dict):
+                            product_id_to_check = result.get("product_id")
+                        elif isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
+                            product_id_to_check = result[0].get("product_id")
+                        
+                        # Chỉ thêm nếu product_id chưa có trong danh sách
+                        if not product_id_to_check or product_id_to_check not in existing_product_ids:
+                            if isinstance(result, list):
+                                for r in result:
+                                    if isinstance(r, dict) and r.get("product_id"):
+                                        existing_product_ids.add(r.get("product_id"))
+                                all_detail_results.extend([r for r in result if r])
+                            elif isinstance(result, dict):
+                                if product_id_to_check:
+                                    existing_product_ids.add(product_id_to_check)
+                                all_detail_results.append(result)
+                            else:
+                                all_detail_results.append(result)
+                            fetched_count += 1
 
                     # Log progress mỗi 200 items
                     if (map_index + 1) % 200 == 0:
                         progress_pct = (len(all_detail_results) / actual_crawl_count * 100) if actual_crawl_count > 0 else 0
                         logger.info(
-                            f"📊 Đã lấy {len(all_detail_results)}/{actual_crawl_count} results ({progress_pct:.1f}%) từng map_index..."
+                            f"📊 Đã lấy tổng {len(all_detail_results)}/{actual_crawl_count} results ({progress_pct:.1f}%) từng map_index..."
                         )
                 except Exception as e:
                     # Bỏ qua nếu không lấy được (có thể task chưa chạy xong hoặc failed)
-                    logger.debug(f"Không lấy được map_index {map_index}: {e}")
+                    logger.debug(f"   Không lấy được map_index {map_index}: {e}")
                     pass
 
-            logger.info(f"Sau khi lấy từng map_index: {len(all_detail_results)} detail results")
+            logger.info(f"✅ Sau khi lấy từng map_index: tổng {len(all_detail_results)} detail results (lấy thêm {fetched_count})")
 
         # Tạo dict để lookup nhanh
         detail_dict = {}
@@ -2031,13 +2085,20 @@ def merge_product_details(**context) -> dict[str, Any]:
             "cached": 0,
             "failed": 0,
             "timeout": 0,
+            "degraded": 0,
+            "circuit_breaker_open": 0,
         }
 
+        logger.info(f"📊 Đang xử lý {len(all_detail_results)} detail results...")
+        
+        # Kiểm tra nếu có quá nhiều kết quả None hoặc invalid
+        valid_results = 0
         for detail_result in all_detail_results:
             if detail_result and isinstance(detail_result, dict):
                 product_id = detail_result.get("product_id")
                 if product_id:
                     detail_dict[product_id] = detail_result
+                    valid_results += 1
                     status = detail_result.get("status", "failed")
                     if status == "success":
                         stats["with_detail"] += 1
@@ -2045,8 +2106,19 @@ def merge_product_details(**context) -> dict[str, Any]:
                         stats["cached"] += 1
                     elif status == "timeout":
                         stats["timeout"] += 1
+                    elif status == "degraded":
+                        stats["degraded"] += 1
+                    elif status == "circuit_breaker_open":
+                        stats["circuit_breaker_open"] += 1
                     else:
                         stats["failed"] += 1
+        
+        logger.info(f"📊 Có {valid_results} detail results hợp lệ từ {len(all_detail_results)} results")
+        
+        if valid_results < len(all_detail_results):
+            logger.warning(
+                f"⚠️  Có {len(all_detail_results) - valid_results} results không hợp lệ hoặc thiếu product_id"
+            )
 
         # Merge detail vào products
         products_with_detail = []
@@ -2102,10 +2174,18 @@ def merge_product_details(**context) -> dict[str, Any]:
         logger.info("📊 THỐNG KÊ MERGE DETAIL")
         logger.info("=" * 70)
         logger.info(f"📦 Tổng products: {stats['total_products']}")
-        logger.info(f"✅ Có detail: {stats['with_detail']}")
-        logger.info(f"📦 Cache: {stats['cached']}")
+        logger.info(f"✅ Có detail (success): {stats['with_detail']}")
+        logger.info(f"📦 Có detail (cached): {stats['cached']}")
+        logger.info(f"⚠️  Degraded: {stats['degraded']}")
+        logger.info(f"⚡ Circuit breaker open: {stats['circuit_breaker_open']}")
         logger.info(f"❌ Failed: {stats['failed']}")
         logger.info(f"⏱️  Timeout: {stats['timeout']}")
+        
+        # Tính tổng có detail (success + cached)
+        total_with_detail = stats['with_detail'] + stats['cached']
+        if stats['total_products'] > 0:
+            detail_coverage = (total_with_detail / stats['total_products'] * 100)
+            logger.info(f"📈 Tỷ lệ có detail: {total_with_detail}/{stats['total_products']} ({detail_coverage:.1f}%)")
         logger.info("=" * 70)
 
         result = {
@@ -2116,8 +2196,31 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         return result
 
+    except ValueError as e:
+        logger.error(f"❌ Validation error khi merge details: {e}", exc_info=True)
+        # Nếu là validation error (thiếu products), return empty result thay vì raise
+        return {
+            "products": [],
+            "stats": {
+                "total_products": 0,
+                "with_detail": 0,
+                "cached": 0,
+                "failed": 0,
+                "timeout": 0,
+            },
+            "merged_at": datetime.now().isoformat(),
+            "error": str(e),
+        }
     except Exception as e:
         logger.error(f"❌ Lỗi khi merge details: {e}", exc_info=True)
+        # Log chi tiết context để debug
+        logger.error(f"   Context keys: {list(context.keys()) if context else 'None'}")
+        try:
+            ti = context.get("ti")
+            if ti:
+                logger.error(f"   Task ID: {ti.task_id}, DAG ID: {ti.dag_id}, Run ID: {ti.run_id}")
+        except Exception:
+            pass
         raise
 
 
