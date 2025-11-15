@@ -26,6 +26,7 @@
 - ✅ **Transform**: Normalize, validate và tính toán các trường dữ liệu
 - ✅ **Load**: Lưu dữ liệu vào PostgreSQL database và file JSON
 - ✅ **Orchestration**: Tự động hóa workflow với Apache Airflow DAG
+- ✅ **Asset-aware Scheduling**: Data-aware scheduling với Dataset/Asset tracking
 - ✅ **Performance**: Xử lý song song, caching, rate limiting
 - ✅ **Data Quality**: Validation, error handling, computed fields
 
@@ -41,6 +42,7 @@
 | 🔄 **Data Transformer** | Normalize, validate và tính computed fields |
 | 💾 **Data Loader** | Load dữ liệu vào PostgreSQL database |
 | ⚡ **Airflow DAG** | Workflow orchestration với Dynamic Task Mapping |
+| 📊 **Asset Tracking** | Data-aware scheduling với Dataset/Asset dependencies |
 | 🕷️ **Selenium Automation** | Crawl dynamic content với Selenium WebDriver |
 | 📊 **Full Pipeline** | Crawl → Transform → Load end-to-end |
 | ⚡ **Performance** | Caching, rate limiting, batch processing |
@@ -167,14 +169,29 @@ graph TB
     end
     
     subgraph "Databases"
-        F[(PostgreSQL)]
-        G[(Redis)]
+        F[(PostgreSQL<br/>Metadata + Data)]
+        G[(Redis<br/>Cache + Broker)]
     end
     
-    subgraph "Crawling Pipeline"
+    subgraph "ETL Pipeline"
         H[Crawl Categories]
         I[Crawl Products]
-        J[Crawl Product Details]
+        J[Crawl Details]
+        K[Transform]
+        L[Load]
+    end
+    
+    subgraph "Data Storage"
+        M[Raw Data<br/>JSON Files]
+        N[Processed Data<br/>JSON Files]
+        O[PostgreSQL<br/>Products Table]
+    end
+    
+    subgraph "Asset Tracking"
+        P[tiki://products/raw]
+        Q[tiki://products/with_detail]
+        R[tiki://products/transformed]
+        S[tiki://products/final]
     end
     
     A --> F
@@ -185,20 +202,58 @@ graph TB
     C --> H
     C --> I
     C --> J
+    C --> K
+    C --> L
+    
+    H --> I
+    I --> M
+    I --> P
+    J --> M
+    J --> Q
+    K --> N
+    K --> R
+    L --> N
+    L --> O
+    L --> S
+    
+    P -.->|Asset| K
+    Q -.->|Asset| K
+    R -.->|Asset| L
     
     style F fill:#336791
     style G fill:#DC382D
     style A fill:#017CEE
+    style O fill:#336791
+    style P fill:#90EE90
+    style Q fill:#90EE90
+    style R fill:#90EE90
+    style S fill:#90EE90
 ```
 
 </div>
+
+### ETL Pipeline Flow
+
+```
+1. Extract (Crawl)
+   ├── Categories → Products → Product Details
+   └── Output: Raw JSON files + Asset: tiki://products/raw, tiki://products/with_detail
+
+2. Transform
+   ├── Normalize, Validate, Compute Fields
+   └── Output: Transformed JSON + Asset: tiki://products/transformed
+
+3. Load
+   ├── PostgreSQL Database + JSON Backup
+   └── Output: Final Data + Asset: tiki://products/final
+```
 
 ### Services Overview
 
 | Service | Purpose | Port |
 |:-------:|:--------|:----:|
-| **PostgreSQL** | Airflow metadata database | 5432 (internal) |
-| **Redis** | Celery message broker | 6379 (internal) |
+| **PostgreSQL** | Airflow metadata + Products data | 5432 (internal) |
+| **Redis** | Celery message broker + Cache | 6379 (internal) |
 | **Airflow API Server** | Web UI và REST API | 8080 |
 | **Airflow Scheduler** | Schedule và trigger DAGs | - |
 | **Airflow Worker** | Execute tasks | - |
@@ -374,19 +429,25 @@ python src/pipelines/load/loader.py
 
 ### 6. Airflow DAG (Full Pipeline)
 
-DAG tự động hóa toàn bộ quy trình ETL:
+DAG tự động hóa toàn bộ quy trình ETL với **Asset-aware Scheduling**:
 
 1. **Load Categories**: Load danh sách categories từ file
 2. **Crawl Products**: Crawl products từ categories (Dynamic Task Mapping)
 3. **Merge Products**: Merge và lưu danh sách products
+   - 📊 Tạo Asset: `tiki://products/raw`
 4. **Crawl Product Details**: Crawl chi tiết products (Dynamic Task Mapping)
 5. **Merge Details**: Merge details vào products
+   - 📊 Tạo Asset: `tiki://products/with_detail`
 6. **Transform Products**: Normalize, validate và tính computed fields
+   - 📊 Tạo Asset: `tiki://products/transformed`
 7. **Load Products**: Load vào PostgreSQL database
+   - 📊 Tạo Asset: `tiki://products/final`
 8. **Validate Data**: Validate dữ liệu đã load
 
 **Truy cập**: http://localhost:8080  
 **DAG ID**: `tiki_crawl_products`
+
+**Asset Tracking**: DAG sử dụng Dataset/Asset để track data dependencies. Xem thêm: [docs/ASSET_SCHEDULING.md](docs/ASSET_SCHEDULING.md)
 
 ### 7. Demo Files (Quick Start)
 
@@ -430,6 +491,7 @@ Cấu hình các biến sau trong Airflow UI (Admin → Variables):
 | `POSTGRES_DB` | `crawl_data` | Database name |
 | `POSTGRES_USER` | `airflow` | Database user |
 | `POSTGRES_PASSWORD` | `airflow` | Database password |
+| `TIKI_USE_ASSET_SCHEDULING` | `false` | Enable Asset-aware scheduling |
 
 ### Environment Variables
 
@@ -459,11 +521,12 @@ _PIP_ADDITIONAL_REQUIREMENTS=selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.
 
 | Use Case | Description | Example |
 |:--------:|:-----------|:--------|
-| 🛍️ **Product Monitoring** | Theo dõi sản phẩm Tiki | Price tracking, Stock monitoring |
-| 📊 **Market Analysis** | Phân tích thị trường | Category trends, Sales analysis |
-| 💰 **Price Comparison** | So sánh giá sản phẩm | Competitor analysis |
-| 📈 **Data Analytics** | Phân tích dữ liệu sản phẩm | Product performance, Reviews analysis |
-| 🔄 **Automated Data Collection** | Thu thập dữ liệu tự động | Daily product updates |
+| 🛍️ **Product Monitoring** | Theo dõi sản phẩm Tiki | Price tracking, Stock monitoring, Sales trends |
+| 📊 **Market Analysis** | Phân tích thị trường | Category trends, Sales analysis, Popularity metrics |
+| 💰 **Price Comparison** | So sánh giá sản phẩm | Competitor analysis, Discount tracking |
+| 📈 **Data Analytics** | Phân tích dữ liệu sản phẩm | Product performance, Reviews analysis, Revenue estimation |
+| 🔄 **Automated ETL** | Thu thập và xử lý dữ liệu tự động | Daily product updates, Data transformation, Database loading |
+| 📊 **Business Intelligence** | Báo cáo và dashboard | Product insights, Market trends, Performance metrics |
 
 </div>
 
@@ -474,11 +537,14 @@ _PIP_ADDITIONAL_REQUIREMENTS=selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.
 <div align="center">
 
 ✅ **Rate Limiting** - Delay giữa các requests để tránh bị block  
-✅ **Caching** - Cache dữ liệu đã crawl để tránh crawl lại  
-✅ **Error Handling** - Retry mechanism và error logging  
+✅ **Caching** - Multi-level caching (Redis + File) để tối ưu performance  
+✅ **Error Handling** - Retry mechanism, circuit breaker, dead letter queue  
 ✅ **Resource Management** - Giới hạn tài nguyên cho từng service  
-✅ **Data Validation** - Validate dữ liệu trước khi lưu  
+✅ **Data Validation** - Validate dữ liệu ở mọi stage (crawl, transform, load)  
 ✅ **Atomic Writes** - Ghi file an toàn để tránh corruption  
+✅ **Asset Tracking** - Sử dụng Dataset/Asset để track data dependencies  
+✅ **Batch Processing** - Xử lý dữ liệu theo batch để tối ưu memory  
+✅ **Data Quality** - Normalize, validate và compute fields tự động  
 
 </div>
 
@@ -506,102 +572,24 @@ _PIP_ADDITIONAL_REQUIREMENTS=selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.
 
 > ⚠️ **Rate Limiting**: Tiki có thể rate limit, sử dụng delay giữa các requests  
 > 🔒 **Selenium**: Cần Chrome/Chromium driver để chạy Selenium (được cài tự động trong Docker)  
-> 📊 **Data Volume**: Với hàng nghìn sản phẩm, cần đủ disk space  
-> 🐳 **Docker**: Đảm bảo đủ tài nguyên hệ thống (RAM, CPU)  
-> ⏱️ **Timeout**: Cấu hình timeout phù hợp cho từng task  
-> 💾 **Cache**: Sử dụng cache để tránh crawl lại dữ liệu đã có  
+> 📊 **Data Volume**: Với hàng nghìn sản phẩm, cần đủ disk space (10GB+ recommended)  
+> 🐳 **Docker**: Đảm bảo đủ tài nguyên hệ thống (RAM 8GB+, CPU 4+ cores)  
+> ⏱️ **Timeout**: Cấu hình timeout phù hợp cho từng task (crawl, transform, load)  
+> 💾 **Cache**: Sử dụng multi-level cache (Redis + File) để tránh crawl lại  
+> 📊 **Asset Tracking**: Sử dụng Dataset/Asset để track data flow và dependencies  
+> 🔄 **ETL Pipeline**: Pipeline hoàn chỉnh từ Extract → Transform → Load  
 
 </div>
-
----
-
-## 🐛 Troubleshooting
-
-### Lỗi: ModuleNotFoundError: No module named 'selenium'
-
-**Giải pháp**: Rebuild Docker images để cài packages:
-
-```bash
-docker-compose build --no-cache
-docker-compose up -d
-```
-
-### Lỗi: Chrome/ChromeDriver không tìm thấy
-
-**Giải pháp**: Custom Dockerfile đã cài Chrome tự động. Nếu vẫn lỗi:
-
-```bash
-# Rebuild Airflow image
-docker-compose build airflow-worker airflow-scheduler
-docker-compose up -d
-```
-
-### Lỗi: DAG không hiển thị trong Airflow UI
-
-**Giải pháp**: 
-1. Kiểm tra DAG file có trong `airflow/dags/`
-2. Kiểm tra syntax errors: `docker-compose exec airflow-scheduler airflow dags list`
-3. Restart DAG processor: `docker-compose restart airflow-dag-processor`
-
-### Lỗi: Connection timeout khi crawl
-
-**Giải pháp**: 
-1. Tăng timeout trong Airflow Variables
-2. Kiểm tra network connection
-3. Giảm rate limit delay nếu quá chậm
 
 ---
 
 ## 📚 Documentation
 
 - [Airflow Documentation](https://airflow.apache.org/docs/)
+- [Airflow Asset Scheduling](https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/asset-scheduling.html)
 - [Selenium Documentation](https://www.selenium.dev/documentation/)
 - [Docker Compose Documentation](https://docs.docker.com/compose/)
+- [Asset Scheduling Guide](docs/ASSET_SCHEDULING.md) - Hướng dẫn sử dụng Asset-aware scheduling
 
 ---
 
-## 🤝 Contributing
-
-<div align="center">
-
-Chúng tôi hoan nghênh mọi đóng góp! 🎉
-
-[📖 Contributing Guidelines](docs/CONTRIBUTING.md) | [🐛 Report Bug](https://github.com/your-username/tiki-data-pipeline/issues) | [💡 Request Feature](https://github.com/your-username/tiki-data-pipeline/issues)
-
-</div>
-
----
-
-## 📝 License
-
-<div align="center">
-
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-</div>
-
----
-
-## 🌟 Star History
-
-<div align="center">
-
-[![Star History Chart](https://api.star-history.com/svg?repos=your-username/tiki-data-pipeline&type=Date)](https://star-history.com/#your-username/tiki-data-pipeline&Date)
-
-</div>
-
----
-
-<div align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,0A192F,172A45,64FFDA&height=100&section=footer"/>
-  
-  <p>Made with ❤️ for the Data Engineering community</p>
-  
-  <p>
-    <img src="https://img.shields.io/github/stars/your-username/tiki-data-pipeline?style=social&label=Star"/>
-    <img src="https://img.shields.io/github/forks/your-username/tiki-data-pipeline?style=social&label=Fork"/>
-    <img src="https://img.shields.io/github/watchers/your-username/tiki-data-pipeline?style=social&label=Watch"/>
-  </p>
-</div>

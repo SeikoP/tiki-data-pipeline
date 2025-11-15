@@ -3,6 +3,7 @@ DAG Airflow để crawl sản phẩm Tiki với tối ưu hóa cho dữ liệu l
 
 Tính năng:
 - Dynamic Task Mapping: crawl song song nhiều danh mục
+- Asset-aware Scheduling: sử dụng Dataset để track data dependencies
 - Chia nhỏ tasks: mỗi task một chức năng riêng
 - XCom: chia sẻ dữ liệu giữa các tasks
 - Retry: tự động retry khi lỗi
@@ -12,6 +13,12 @@ Tính năng:
 - Atomic writes: ghi file an toàn, tránh corrupt
 - TaskGroup: nhóm các tasks liên quan
 - Tối ưu: batch processing, rate limiting, caching
+
+Asset/Dataset Tracking:
+- tiki://products/raw: Raw products từ crawl
+- tiki://products/with_detail: Products với chi tiết
+- tiki://products/transformed: Products đã transform
+- tiki://products/final: Products đã load vào database
 """
 
 import json
@@ -28,6 +35,15 @@ from typing import Any
 from airflow.providers.standard.operators.python import PythonOperator
 
 from airflow import DAG
+
+# Import Dataset cho Asset-aware scheduling (Airflow 2.7+)
+try:
+    from airflow.datasets import Dataset
+    DATASET_AVAILABLE = True
+except ImportError:
+    # Fallback cho Airflow < 2.7
+    DATASET_AVAILABLE = False
+    Dataset = None
 
 # Import Variable và TaskGroup với suppress warning
 try:
@@ -502,11 +518,20 @@ else:
     )
     dag_tags = ["tiki", "crawl", "products", "data-pipeline", "manual"]
 
+# Cấu hình DAG với Asset-aware scheduling (nếu có Dataset)
+# Có thể schedule dựa trên Dataset hoặc schedule thời gian
+dag_schedule_config = dag_schedule
+if DATASET_AVAILABLE and Variable.get("TIKI_USE_ASSET_SCHEDULING", default_var="false").lower() == "true":
+    # Nếu enable asset scheduling, có thể schedule dựa trên upstream datasets
+    # Ví dụ: chạy khi có categories mới (nếu có categories dataset)
+    # Hiện tại giữ schedule thời gian, nhưng có thể thêm dataset dependencies
+    pass
+
 DAG_CONFIG = {
     "dag_id": "tiki_crawl_products",
     "description": dag_description,
     "default_args": DEFAULT_ARGS,
-    "schedule": dag_schedule,
+    "schedule": dag_schedule_config,
     "start_date": datetime(2025, 11, 1),  # Ngày cố định trong quá khứ
     "catchup": False,  # Không chạy lại các task đã bỏ lỡ
     "tags": dag_tags,
@@ -541,6 +566,26 @@ OUTPUT_FILE = OUTPUT_DIR / "products.json"
 OUTPUT_FILE_WITH_DETAIL = OUTPUT_DIR / "products_with_detail.json"
 # Progress tracking cho multi-day crawling
 PROGRESS_FILE = OUTPUT_DIR / "crawl_progress.json"
+
+# Định nghĩa Datasets/Assets cho Asset-aware scheduling
+if DATASET_AVAILABLE:
+    # Raw products dataset (từ crawl)
+    RAW_PRODUCTS_DATASET = Dataset("tiki://products/raw")
+    
+    # Products with detail dataset (sau khi crawl detail)
+    PRODUCTS_WITH_DETAIL_DATASET = Dataset("tiki://products/with_detail")
+    
+    # Transformed products dataset (sau transform)
+    TRANSFORMED_PRODUCTS_DATASET = Dataset("tiki://products/transformed")
+    
+    # Final products dataset (sau load vào database)
+    FINAL_PRODUCTS_DATASET = Dataset("tiki://products/final")
+else:
+    # Fallback: tạo None objects nếu Dataset không available
+    RAW_PRODUCTS_DATASET = None
+    PRODUCTS_WITH_DETAIL_DATASET = None
+    TRANSFORMED_PRODUCTS_DATASET = None
+    FINAL_PRODUCTS_DATASET = None
 
 # Tạo thư mục nếu chưa có
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -3047,6 +3092,7 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=save_products,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
             pool="default_pool",
+            outlets=[RAW_PRODUCTS_DATASET] if RAW_PRODUCTS_DATASET else [],  # Asset output
         )
 
     # TaskGroup: Crawl Product Details (Dynamic Task Mapping)
@@ -3185,6 +3231,7 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=save_products_with_detail,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
             pool="default_pool",
+            outlets=[PRODUCTS_WITH_DETAIL_DATASET] if PRODUCTS_WITH_DETAIL_DATASET else [],  # Asset output
         )
 
         # Dependencies trong detail group
@@ -3203,6 +3250,8 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=transform_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
+            ins=[PRODUCTS_WITH_DETAIL_DATASET] if PRODUCTS_WITH_DETAIL_DATASET else [],  # Asset input
+            outlets=[TRANSFORMED_PRODUCTS_DATASET] if TRANSFORMED_PRODUCTS_DATASET else [],  # Asset output
         )
 
         task_load_products = PythonOperator(
@@ -3210,6 +3259,8 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=load_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
+            ins=[TRANSFORMED_PRODUCTS_DATASET] if TRANSFORMED_PRODUCTS_DATASET else [],  # Asset input
+            outlets=[FINAL_PRODUCTS_DATASET] if FINAL_PRODUCTS_DATASET else [],  # Asset output
         )
 
         # Dependencies trong transform_load group
