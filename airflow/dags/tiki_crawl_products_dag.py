@@ -230,8 +230,8 @@ DAG_CONFIG = {
     'description': 'Crawl sản phẩm Tiki với Dynamic Task Mapping và tối ưu hóa',
     'default_args': DEFAULT_ARGS,
     'schedule': timedelta(days=1),  # Chạy hàng ngày - crawl một batch products mỗi ngày
-    'start_date': datetime(2024, 1, 1),
-    'catchup': False,
+    'start_date': datetime.now().replace(hour=0, minute=0, second=0, microsecond=0),  # Bắt đầu từ hôm nay
+    'catchup': False,  # Không chạy lại các task đã bỏ lỡ
     'tags': ['tiki', 'crawl', 'products', 'data-pipeline'],
     'max_active_runs': 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
     'max_active_tasks': 20,  # Tối đa 20 tasks song song
@@ -1235,24 +1235,101 @@ def merge_product_details(**context) -> Dict[str, Any]:
         products = merge_result.get('products', [])
         logger.info(f"Tổng số products: {len(products)}")
         
+        # Lấy số lượng products thực tế được crawl từ prepare_products_for_detail
+        # Đây là số lượng map_index thực tế, không phải tổng số products
+        products_to_crawl = None
+        try:
+            products_to_crawl = ti.xcom_pull(task_ids='crawl_product_details.prepare_products_for_detail')
+        except:
+            try:
+                products_to_crawl = ti.xcom_pull(task_ids='prepare_products_for_detail')
+            except:
+                pass
+        
+        # Số lượng products thực tế được crawl (map_index count)
+        actual_crawl_count = len(products_to_crawl) if products_to_crawl else 0
+        logger.info(f"📊 Số products thực tế được crawl (map_index count): {actual_crawl_count}")
+        
+        if actual_crawl_count == 0:
+            logger.warning("⚠️  Không có products nào được crawl detail, bỏ qua merge detail")
+            # Trả về products gốc không có detail
+            return {
+                'products': products,
+                'stats': {
+                    'total_products': len(products),
+                    'with_detail': 0,
+                    'cached': 0,
+                    'failed': 0,
+                    'timeout': 0
+                },
+                'merged_at': datetime.now().isoformat()
+            }
+        
         # Lấy detail results từ Dynamic Task Mapping
         task_id = 'crawl_product_details.crawl_product_detail'
         all_detail_results = []
         
-        # Thử lấy từ XCom
-        try:
-            detail_results = ti.xcom_pull(task_ids=task_id, key='return_value')
+        # Lấy tất cả results bằng cách lấy từng map_index để tránh giới hạn XCom
+        # CHỈ lấy từ map_index 0 đến actual_crawl_count - 1 (không phải len(products))
+        logger.info(f"Bắt đầu lấy detail results từ {actual_crawl_count} crawled products...")
+        
+        # Lấy theo batch để tối ưu
+        batch_size = 100
+        for start_idx in range(0, actual_crawl_count, batch_size):
+            end_idx = min(start_idx + batch_size, actual_crawl_count)
+            batch_map_indexes = list(range(start_idx, end_idx))
             
-            if isinstance(detail_results, list):
-                all_detail_results = detail_results
-            elif isinstance(detail_results, dict):
-                all_detail_results = list(detail_results.values()) if detail_results else []
-            elif detail_results:
-                all_detail_results = [detail_results]
-        except Exception as e:
-            logger.warning(f"Không lấy được từ XCom: {e}")
-            # Thử lấy từng map_index
-            for map_index in range(len(products)):
+            try:
+                batch_results = ti.xcom_pull(
+                    task_ids=task_id,
+                    key='return_value',
+                    map_indexes=batch_map_indexes
+                )
+                
+                if batch_results:
+                    if isinstance(batch_results, list):
+                        # List results theo thứ tự map_indexes
+                        all_detail_results.extend([r for r in batch_results if r])
+                    elif isinstance(batch_results, dict):
+                        # Dict với key là map_index hoặc string
+                        # Lấy tất cả values, sắp xếp theo map_index nếu có thể
+                        values = [v for v in batch_results.values() if v]
+                        all_detail_results.extend(values)
+                    else:
+                        # Single result
+                        all_detail_results.append(batch_results)
+                
+                if (start_idx // batch_size + 1) % 10 == 0:
+                    logger.info(f"Đã lấy {len(all_detail_results)}/{actual_crawl_count} results...")
+            except Exception as e:
+                logger.warning(f"Lỗi khi lấy batch {start_idx}-{end_idx}: {e}")
+                # Thử lấy từng map_index riêng lẻ
+                for map_index in batch_map_indexes:
+                    try:
+                        result = ti.xcom_pull(
+                            task_ids=task_id,
+                            key='return_value',
+                            map_indexes=[map_index]
+                        )
+                        if result:
+                            if isinstance(result, list):
+                                all_detail_results.extend([r for r in result if r])
+                            elif isinstance(result, dict):
+                                all_detail_results.append(result)
+                            else:
+                                all_detail_results.append(result)
+                    except Exception as e2:
+                        # Bỏ qua nếu không lấy được (có thể task chưa chạy xong hoặc failed)
+                        logger.debug(f"Không lấy được map_index {map_index}: {e2}")
+                        pass
+        
+        logger.info(f"Lấy được {len(all_detail_results)} detail results (mong đợi {actual_crawl_count})")
+        
+        # Nếu không lấy đủ, thử lấy từng map_index một (chỉ trong phạm vi actual_crawl_count)
+        if len(all_detail_results) < actual_crawl_count * 0.8:  # Nếu thiếu hơn 20%
+            logger.warning(f"Chỉ lấy được {len(all_detail_results)}/{actual_crawl_count} results, thử lấy từng map_index...")
+            all_detail_results = []  # Reset và lấy lại
+            for map_index in range(actual_crawl_count):  # CHỈ lấy từ 0 đến actual_crawl_count - 1
                 try:
                     result = ti.xcom_pull(
                         task_ids=task_id,
@@ -1260,11 +1337,22 @@ def merge_product_details(**context) -> Dict[str, Any]:
                         map_indexes=[map_index]
                     )
                     if result:
-                        all_detail_results.append(result)
-                except:
+                        if isinstance(result, list):
+                            all_detail_results.extend([r for r in result if r])
+                        elif isinstance(result, dict):
+                            # Nếu là dict, có thể là dict chứa result
+                            all_detail_results.append(result)
+                        else:
+                            all_detail_results.append(result)
+                    
+                    if (map_index + 1) % 500 == 0:
+                        logger.info(f"Đã lấy {len(all_detail_results)}/{actual_crawl_count} results (từng map_index)...")
+                except Exception as e:
+                    # Bỏ qua nếu không lấy được (có thể task chưa chạy xong hoặc failed)
+                    logger.debug(f"Không lấy được map_index {map_index}: {e}")
                     pass
-        
-        logger.info(f"Lấy được {len(all_detail_results)} detail results")
+            
+            logger.info(f"Sau khi lấy từng map_index: {len(all_detail_results)} detail results")
         
         # Tạo dict để lookup nhanh
         detail_dict = {}
@@ -1755,6 +1843,24 @@ with DAG(**DAG_CONFIG) as dag:
     
     # Định nghĩa dependencies
     # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Validate
-    task_load_categories >> task_prepare_crawl >> task_crawl_category >> task_merge_products >> task_save_products
-    task_save_products >> task_prepare_detail >> task_prepare_detail_kwargs >> task_crawl_product_detail >> task_merge_product_details >> task_save_products_with_detail >> task_validate_data
+    
+    # Dependencies giữa các TaskGroup
+    # Load categories trước, sau đó prepare crawl kwargs
+    task_load_categories >> task_prepare_crawl
+    
+    # Prepare crawl kwargs -> crawl category (dynamic mapping)
+    task_prepare_crawl >> task_crawl_category
+    
+    # Crawl category -> merge products (merge chạy khi tất cả crawl tasks done)
+    task_crawl_category >> task_merge_products
+    
+    # Merge -> save products
+    task_merge_products >> task_save_products
+    
+    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> validate
+    task_save_products >> task_prepare_detail
+    # Dependencies trong detail group đã được định nghĩa ở dòng 1800
+    # Chỉ cần thêm dependency từ save_products -> prepare_detail (đã có ở trên)
+    # và từ save_products_with_detail -> validate
+    task_save_products_with_detail >> task_validate_data
 
