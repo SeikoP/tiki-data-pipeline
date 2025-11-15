@@ -1,4 +1,4 @@
-.PHONY: help lint format test validate-dags docker-build docker-up docker-down clean install
+.PHONY: help lint format test validate-dags docker-build docker-up docker-down clean install perf-check dead-code complexity
 
 help: ## Hiển thị help message
 	@echo "Các lệnh có sẵn:"
@@ -7,7 +7,7 @@ help: ## Hiển thị help message
 install: ## Cài đặt dependencies
 	pip install --upgrade pip
 	pip install -r requirements.txt
-	pip install ruff black isort mypy pylint bandit safety pytest pytest-cov
+	pip install ruff black isort mypy pylint bandit safety pytest pytest-cov vulture radon
 
 lint: ## Chạy linting với ruff
 	ruff check src/ tests/ airflow/dags/
@@ -36,6 +36,19 @@ validate-dags: ## Validate Airflow DAGs
 security-check: ## Kiểm tra bảo mật với bandit và safety
 	bandit -r src/
 	safety check
+
+perf-check: ## Kiểm tra performance với Ruff PERF rules
+	ruff check --select PERF src/ tests/ airflow/dags/
+
+dead-code: ## Tìm code thừa với Vulture
+	vulture src/ airflow/dags/ --min-confidence 80
+
+complexity: ## Phân tích độ phức tạp với Radon
+	@echo "📊 Cyclomatic Complexity Analysis:"
+	@radon cc src/ airflow/dags/ --min B || true
+	@echo ""
+	@echo "📈 Maintainability Index Analysis:"
+	@radon mi src/ airflow/dags/ --min B || true
 
 docker-build: ## Build Docker images
 	docker-compose build
@@ -70,6 +83,7 @@ ci-local: ## Chạy tất cả các bước CI cục bộ
 	@echo "🔍 Running local CI checks..."
 	@make format-check
 	@make lint
+	@make perf-check
 	@make type-check
 	@make validate-dags
 	@make security-check
@@ -79,5 +93,16 @@ ci-local: ## Chạy tất cả các bước CI cục bộ
 ci-fast: ## Chạy CI nhanh (không test)
 	@make format-check
 	@make lint
+	@make perf-check
 	@make validate-dags
+
+code-quality: ## Chạy tất cả code quality checks (perf, dead code, complexity)
+	@echo "🔍 Running code quality analysis..."
+	@make perf-check
+	@echo ""
+	@echo "🧹 Finding dead code..."
+	@make dead-code
+	@echo ""
+	@echo "📊 Analyzing complexity..."
+	@make complexity
 

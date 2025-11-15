@@ -49,6 +49,7 @@ select = [
     "B",   # flake8-bugbear
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
+    "PERF", # Performance rules
 ]
 ignore = [
     "E501",  # line too long (handled by black)
@@ -103,4 +104,23 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "@abstractmethod",
 ]
+
+# Vulture configuration for finding dead code
+[tool.vulture]
+min_confidence = 80
+paths = ["src", "airflow/dags"]
+exclude = [
+    "tests",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "airflow/logs",
+    "build",
+    "dist",
+]
+
+# Radon configuration for complexity analysis
+[tool.radon]
+cc_min = "B"  # Cyclomatic complexity minimum grade
+mi_min = "B"  # Maintainability index minimum grade
 

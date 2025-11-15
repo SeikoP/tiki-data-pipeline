@@ -10,6 +10,10 @@ function Show-Help {
     Write-Host "`n=== CI/CD Commands ===" -ForegroundColor Cyan
     Write-Host "install          - Cài đặt dependencies" -ForegroundColor Yellow
     Write-Host "lint             - Chạy linting với ruff" -ForegroundColor Yellow
+    Write-Host "perf-check       - Kiểm tra performance với Ruff PERF" -ForegroundColor Yellow
+    Write-Host "dead-code        - Tìm code thừa với Vulture" -ForegroundColor Yellow
+    Write-Host "complexity       - Phân tích độ phức tạp với Radon" -ForegroundColor Yellow
+    Write-Host "code-quality     - Chạy tất cả code quality checks" -ForegroundColor Yellow
     Write-Host "format           - Format code với black và isort" -ForegroundColor Yellow
     Write-Host "format-check     - Kiểm tra format code (không sửa)" -ForegroundColor Yellow
     Write-Host "type-check       - Kiểm tra type với mypy" -ForegroundColor Yellow
@@ -32,7 +36,7 @@ function Install-Dependencies {
     Write-Host "`n📦 Cài đặt dependencies..." -ForegroundColor Cyan
     python -m pip install --upgrade pip
     pip install -r requirements.txt
-    pip install ruff black isort mypy pylint bandit safety pytest pytest-cov pytest-mock
+    pip install ruff black isort mypy pylint bandit safety pytest pytest-cov pytest-mock vulture radon
     Write-Host "✅ Hoàn thành!" -ForegroundColor Green
 }
 
@@ -45,6 +49,31 @@ function Invoke-Lint {
         Write-Host "❌ Linting failed!" -ForegroundColor Red
         exit 1
     }
+}
+
+function Invoke-PerfCheck {
+    Write-Host "`n⚡ Kiểm tra performance với Ruff PERF..." -ForegroundColor Cyan
+    ruff check --select PERF src/ tests/ airflow/dags/
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ Performance check passed!" -ForegroundColor Green
+    } else {
+        Write-Host "⚠️  Performance issues found!" -ForegroundColor Yellow
+    }
+}
+
+function Invoke-DeadCode {
+    Write-Host "`n🧹 Tìm code thừa với Vulture..." -ForegroundColor Cyan
+    vulture src/ airflow/dags/ --min-confidence 80
+    Write-Host "✅ Dead code check completed!" -ForegroundColor Green
+}
+
+function Invoke-Complexity {
+    Write-Host "`n📊 Phân tích độ phức tạp với Radon..." -ForegroundColor Cyan
+    Write-Host "`nCyclomatic Complexity:" -ForegroundColor Yellow
+    radon cc src/ airflow/dags/ --min B
+    Write-Host "`nMaintainability Index:" -ForegroundColor Yellow
+    radon mi src/ airflow/dags/ --min B
+    Write-Host "✅ Complexity analysis completed!" -ForegroundColor Green
 }
 
 function Invoke-Format {
@@ -216,6 +245,7 @@ function Invoke-CILocal {
     try {
         Invoke-FormatCheck
         Invoke-Lint
+        Invoke-PerfCheck
         Invoke-TypeCheck
         Invoke-ValidateDags
         Invoke-SecurityCheck
@@ -239,6 +269,7 @@ function Invoke-CIFast {
     try {
         Invoke-FormatCheck
         Invoke-Lint
+        Invoke-PerfCheck
         Invoke-ValidateDags
         
         Write-Host "`n========================================" -ForegroundColor Green
@@ -257,6 +288,14 @@ switch ($Command.ToLower()) {
     "help" { Show-Help }
     "install" { Install-Dependencies }
     "lint" { Invoke-Lint }
+    "perf-check" { Invoke-PerfCheck }
+    "dead-code" { Invoke-DeadCode }
+    "complexity" { Invoke-Complexity }
+    "code-quality" { 
+        Invoke-PerfCheck
+        Invoke-DeadCode
+        Invoke-Complexity
+    }
     "format" { Invoke-Format }
     "format-check" { Invoke-FormatCheck }
     "type-check" { Invoke-TypeCheck }

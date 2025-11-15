@@ -140,10 +140,9 @@ def crawl_single_category(
         child_categories = parse_categories(html_content, parent_url=url, level=level + 1)
 
         # Lọc chỉ lấy các danh mục có hình ảnh
-        categories_with_images = []
-        for cat in child_categories:
-            if cat.get("image_url", "").strip():
-                categories_with_images.append(cat)
+        categories_with_images = [
+            cat for cat in child_categories if cat.get("image_url", "").strip()
+        ]
 
         # Lưu cache
         if cache_file:
