@@ -1,7 +1,9 @@
 """
 Utility để lưu dữ liệu crawl vào PostgreSQL database
+Tối ưu: Connection pooling, batch processing, error handling
 """
 import os
+import time
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 import psycopg2
@@ -11,7 +13,7 @@ from contextlib import contextmanager
 
 
 class PostgresStorage:
-    """Class để lưu và truy vấn dữ liệu crawl từ PostgreSQL"""
+    """Class để lưu và truy vấn dữ liệu crawl từ PostgreSQL với connection pooling tối ưu"""
 
     def __init__(
         self,
@@ -20,11 +22,15 @@ class PostgresStorage:
         database: str = "crawl_data",
         user: str = None,
         password: str = None,
-        minconn: int = 1,
-        maxconn: int = 5,
+        minconn: int = 2,
+        maxconn: int = 10,
+        connect_timeout: int = 10,
+        keepalives_idle: int = 600,
+        keepalives_interval: int = 10,
+        keepalives_count: int = 5,
     ):
         """
-        Khởi tạo connection pool đến PostgreSQL
+        Khởi tạo connection pool đến PostgreSQL với tối ưu hóa
 
         Args:
             host: PostgreSQL host (mặc định: lấy từ env hoặc 'postgres')
@@ -32,8 +38,12 @@ class PostgresStorage:
             database: Database name (mặc định: 'crawl_data')
             user: PostgreSQL user (mặc định: lấy từ env)
             password: PostgreSQL password (mặc định: lấy từ env)
-            minconn: Số connection tối thiểu trong pool
-            maxconn: Số connection tối đa trong pool
+            minconn: Số connection tối thiểu trong pool (mặc định: 2)
+            maxconn: Số connection tối đa trong pool (mặc định: 10)
+            connect_timeout: Timeout khi connect (giây)
+            keepalives_idle: Seconds before sending keepalive
+            keepalives_interval: Seconds between keepalive probes
+            keepalives_count: Number of keepalive probes before considering connection dead
         """
         self.host = host or os.getenv("POSTGRES_HOST", "postgres")
         self.port = port
@@ -43,42 +53,129 @@ class PostgresStorage:
         self.minconn = minconn
         self.maxconn = maxconn
         self._pool: Optional[SimpleConnectionPool] = None
+        self._pool_stats = {
+            'total_connections': 0,
+            'active_connections': 0,
+            'failed_connections': 0,
+            'retries': 0,
+        }
+        # Connection parameters
+        self.connect_kwargs = {
+            'connect_timeout': connect_timeout,
+            'keepalives_idle': keepalives_idle,
+            'keepalives_interval': keepalives_interval,
+            'keepalives_count': keepalives_count,
+        }
 
     def _get_pool(self) -> SimpleConnectionPool:
-        """Lấy hoặc tạo connection pool"""
+        """Lấy hoặc tạo connection pool với retry logic"""
         if self._pool is None:
-            self._pool = SimpleConnectionPool(
-                self.minconn,
-                self.maxconn,
-                host=self.host,
-                port=self.port,
-                database=self.database,
-                user=self.user,
-                password=self.password,
-            )
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    self._pool = SimpleConnectionPool(
+                        self.minconn,
+                        self.maxconn,
+                        host=self.host,
+                        port=self.port,
+                        database=self.database,
+                        user=self.user,
+                        password=self.password,
+                        **self.connect_kwargs,
+                    )
+                    self._pool_stats['total_connections'] = self.maxconn
+                    return self._pool
+                except Exception as e:
+                    self._pool_stats['failed_connections'] += 1
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    raise
         return self._pool
 
-    @contextmanager
-    def get_connection(self):
-        """Context manager để lấy connection từ pool"""
-        pool = self._get_pool()
-        conn = pool.getconn()
+    def _check_connection(self, conn) -> bool:
+        """Kiểm tra connection còn sống không (pre-ping)"""
         try:
-            yield conn
-            conn.commit()
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                return True
         except Exception:
-            conn.rollback()
-            raise
-        finally:
-            pool.putconn(conn)
+            return False
 
-    def save_categories(self, categories: List[Dict[str, Any]], upsert: bool = True) -> int:
+    @contextmanager
+    def get_connection(self, retries: int = 3):
         """
-        Lưu danh sách categories vào database
+        Context manager để lấy connection từ pool với retry và health check
+        
+        Args:
+            retries: Số lần retry nếu connection lỗi
+        """
+        pool = self._get_pool()
+        conn = None
+        
+        for attempt in range(retries):
+            try:
+                conn = pool.getconn()
+                
+                # Pre-ping: Check connection health
+                if not self._check_connection(conn):
+                    # Connection dead, close và lấy connection mới
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    # Remove dead connection from pool
+                    pool.putconn(conn, close=True)
+                    conn = pool.getconn()
+                
+                self._pool_stats['active_connections'] = max(
+                    self._pool_stats['active_connections'],
+                    len([c for c in pool._used if c])
+                )
+                
+                yield conn
+                conn.commit()
+                break
+                
+            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                # Connection error, retry
+                if conn:
+                    try:
+                        conn.rollback()
+                        pool.putconn(conn, close=True)  # Close dead connection
+                    except Exception:
+                        pass
+                    conn = None
+                
+                if attempt < retries - 1:
+                    self._pool_stats['retries'] += 1
+                    time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    raise
+                    
+            except Exception:
+                if conn:
+                    conn.rollback()
+                raise
+                
+            finally:
+                if conn:
+                    try:
+                        pool.putconn(conn)
+                    except Exception:
+                        pass
+
+    def save_categories(
+        self, categories: List[Dict[str, Any]], upsert: bool = True, batch_size: int = 100
+    ) -> int:
+        """
+        Lưu danh sách categories vào database với batch processing tối ưu
 
         Args:
             categories: List các category dictionaries
             upsert: Nếu True, update nếu đã tồn tại (dựa trên url)
+            batch_size: Số categories insert mỗi lần (mặc định: 100)
 
         Returns:
             Số categories đã lưu thành công
@@ -89,15 +186,32 @@ class PostgresStorage:
         saved_count = 0
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                for cat in categories:
+                # Batch processing
+                for i in range(0, len(categories), batch_size):
+                    batch = categories[i : i + batch_size]
                     try:
+                        # Chuẩn bị data cho batch insert
+                        values = [
+                            (
+                                cat.get("category_id"),
+                                cat.get("name"),
+                                cat.get("url"),
+                                cat.get("image_url"),
+                                cat.get("parent_url"),
+                                cat.get("level"),
+                                cat.get("product_count", 0),
+                            )
+                            for cat in batch
+                        ]
+                        
                         if upsert:
-                            # INSERT ... ON CONFLICT UPDATE
-                            cur.execute(
+                            # Batch INSERT ... ON CONFLICT UPDATE
+                            execute_values(
+                                cur,
                                 """
                                 INSERT INTO categories 
                                     (category_id, name, url, image_url, parent_url, level, product_count)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                VALUES %s
                                 ON CONFLICT (url) 
                                 DO UPDATE SET
                                     name = EXCLUDED.name,
@@ -107,39 +221,73 @@ class PostgresStorage:
                                     product_count = EXCLUDED.product_count,
                                     updated_at = CURRENT_TIMESTAMP
                                 """,
-                                (
-                                    cat.get("category_id"),
-                                    cat.get("name"),
-                                    cat.get("url"),
-                                    cat.get("image_url"),
-                                    cat.get("parent_url"),
-                                    cat.get("level"),
-                                    cat.get("product_count", 0),
-                                ),
+                                values,
                             )
                         else:
-                            # Chỉ INSERT, bỏ qua nếu đã tồn tại
-                            cur.execute(
+                            # Batch INSERT, bỏ qua nếu đã tồn tại
+                            execute_values(
+                                cur,
                                 """
                                 INSERT INTO categories 
                                     (category_id, name, url, image_url, parent_url, level, product_count)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                VALUES %s
                                 ON CONFLICT (url) DO NOTHING
                                 """,
-                                (
-                                    cat.get("category_id"),
-                                    cat.get("name"),
-                                    cat.get("url"),
-                                    cat.get("image_url"),
-                                    cat.get("parent_url"),
-                                    cat.get("level"),
-                                    cat.get("product_count", 0),
-                                ),
+                                values,
                             )
-                        saved_count += 1
+                        
+                        saved_count += len(batch)
                     except Exception as e:
-                        print(f"⚠️  Lỗi khi lưu category {cat.get('url', 'unknown')}: {e}")
-                        continue
+                        # Fallback: lưu từng item một
+                        print(f"⚠️  Lỗi khi lưu batch categories: {e}")
+                        for cat in batch:
+                            try:
+                                if upsert:
+                                    cur.execute(
+                                        """
+                                        INSERT INTO categories 
+                                            (category_id, name, url, image_url, parent_url, level, product_count)
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                        ON CONFLICT (url) 
+                                        DO UPDATE SET
+                                            name = EXCLUDED.name,
+                                            image_url = EXCLUDED.image_url,
+                                            parent_url = EXCLUDED.parent_url,
+                                            level = EXCLUDED.level,
+                                            product_count = EXCLUDED.product_count,
+                                            updated_at = CURRENT_TIMESTAMP
+                                        """,
+                                        (
+                                            cat.get("category_id"),
+                                            cat.get("name"),
+                                            cat.get("url"),
+                                            cat.get("image_url"),
+                                            cat.get("parent_url"),
+                                            cat.get("level"),
+                                            cat.get("product_count", 0),
+                                        ),
+                                    )
+                                else:
+                                    cur.execute(
+                                        """
+                                        INSERT INTO categories 
+                                            (category_id, name, url, image_url, parent_url, level, product_count)
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                        ON CONFLICT (url) DO NOTHING
+                                        """,
+                                        (
+                                            cat.get("category_id"),
+                                            cat.get("name"),
+                                            cat.get("url"),
+                                            cat.get("image_url"),
+                                            cat.get("parent_url"),
+                                            cat.get("level"),
+                                            cat.get("product_count", 0),
+                                        ),
+                                    )
+                                saved_count += 1
+                            except Exception:
+                                continue
 
         return saved_count
 
@@ -168,26 +316,25 @@ class PostgresStorage:
                     batch = products[i : i + batch_size]
                     try:
                         # Chuẩn bị data cho batch insert
-                        values = []
-                        for product in batch:
-                            values.append(
-                                (
-                                    product.get("product_id"),
-                                    product.get("name"),
-                                    product.get("url"),
-                                    product.get("image_url"),
-                                    product.get("category_url"),
-                                    product.get("sales_count"),
-                                    product.get("price"),
-                                    product.get("original_price"),
-                                    product.get("discount_percent"),
-                                    product.get("rating_average"),
-                                    product.get("review_count"),
-                                    product.get("description"),
-                                    Json(product.get("specifications")) if product.get("specifications") else None,
-                                    Json(product.get("images")) if product.get("images") else None,
-                                )
+                        values = [
+                            (
+                                product.get("product_id"),
+                                product.get("name"),
+                                product.get("url"),
+                                product.get("image_url"),
+                                product.get("category_url"),
+                                product.get("sales_count"),
+                                product.get("price"),
+                                product.get("original_price"),
+                                product.get("discount_percent"),
+                                product.get("rating_average"),
+                                product.get("review_count"),
+                                product.get("description"),
+                                Json(product.get("specifications")) if product.get("specifications") else None,
+                                Json(product.get("images")) if product.get("images") else None,
                             )
+                            for product in batch
+                        ]
 
                         if upsert:
                             # Batch INSERT ... ON CONFLICT UPDATE
@@ -334,9 +481,22 @@ class PostgresStorage:
                     "last_crawl_time": row[4],
                 }
 
+    def get_pool_stats(self) -> Dict[str, Any]:
+        """Lấy thống kê connection pool"""
+        stats = self._pool_stats.copy()
+        if self._pool:
+            try:
+                stats['pool_size'] = self.maxconn
+                stats['min_conn'] = self.minconn
+                # Note: SimpleConnectionPool không expose số connection đang dùng
+            except Exception:
+                pass
+        return stats
+
     def close(self):
         """Đóng connection pool"""
         if self._pool:
             self._pool.closeall()
             self._pool = None
+            self._pool_stats['active_connections'] = 0
 
