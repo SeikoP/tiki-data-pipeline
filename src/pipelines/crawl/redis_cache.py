@@ -109,9 +109,7 @@ class RedisCache:
             return cached.get("products")
         return None
 
-    def cache_product_detail(
-        self, product_id: str, detail: dict, ttl: int | None = None
-    ) -> bool:
+    def cache_product_detail(self, product_id: str, detail: dict, ttl: int | None = None) -> bool:
         """Cache product detail"""
         key = f"detail:{product_id}"
         return self.set(
