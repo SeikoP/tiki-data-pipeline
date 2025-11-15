@@ -95,11 +95,19 @@ git clone https://github.com/your-username/tiki-data-pipeline.git
 cd tiki-data-pipeline
 ```
 
-#### 2. Cấu hình môi trường (Optional)
+#### 2. Cấu hình môi trường (Bắt buộc)
 
 ```bash
-# Tạo file .env nếu cần (không bắt buộc)
-# Các biến môi trường có thể được set trong docker-compose.yaml
+# Copy file .env.example thành .env và điền các giá trị thực tế
+cp .env.example .env
+
+# Chỉnh sửa file .env với các giá trị của bạn:
+# - POSTGRES_USER: Tên người dùng PostgreSQL
+# - POSTGRES_PASSWORD: Mật khẩu PostgreSQL (sử dụng mật khẩu mạnh!)
+# - _AIRFLOW_WWW_USER_USERNAME: Tên người dùng Airflow Web UI
+# - _AIRFLOW_WWW_USER_PASSWORD: Mật khẩu Airflow Web UI (sử dụng mật khẩu mạnh!)
+
+# ⚠️ QUAN TRỌNG: File .env đã được ignore trong .gitignore, KHÔNG commit file này!
 ```
 
 #### 3. Khởi động Airflow Services
