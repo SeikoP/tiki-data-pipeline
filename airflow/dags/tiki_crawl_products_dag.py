@@ -3,7 +3,6 @@ DAG Airflow để crawl sản phẩm Tiki với tối ưu hóa cho dữ liệu l
 
 Tính năng:
 - Dynamic Task Mapping: crawl song song nhiều danh mục
-- Asset-aware Scheduling: sử dụng Dataset để track data dependencies
 - Chia nhỏ tasks: mỗi task một chức năng riêng
 - XCom: chia sẻ dữ liệu giữa các tasks
 - Retry: tự động retry khi lỗi
@@ -14,11 +13,7 @@ Tính năng:
 - TaskGroup: nhóm các tasks liên quan
 - Tối ưu: batch processing, rate limiting, caching
 
-Asset/Dataset Tracking:
-- tiki://products/raw: Raw products từ crawl
-- tiki://products/with_detail: Products với chi tiết
-- tiki://products/transformed: Products đã transform
-- tiki://products/final: Products đã load vào database
+Dependencies được quản lý bằng >> operator giữa các tasks.
 """
 
 import json
@@ -35,15 +30,7 @@ from typing import Any
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 
-# Import Dataset cho Asset-aware scheduling (Airflow 2.7+)
-try:
-    from airflow.datasets import Dataset
-
-    DATASET_AVAILABLE = True
-except ImportError:
-    # Fallback cho Airflow < 2.7
-    DATASET_AVAILABLE = False
-    Dataset = None
+# Asset/Dataset đã được xóa vì không cần thiết cho single DAG và gây lỗi với PythonOperator
 
 # Import Variable và TaskGroup với suppress warning
 try:
@@ -529,17 +516,8 @@ else:
     )
     dag_tags = ["tiki", "crawl", "products", "data-pipeline", "manual"]
 
-# Cấu hình DAG với Asset-aware scheduling (nếu có Dataset)
-# Có thể schedule dựa trên Dataset hoặc schedule thời gian
+# Cấu hình DAG schedule
 dag_schedule_config = dag_schedule
-if (
-    DATASET_AVAILABLE
-    and Variable.get("TIKI_USE_ASSET_SCHEDULING", default_var="false").lower() == "true"
-):
-    # Nếu enable asset scheduling, có thể schedule dựa trên upstream datasets
-    # Ví dụ: chạy khi có categories mới (nếu có categories dataset)
-    # Hiện tại giữ schedule thời gian, nhưng có thể thêm dataset dependencies
-    pass
 
 # Documentation cho DAG với Mermaid diagram để hiển thị đẹp trong Airflow UI
 dag_doc_md = """
@@ -548,7 +526,6 @@ dag_doc_md = """
 ## 📋 Mô tả
 DAG này crawl sản phẩm từ Tiki.vn với các tính năng:
 - **Dynamic Task Mapping**: Tự động tạo tasks cho từng danh mục
-- **Asset-aware Scheduling**: Sử dụng Dataset để track data dependencies
 - **Selenium**: Crawl chi tiết sản phẩm với browser automation
 - **Retry & Timeout**: Tự động retry và timeout protection
 - **Error Handling**: Xử lý lỗi và tiếp tục với các tasks khác
@@ -616,14 +593,6 @@ graph TB
     style AGGREGATE fill:#FF8787,stroke:#C92A2A,stroke-width:2px,color:#fff
 ```
 
-## 📊 Asset Tracking
-
-DAG sử dụng Airflow Datasets để track data dependencies:
-- `tiki://products/raw`: Raw products từ crawl
-- `tiki://products/with_detail`: Products với chi tiết
-- `tiki://products/transformed`: Products đã transform
-- `tiki://products/final`: Products đã load vào database
-
 ## ⚙️ Cấu hình
 
 - **Schedule**: Có thể config qua Variable `TIKI_DAG_SCHEDULE_MODE`
@@ -637,7 +606,6 @@ DAG sử dụng Airflow Datasets để track data dependencies:
 ## 🔧 Variables
 
 - `TIKI_DAG_SCHEDULE_MODE`: `scheduled` hoặc `manual`
-- `TIKI_USE_ASSET_SCHEDULING`: `true` hoặc `false`
 - `TIKI_CRAWL_CATEGORIES`: Danh sách categories (JSON array)
 - `TIKI_MAX_PRODUCTS_PER_CATEGORY`: Số lượng sản phẩm tối đa mỗi category
 """
@@ -683,25 +651,7 @@ OUTPUT_FILE_WITH_DETAIL = OUTPUT_DIR / "products_with_detail.json"
 # Progress tracking cho multi-day crawling
 PROGRESS_FILE = OUTPUT_DIR / "crawl_progress.json"
 
-# Định nghĩa Datasets/Assets cho Asset-aware scheduling
-if DATASET_AVAILABLE:
-    # Raw products dataset (từ crawl)
-    RAW_PRODUCTS_DATASET = Dataset("tiki://products/raw")
-
-    # Products with detail dataset (sau khi crawl detail)
-    PRODUCTS_WITH_DETAIL_DATASET = Dataset("tiki://products/with_detail")
-
-    # Transformed products dataset (sau transform)
-    TRANSFORMED_PRODUCTS_DATASET = Dataset("tiki://products/transformed")
-
-    # Final products dataset (sau load vào database)
-    FINAL_PRODUCTS_DATASET = Dataset("tiki://products/final")
-else:
-    # Fallback: tạo None objects nếu Dataset không available
-    RAW_PRODUCTS_DATASET = None
-    PRODUCTS_WITH_DETAIL_DATASET = None
-    TRANSFORMED_PRODUCTS_DATASET = None
-    FINAL_PRODUCTS_DATASET = None
+# Asset/Dataset đã được xóa - dependencies được quản lý bằng >> operator
 
 # Tạo thư mục nếu chưa có
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -3241,17 +3191,28 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 # Tạo DAG duy nhất với schedule có thể config qua Variable
 with DAG(**DAG_CONFIG) as dag:
 
-    # TaskGroup: Load và Prepare
-    with TaskGroup("load_and_prepare", tooltip="Load categories và chuẩn bị") as load_group:
+    # TaskGroup: Load và Prepare - Màu xanh lá (Extract)
+    with TaskGroup(
+        "load_and_prepare",
+        tooltip="📥 Load categories và chuẩn bị dữ liệu",
+        ui_color="#51CF66",  # Xanh lá
+        ui_fgcolor="#FFFFFF",  # Chữ trắng
+    ) as load_group:
         task_load_categories = PythonOperator(
             task_id="load_categories",
             python_callable=load_categories,
             execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
             pool="default_pool",
+            doc_md="📥 Load categories từ file JSON và chuẩn bị dữ liệu cho crawl",
         )
 
-    # TaskGroup: Crawl Categories (Dynamic Task Mapping)
-    with TaskGroup("crawl_categories", tooltip="Crawl sản phẩm từ các danh mục") as crawl_group:
+    # TaskGroup: Crawl Categories (Dynamic Task Mapping) - Màu xanh lá (Extract)
+    with TaskGroup(
+        "crawl_categories",
+        tooltip="🕷️ Crawl sản phẩm từ các danh mục (Dynamic Task Mapping)",
+        ui_color="#51CF66",  # Xanh lá
+        ui_fgcolor="#FFFFFF",  # Chữ trắng
+    ) as crawl_group:
         # Sử dụng expand để Dynamic Task Mapping
         # Cần một task helper để lấy categories và tạo list op_kwargs
         def prepare_crawl_kwargs(**context):
@@ -3322,6 +3283,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="prepare_crawl_kwargs",
             python_callable=prepare_crawl_kwargs,
             execution_timeout=timedelta(minutes=1),
+            doc_md="🔧 Chuẩn bị arguments cho Dynamic Task Mapping crawl categories",
         )
 
         # Dynamic Task Mapping với expand
@@ -3334,14 +3296,20 @@ with DAG(**DAG_CONFIG) as dag:
             retries=1,  # Retry 1 lần (tổng 2 lần thử: 1 lần đầu + 1 retry)
         ).expand(op_kwargs=task_prepare_crawl.output)
 
-    # TaskGroup: Process và Save
-    with TaskGroup("process_and_save", tooltip="Merge và lưu sản phẩm") as process_group:
+    # TaskGroup: Process và Save - Màu vàng (Transform)
+    with TaskGroup(
+        "process_and_save",
+        tooltip="💾 Merge và lưu sản phẩm raw",
+        ui_color="#FFD43B",  # Vàng
+        ui_fgcolor="#000000",  # Chữ đen
+    ) as process_group:
         task_merge_products = PythonOperator(
             task_id="merge_products",
             python_callable=merge_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
             trigger_rule="all_done",  # QUAN TRỌNG: Chạy khi tất cả upstream tasks done (success hoặc failed)
+            doc_md="🔄 Merge tất cả products từ các categories đã crawl",
         )
 
         task_save_products = PythonOperator(
@@ -3349,11 +3317,16 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=save_products,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
             pool="default_pool",
-            outlets=[RAW_PRODUCTS_DATASET] if RAW_PRODUCTS_DATASET else [],  # Asset output
+            doc_md="💾 Lưu products raw vào file JSON",
         )
 
-    # TaskGroup: Crawl Product Details (Dynamic Task Mapping)
-    with TaskGroup("crawl_product_details", tooltip="Crawl chi tiết sản phẩm") as detail_group:
+    # TaskGroup: Crawl Product Details (Dynamic Task Mapping) - Màu xanh dương (Detail)
+    with TaskGroup(
+        "crawl_product_details",
+        tooltip="🔍 Crawl chi tiết sản phẩm với Selenium (Dynamic Task Mapping)",
+        ui_color="#74C0FC",  # Xanh dương
+        ui_fgcolor="#FFFFFF",  # Chữ trắng
+    ) as detail_group:
 
         def prepare_detail_kwargs(**context):
             """Helper function để prepare op_kwargs cho Dynamic Task Mapping detail"""
@@ -3488,9 +3461,6 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=save_products_with_detail,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
             pool="default_pool",
-            outlets=(
-                [PRODUCTS_WITH_DETAIL_DATASET] if PRODUCTS_WITH_DETAIL_DATASET else []
-            ),  # Asset output
         )
 
         # Dependencies trong detail group
@@ -3502,18 +3472,19 @@ with DAG(**DAG_CONFIG) as dag:
             >> task_save_products_with_detail
         )
 
-    # TaskGroup: Transform and Load
+    # TaskGroup: Transform and Load - Màu tím (Transform & Load)
     with TaskGroup(
-        "transform_and_load", tooltip="Transform và Load dữ liệu vào database"
+        "transform_and_load",
+        tooltip="🔄 Transform và Load dữ liệu vào database",
+        ui_color="#845EF7",  # Tím
+        ui_fgcolor="#FFFFFF",  # Chữ trắng
     ) as transform_load_group:
         task_transform_products = PythonOperator(
             task_id="transform_products",
             python_callable=transform_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
-            outlets=(
-                [TRANSFORMED_PRODUCTS_DATASET] if TRANSFORMED_PRODUCTS_DATASET else []
-            ),  # Asset output
+            doc_md="🔄 Transform và normalize dữ liệu sản phẩm",
         )
 
         task_load_products = PythonOperator(
@@ -3521,14 +3492,19 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=load_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
             pool="default_pool",
-            outlets=[FINAL_PRODUCTS_DATASET] if FINAL_PRODUCTS_DATASET else [],  # Asset output
+            doc_md="💾 Load products đã transform vào PostgreSQL database",
         )
 
         # Dependencies trong transform_load group
         task_transform_products >> task_load_products
 
-    # TaskGroup: Validate
-    with TaskGroup("validate", tooltip="Validate dữ liệu") as validate_group:
+    # TaskGroup: Validate - Màu đỏ (Validation)
+    with TaskGroup(
+        "validate",
+        tooltip="✅ Validate dữ liệu đã crawl",
+        ui_color="#FF8787",  # Đỏ nhạt
+        ui_fgcolor="#FFFFFF",  # Chữ trắng
+    ) as validate_group:
         task_validate_data = PythonOperator(
             task_id="validate_data",
             python_callable=validate_data,
@@ -3536,9 +3512,12 @@ with DAG(**DAG_CONFIG) as dag:
             pool="default_pool",
         )
 
-    # TaskGroup: Aggregate and Notify
+    # TaskGroup: Aggregate and Notify - Màu đỏ (Notification)
     with TaskGroup(
-        "aggregate_and_notify", tooltip="Tổng hợp dữ liệu và gửi thông báo"
+        "aggregate_and_notify",
+        tooltip="📊 Tổng hợp dữ liệu và gửi thông báo Discord",
+        ui_color="#FF8787",  # Đỏ nhạt
+        ui_fgcolor="#FFFFFF",  # Chữ trắng
     ) as aggregate_group:
         task_aggregate_and_notify = PythonOperator(
             task_id="aggregate_and_notify",
