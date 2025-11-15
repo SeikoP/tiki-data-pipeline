@@ -152,8 +152,44 @@ stats = {
 }
 
 
-def get_page_with_selenium(url, timeout=30):
-    """Lấy HTML của trang với Selenium (cho dynamic content)"""
+def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limiting=True):
+    """Lấy HTML của trang với Selenium (cho dynamic content)
+    
+    Args:
+        url: URL cần crawl
+        timeout: Timeout cho page load
+        use_redis_cache: Có dùng Redis cache không
+        use_rate_limiting: Có dùng rate limiting không
+    """
+    # Thử Redis cache trước
+    if use_redis_cache:
+        try:
+            from pipelines.crawl.redis_cache import get_redis_cache
+            redis_cache = get_redis_cache("redis://redis:6379/1")
+            if redis_cache:
+                cached_html = redis_cache.get_cached_html(url)
+                if cached_html:
+                    return cached_html
+        except Exception:
+            pass  # Fallback về crawl
+    
+    # Rate limiting - kiểm tra và đợi nếu cần
+    if use_rate_limiting:
+        try:
+            from pipelines.crawl.redis_cache import get_redis_rate_limiter
+            rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
+            if rate_limiter:
+                # Extract domain từ URL để rate limit theo domain
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc or "tiki.vn"
+                
+                # Kiểm tra rate limit, đợi nếu cần
+                if not rate_limiter.is_allowed(domain):
+                    rate_limiter.wait_if_needed(domain)
+        except Exception:
+            # Nếu rate limiter không available, fallback về sleep cố định
+            time.sleep(2)  # Delay cơ bản cho Selenium (lâu hơn requests)
+    
     # Lazy import để tránh timeout khi load DAG
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
@@ -213,13 +249,61 @@ def get_page_with_selenium(url, timeout=30):
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(1)
         
-        return driver.page_source
+        html = driver.page_source
+        
+        # Cache HTML vào Redis sau khi crawl thành công
+        if use_redis_cache and html:
+            try:
+                from pipelines.crawl.redis_cache import get_redis_cache
+                redis_cache = get_redis_cache("redis://redis:6379/1")
+                if redis_cache:
+                    redis_cache.cache_html(url, html, ttl=86400)  # Cache 24 giờ
+            except Exception:
+                pass  # Ignore cache errors
+        
+        return html
     finally:
         driver.quit()
 
 
-def get_page_with_requests(url, max_retries=3):
-    """Lấy HTML của trang với requests (nhanh hơn nhưng không hỗ trợ JS)"""
+def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_limiting=True):
+    """Lấy HTML của trang với requests (nhanh hơn nhưng không hỗ trợ JS)
+    
+    Args:
+        url: URL cần crawl
+        max_retries: Số lần retry tối đa
+        use_redis_cache: Có dùng Redis cache không
+        use_rate_limiting: Có dùng rate limiting không
+    """
+    # Thử Redis cache trước
+    if use_redis_cache:
+        try:
+            from pipelines.crawl.redis_cache import get_redis_cache
+            redis_cache = get_redis_cache("redis://redis:6379/1")
+            if redis_cache:
+                cached_html = redis_cache.get_cached_html(url)
+                if cached_html:
+                    return cached_html
+        except Exception:
+            pass  # Fallback về crawl
+    
+    # Rate limiting - kiểm tra và đợi nếu cần
+    if use_rate_limiting:
+        try:
+            from pipelines.crawl.redis_cache import get_redis_rate_limiter
+            rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
+            if rate_limiter:
+                # Extract domain từ URL để rate limit theo domain
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc or "tiki.vn"
+                
+                # Kiểm tra rate limit, đợi nếu cần
+                if not rate_limiter.is_allowed(domain):
+                    rate_limiter.wait_if_needed(domain)
+        except Exception:
+            # Nếu rate limiter không available, fallback về sleep cố định
+            time.sleep(1)  # Delay cơ bản
+    
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -234,7 +318,19 @@ def get_page_with_requests(url, max_retries=3):
             response = requests.get(url, headers=headers, timeout=30)
             response.raise_for_status()
             response.encoding = 'utf-8'
-            return response.text
+            html = response.text
+            
+            # Cache HTML vào Redis sau khi crawl thành công
+            if use_redis_cache and html:
+                try:
+                    from pipelines.crawl.redis_cache import get_redis_cache
+                    redis_cache = get_redis_cache("redis://redis:6379/1")
+                    if redis_cache:
+                        redis_cache.cache_html(url, html, ttl=86400)  # Cache 24 giờ
+                except Exception:
+                    pass  # Ignore cache errors
+            
+            return html
         except requests.exceptions.RequestException as e:
             if attempt == max_retries - 1:
                 raise
@@ -540,12 +636,35 @@ def get_category_page_url(category_url, page=1):
         return f"{category_url}?page={page}"
 
 
-def crawl_category_products(category_url, max_pages=None, use_selenium=False, cache_dir='data/demo/products/cache'):
-    """Crawl tất cả sản phẩm từ một danh mục"""
+def crawl_category_products(category_url, max_pages=None, use_selenium=False, cache_dir='data/demo/products/cache', use_redis_cache=True):
+    """Crawl tất cả sản phẩm từ một danh mục
+    
+    Args:
+        category_url: URL của category
+        max_pages: Số trang tối đa để crawl
+        use_selenium: Có dùng Selenium không
+        cache_dir: Thư mục cache (fallback nếu Redis không available)
+        use_redis_cache: Có dùng Redis cache không (mặc định True)
+    """
     
     all_products = []
     
-    # Kiểm tra cache - dùng safe_read_json
+    # Thử Redis cache trước (nhanh hơn, distributed)
+    redis_cache = None
+    if use_redis_cache:
+        try:
+            from pipelines.crawl.redis_cache import get_redis_cache
+            redis_cache = get_redis_cache("redis://redis:6379/1")
+            if redis_cache:
+                cached_products = redis_cache.get_cached_products(category_url)
+                if cached_products:
+                    print(f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}...")
+                    return cached_products
+        except Exception as e:
+            # Redis không available, fallback về file cache
+            pass  # Silent fallback
+    
+    # Fallback: Kiểm tra file cache
     cache_file = None
     if cache_dir:
         import hashlib
@@ -556,6 +675,7 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
         if cached_data:
             cached_products = cached_data.get('products', [])
             if cached_products:  # Chỉ return cache nếu có sản phẩm
+                print(f"[File Cache] ✅ Hit cache cho {category_url[:60]}...")
                 return cached_products
     
     try:
@@ -563,12 +683,12 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
         html = None
         if use_selenium:
             if _check_selenium_available():
-                html = get_page_with_selenium(category_url)
+                html = get_page_with_selenium(category_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
             else:
                 print(f"⚠️  Selenium chưa được cài đặt, dùng requests thay thế")
-                html = get_page_with_requests(category_url)
+                html = get_page_with_requests(category_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
         else:
-            html = get_page_with_requests(category_url)
+            html = get_page_with_requests(category_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
             # Nếu không tìm thấy sản phẩm với requests, thử Selenium
             if html:
                 products_test = parse_products_from_html(html, category_url)
@@ -609,9 +729,9 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
             try:
                 page_url = get_category_page_url(category_url, page)
                 if use_selenium and _check_selenium_available():
-                    html = get_page_with_selenium(page_url)
+                    html = get_page_with_selenium(page_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
                 else:
-                    html = get_page_with_requests(page_url)
+                    html = get_page_with_requests(page_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
                 
                 if html:
                     products = parse_products_from_html(html, category_url)
@@ -621,7 +741,10 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
                         # Nếu không tìm thấy sản phẩm ở trang này, có thể đã hết
                         break
                 
-                time.sleep(1)  # Delay giữa các trang
+                # Rate limiting đã được xử lý trong get_page_with_requests/selenium
+                # Chỉ sleep nếu không dùng rate limiting
+                if not use_rate_limiting:
+                    time.sleep(1)  # Delay giữa các trang
                 
             except Exception as e:
                 continue
@@ -634,7 +757,16 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
                 seen_ids.add(product['product_id'])
                 unique_products.append(product)
         
-        # Lưu cache
+        # Lưu cache - ưu tiên Redis, fallback về file
+        # Redis cache (nhanh, distributed)
+        if redis_cache:
+            try:
+                redis_cache.cache_products(category_url, unique_products, ttl=43200)  # 12 giờ
+                print(f"[Redis Cache] ✅ Đã cache {len(unique_products)} products cho {category_url[:60]}...")
+            except Exception as e:
+                print(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
+        
+        # File cache (fallback)
         if cache_file:
             try:
                 with open(cache_file, 'w', encoding='utf-8') as f:

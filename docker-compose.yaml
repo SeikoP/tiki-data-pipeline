@@ -24,10 +24,13 @@ x-airflow-common:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     # Postgres: Database airflow
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    # Sử dụng environment variables cho password
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres/airflow
     # Redis: Airflow dùng database 0
-    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    # Nếu có REDIS_PASSWORD, format: redis://:password@redis:6379/0
+    # Nếu không có password, format: redis://:@redis:6379/0
+    AIRFLOW__CELERY__BROKER_URL: redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
@@ -60,8 +63,8 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres-shared-volume:/var/lib/postgresql/data
       # Script để tự động tạo database airflow (chạy khi init lần đầu)
@@ -85,13 +88,23 @@ services:
       - backend
 
   # ============================================
-  # REDIS - Celery message broker cho Airflow
+  # REDIS - Celery message broker + Cache + Rate Limiting
   # ============================================
+  # Databases:
+  # - Database 0: Celery message broker (Airflow)
+  # - Database 1: Cache (HTML, products, categories) - Optional
+  # - Database 2: Rate limiting & Distributed locking - Optional
   redis:
     image: redis:7.2-alpine
     networks:
       - backend
-    command: redis-server --bind 0.0.0.0
+    command: >
+      redis-server
+      --bind 0.0.0.0
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

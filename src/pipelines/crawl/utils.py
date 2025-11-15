@@ -35,6 +35,7 @@ def setup_utf8_encoding():
 def get_selenium_options(headless: bool = True) -> Optional[Any]:
     """
     Tạo Chrome options cho Selenium (shared config)
+    Tối ưu hóa để khởi động nhanh hơn
     
     Returns:
         Chrome Options object hoặc None nếu Selenium không có
@@ -49,17 +50,53 @@ def get_selenium_options(headless: bool = True) -> Optional[Any]:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--disable-extensions")
+        # Tối ưu hóa để khởi động nhanh hơn
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
+        chrome_options.add_argument("--disable-features=TranslateUI")
+        chrome_options.add_argument("--disable-ipc-flooding-protection")
+        chrome_options.add_argument("--disable-hang-monitor")
+        chrome_options.add_argument("--disable-prompt-on-repost")
+        chrome_options.add_argument("--disable-sync")
+        chrome_options.add_argument("--disable-default-apps")
+        chrome_options.add_argument("--disable-component-update")
+        chrome_options.add_argument("--disable-background-networking")
+        chrome_options.add_argument("--disable-breakpad")
+        chrome_options.add_argument("--disable-client-side-phishing-detection")
+        chrome_options.add_argument("--disable-crash-reporter")
+        chrome_options.add_argument("--disable-domain-reliability")
+        chrome_options.add_argument("--disable-features=AudioServiceOutOfProcess")
+        chrome_options.add_argument("--disable-features=IsolateOrigins,site-per-process")
+        chrome_options.add_argument("--metrics-recording-only")
+        chrome_options.add_argument("--no-first-run")
+        chrome_options.add_argument("--safebrowsing-disable-auto-update")
+        chrome_options.add_argument("--enable-automation")
+        chrome_options.add_argument("--password-store=basic")
+        chrome_options.add_argument("--use-mock-keychain")
         chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        # Tắt images để tăng tốc (nếu không cần)
+        prefs = {
+            "profile.managed_default_content_settings.images": 2,  # Block images
+            "profile.default_content_setting_values.notifications": 2
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
         return chrome_options
     except ImportError:
         return None
 
 
-def create_selenium_driver(headless: bool = True) -> Optional[Any]:
+def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Optional[Any]:
     """
-    Tạo Selenium WebDriver với cấu hình tối ưu
+    Tạo Selenium WebDriver với cấu hình tối ưu và timeout
     
-    Tối ưu: Ưu tiên dùng ChromeDriver có sẵn trong PATH để tránh download chậm
+    Tối ưu: 
+    - Ưu tiên dùng ChromeDriver có sẵn trong PATH để tránh download chậm
+    - Thêm timeout cho việc tạo driver để tránh treo lâu
+    
+    Args:
+        headless: Chạy headless mode hay không
+        timeout: Timeout cho việc tạo driver (giây), mặc định 60s
     
     Returns:
         WebDriver object hoặc None nếu Selenium không có
@@ -67,36 +104,67 @@ def create_selenium_driver(headless: bool = True) -> Optional[Any]:
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.service import Service
+        import threading
         
         chrome_options = get_selenium_options(headless)
         if not chrome_options:
             return None
         
-        # Ưu tiên 1: Thử dùng ChromeDriver có sẵn trong PATH (nhanh nhất)
-        try:
-            return webdriver.Chrome(options=chrome_options)
-        except Exception as e:
-            # Nếu không có ChromeDriver trong PATH, thử webdriver-manager
-            # Nhưng chỉ thử nếu lỗi là về driver không tìm thấy
-            error_msg = str(e).lower()
-            if 'chromedriver' not in error_msg and 'driver' not in error_msg:
-                # Lỗi khác, không phải về driver -> raise
-                raise
-            
-            # Ưu tiên 2: Thử dùng webdriver-manager (chậm hơn, có thể download)
+        driver = None
+        driver_created = threading.Event()
+        error_occurred = [None]  # Dùng list để có thể modify trong nested function
+        
+        def create_driver():
+            """Helper function để tạo driver trong thread riêng"""
+            nonlocal driver
             try:
-                from webdriver_manager.chrome import ChromeDriverManager
-                # Tắt log của webdriver_manager để giảm noise
-                import logging
-                wdm_logger = logging.getLogger('WDM')
-                wdm_logger.setLevel(logging.WARNING)
-                
-                # Install với cache để tránh download lại
-                service = Service(ChromeDriverManager().install())
-                return webdriver.Chrome(service=service, options=chrome_options)
-            except ImportError:
-                # Không có webdriver-manager, raise lỗi gốc
-                raise e
+                # Ưu tiên 1: Thử dùng ChromeDriver có sẵn trong PATH (nhanh nhất)
+                try:
+                    driver = webdriver.Chrome(options=chrome_options)
+                    driver_created.set()
+                except Exception as e:
+                    # Nếu không có ChromeDriver trong PATH, thử webdriver-manager
+                    # Nhưng chỉ thử nếu lỗi là về driver không tìm thấy
+                    error_msg = str(e).lower()
+                    if 'chromedriver' not in error_msg and 'driver' not in error_msg:
+                        # Lỗi khác, không phải về driver -> raise
+                        error_occurred[0] = e
+                        driver_created.set()
+                        return
+                    
+                    # Ưu tiên 2: Thử dùng webdriver-manager (chậm hơn, có thể download)
+                    try:
+                        from webdriver_manager.chrome import ChromeDriverManager
+                        # Tắt log của webdriver_manager để giảm noise
+                        import logging
+                        wdm_logger = logging.getLogger('WDM')
+                        wdm_logger.setLevel(logging.WARNING)
+                        
+                        # Install với cache để tránh download lại
+                        service = Service(ChromeDriverManager().install())
+                        driver = webdriver.Chrome(service=service, options=chrome_options)
+                        driver_created.set()
+                    except ImportError:
+                        # Không có webdriver-manager, raise lỗi gốc
+                        error_occurred[0] = e
+                        driver_created.set()
+            except Exception as e:
+                error_occurred[0] = e
+                driver_created.set()
+        
+        # Tạo driver trong thread riêng với timeout
+        thread = threading.Thread(target=create_driver, daemon=True)
+        thread.start()
+        
+        # Đợi với timeout
+        if driver_created.wait(timeout=timeout):
+            if error_occurred[0]:
+                raise error_occurred[0]
+            return driver
+        else:
+            # Timeout - thread vẫn đang chạy nhưng quá lâu
+            raise TimeoutError(f"Tạo Selenium driver timeout sau {timeout} giây")
+            
     except ImportError:
         return None
 

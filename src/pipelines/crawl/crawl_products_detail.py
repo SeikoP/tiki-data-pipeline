@@ -52,7 +52,7 @@ except ImportError:
 setup_utf8_encoding()
 
 
-def crawl_product_detail_with_selenium(url, save_html=False, verbose=True, max_retries=2, timeout=30):
+def crawl_product_detail_with_selenium(url, save_html=False, verbose=True, max_retries=2, timeout=30, use_redis_cache=True, use_rate_limiting=True):
     """Crawl trang sản phẩm Tiki bằng Selenium để load đầy đủ dữ liệu
     
     Args:
@@ -61,6 +61,8 @@ def crawl_product_detail_with_selenium(url, save_html=False, verbose=True, max_r
         verbose: Có in log không
         max_retries: Số lần retry tối đa
         timeout: Timeout cho page load (giây)
+        use_redis_cache: Có dùng Redis cache không
+        use_rate_limiting: Có dùng rate limiting không
         
     Returns:
         str: HTML content hoặc None nếu lỗi
@@ -68,6 +70,41 @@ def crawl_product_detail_with_selenium(url, save_html=False, verbose=True, max_r
     Raises:
         Exception: Nếu không thể crawl sau max_retries lần
     """
+    # Thử Redis cache trước
+    if use_redis_cache:
+        try:
+            from pipelines.crawl.redis_cache import get_redis_cache
+            redis_cache = get_redis_cache("redis://redis:6379/1")
+            if redis_cache:
+                cached_html = redis_cache.get_cached_html(url)
+                if cached_html:
+                    if verbose:
+                        print(f"[Redis Cache] ✅ Hit cache cho {url[:60]}...")
+                    return cached_html
+        except Exception:
+            pass  # Fallback về crawl
+    
+    # Rate limiting - kiểm tra và đợi nếu cần
+    if use_rate_limiting:
+        try:
+            from pipelines.crawl.redis_cache import get_redis_rate_limiter
+            rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
+            if rate_limiter:
+                # Extract domain từ URL để rate limit theo domain
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc or "tiki.vn"
+                
+                # Kiểm tra rate limit, đợi nếu cần
+                if not rate_limiter.is_allowed(domain):
+                    if verbose:
+                        print(f"[Rate Limiter] ⏳ Đợi rate limit cho {domain}...")
+                    rate_limiter.wait_if_needed(domain)
+        except Exception:
+            # Nếu rate limiter không available, fallback về sleep cố định
+            if verbose:
+                print(f"[Rate Limiter] ⚠️  Rate limiter không available, dùng delay cố định")
+            time.sleep(2)  # Delay cơ bản cho Selenium
+    
     driver = None
     last_error = None
     
@@ -123,6 +160,18 @@ def crawl_product_detail_with_selenium(url, save_html=False, verbose=True, max_r
                     f.write(full_html)
                 if verbose:
                     print(f"[Selenium] ✓ Đã lưu HTML vào {html_file}")
+            
+            # Cache HTML vào Redis sau khi crawl thành công
+            if use_redis_cache and full_html:
+                try:
+                    from pipelines.crawl.redis_cache import get_redis_cache
+                    redis_cache = get_redis_cache("redis://redis:6379/1")
+                    if redis_cache:
+                        redis_cache.cache_html(url, full_html, ttl=86400)  # Cache 24 giờ
+                        if verbose:
+                            print(f"[Redis Cache] ✅ Đã cache HTML cho {url[:60]}...")
+                except Exception:
+                    pass  # Ignore cache errors
             
             # Đóng driver trước khi return
             if driver:

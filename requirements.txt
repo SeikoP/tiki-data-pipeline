@@ -5,3 +5,4 @@ selenium>=4.0.0
 webdriver-manager>=4.0.0
 tqdm>=4.65.0
 firecrawl-py>=1.0.0
+redis>=5.0.0
