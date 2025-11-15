@@ -541,9 +541,111 @@ if (
     # Hiện tại giữ schedule thời gian, nhưng có thể thêm dataset dependencies
     pass
 
+# Documentation cho DAG với Mermaid diagram để hiển thị đẹp trong Airflow UI
+dag_doc_md = """
+# Tiki Products Crawl Pipeline
+
+## 📋 Mô tả
+DAG này crawl sản phẩm từ Tiki.vn với các tính năng:
+- **Dynamic Task Mapping**: Tự động tạo tasks cho từng danh mục
+- **Asset-aware Scheduling**: Sử dụng Dataset để track data dependencies
+- **Selenium**: Crawl chi tiết sản phẩm với browser automation
+- **Retry & Timeout**: Tự động retry và timeout protection
+- **Error Handling**: Xử lý lỗi và tiếp tục với các tasks khác
+
+## 🔄 Workflow
+
+```mermaid
+graph TB
+    subgraph "📥 Load & Prepare"
+        LOAD[Load Categories]
+    end
+    
+    subgraph "🕷️ Crawl Categories"
+        PREPARE_CRAWL[Prepare Crawl Args]
+        CRAWL_CAT[Crawl Categories<br/>Dynamic Task Mapping]
+    end
+    
+    subgraph "💾 Process & Save"
+        MERGE[Merge Products]
+        SAVE[Save Products]
+    end
+    
+    subgraph "🔍 Crawl Details"
+        PREPARE_DETAIL[Prepare Detail Args]
+        PREPARE_PROD[Prepare Products]
+        CRAWL_DETAIL[Crawl Product Details<br/>Dynamic Task Mapping]
+        SAVE_DETAIL[Save Products with Detail]
+    end
+    
+    subgraph "🔄 Transform & Load"
+        TRANSFORM[Transform Products]
+        LOAD_DB[Load to Database]
+    end
+    
+    subgraph "✅ Validate & Notify"
+        VALIDATE[Validate Data]
+        AGGREGATE[Aggregate & Notify]
+    end
+    
+    LOAD --> PREPARE_CRAWL
+    PREPARE_CRAWL --> CRAWL_CAT
+    CRAWL_CAT --> MERGE
+    MERGE --> SAVE
+    SAVE --> PREPARE_DETAIL
+    PREPARE_DETAIL --> PREPARE_PROD
+    PREPARE_PROD --> CRAWL_DETAIL
+    CRAWL_DETAIL --> SAVE_DETAIL
+    SAVE_DETAIL --> TRANSFORM
+    TRANSFORM --> LOAD_DB
+    LOAD_DB --> VALIDATE
+    VALIDATE --> AGGREGATE
+    
+    style LOAD fill:#51CF66,stroke:#2F9E44,stroke-width:2px,color:#fff
+    style PREPARE_CRAWL fill:#51CF66,stroke:#2F9E44,stroke-width:2px,color:#fff
+    style CRAWL_CAT fill:#51CF66,stroke:#2F9E44,stroke-width:2px,color:#fff
+    style MERGE fill:#FFD43B,stroke:#F59F00,stroke-width:2px,color:#000
+    style SAVE fill:#FFD43B,stroke:#F59F00,stroke-width:2px,color:#000
+    style PREPARE_DETAIL fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
+    style PREPARE_PROD fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
+    style CRAWL_DETAIL fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
+    style SAVE_DETAIL fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
+    style TRANSFORM fill:#845EF7,stroke:#5F3DC4,stroke-width:2px,color:#fff
+    style LOAD_DB fill:#845EF7,stroke:#5F3DC4,stroke-width:2px,color:#fff
+    style VALIDATE fill:#FF8787,stroke:#C92A2A,stroke-width:2px,color:#fff
+    style AGGREGATE fill:#FF8787,stroke:#C92A2A,stroke-width:2px,color:#fff
+```
+
+## 📊 Asset Tracking
+
+DAG sử dụng Airflow Datasets để track data dependencies:
+- `tiki://products/raw`: Raw products từ crawl
+- `tiki://products/with_detail`: Products với chi tiết
+- `tiki://products/transformed`: Products đã transform
+- `tiki://products/final`: Products đã load vào database
+
+## ⚙️ Cấu hình
+
+- **Schedule**: Có thể config qua Variable `TIKI_DAG_SCHEDULE_MODE`
+  - `scheduled`: Chạy tự động hàng ngày
+  - `manual`: Chạy thủ công (mặc định)
+- **Max Active Runs**: 1 (chỉ chạy 1 instance tại một thời điểm)
+- **Max Active Tasks**: 10 (giới hạn tasks song song)
+- **Retries**: 3 lần với exponential backoff
+- **Timeout**: Tùy theo task (5-30 phút)
+
+## 🔧 Variables
+
+- `TIKI_DAG_SCHEDULE_MODE`: `scheduled` hoặc `manual`
+- `TIKI_USE_ASSET_SCHEDULING`: `true` hoặc `false`
+- `TIKI_CRAWL_CATEGORIES`: Danh sách categories (JSON array)
+- `TIKI_MAX_PRODUCTS_PER_CATEGORY`: Số lượng sản phẩm tối đa mỗi category
+"""
+
 DAG_CONFIG = {
     "dag_id": "tiki_crawl_products",
     "description": dag_description,
+    "doc_md": dag_doc_md,  # Thêm documentation với Mermaid diagram
     "default_args": DEFAULT_ARGS,
     "schedule": dag_schedule_config,
     "start_date": datetime(2025, 11, 1),  # Ngày cố định trong quá khứ
