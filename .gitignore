@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
+
+airflow/config/airflow.cfg
+
+
 # C extensions
 *.so
 
@@ -33,6 +38,7 @@ venv.bak/
 coverage.xml
 htmlcov/
 
+
 # Jupyter
 .ipynb_checkpoints/
 
@@ -46,6 +52,8 @@ htmlcov/
 # These can be large; tracked only if intentionally committed.
 data/raw/
 data/processed/
+data/demo/
+data/test_output/
 # Note: .github/ should be committed (contains workflows, templates, etc.)
 
 # Logs and runtime files
@@ -102,6 +110,3 @@ htmlcov/
 # Environment files (already covered, but explicit)
 .env.local
 .env.*.local
-
-# Firecrawl (optional - keep if needed for development)
-# firecrawl/

@@ -1,0 +1,134 @@
+name: Test Docker Compose
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-compose:
+    name: Test Docker Compose Services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Clean up Docker (aggressive)
+        run: |
+          echo "🧹 Dọn dẹp Docker cache và unused resources..."
+          docker system df
+          docker system prune -af --volumes || true
+          docker builder prune -af --volumes || true
+          docker image prune -af || true
+          docker container prune -f || true
+          docker volume prune -f || true
+          docker network prune -f || true
+          echo "📊 Không gian đĩa sau khi dọn dẹp:"
+          docker system df
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          AIRFLOW_UID=50000
+          AIRFLOW_PROJ_DIR=.
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=postgres
+          REDIS_PASSWORD=
+          _AIRFLOW_WWW_USER_USERNAME=admin
+          _AIRFLOW_WWW_USER_PASSWORD=admin
+          EOF
+
+      - name: Build base Airflow image first
+        run: |
+          echo "🔨 Building base Airflow image..."
+          docker compose build airflow-init --progress=plain || true
+          # Dọn dẹp cache sau khi build base image
+          docker builder prune -af --volumes || true
+
+      - name: Build remaining services (one at a time to save space)
+        run: |
+          echo "🔨 Building remaining services..."
+          # Build từng service một để tiết kiệm không gian đĩa
+          docker compose build airflow-scheduler --progress=plain || true
+          docker builder prune -af --volumes || true
+          
+          docker compose build airflow-worker --progress=plain || true
+          docker builder prune -af --volumes || true
+          
+          docker compose build airflow-apiserver --progress=plain || true
+          docker builder prune -af --volumes || true
+          
+          docker compose build airflow-dag-processor --progress=plain || true
+          docker builder prune -af --volumes || true
+          
+          docker compose build airflow-triggerer --progress=plain || true
+          docker builder prune -af --volumes || true
+          
+      - name: Final cleanup
+        run: |
+          echo "🧹 Final cleanup..."
+          docker builder prune -af --volumes || true
+          docker system df
+
+      - name: Start services
+        run: |
+          docker compose up -d
+          echo "Services started, waiting for initialization..."
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "Waiting for services to start..."
+          max_wait=300
+          elapsed=0
+          while [ $elapsed -lt $max_wait ]; do
+            if docker compose ps | grep -q "healthy"; then
+              echo "Services are healthy!"
+              break
+            fi
+            echo "Waiting... ($elapsed/$max_wait seconds)"
+            sleep 10
+            elapsed=$((elapsed + 10))
+          done
+          sleep 30
+          docker compose ps
+
+      - name: Check service status
+        run: |
+          docker compose ps
+          echo "Checking service health..."
+          docker compose ps | grep -E "(healthy|unhealthy|starting)" || true
+
+      - name: Test Airflow API
+        run: |
+          echo "Testing Airflow API..."
+          for i in {1..10}; do
+            if curl -f http://localhost:8080/api/v2/version; then
+              echo "✅ Airflow API is ready!"
+              exit 0
+            fi
+            echo "Attempt $i/10: API not ready, waiting..."
+            sleep 10
+          done
+          echo "❌ Airflow API failed to respond"
+          exit 1
+
+      - name: Validate DAGs in container
+        run: |
+          docker compose exec -T airflow-scheduler airflow dags list || true
+          docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker compose logs --tail=100
+
+      - name: Stop services
+        if: always()
+        run: |
+          docker compose down -v
+

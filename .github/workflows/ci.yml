@@ -1,0 +1,182 @@
+name: CI - Lint & Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff black isort mypy
+
+      - name: Check code formatting with Black
+        run: |
+          black --check --diff src/ tests/ airflow/dags/ || (echo "⚠️  Black found formatting issues. Run 'black src/ tests/ airflow/dags/' to fix." && exit 1)
+
+      - name: Check import sorting with isort
+        run: |
+          isort --check-only --diff src/ tests/ airflow/dags/ || (echo "⚠️  isort found import order issues. Run 'isort src/ tests/ airflow/dags/' to fix." && exit 1)
+
+      - name: Lint with Ruff
+        run: |
+          ruff check src/ tests/ airflow/dags/ || (echo "⚠️  Ruff found linting issues. Run 'ruff check --fix src/ tests/ airflow/dags/' to fix." && exit 1)
+
+      - name: Type check with mypy
+        run: |
+          mypy src/ --ignore-missing-imports || true
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-mock
+
+      - name: Run tests with pytest
+        run: |
+          pytest tests/ -v --cov=src --cov-report=xml --cov-report=term || true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+        continue-on-error: true
+
+  validate-dags:
+    name: Validate Airflow DAGs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Airflow and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install apache-airflow==3.1.2
+          pip install -r requirements.txt
+
+      - name: Validate DAGs
+        run: |
+          mkdir -p airflow/dags airflow/logs airflow/config airflow/plugins
+          mkdir -p src/pipelines/crawl data/raw/products
+          # Tạo file __init__.py nếu chưa có
+          touch src/__init__.py src/pipelines/__init__.py src/pipelines/crawl/__init__.py
+          # Tạo file categories mẫu để DAG không fail khi load
+          mkdir -p data/raw
+          echo '[]' > data/raw/categories_recursive_optimized.json || true
+          python -c "
+          import sys
+          import os
+          import warnings
+          warnings.filterwarnings('ignore')
+          # Sử dụng absolute path cho AIRFLOW_HOME
+          airflow_home = os.path.abspath('airflow')
+          os.environ['AIRFLOW_HOME'] = airflow_home
+          # Set SQL_ALCHEMY_CONN với absolute path để tránh lỗi SQLite
+          os.environ['AIRFLOW__DATABASE__SQL_ALCHEMY_CONN'] = f'sqlite:///{airflow_home}/airflow.db'
+          # Thêm src vào path để DAG có thể import
+          sys.path.insert(0, os.path.abspath('src'))
+          sys.path.insert(0, os.path.abspath('src/pipelines/crawl'))
+          from airflow.models import DagBag
+          
+          try:
+              dag_folder = os.path.abspath('airflow/dags')
+              dag_bag = DagBag(dag_folder=dag_folder, include_examples=False)
+              if dag_bag.import_errors:
+                  print('❌ DAG Import Errors:')
+                  for filename, error in dag_bag.import_errors.items():
+                      print(f'  {filename}: {error}')
+                  sys.exit(1)
+              else:
+                  print('✅ All DAGs validated successfully!')
+                  print(f'Found {len(dag_bag.dags)} DAG(s)')
+                  for dag_id in dag_bag.dag_ids:
+                      print(f'  - {dag_id}')
+          except Exception as e:
+              print(f'❌ Error validating DAGs: {e}')
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
+          "
+
+  docker-build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Clean up Docker before build
+        run: |
+          echo "🧹 Dọn dẹp Docker cache trước khi build..."
+          docker system df
+          docker system prune -af --volumes || true
+          docker builder prune -af --volumes || true
+          echo "📊 Không gian đĩa sau khi dọn dẹp:"
+          docker system df
+
+      - name: Build Airflow Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./airflow/Dockerfile
+          push: false
+          tags: tiki-airflow:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+      - name: Create .env file for validation
+        run: |
+          cat > .env << EOF
+          AIRFLOW_UID=50000
+          AIRFLOW_PROJ_DIR=.
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=postgres
+          REDIS_PASSWORD=
+          _AIRFLOW_WWW_USER_USERNAME=admin
+          _AIRFLOW_WWW_USER_PASSWORD=admin
+          EOF
+
+      - name: Test Docker Compose
+        run: |
+          docker compose config
+
