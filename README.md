@@ -160,75 +160,125 @@ python src/pipelines/crawl/crawl_products_detail.py
 
 ```mermaid
 graph TB
-    subgraph "Airflow Services"
-        A[Airflow Scheduler]
-        B[Airflow API Server]
-        C[Airflow Worker]
-        D[Airflow Triggerer]
-        E[DAG Processor]
+    subgraph "🌐 External Source"
+        TIKI[Tiki.vn<br/>Website]
     end
     
-    subgraph "Databases"
-        F[(PostgreSQL<br/>Metadata + Data)]
-        G[(Redis<br/>Cache + Broker)]
+    subgraph "☁️ Airflow Orchestration"
+        SCHEDULER[Airflow Scheduler<br/>Schedule & Trigger]
+        API[Airflow API Server<br/>Web UI :8080]
+        WORKER[Airflow Worker<br/>Execute Tasks]
+        PROCESSOR[DAG Processor<br/>Parse DAGs]
     end
     
-    subgraph "ETL Pipeline"
-        H[Crawl Categories]
-        I[Crawl Products]
-        J[Crawl Details]
-        K[Transform]
-        L[Load]
+    subgraph "💾 Storage Layer"
+        POSTGRES[(PostgreSQL<br/>Metadata + Products Data)]
+        REDIS[(Redis<br/>Cache + Message Broker)]
     end
     
-    subgraph "Data Storage"
-        M[Raw Data<br/>JSON Files]
-        N[Processed Data<br/>JSON Files]
-        O[PostgreSQL<br/>Products Table]
+    subgraph "📥 Extract Pipeline"
+        CRAWL_CAT[Crawl Categories<br/>Recursive]
+        CRAWL_PROD[Crawl Products<br/>Dynamic Task Mapping]
+        CRAWL_DETAIL[Crawl Details<br/>Selenium]
     end
     
-    subgraph "Asset Tracking"
-        P[tiki://products/raw]
-        Q[tiki://products/with_detail]
-        R[tiki://products/transformed]
-        S[tiki://products/final]
+    subgraph "🔄 Transform Pipeline"
+        TRANSFORM[Transform Products<br/>Normalize + Validate]
+        COMPUTE[Compute Fields<br/>Revenue, Popularity]
     end
     
-    A --> F
-    A --> G
-    B --> F
-    C --> G
-    C --> F
-    C --> H
-    C --> I
-    C --> J
-    C --> K
-    C --> L
+    subgraph "📤 Load Pipeline"
+        LOAD[Load to Database<br/>PostgreSQL + JSON]
+    end
     
-    H --> I
-    I --> M
-    I --> P
-    J --> M
-    J --> Q
-    K --> N
-    K --> R
-    L --> N
-    L --> O
-    L --> S
+    subgraph "📊 Data Storage"
+        RAW_JSON[Raw Data<br/>JSON Files]
+        PROCESSED_JSON[Processed Data<br/>JSON Files]
+        DB_TABLE[(Products Table<br/>PostgreSQL)]
+    end
     
-    P -.->|Asset| K
-    Q -.->|Asset| K
-    R -.->|Asset| L
+    subgraph "📈 Asset Tracking"
+        ASSET_RAW[tiki://products/raw<br/>Dataset]
+        ASSET_DETAIL[tiki://products/with_detail<br/>Dataset]
+        ASSET_TRANS[tiki://products/transformed<br/>Dataset]
+        ASSET_FINAL[tiki://products/final<br/>Dataset]
+    end
     
-    style F fill:#336791
-    style G fill:#DC382D
-    style A fill:#017CEE
-    style O fill:#336791
-    style P fill:#90EE90
-    style Q fill:#90EE90
-    style R fill:#90EE90
-    style S fill:#90EE90
+    subgraph "✅ Validation & Analytics"
+        VALIDATE[Validate Data]
+        AGGREGATE[Aggregate & Notify]
+    end
+    
+    %% External to Crawl
+    TIKI -->|HTTP/HTTPS| CRAWL_CAT
+    TIKI -->|HTTP/HTTPS| CRAWL_PROD
+    TIKI -->|Selenium| CRAWL_DETAIL
+    
+    %% Airflow Orchestration
+    SCHEDULER --> POSTGRES
+    SCHEDULER --> REDIS
+    API --> POSTGRES
+    WORKER --> REDIS
+    WORKER --> POSTGRES
+    PROCESSOR --> SCHEDULER
+    
+    %% Extract Flow
+    SCHEDULER --> CRAWL_CAT
+    CRAWL_CAT --> CRAWL_PROD
+    CRAWL_PROD --> RAW_JSON
+    CRAWL_PROD --> ASSET_RAW
+    CRAWL_PROD --> CRAWL_DETAIL
+    CRAWL_DETAIL --> RAW_JSON
+    CRAWL_DETAIL --> ASSET_DETAIL
+    
+    %% Transform Flow
+    ASSET_DETAIL -.->|Asset Trigger| TRANSFORM
+    TRANSFORM --> COMPUTE
+    COMPUTE --> PROCESSED_JSON
+    COMPUTE --> ASSET_TRANS
+    
+    %% Load Flow
+    ASSET_TRANS -.->|Asset Trigger| LOAD
+    LOAD --> DB_TABLE
+    LOAD --> PROCESSED_JSON
+    LOAD --> ASSET_FINAL
+    
+    %% Validation
+    ASSET_FINAL -.->|Asset Trigger| VALIDATE
+    VALIDATE --> AGGREGATE
+    
+    %% Cache
+    REDIS -.->|Cache| CRAWL_DETAIL
+    REDIS -.->|Cache| CRAWL_PROD
+    
+    %% Styling
+    classDef external fill:#FF6B6B,stroke:#C92A2A,stroke-width:2px,color:#fff
+    classDef airflow fill:#017CEE,stroke:#0056B3,stroke-width:2px,color:#fff
+    classDef storage fill:#336791,stroke:#1E4A6B,stroke-width:2px,color:#fff
+    classDef extract fill:#51CF66,stroke:#2F9E44,stroke-width:2px,color:#fff
+    classDef transform fill:#FFD43B,stroke:#F59F00,stroke-width:2px,color:#000
+    classDef load fill:#74C0FC,stroke:#1971C2,stroke-width:2px,color:#fff
+    classDef data fill:#845EF7,stroke:#5F3DC4,stroke-width:2px,color:#fff
+    classDef asset fill:#90EE90,stroke:#2F9E44,stroke-width:2px,color:#000
+    classDef validate fill:#FF8787,stroke:#C92A2A,stroke-width:2px,color:#fff
+    
+    class TIKI external
+    class SCHEDULER,API,WORKER,PROCESSOR airflow
+    class POSTGRES,REDIS storage
+    class CRAWL_CAT,CRAWL_PROD,CRAWL_DETAIL extract
+    class TRANSFORM,COMPUTE transform
+    class LOAD load
+    class RAW_JSON,PROCESSED_JSON,DB_TABLE data
+    class ASSET_RAW,ASSET_DETAIL,ASSET_TRANS,ASSET_FINAL asset
+    class VALIDATE,AGGREGATE validate
 ```
+
+**📥 Download diagram files để import vào các tool:**
+- [Mermaid format](docs/architecture.mmd) - Import vào [Mermaid Live Editor](https://mermaid.live), VS Code, hoặc GitHub
+- [PlantUML format](docs/architecture.puml) - Import vào [PlantUML Online](http://www.plantuml.com/plantuml/uml/), IntelliJ IDEA, hoặc VS Code
+- [Draw.io format](docs/architecture.drawio.xml) - Import vào [Draw.io](https://app.diagrams.net/) hoặc [diagrams.net](https://app.diagrams.net/)
+
+Xem thêm: [Architecture Documentation](docs/ARCHITECTURE.md)
 
 </div>
 
