@@ -332,6 +332,24 @@ class PostgresStorage:
                                 product.get("description"),
                                 Json(product.get("specifications")) if product.get("specifications") else None,
                                 Json(product.get("images")) if product.get("images") else None,
+                                # Seller fields
+                                product.get("seller_name"),
+                                product.get("seller_id"),
+                                product.get("seller_is_official"),
+                                # Brand and stock
+                                product.get("brand"),
+                                product.get("stock_available"),
+                                product.get("stock_quantity"),
+                                product.get("stock_status"),
+                                Json(product.get("shipping")) if product.get("shipping") else None,
+                                # Computed fields
+                                product.get("estimated_revenue"),
+                                product.get("price_savings"),
+                                product.get("price_category"),
+                                product.get("popularity_score"),
+                                product.get("value_score"),
+                                product.get("discount_amount"),
+                                product.get("sales_velocity"),
                             )
                             for product in batch
                         ]
@@ -344,7 +362,11 @@ class PostgresStorage:
                                 INSERT INTO products 
                                     (product_id, name, url, image_url, category_url, sales_count,
                                      price, original_price, discount_percent, rating_average, 
-                                     review_count, description, specifications, images)
+                                     review_count, description, specifications, images,
+                                     seller_name, seller_id, seller_is_official, brand,
+                                     stock_available, stock_quantity, stock_status, shipping,
+                                     estimated_revenue, price_savings, price_category, popularity_score,
+                                     value_score, discount_amount, sales_velocity)
                                 VALUES %s
                                 ON CONFLICT (product_id) 
                                 DO UPDATE SET
@@ -361,6 +383,21 @@ class PostgresStorage:
                                     description = EXCLUDED.description,
                                     specifications = EXCLUDED.specifications,
                                     images = EXCLUDED.images,
+                                    seller_name = EXCLUDED.seller_name,
+                                    seller_id = EXCLUDED.seller_id,
+                                    seller_is_official = EXCLUDED.seller_is_official,
+                                    brand = EXCLUDED.brand,
+                                    stock_available = EXCLUDED.stock_available,
+                                    stock_quantity = EXCLUDED.stock_quantity,
+                                    stock_status = EXCLUDED.stock_status,
+                                    shipping = EXCLUDED.shipping,
+                                    estimated_revenue = EXCLUDED.estimated_revenue,
+                                    price_savings = EXCLUDED.price_savings,
+                                    price_category = EXCLUDED.price_category,
+                                    popularity_score = EXCLUDED.popularity_score,
+                                    value_score = EXCLUDED.value_score,
+                                    discount_amount = EXCLUDED.discount_amount,
+                                    sales_velocity = EXCLUDED.sales_velocity,
                                     updated_at = CURRENT_TIMESTAMP
                                 """,
                                 values,
@@ -373,7 +410,11 @@ class PostgresStorage:
                                 INSERT INTO products 
                                     (product_id, name, url, image_url, category_url, sales_count,
                                      price, original_price, discount_percent, rating_average, 
-                                     review_count, description, specifications, images)
+                                     review_count, description, specifications, images,
+                                     seller_name, seller_id, seller_is_official, brand,
+                                     stock_available, stock_quantity, stock_status, shipping,
+                                     estimated_revenue, price_savings, price_category, popularity_score,
+                                     value_score, discount_amount, sales_velocity)
                                 VALUES %s
                                 ON CONFLICT (product_id) DO NOTHING
                                 """,
