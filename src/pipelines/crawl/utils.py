@@ -266,13 +266,16 @@ def ensure_dir(path: str | Path) -> Path:
     return path_obj
 
 
-def atomic_write_json(filepath: str | Path, data: Any, **kwargs) -> bool:
+def atomic_write_json(
+    filepath: str | Path, data: Any, compress: bool = False, **kwargs
+) -> bool:
     """
-    Ghi JSON file một cách atomic (tránh corrupt file)
+    Ghi JSON file một cách atomic (tránh corrupt file) với optional compression
 
     Args:
         filepath: Đường dẫn file
         data: Dữ liệu cần ghi
+        compress: Có nén file không (gzip)
         **kwargs: Các tham số cho json.dump
 
     Returns:
@@ -285,9 +288,30 @@ def atomic_write_json(filepath: str | Path, data: Any, **kwargs) -> bool:
         # Đảm bảo thư mục tồn tại
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
-        # Ghi vào temp file
-        with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, **kwargs)
+        if compress:
+            # Sử dụng compression
+            try:
+                from ..storage.compression import write_compressed_json
+                if write_compressed_json(temp_file, data):
+                    # Atomic move cho compressed file
+                    if os.name == "nt":  # Windows
+                        if filepath.exists():
+                            filepath.unlink()
+                        import shutil
+                        shutil.move(str(temp_file), str(filepath))
+                    else:  # Unix/Linux
+                        os.rename(str(temp_file), str(filepath))
+                    return True
+                else:
+                    compress = False  # Fallback nếu compression fail
+            except ImportError:
+                # Fallback về normal write nếu không có compression module
+                compress = False
+
+        if not compress:
+            # Ghi vào temp file
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2, **kwargs)
 
         # Atomic move
         if os.name == "nt":  # Windows
@@ -310,18 +334,31 @@ def atomic_write_json(filepath: str | Path, data: Any, **kwargs) -> bool:
         return False
 
 
-def safe_read_json(filepath: str | Path, default: Any = None) -> Any:
+def safe_read_json(filepath: str | Path, default: Any = None, try_compressed: bool = True) -> Any:
     """
-    Đọc JSON file một cách an toàn
+    Đọc JSON file một cách an toàn với support cho compressed files
 
     Args:
         filepath: Đường dẫn file
         default: Giá trị mặc định nếu lỗi
+        try_compressed: Thử đọc compressed version (.gz) nếu file không tồn tại
 
     Returns:
         Dữ liệu JSON hoặc default
     """
     filepath = Path(filepath)
+    
+    # Thử đọc compressed version trước
+    if try_compressed:
+        try:
+            from ..storage.compression import read_compressed_json
+            result = read_compressed_json(filepath, default=None)
+            if result is not None:
+                return result
+        except ImportError:
+            pass
+    
+    # Fallback về normal read
     if not filepath.exists():
         return default
 

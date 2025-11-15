@@ -251,7 +251,7 @@ class RedisLock:
         """Context manager entry"""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb):  # noqa: ARG002
         """Context manager exit"""
         pass
 

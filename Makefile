@@ -73,6 +73,24 @@ docker-down: ## Dừng Docker Compose services
 docker-logs: ## Xem logs của Docker Compose services
 	docker-compose logs -f
 
+postgres-backup: ## Backup PostgreSQL database
+	@if [ -f scripts/backup-postgres.sh ]; then \
+		bash scripts/backup-postgres.sh; \
+	elif [ -f scripts/backup-postgres.ps1 ]; then \
+		powershell -ExecutionPolicy Bypass -File scripts/backup-postgres.ps1; \
+	else \
+		echo "⚠️  Script backup không tìm thấy"; \
+	fi
+
+postgres-restore: ## Restore PostgreSQL database (cần truyền BACKUP_FILE và DATABASE)
+	@if [ -f scripts/restore-postgres.sh ]; then \
+		bash scripts/restore-postgres.sh $(BACKUP_FILE) $(DATABASE); \
+	elif [ -f scripts/restore-postgres.ps1 ]; then \
+		powershell -ExecutionPolicy Bypass -File scripts/restore-postgres.ps1 -BackupFile $(BACKUP_FILE) -Database $(DATABASE); \
+	else \
+		echo "⚠️  Script restore không tìm thấy"; \
+	fi
+
 docker-test: ## Test Docker Compose setup
 	docker-compose config
 	docker-compose build

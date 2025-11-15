@@ -80,7 +80,7 @@ def crawl_product_detail_with_selenium(
     # Thử Redis cache trước
     if use_redis_cache:
         try:
-            from pipelines.crawl.redis_cache import get_redis_cache
+            from pipelines.crawl.storage.redis_cache import get_redis_cache
 
             redis_cache = get_redis_cache("redis://redis:6379/1")
             if redis_cache:
@@ -95,7 +95,7 @@ def crawl_product_detail_with_selenium(
     # Rate limiting - kiểm tra và đợi nếu cần
     if use_rate_limiting:
         try:
-            from pipelines.crawl.redis_cache import get_redis_rate_limiter
+            from pipelines.crawl.storage.redis_cache import get_redis_rate_limiter
 
             rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
             if rate_limiter:
@@ -176,7 +176,7 @@ def crawl_product_detail_with_selenium(
             # Cache HTML vào Redis sau khi crawl thành công
             if use_redis_cache and full_html:
                 try:
-                    from pipelines.crawl.redis_cache import get_redis_cache
+                    from pipelines.crawl.storage.redis_cache import get_redis_cache
 
                     redis_cache = get_redis_cache("redis://redis:6379/1")
                     if redis_cache:
