@@ -5,13 +5,13 @@ Demo script để minh họa dữ liệu trước và sau khi transform
 import json
 import os
 import sys
-from pathlib import Path
 
 # Fix encoding cho Windows console
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Thêm src vào path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -24,7 +24,8 @@ for path in [project_root, src_path, pipelines_path, transform_path]:
         sys.path.insert(0, path)
 
 # Import transformer
-import importlib.util
+import importlib.util  # noqa: E402
+
 transformer_path = os.path.join(transform_path, "transformer.py")
 spec = importlib.util.spec_from_file_location("transformer", transformer_path)
 transformer_module = importlib.util.module_from_spec(spec)
@@ -46,52 +47,31 @@ def create_sample_raw_product():
             "currency": "VND",
             "current_price": "2,990,000",  # String với dấu phẩy
             "original_price": "3,500,000",
-            "discount_percent": 14.57  # Sẽ được tính lại
+            "discount_percent": 14.57,  # Sẽ được tính lại
         },
         "rating": {
             "average": "4.5",  # String
             "total_reviews": "1,234",  # String với dấu phẩy
-            "rating_distribution": {
-                "5": 800,
-                "4": 300,
-                "3": 100,
-                "2": 24,
-                "1": 10
-            }
+            "rating_distribution": {"5": 800, "4": 300, "3": 100, "2": 24, "1": 10},
         },
-        "stock": {
-            "quantity": 50,
-            "available": True,
-            "stock_status": "in_stock"
-        },
-        "seller": {
-            "name": "Tiki Trading",
-            "seller_id": "seller_123",
-            "is_official": True
-        },
-        "shipping": {
-            "delivery_time": "2-3 ngày",
-            "fast_delivery": True,
-            "free_shipping": True
-        },
+        "stock": {"quantity": 50, "available": True, "stock_status": "in_stock"},
+        "seller": {"name": "Tiki Trading", "seller_id": "seller_123", "is_official": True},
+        "shipping": {"delivery_time": "2-3 ngày", "fast_delivery": True, "free_shipping": True},
         "description": "Máy lọc không khí Xiaomi với công nghệ tiên tiến...",
         "specifications": {
             "Kích thước": "260 x 260 x 735 mm",
             "Công suất": "38W",
             "Diện tích phòng": "48 m²",
-            "Bộ lọc": "HEPA + Than hoạt tính"
+            "Bộ lọc": "HEPA + Than hoạt tính",
         },
         "images": [
             "https://example.com/img1.jpg",
             "https://example.com/img2.jpg",
-            "https://example.com/img3.jpg"
+            "https://example.com/img3.jpg",
         ],
         "crawled_at": "2025-01-15 14:30:00",  # String format
         "detail_crawled_at": "2025-01-15T14:35:00.000000",  # ISO format
-        "_metadata": {
-            "extraction_method": "selenium",
-            "crawl_version": "1.0"
-        }
+        "_metadata": {"extraction_method": "selenium", "crawl_version": "1.0"},
     }
 
 
@@ -110,9 +90,7 @@ def main():
 
     # Transform
     transformer = DataTransformer(
-        strict_validation=False,
-        remove_invalid=True,
-        normalize_fields=True
+        strict_validation=False, remove_invalid=True, normalize_fields=True
     )
 
     transformed_product = transformer.transform_product(raw_product)
@@ -130,88 +108,112 @@ def main():
 
     # So sánh các trường
     if raw_product.get("name") != transformed_product.get("name"):
-        changes.append({
-            "field": "name",
-            "before": f"'{raw_product.get('name')}'",
-            "after": f"'{transformed_product.get('name')}'",
-            "note": "Đã trim whitespace"
-        })
+        changes.append(
+            {
+                "field": "name",
+                "before": f"'{raw_product.get('name')}'",
+                "after": f"'{transformed_product.get('name')}'",
+                "note": "Đã trim whitespace",
+            }
+        )
 
     if raw_product.get("brand") != transformed_product.get("brand"):
-        changes.append({
-            "field": "brand",
-            "before": f"'{raw_product.get('brand')}'",
-            "after": f"'{transformed_product.get('brand')}'",
-            "note": "Đã loại bỏ prefix 'Thương hiệu: '"
-        })
+        changes.append(
+            {
+                "field": "brand",
+                "before": f"'{raw_product.get('brand')}'",
+                "after": f"'{transformed_product.get('brand')}'",
+                "note": "Đã loại bỏ prefix 'Thương hiệu: '",
+            }
+        )
 
     if raw_product.get("sales_count") != transformed_product.get("sales_count"):
-        changes.append({
-            "field": "sales_count",
-            "before": f"{raw_product.get('sales_count')} (string)",
-            "after": f"{transformed_product.get('sales_count')} (int)",
-            "note": "Đã parse từ string sang int"
-        })
+        changes.append(
+            {
+                "field": "sales_count",
+                "before": f"{raw_product.get('sales_count')} (string)",
+                "after": f"{transformed_product.get('sales_count')} (int)",
+                "note": "Đã parse từ string sang int",
+            }
+        )
 
     # Price fields
     if raw_product.get("price", {}).get("current_price") != transformed_product.get("price"):
-        changes.append({
-            "field": "price",
-            "before": f"{raw_product.get('price', {}).get('current_price')} (nested dict)",
-            "after": f"{transformed_product.get('price')} (flatten)",
-            "note": "Đã flatten từ nested dict, parse từ string sang float"
-        })
+        changes.append(
+            {
+                "field": "price",
+                "before": f"{raw_product.get('price', {}).get('current_price')} (nested dict)",
+                "after": f"{transformed_product.get('price')} (flatten)",
+                "note": "Đã flatten từ nested dict, parse từ string sang float",
+            }
+        )
 
-    if raw_product.get("price", {}).get("discount_percent") != transformed_product.get("discount_percent"):
-        changes.append({
-            "field": "discount_percent",
-            "before": f"{raw_product.get('price', {}).get('discount_percent')} (trong dict)",
-            "after": f"{transformed_product.get('discount_percent')} (flatten, tính lại)",
-            "note": "Đã tính lại từ price và original_price, làm tròn"
-        })
+    if raw_product.get("price", {}).get("discount_percent") != transformed_product.get(
+        "discount_percent"
+    ):
+        changes.append(
+            {
+                "field": "discount_percent",
+                "before": f"{raw_product.get('price', {}).get('discount_percent')} (trong dict)",
+                "after": f"{transformed_product.get('discount_percent')} (flatten, tính lại)",
+                "note": "Đã tính lại từ price và original_price, làm tròn",
+            }
+        )
 
     # Rating fields
     if raw_product.get("rating", {}).get("average") != transformed_product.get("rating_average"):
-        changes.append({
-            "field": "rating_average",
-            "before": f"{raw_product.get('rating', {}).get('average')} (nested dict, string)",
-            "after": f"{transformed_product.get('rating_average')} (flatten, float)",
-            "note": "Đã flatten từ nested dict, parse từ string sang float"
-        })
+        changes.append(
+            {
+                "field": "rating_average",
+                "before": f"{raw_product.get('rating', {}).get('average')} (nested dict, string)",
+                "after": f"{transformed_product.get('rating_average')} (flatten, float)",
+                "note": "Đã flatten từ nested dict, parse từ string sang float",
+            }
+        )
 
-    if raw_product.get("rating", {}).get("total_reviews") != transformed_product.get("review_count"):
-        changes.append({
-            "field": "review_count",
-            "before": f"{raw_product.get('rating', {}).get('total_reviews')} (nested dict, string)",
-            "after": f"{transformed_product.get('review_count')} (flatten, int)",
-            "note": "Đã flatten, đổi tên từ total_reviews -> review_count, parse sang int"
-        })
+    if raw_product.get("rating", {}).get("total_reviews") != transformed_product.get(
+        "review_count"
+    ):
+        changes.append(
+            {
+                "field": "review_count",
+                "before": f"{raw_product.get('rating', {}).get('total_reviews')} (nested dict, string)",
+                "after": f"{transformed_product.get('review_count')} (flatten, int)",
+                "note": "Đã flatten, đổi tên từ total_reviews -> review_count, parse sang int",
+            }
+        )
 
     # Seller fields
     if raw_product.get("seller", {}).get("name") != transformed_product.get("seller_name"):
-        changes.append({
-            "field": "seller_name",
-            "before": f"'{raw_product.get('seller', {}).get('name')}' (nested dict)",
-            "after": f"'{transformed_product.get('seller_name')}' (flatten)",
-            "note": "Đã flatten từ seller.name sang seller_name"
-        })
+        changes.append(
+            {
+                "field": "seller_name",
+                "before": f"'{raw_product.get('seller', {}).get('name')}' (nested dict)",
+                "after": f"'{transformed_product.get('seller_name')}' (flatten)",
+                "note": "Đã flatten từ seller.name sang seller_name",
+            }
+        )
 
     if raw_product.get("seller", {}).get("seller_id") != transformed_product.get("seller_id"):
-        changes.append({
-            "field": "seller_id",
-            "before": f"'{raw_product.get('seller', {}).get('seller_id')}' (nested dict)",
-            "after": f"'{transformed_product.get('seller_id')}' (flatten)",
-            "note": "Đã flatten từ seller.seller_id"
-        })
+        changes.append(
+            {
+                "field": "seller_id",
+                "before": f"'{raw_product.get('seller', {}).get('seller_id')}' (nested dict)",
+                "after": f"'{transformed_product.get('seller_id')}' (flatten)",
+                "note": "Đã flatten từ seller.seller_id",
+            }
+        )
 
     # crawled_at
     if raw_product.get("crawled_at") or raw_product.get("detail_crawled_at"):
-        changes.append({
-            "field": "crawled_at",
-            "before": f"'{raw_product.get('crawled_at')}' hoặc '{raw_product.get('detail_crawled_at')}' (string)",
-            "after": f"'{transformed_product.get('crawled_at')}' (ISO format string)",
-            "note": "Đã parse và convert sang ISO format string"
-        })
+        changes.append(
+            {
+                "field": "crawled_at",
+                "before": f"'{raw_product.get('crawled_at')}' hoặc '{raw_product.get('detail_crawled_at')}' (string)",
+                "after": f"'{transformed_product.get('crawled_at')}' (ISO format string)",
+                "note": "Đã parse và convert sang ISO format string",
+            }
+        )
 
     # In các thay đổi
     for i, change in enumerate(changes, 1):
@@ -231,7 +233,12 @@ def main():
             ("price_savings", "Số tiền tiết kiệm", "VND", "original_price - price"),
             ("discount_amount", "Số tiền giảm", "VND", "original_price - price"),
             ("price_category", "Phân loại giá", "", "budget/mid-range/premium/luxury"),
-            ("popularity_score", "Điểm độ phổ biến", "0-100", "sales_count(50%) + rating(30%) + reviews(20%)"),
+            (
+                "popularity_score",
+                "Điểm độ phổ biến",
+                "0-100",
+                "sales_count(50%) + rating(30%) + reviews(20%)",
+            ),
             ("value_score", "Điểm giá trị", "", "rating / (price / 1M)"),
             ("sales_velocity", "Tốc độ bán", "", "sales_count"),
         ]
@@ -241,7 +248,11 @@ def main():
             if value is not None:
                 if unit:
                     print(f"\n{field_name.upper()}:")
-                    print(f"   Giá trị: {value:,.2f} {unit}" if isinstance(value, (int, float)) else f"   Giá trị: {value} {unit}")
+                    print(
+                        f"   Giá trị: {value:,.2f} {unit}"
+                        if isinstance(value, (int, float))
+                        else f"   Giá trị: {value} {unit}"
+                    )
                     print(f"   Mô tả: {description}")
                     print(f"   Công thức: {formula}")
                 else:
@@ -253,7 +264,8 @@ def main():
     print("\n" + "=" * 80)
     print("📋 CẤU TRÚC DATABASE SCHEMA")
     print("=" * 80)
-    print("""
+    print(
+        """
 Các trường chính trong database (table products):
 
 📦 Basic Fields:
@@ -298,12 +310,14 @@ Các trường chính trong database (table products):
 - popularity_score (DECIMAL) - Điểm độ phổ biến (0-100)
 - value_score (DECIMAL) - Điểm giá trị = rating / (price / 1M)
 - sales_velocity (INTEGER) - Tốc độ bán = sales_count
-    """)
+    """
+    )
 
     print("\n" + "=" * 80)
     print("✅ TÓM TẮT")
     print("=" * 80)
-    print("""
+    print(
+        """
 1. ✅ Normalize: Trim whitespace, loại bỏ prefix không cần thiết
 2. ✅ Parse: Convert string numbers sang int/float
 3. ✅ Flatten: Chuyển nested dict (price, rating) sang flat structure
@@ -311,11 +325,11 @@ Các trường chính trong database (table products):
 5. ✅ Format: Convert datetime sang ISO format string
 6. ✅ Validate: Kiểm tra required fields và format
 7. ✅ Type conversion: Đảm bảo types đúng với database schema
-    """)
+    """
+    )
 
     print("=" * 80)
 
 
 if __name__ == "__main__":
     main()
-

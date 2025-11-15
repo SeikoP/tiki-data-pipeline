@@ -2,14 +2,16 @@
 Utility để lưu dữ liệu crawl vào PostgreSQL database
 Tối ưu: Connection pooling, batch processing, error handling
 """
+
 import os
 import time
-from typing import Any, Dict, List, Optional
-from datetime import datetime
-import psycopg2
-from psycopg2.extras import execute_values, Json
-from psycopg2.pool import SimpleConnectionPool
 from contextlib import contextmanager
+from datetime import datetime
+from typing import Any
+
+import psycopg2
+from psycopg2.extras import Json, execute_values
+from psycopg2.pool import SimpleConnectionPool
 
 
 class PostgresStorage:
@@ -52,19 +54,19 @@ class PostgresStorage:
         self.password = password or os.getenv("POSTGRES_PASSWORD", "")
         self.minconn = minconn
         self.maxconn = maxconn
-        self._pool: Optional[SimpleConnectionPool] = None
+        self._pool: SimpleConnectionPool | None = None
         self._pool_stats = {
-            'total_connections': 0,
-            'active_connections': 0,
-            'failed_connections': 0,
-            'retries': 0,
+            "total_connections": 0,
+            "active_connections": 0,
+            "failed_connections": 0,
+            "retries": 0,
         }
         # Connection parameters
         self.connect_kwargs = {
-            'connect_timeout': connect_timeout,
-            'keepalives_idle': keepalives_idle,
-            'keepalives_interval': keepalives_interval,
-            'keepalives_count': keepalives_count,
+            "connect_timeout": connect_timeout,
+            "keepalives_idle": keepalives_idle,
+            "keepalives_interval": keepalives_interval,
+            "keepalives_count": keepalives_count,
         }
 
     def _get_pool(self) -> SimpleConnectionPool:
@@ -83,12 +85,12 @@ class PostgresStorage:
                         password=self.password,
                         **self.connect_kwargs,
                     )
-                    self._pool_stats['total_connections'] = self.maxconn
+                    self._pool_stats["total_connections"] = self.maxconn
                     return self._pool
-                except Exception as e:
-                    self._pool_stats['failed_connections'] += 1
+                except Exception:
+                    self._pool_stats["failed_connections"] += 1
                     if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)  # Exponential backoff
+                        time.sleep(2**attempt)  # Exponential backoff
                         continue
                     raise
         return self._pool
@@ -106,17 +108,17 @@ class PostgresStorage:
     def get_connection(self, retries: int = 3):
         """
         Context manager để lấy connection từ pool với retry và health check
-        
+
         Args:
             retries: Số lần retry nếu connection lỗi
         """
         pool = self._get_pool()
         conn = None
-        
+
         for attempt in range(retries):
             try:
                 conn = pool.getconn()
-                
+
                 # Pre-ping: Check connection health
                 if not self._check_connection(conn):
                     # Connection dead, close và lấy connection mới
@@ -127,17 +129,16 @@ class PostgresStorage:
                     # Remove dead connection from pool
                     pool.putconn(conn, close=True)
                     conn = pool.getconn()
-                
-                self._pool_stats['active_connections'] = max(
-                    self._pool_stats['active_connections'],
-                    len([c for c in pool._used if c])
+
+                self._pool_stats["active_connections"] = max(
+                    self._pool_stats["active_connections"], len([c for c in pool._used if c])
                 )
-                
+
                 yield conn
                 conn.commit()
                 break
-                
-            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+
+            except (psycopg2.OperationalError, psycopg2.InterfaceError):
                 # Connection error, retry
                 if conn:
                     try:
@@ -146,19 +147,19 @@ class PostgresStorage:
                     except Exception:
                         pass
                     conn = None
-                
+
                 if attempt < retries - 1:
-                    self._pool_stats['retries'] += 1
+                    self._pool_stats["retries"] += 1
                     time.sleep(0.5 * (attempt + 1))  # Exponential backoff
                     continue
                 else:
                     raise
-                    
+
             except Exception:
                 if conn:
                     conn.rollback()
                 raise
-                
+
             finally:
                 if conn:
                     try:
@@ -167,7 +168,7 @@ class PostgresStorage:
                         pass
 
     def save_categories(
-        self, categories: List[Dict[str, Any]], upsert: bool = True, batch_size: int = 100
+        self, categories: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
     ) -> int:
         """
         Lưu danh sách categories vào database với batch processing tối ưu
@@ -203,16 +204,16 @@ class PostgresStorage:
                             )
                             for cat in batch
                         ]
-                        
+
                         if upsert:
                             # Batch INSERT ... ON CONFLICT UPDATE
                             execute_values(
                                 cur,
                                 """
-                                INSERT INTO categories 
+                                INSERT INTO categories
                                     (category_id, name, url, image_url, parent_url, level, product_count)
                                 VALUES %s
-                                ON CONFLICT (url) 
+                                ON CONFLICT (url)
                                 DO UPDATE SET
                                     name = EXCLUDED.name,
                                     image_url = EXCLUDED.image_url,
@@ -228,14 +229,14 @@ class PostgresStorage:
                             execute_values(
                                 cur,
                                 """
-                                INSERT INTO categories 
+                                INSERT INTO categories
                                     (category_id, name, url, image_url, parent_url, level, product_count)
                                 VALUES %s
                                 ON CONFLICT (url) DO NOTHING
                                 """,
                                 values,
                             )
-                        
+
                         saved_count += len(batch)
                     except Exception as e:
                         # Fallback: lưu từng item một
@@ -245,10 +246,10 @@ class PostgresStorage:
                                 if upsert:
                                     cur.execute(
                                         """
-                                        INSERT INTO categories 
+                                        INSERT INTO categories
                                             (category_id, name, url, image_url, parent_url, level, product_count)
                                         VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                        ON CONFLICT (url) 
+                                        ON CONFLICT (url)
                                         DO UPDATE SET
                                             name = EXCLUDED.name,
                                             image_url = EXCLUDED.image_url,
@@ -270,7 +271,7 @@ class PostgresStorage:
                                 else:
                                     cur.execute(
                                         """
-                                        INSERT INTO categories 
+                                        INSERT INTO categories
                                             (category_id, name, url, image_url, parent_url, level, product_count)
                                         VALUES (%s, %s, %s, %s, %s, %s, %s)
                                         ON CONFLICT (url) DO NOTHING
@@ -292,7 +293,7 @@ class PostgresStorage:
         return saved_count
 
     def save_products(
-        self, products: List[Dict[str, Any]], upsert: bool = True, batch_size: int = 100
+        self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
     ) -> int:
         """
         Lưu danh sách products vào database (batch insert để tối ưu)
@@ -330,7 +331,11 @@ class PostgresStorage:
                                 product.get("rating_average"),
                                 product.get("review_count"),
                                 product.get("description"),
-                                Json(product.get("specifications")) if product.get("specifications") else None,
+                                (
+                                    Json(product.get("specifications"))
+                                    if product.get("specifications")
+                                    else None
+                                ),
                                 Json(product.get("images")) if product.get("images") else None,
                                 # Seller fields
                                 product.get("seller_name"),
@@ -359,16 +364,16 @@ class PostgresStorage:
                             execute_values(
                                 cur,
                                 """
-                                INSERT INTO products 
+                                INSERT INTO products
                                     (product_id, name, url, image_url, category_url, sales_count,
-                                     price, original_price, discount_percent, rating_average, 
+                                     price, original_price, discount_percent, rating_average,
                                      review_count, description, specifications, images,
                                      seller_name, seller_id, seller_is_official, brand,
                                      stock_available, stock_quantity, stock_status, shipping,
                                      estimated_revenue, price_savings, price_category, popularity_score,
                                      value_score, discount_amount, sales_velocity)
                                 VALUES %s
-                                ON CONFLICT (product_id) 
+                                ON CONFLICT (product_id)
                                 DO UPDATE SET
                                     name = EXCLUDED.name,
                                     url = EXCLUDED.url,
@@ -407,9 +412,9 @@ class PostgresStorage:
                             execute_values(
                                 cur,
                                 """
-                                INSERT INTO products 
+                                INSERT INTO products
                                     (product_id, name, url, image_url, category_url, sales_count,
-                                     price, original_price, discount_percent, rating_average, 
+                                     price, original_price, discount_percent, rating_average,
                                      review_count, description, specifications, images,
                                      seller_name, seller_id, seller_is_official, brand,
                                      stock_available, stock_quantity, stock_status, shipping,
@@ -463,8 +468,8 @@ class PostgresStorage:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO crawl_history 
-                        (crawl_type, status, items_count, category_url, product_id, 
+                    INSERT INTO crawl_history
+                        (crawl_type, status, items_count, category_url, product_id,
                          error_message, started_at, completed_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                     RETURNING id
@@ -481,13 +486,13 @@ class PostgresStorage:
                 )
                 return cur.fetchone()[0]
 
-    def get_products_by_category(self, category_url: str, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
         """Lấy danh sách products theo category_url"""
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT product_id, name, url, image_url, sales_count, price, 
+                    SELECT product_id, name, url, image_url, sales_count, price,
                            rating_average, review_count, crawled_at
                     FROM products
                     WHERE category_url = %s
@@ -497,15 +502,15 @@ class PostgresStorage:
                     (category_url, limit),
                 )
                 columns = [desc[0] for desc in cur.description]
-                return [dict(zip(columns, row)) for row in cur.fetchall()]
+                return [dict(zip(columns, row, strict=False)) for row in cur.fetchall()]
 
-    def get_category_stats(self) -> Dict[str, Any]:
+    def get_category_stats(self) -> dict[str, Any]:
         """Lấy thống kê tổng quan về categories và products"""
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT 
+                    SELECT
                         (SELECT COUNT(*) FROM categories) as total_categories,
                         (SELECT COUNT(*) FROM products) as total_products,
                         (SELECT COUNT(DISTINCT category_url) FROM products) as categories_with_products,
@@ -522,13 +527,13 @@ class PostgresStorage:
                     "last_crawl_time": row[4],
                 }
 
-    def get_pool_stats(self) -> Dict[str, Any]:
+    def get_pool_stats(self) -> dict[str, Any]:
         """Lấy thống kê connection pool"""
         stats = self._pool_stats.copy()
         if self._pool:
             try:
-                stats['pool_size'] = self.maxconn
-                stats['min_conn'] = self.minconn
+                stats["pool_size"] = self.maxconn
+                stats["min_conn"] = self.minconn
                 # Note: SimpleConnectionPool không expose số connection đang dùng
             except Exception:
                 pass
@@ -539,5 +544,4 @@ class PostgresStorage:
         if self._pool:
             self._pool.closeall()
             self._pool = None
-            self._pool_stats['active_connections'] = 0
-
+            self._pool_stats["active_connections"] = 0

@@ -6,9 +6,8 @@ import json
 import os
 import sys
 import tempfile
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 # Fix encoding cho Windows console
 if sys.platform == "win32":
@@ -43,9 +42,10 @@ for path in [project_root, src_path, common_path, pipelines_path, transform_path
     if path not in sys.path:
         sys.path.insert(0, path)
 
+import importlib.util  # noqa: E402
+
 # Import modules
-import types
-import importlib.util
+import types  # noqa: E402
 
 # Setup package structure
 if "pipelines" not in sys.modules:
@@ -72,7 +72,7 @@ spec.loader.exec_module(loader_module)
 DataLoader = loader_module.DataLoader
 
 
-def create_sample_products() -> List[Dict[str, Any]]:
+def create_sample_products() -> list[dict[str, Any]]:
     """Tạo danh sách products mẫu để test"""
     return [
         {
@@ -194,7 +194,7 @@ def test_transform_validation():
 
     transformed, stats = transformer.transform_products(products, validate=True)
 
-    print(f"\n📊 Thống kê:")
+    print("\n📊 Thống kê:")
     print(f"   - Tổng products: {stats['total_processed']}")
     print(f"   - Valid: {stats['valid_products']}")
     print(f"   - Invalid: {stats['invalid_products']}")
@@ -202,7 +202,7 @@ def test_transform_validation():
     print(f"   - Errors: {len(stats['errors'])}")
 
     if stats["errors"]:
-        print(f"\n⚠️  Lỗi:")
+        print("\n⚠️  Lỗi:")
         for error in stats["errors"][:5]:  # Chỉ hiển thị 5 lỗi đầu
             print(f"   - {error}")
 
@@ -211,7 +211,7 @@ def test_transform_validation():
     assert stats["invalid_products"] > 0, "Phải có ít nhất 1 product không hợp lệ"
     assert len(transformed) == stats["valid_products"], "Số products transformed phải khớp"
 
-    print(f"\n✅ Test validation thành công!")
+    print("\n✅ Test validation thành công!")
     return transformed, stats
 
 
@@ -228,17 +228,21 @@ def test_transform_normalization():
     product = products[0]
     transformed = transformer.transform_product(product)
 
-    print(f"\n📝 Product gốc:")
+    print("\n📝 Product gốc:")
     print(f"   - name: '{product['name']}'")
     print(f"   - brand: '{product['brand']}'")
     print(f"   - sales_count: {product['sales_count']} (type: {type(product['sales_count'])})")
-    print(f"   - price.current_price: {product['price']['current_price']} (type: {type(product['price']['current_price'])})")
+    print(
+        f"   - price.current_price: {product['price']['current_price']} (type: {type(product['price']['current_price'])})"
+    )
 
-    print(f"\n📝 Product sau transform:")
+    print("\n📝 Product sau transform:")
     if transformed:
         print(f"   - name: '{transformed['name']}'")
         print(f"   - brand: '{transformed.get('brand')}'")
-        print(f"   - sales_count: {transformed.get('sales_count')} (type: {type(transformed.get('sales_count'))})")
+        print(
+            f"   - sales_count: {transformed.get('sales_count')} (type: {type(transformed.get('sales_count'))})"
+        )
         print(f"   - price: {transformed.get('price')} (type: {type(transformed.get('price'))})")
         print(f"   - original_price: {transformed.get('original_price')}")
         print(f"   - discount_percent: {transformed.get('discount_percent')}")
@@ -250,9 +254,12 @@ def test_transform_normalization():
         assert transformed.get("sales_count") == 500, "sales_count phải được parse thành int"
         assert transformed.get("price") == 100000.0, "price phải được parse thành float"
         assert transformed.get("original_price") == 150000.0, "original_price phải được parse"
-        assert transformed.get("discount_percent") in [33, 34], "discount_percent phải được tính lại (có thể làm tròn)"
+        assert transformed.get("discount_percent") in [
+            33,
+            34,
+        ], "discount_percent phải được tính lại (có thể làm tròn)"
 
-    print(f"\n✅ Test normalization thành công!")
+    print("\n✅ Test normalization thành công!")
     return transformed
 
 
@@ -288,7 +295,7 @@ def test_transform_db_format():
             assert "price" in transformed, "Phải có trường price (flatten từ dict)"
             assert "rating_average" in transformed, "Phải có rating_average (flatten từ dict)"
 
-    print(f"\n✅ Test database format thành công!")
+    print("\n✅ Test database format thành công!")
 
 
 def test_transform_duplicates():
@@ -306,7 +313,7 @@ def test_transform_duplicates():
     transformer = DataTransformer(remove_invalid=True)
     transformed, stats = transformer.transform_products(products)
 
-    print(f"\n📊 Thống kê:")
+    print("\n📊 Thống kê:")
     print(f"   - Tổng products: {stats['total_processed']}")
     print(f"   - Valid: {stats['valid_products']}")
     print(f"   - Duplicates removed: {stats['duplicates_removed']}")
@@ -316,7 +323,7 @@ def test_transform_duplicates():
     unique_ids = set(product_ids)
     assert len(product_ids) == len(unique_ids), "Không được có duplicate product_id"
 
-    print(f"\n✅ Test remove duplicates thành công!")
+    print("\n✅ Test remove duplicates thành công!")
 
 
 def test_load_to_file():
@@ -333,15 +340,13 @@ def test_load_to_file():
     valid_products = [p for p in transformed if p.get("product_id") and p.get("name")]
 
     loader = DataLoader(enable_db=False)
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
         temp_file = f.name
 
     try:
         stats = loader.load_products(valid_products, save_to_file=temp_file)
 
-        print(f"\n📊 Thống kê:")
+        print("\n📊 Thống kê:")
         print(f"   - Tổng products: {stats['total_loaded']}")
         print(f"   - File loaded: {stats['file_loaded']}")
         print(f"   - Success: {stats['success_count']}")
@@ -351,13 +356,13 @@ def test_load_to_file():
         assert stats["file_loaded"] > 0, "Phải có products được lưu vào file"
 
         # Đọc và kiểm tra file
-        with open(temp_file, "r", encoding="utf-8") as f:
+        with open(temp_file, encoding="utf-8") as f:
             data = json.load(f)
             assert "products" in data, "File phải có key 'products'"
             assert len(data["products"]) == stats["file_loaded"], "Số products phải khớp"
             assert "loaded_at" in data, "File phải có 'loaded_at'"
 
-        print(f"\n✅ Test load to file thành công!")
+        print("\n✅ Test load to file thành công!")
         return temp_file
 
     finally:
@@ -378,9 +383,7 @@ def test_load_from_file():
     transformed, _ = transformer.transform_products(products)
     valid_products = [p for p in transformed if p.get("product_id") and p.get("name")]
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
         input_file = f.name
         json.dump({"products": valid_products}, f, ensure_ascii=False, indent=2)
 
@@ -392,17 +395,15 @@ def test_load_from_file():
             output_file = f.name
 
         try:
-            stats = loader.load_from_file(
-                input_file, save_to_db=False, save_to_file=output_file
-            )
+            stats = loader.load_from_file(input_file, save_to_db=False, save_to_file=output_file)
 
-            print(f"\n📊 Thống kê:")
+            print("\n📊 Thống kê:")
             print(f"   - File loaded: {stats['file_loaded']}")
             print(f"   - Success: {stats['success_count']}")
 
             assert stats["file_loaded"] > 0, "Phải có products được load từ file"
 
-            print(f"\n✅ Test load from file thành công!")
+            print("\n✅ Test load from file thành công!")
             return output_file
 
         finally:
@@ -426,28 +427,26 @@ def test_load_integration():
     transformer = DataTransformer(remove_invalid=True, normalize_fields=True)
     transformed, transform_stats = transformer.transform_products(products, validate=True)
 
-    print(f"\n📊 Transform stats:")
+    print("\n📊 Transform stats:")
     print(f"   - Valid products: {transform_stats['valid_products']}")
 
     # Load
     loader = DataLoader(enable_db=False)
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
         output_file = f.name
 
     try:
         load_stats = loader.load_products(transformed, save_to_file=output_file)
 
-        print(f"\n📊 Load stats:")
+        print("\n📊 Load stats:")
         print(f"   - File loaded: {load_stats['file_loaded']}")
         print(f"   - Success: {load_stats['success_count']}")
 
-        assert transform_stats["valid_products"] == load_stats["file_loaded"], (
-            "Số products transform và load phải khớp"
-        )
+        assert (
+            transform_stats["valid_products"] == load_stats["file_loaded"]
+        ), "Số products transform và load phải khớp"
 
-        print(f"\n✅ Test integration thành công!")
+        print("\n✅ Test integration thành công!")
         return transform_stats, load_stats
 
     finally:
@@ -477,7 +476,7 @@ def test_edge_cases():
     transformed = transformer.transform_product(minimal_product)
     assert transformed is not None, "Minimal product phải được transform"
 
-    print(f"\n✅ Test edge cases thành công!")
+    print("\n✅ Test edge cases thành công!")
 
 
 def main():
@@ -572,4 +571,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

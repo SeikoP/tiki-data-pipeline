@@ -10,8 +10,9 @@ from pathlib import Path
 # Fix encoding cho Windows console
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Thêm src vào path - cần thêm cả common, pipelines và crawl
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -25,6 +26,7 @@ env_file = os.path.join(common_path, ".env")
 if os.path.exists(env_file):
     try:
         from dotenv import load_dotenv
+
         load_dotenv(env_file)
         print(f"✅ Đã load .env từ: {env_file}")
     except ImportError:
@@ -37,9 +39,10 @@ for path in [project_root, src_path, common_path, pipelines_path, crawl_path]:
     if path not in sys.path:
         sys.path.insert(0, path)
 
+import importlib.util  # noqa: E402
+
 # Setup package structure để relative imports hoạt động
-import types
-import importlib.util
+import types  # noqa: E402
 
 # Tạo package structure trong sys.modules
 if "pipelines" not in sys.modules:
@@ -97,17 +100,14 @@ def create_sample_data_file(output_path: str) -> str:
             "timeout": 15,
             "degraded": 0,
             "with_detail": 85,
-            "error_details": {
-                "timeout": 15,
-                "selenium_error": 10
-            },
+            "error_details": {"timeout": 15, "selenium_error": 10},
             "products_saved": 85,
             "total_products": 100,
             "products_skipped": 0,
             "circuit_breaker_open": 0,
             "failed_products_count": 10,
             "products_cached_skipped": 0,
-            "products_failed_skipped": 0
+            "products_failed_skipped": 0,
         },
         "crawled_at": "2025-11-15T14:00:00.000000",
         "note": "Dữ liệu test cho AI summary",
@@ -120,27 +120,15 @@ def create_sample_data_file(output_path: str) -> str:
                     "currency": "VND",
                     "current_price": 100000,
                     "original_price": 150000,
-                    "discount_percent": 33.3
+                    "discount_percent": 33.3,
                 },
-                "stock": {
-                    "quantity": 10,
-                    "available": True,
-                    "stock_status": "in_stock"
-                },
-                "rating": {
-                    "average": 4.5,
-                    "total_reviews": 100,
-                    "rating_distribution": {}
-                },
-                "seller": {
-                    "name": "Test Seller",
-                    "seller_id": "seller_123",
-                    "is_official": True
-                },
+                "stock": {"quantity": 10, "available": True, "stock_status": "in_stock"},
+                "rating": {"average": 4.5, "total_reviews": 100, "rating_distribution": {}},
+                "seller": {"name": "Test Seller", "seller_id": "seller_123", "is_official": True},
                 "shipping": {
                     "delivery_time": "2-3 ngày",
                     "fast_delivery": True,
-                    "free_shipping": True
+                    "free_shipping": True,
                 },
                 "image_url": "https://example.com/image.jpg",
                 "crawled_at": "2025-11-15 14:00:00",
@@ -148,7 +136,7 @@ def create_sample_data_file(output_path: str) -> str:
                 "sales_count": 500,
                 "category_url": "https://tiki.vn/test/c123",
                 "detail_status": "success",
-                "detail_crawled_at": "2025-11-15T14:00:00.000000"
+                "detail_crawled_at": "2025-11-15T14:00:00.000000",
             },
             {
                 "url": "https://tiki.vn/p/789012",
@@ -158,27 +146,19 @@ def create_sample_data_file(output_path: str) -> str:
                     "currency": "VND",
                     "current_price": 200000,
                     "original_price": 250000,
-                    "discount_percent": 20.0
+                    "discount_percent": 20.0,
                 },
-                "stock": {
-                    "quantity": 5,
-                    "available": True,
-                    "stock_status": "in_stock"
-                },
-                "rating": {
-                    "average": 4.8,
-                    "total_reviews": 200,
-                    "rating_distribution": {}
-                },
+                "stock": {"quantity": 5, "available": True, "stock_status": "in_stock"},
+                "rating": {"average": 4.8, "total_reviews": 200, "rating_distribution": {}},
                 "seller": {
                     "name": "Test Seller 2",
                     "seller_id": "seller_456",
-                    "is_official": False
+                    "is_official": False,
                 },
                 "shipping": {
                     "delivery_time": "3-5 ngày",
                     "fast_delivery": False,
-                    "free_shipping": False
+                    "free_shipping": False,
                 },
                 "image_url": "https://example.com/image2.jpg",
                 "crawled_at": "2025-11-15 14:00:00",
@@ -186,9 +166,9 @@ def create_sample_data_file(output_path: str) -> str:
                 "sales_count": 1000,
                 "category_url": "https://tiki.vn/test/c456",
                 "detail_status": "success",
-                "detail_crawled_at": "2025-11-15T14:00:00.000000"
-            }
-        ]
+                "detail_crawled_at": "2025-11-15T14:00:00.000000",
+            },
+        ],
     }
 
     # Tạo thư mục nếu chưa có
@@ -210,12 +190,14 @@ def test_data_aggregator():
     print("=" * 70)
 
     # Tạo file dữ liệu mẫu
-    test_data_file = os.path.join(os.path.dirname(__file__), "..", "data", "test_output", "test_products.json")
+    test_data_file = os.path.join(
+        os.path.dirname(__file__), "..", "data", "test_output", "test_products.json"
+    )
     create_sample_data_file(test_data_file)
 
     try:
         aggregator = DataAggregator(test_data_file)
-        
+
         # Test load data
         print("\n📂 Test load dữ liệu...")
         load_success = aggregator.load_data()
@@ -225,11 +207,11 @@ def test_data_aggregator():
         # Test aggregate
         print("\n📊 Test tổng hợp dữ liệu...")
         summary = aggregator.aggregate()
-        
+
         assert summary, "❌ Summary không được tạo"
         assert "statistics" in summary, "❌ Thiếu statistics trong summary"
         assert "metadata" in summary, "❌ Thiếu metadata trong summary"
-        
+
         stats = summary.get("statistics", {})
         print(f"   📦 Tổng sản phẩm: {stats.get('total_products', 0)}")
         print(f"   ✅ Có chi tiết: {stats.get('with_detail', 0)}")
@@ -239,7 +221,7 @@ def test_data_aggregator():
         # Kiểm tra price analysis
         if "price_analysis" in summary:
             price_analysis = summary["price_analysis"]
-            print(f"\n💰 Phân tích giá:")
+            print("\n💰 Phân tích giá:")
             print(f"   - Giá trung bình: {price_analysis.get('avg_price', 0):,.0f} VND")
             print(f"   - Giá min: {price_analysis.get('min_price', 0):,.0f} VND")
             print(f"   - Giá max: {price_analysis.get('max_price', 0):,.0f} VND")
@@ -249,7 +231,7 @@ def test_data_aggregator():
         # Kiểm tra rating analysis
         if "rating_analysis" in summary:
             rating_analysis = summary["rating_analysis"]
-            print(f"\n⭐ Phân tích đánh giá:")
+            print("\n⭐ Phân tích đánh giá:")
             print(f"   - Rating trung bình: {rating_analysis.get('avg_rating', 0):.2f}")
             print(f"   - Rating min: {rating_analysis.get('min_rating', 0):.2f}")
             print(f"   - Rating max: {rating_analysis.get('max_rating', 0):.2f}")
@@ -260,6 +242,7 @@ def test_data_aggregator():
     except Exception as e:
         print(f"\n❌ Test DataAggregator thất bại: {e}")
         import traceback
+
         traceback.print_exc()
         return None
 
@@ -276,9 +259,9 @@ def test_ai_summarizer(summary=None):
 
     try:
         summarizer = AISummarizer()
-        
+
         # Kiểm tra config
-        print(f"\n⚙️  Cấu hình:")
+        print("\n⚙️  Cấu hình:")
         print(f"   - Enabled: {summarizer.enabled}")
         print(f"   - Model: {summarizer.model}")
         print(f"   - API Key: {'✅ Có' if summarizer.api_key else '❌ Không có'}")
@@ -294,10 +277,10 @@ def test_ai_summarizer(summary=None):
         # Test summarize
         print("\n🤖 Test tổng hợp với AI...")
         ai_summary = summarizer.summarize_data(summary, max_tokens=1000)
-        
+
         if ai_summary:
             print(f"✅ Nhận được summary từ AI ({len(ai_summary)} ký tự)")
-            print(f"\n📝 Nội dung summary:")
+            print("\n📝 Nội dung summary:")
             print("-" * 70)
             print(ai_summary[:500] + "..." if len(ai_summary) > 500 else ai_summary)
             print("-" * 70)
@@ -309,6 +292,7 @@ def test_ai_summarizer(summary=None):
     except Exception as e:
         print(f"\n❌ Test AISummarizer thất bại: {e}")
         import traceback
+
         traceback.print_exc()
         return None
 
@@ -321,9 +305,9 @@ def test_discord_notifier(ai_summary=None, stats=None):
 
     try:
         notifier = DiscordNotifier()
-        
+
         # Kiểm tra config
-        print(f"\n⚙️  Cấu hình:")
+        print("\n⚙️  Cấu hình:")
         print(f"   - Enabled: {notifier.enabled}")
         print(f"   - Webhook URL: {'✅ Có' if notifier.webhook_url else '❌ Không có'}")
 
@@ -337,7 +321,7 @@ def test_discord_notifier(ai_summary=None, stats=None):
 
         # Test send message
         print("\n📤 Test gửi thông báo...")
-        
+
         if ai_summary and stats:
             # Gửi với AI summary
             success = notifier.send_summary(ai_summary=ai_summary, stats=stats)
@@ -371,6 +355,7 @@ def test_discord_notifier(ai_summary=None, stats=None):
     except Exception as e:
         print(f"\n❌ Test DiscordNotifier thất bại: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -383,13 +368,15 @@ def test_integration():
 
     try:
         # 1. Tạo và tổng hợp dữ liệu
-        test_data_file = os.path.join(os.path.dirname(__file__), "..", "data", "test_output", "test_products.json")
+        test_data_file = os.path.join(
+            os.path.dirname(__file__), "..", "data", "test_output", "test_products.json"
+        )
         create_sample_data_file(test_data_file)
 
         aggregator = DataAggregator(test_data_file)
         aggregator.load_data()
         summary = aggregator.aggregate()
-        
+
         print("✅ Bước 1: Tổng hợp dữ liệu thành công")
 
         # 2. Tổng hợp với AI
@@ -416,7 +403,7 @@ def test_integration():
                     title="🧪 Test Integration",
                     color=0x3498DB,
                 )
-            
+
             if success:
                 print("✅ Bước 3: Gửi thông báo Discord thành công")
             else:
@@ -430,6 +417,7 @@ def test_integration():
     except Exception as e:
         print(f"\n❌ Test tích hợp thất bại: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -442,8 +430,12 @@ def test_with_real_data():
 
     # Tìm file products_with_detail.json
     possible_paths = [
-        os.path.join(os.path.dirname(__file__), "..", "data", "raw", "products", "products_with_detail.json"),
-        os.path.join(os.path.dirname(__file__), "..", "data", "demo", "products", "products_with_detail.json"),
+        os.path.join(
+            os.path.dirname(__file__), "..", "data", "raw", "products", "products_with_detail.json"
+        ),
+        os.path.join(
+            os.path.dirname(__file__), "..", "data", "demo", "products", "products_with_detail.json"
+        ),
     ]
 
     data_file = None
@@ -467,8 +459,8 @@ def test_with_real_data():
 
         summary = aggregator.aggregate()
         stats = summary.get("statistics", {})
-        
-        print(f"\n📊 Thống kê từ dữ liệu thực:")
+
+        print("\n📊 Thống kê từ dữ liệu thực:")
         print(f"   📦 Tổng sản phẩm: {stats.get('total_products', 0)}")
         print(f"   ✅ Có chi tiết: {stats.get('with_detail', 0)}")
         print(f"   ❌ Thất bại: {stats.get('failed', 0)}")
@@ -481,7 +473,7 @@ def test_with_real_data():
             ai_summary = summarizer.summarize_data(summary, max_tokens=2000)
             if ai_summary:
                 print(f"✅ Nhận được summary từ AI ({len(ai_summary)} ký tự)")
-                print(f"\n📝 Preview (200 ký tự đầu):")
+                print("\n📝 Preview (200 ký tự đầu):")
                 print("-" * 70)
                 print(ai_summary[:200] + "...")
                 print("-" * 70)
@@ -492,6 +484,7 @@ def test_with_real_data():
     except Exception as e:
         print(f"\n❌ Test với dữ liệu thực thất bại: {e}")
         import traceback
+
         traceback.print_exc()
         return None, None
 
@@ -556,8 +549,12 @@ def main():
     print("📋 TỔNG KẾT")
     print("=" * 70)
     print(f"✅ DataAggregator: {'✅ Thành công' if results['data_aggregator'] else '❌ Thất bại'}")
-    print(f"✅ AISummarizer: {'✅ Thành công' if results['ai_summarizer'] else '⚠️  Bỏ qua (chưa config)'}")
-    print(f"✅ DiscordNotifier: {'✅ Thành công' if results['discord_notifier'] else '⚠️  Bỏ qua (chưa config)'}")
+    print(
+        f"✅ AISummarizer: {'✅ Thành công' if results['ai_summarizer'] else '⚠️  Bỏ qua (chưa config)'}"
+    )
+    print(
+        f"✅ DiscordNotifier: {'✅ Thành công' if results['discord_notifier'] else '⚠️  Bỏ qua (chưa config)'}"
+    )
     print(f"✅ Integration: {'✅ Thành công' if results['integration'] else '❌ Thất bại'}")
     print(f"✅ Real Data: {'✅ Thành công' if results['real_data'] else '⚠️  Bỏ qua'}")
     print("=" * 70)
@@ -570,4 +567,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

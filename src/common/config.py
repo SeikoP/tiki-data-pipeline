@@ -5,7 +5,6 @@ Load từ file .env trong src/common/ hoặc từ environment variables
 
 import os
 from pathlib import Path
-from typing import Any, Dict
 
 # Tìm file .env trong src/common/
 current_dir = Path(__file__).parent
@@ -15,6 +14,7 @@ env_file = current_dir / ".env"
 if env_file.exists():
     try:
         from dotenv import load_dotenv
+
         load_dotenv(env_file)
     except ImportError:
         # Nếu không có python-dotenv, bỏ qua
@@ -34,4 +34,3 @@ DISCORD_CONFIG = {
     "webhook_url": os.getenv("DISCORD_WEBHOOK_URL", ""),
     "enabled": os.getenv("DISCORD_ENABLED", "false").lower() == "true",
 }
-

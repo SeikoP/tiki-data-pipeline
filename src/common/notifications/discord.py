@@ -2,10 +2,9 @@
 Module để gửi thông báo qua Discord webhook
 """
 
-import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
 
@@ -40,9 +39,9 @@ class DiscordNotifier:
     def send_message(
         self,
         content: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         color: int = 0x00FF00,  # Màu xanh lá mặc định
-        fields: Optional[list] = None,
+        fields: list | None = None,
     ) -> bool:
         """
         Gửi thông báo qua Discord webhook
@@ -97,7 +96,7 @@ class DiscordNotifier:
                 try:
                     error_detail = e.response.json()
                     logger.error(f"   Chi tiết lỗi: {error_detail}")
-                except:
+                except Exception:
                     logger.error(f"   Response text: {e.response.text}")
             return False
         except Exception as e:
@@ -107,7 +106,7 @@ class DiscordNotifier:
     def send_summary(
         self,
         ai_summary: str,
-        stats: Dict[str, Any],
+        stats: dict[str, Any],
         color: int = 0x3498DB,  # Màu xanh dương
     ) -> bool:
         """
@@ -171,4 +170,3 @@ class DiscordNotifier:
             color=color,
             fields=fields if fields else None,
         )
-

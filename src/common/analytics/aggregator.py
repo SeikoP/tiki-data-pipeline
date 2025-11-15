@@ -4,9 +4,8 @@ Module để tổng hợp và phân tích dữ liệu sản phẩm
 
 import json
 import logging
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ class DataAggregator:
             data_file_path: Đường dẫn đến file JSON chứa dữ liệu sản phẩm
         """
         self.data_file_path = Path(data_file_path)
-        self.data: Dict[str, Any] = {}
+        self.data: dict[str, Any] = {}
 
     def load_data(self) -> bool:
         """
@@ -36,7 +35,7 @@ class DataAggregator:
                 logger.error(f"❌ File không tồn tại: {self.data_file_path}")
                 return False
 
-            with open(self.data_file_path, "r", encoding="utf-8") as f:
+            with open(self.data_file_path, encoding="utf-8") as f:
                 self.data = json.load(f)
 
             logger.info(f"✅ Đã load dữ liệu từ {self.data_file_path}")
@@ -49,7 +48,7 @@ class DataAggregator:
             logger.error(f"❌ Lỗi khi load dữ liệu: {e}")
             return False
 
-    def aggregate(self) -> Dict[str, Any]:
+    def aggregate(self) -> dict[str, Any]:
         """
         Tổng hợp và phân tích dữ liệu
 
@@ -61,7 +60,7 @@ class DataAggregator:
             if not self.load_data():
                 return {}
 
-        summary: Dict[str, Any] = {
+        summary: dict[str, Any] = {
             "metadata": {},
             "statistics": {},
             "price_analysis": {},
@@ -110,7 +109,9 @@ class DataAggregator:
 
         return summary
 
-    def _analyze_products(self, products: List[Dict[str, Any]], summary: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_products(
+        self, products: list[dict[str, Any]], summary: dict[str, Any]
+    ) -> dict[str, Any]:
         """Phân tích chi tiết các sản phẩm"""
         prices = []
         ratings = []
@@ -123,7 +124,6 @@ class DataAggregator:
             price_info = product.get("price", {})
             if price_info:
                 current_price = price_info.get("current_price")
-                original_price = price_info.get("original_price")
                 discount = price_info.get("discount_percent", 0)
 
                 if current_price:
@@ -191,4 +191,3 @@ class DataAggregator:
             }
 
         return summary
-

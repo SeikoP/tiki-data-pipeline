@@ -2,12 +2,10 @@
 Transform pipeline để làm sạch, validate và chuẩn hóa dữ liệu sản phẩm
 """
 
-import json
 import logging
 import re
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +39,8 @@ class DataTransformer:
         }
 
     def transform_products(
-        self, products: List[Dict[str, Any]], validate: bool = True
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        self, products: list[dict[str, Any]], validate: bool = True
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """
         Transform danh sách products
 
@@ -92,9 +90,7 @@ class DataTransformer:
                     if not is_valid:
                         if self.remove_invalid:
                             self.stats["invalid_products"] += 1
-                            self.stats["errors"].append(
-                                f"Product {product_id}: {error}"
-                            )
+                            self.stats["errors"].append(f"Product {product_id}: {error}")
                             continue
                         elif self.strict_validation:
                             raise ValueError(f"Invalid product {product_id}: {error}")
@@ -117,7 +113,7 @@ class DataTransformer:
 
         return transformed, self.stats
 
-    def transform_product(self, product: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def transform_product(self, product: dict[str, Any]) -> dict[str, Any] | None:
         """
         Transform một product
 
@@ -150,7 +146,7 @@ class DataTransformer:
             logger.error(f"❌ Lỗi khi transform product: {e}")
             return None
 
-    def _normalize_product(self, product: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_product(self, product: dict[str, Any]) -> dict[str, Any]:
         """Chuẩn hóa các trường dữ liệu"""
         # Normalize product_id
         if "product_id" in product:
@@ -224,7 +220,7 @@ class DataTransformer:
 
         return product
 
-    def _transform_to_db_format(self, product: Dict[str, Any]) -> Dict[str, Any]:
+    def _transform_to_db_format(self, product: dict[str, Any]) -> dict[str, Any]:
         """Transform format để phù hợp với database schema"""
         db_product = {
             "product_id": product.get("product_id"),
@@ -241,7 +237,9 @@ class DataTransformer:
             db_product["price"] = price.get("current_price")
             db_product["original_price"] = price.get("original_price")
             db_product["discount_percent"] = (
-                int(round(price["discount_percent"])) if price.get("discount_percent") is not None else None
+                int(round(price["discount_percent"]))
+                if price.get("discount_percent") is not None
+                else None
             )
         else:
             db_product["price"] = None
@@ -252,9 +250,7 @@ class DataTransformer:
         rating = product.get("rating", {})
         if isinstance(rating, dict):
             db_product["rating_average"] = rating.get("average")
-            db_product["review_count"] = rating.get("total_reviews") or rating.get(
-                "review_count"
-            )
+            db_product["review_count"] = rating.get("total_reviews") or rating.get("review_count")
         else:
             db_product["rating_average"] = None
             db_product["review_count"] = None
@@ -320,19 +316,21 @@ class DataTransformer:
             else:
                 # Giữ nguyên string hoặc convert sang ISO nếu cần
                 parsed_dt = self._parse_datetime(crawled_at)
-                db_product["crawled_at"] = (
-                    parsed_dt.isoformat() if parsed_dt else str(crawled_at)
-                )
+                db_product["crawled_at"] = parsed_dt.isoformat() if parsed_dt else str(crawled_at)
 
         return db_product
 
-    def _add_computed_fields(self, product: Dict[str, Any]) -> Dict[str, Any]:
+    def _add_computed_fields(self, product: dict[str, Any]) -> dict[str, Any]:
         """Thêm các trường tính toán"""
         # 1. Doanh thu ước tính (Estimated Revenue)
         # Doanh thu = số lượng đã bán * giá hiện tại
         sales_count = product.get("sales_count")
-        price = product.get("price", {}).get("current_price") if isinstance(product.get("price"), dict) else product.get("price")
-        
+        price = (
+            product.get("price", {}).get("current_price")
+            if isinstance(product.get("price"), dict)
+            else product.get("price")
+        )
+
         if sales_count and price:
             estimated_revenue = sales_count * price
             product["estimated_revenue"] = round(estimated_revenue, 2)
@@ -341,8 +339,12 @@ class DataTransformer:
 
         # 2. Tiết kiệm (Price Savings)
         # Tiết kiệm = giá gốc - giá hiện tại
-        original_price = product.get("price", {}).get("original_price") if isinstance(product.get("price"), dict) else product.get("original_price")
-        
+        original_price = (
+            product.get("price", {}).get("original_price")
+            if isinstance(product.get("price"), dict)
+            else product.get("original_price")
+        )
+
         if price and original_price and original_price > price:
             price_savings = original_price - price
             product["price_savings"] = round(price_savings, 2)
@@ -364,9 +366,18 @@ class DataTransformer:
 
         # 4. Popularity Score (Điểm độ phổ biến)
         # Kết hợp sales_count, rating, review_count
-        rating_avg = product.get("rating", {}).get("average") if isinstance(product.get("rating"), dict) else product.get("rating_average")
-        review_count = product.get("rating", {}).get("total_reviews") or product.get("rating", {}).get("review_count") if isinstance(product.get("rating"), dict) else product.get("review_count")
-        
+        rating_avg = (
+            product.get("rating", {}).get("average")
+            if isinstance(product.get("rating"), dict)
+            else product.get("rating_average")
+        )
+        review_count = (
+            product.get("rating", {}).get("total_reviews")
+            or product.get("rating", {}).get("review_count")
+            if isinstance(product.get("rating"), dict)
+            else product.get("review_count")
+        )
+
         popularity_score = 0
         if sales_count:
             # Sales count chiếm 50% (normalize về scale 0-100)
@@ -374,19 +385,19 @@ class DataTransformer:
             max_sales = 100000
             sales_score = min((sales_count / max_sales) * 50, 50)
             popularity_score += sales_score
-        
+
         if rating_avg:
             # Rating chiếm 30% (0-5 scale -> 0-30)
             rating_score = (rating_avg / 5) * 30
             popularity_score += rating_score
-        
+
         if review_count:
             # Review count chiếm 20% (normalize về scale 0-100)
             # Giả sử max review_count là 10k để normalize
             max_reviews = 10000
             review_score = min((review_count / max_reviews) * 20, 20)
             popularity_score += review_score
-        
+
         product["popularity_score"] = round(popularity_score, 2) if popularity_score > 0 else None
 
         # 5. Value Score (Điểm giá trị)
@@ -419,13 +430,13 @@ class DataTransformer:
         # Normalized brand name (loại bỏ "Thương hiệu: " prefix nếu có trong name)
         if not product.get("brand") and product.get("name"):
             # Thử extract brand từ name
-            name = product["name"]
             # Một số pattern phổ biến: "Brand Name Product Name"
             # Có thể implement logic extract brand ở đây nếu cần
+            pass
 
         return product
 
-    def validate_product(self, product: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    def validate_product(self, product: dict[str, Any]) -> tuple[bool, str | None]:
         """
         Validate một product
 
@@ -491,7 +502,7 @@ class DataTransformer:
         # Hiện tại giữ nguyên URL
         return url
 
-    def _parse_int(self, value: Any) -> Optional[int]:
+    def _parse_int(self, value: Any) -> int | None:
         """Parse value thành int"""
         if value is None:
             return None
@@ -505,7 +516,7 @@ class DataTransformer:
             return int(cleaned) if cleaned else None
         return None
 
-    def _parse_float(self, value: Any) -> Optional[float]:
+    def _parse_float(self, value: Any) -> float | None:
         """Parse value thành float"""
         if value is None:
             return None
@@ -517,7 +528,7 @@ class DataTransformer:
             return float(cleaned) if cleaned else None
         return None
 
-    def _parse_datetime(self, value: Any) -> Optional[datetime]:
+    def _parse_datetime(self, value: Any) -> datetime | None:
         """Parse datetime từ nhiều format"""
         if value is None:
             return None
@@ -539,7 +550,6 @@ class DataTransformer:
                     continue
         return None
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Lấy thống kê transform"""
         return self.stats.copy()
-

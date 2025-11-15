@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,13 @@ def serialize_for_json(obj: Any) -> Any:
     else:
         return obj
 
+
 # Import PostgresStorage từ crawl storage
 try:
     from ...crawl.storage.postgres_storage import PostgresStorage
 except ImportError:
     try:
         import sys
-        import os
         from pathlib import Path
 
         # Thêm src vào path
@@ -54,11 +54,11 @@ class DataLoader:
 
     def __init__(
         self,
-        database: Optional[str] = None,
-        host: Optional[str] = None,
+        database: str | None = None,
+        host: str | None = None,
         port: int = 5432,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
+        user: str | None = None,
+        password: str | None = None,
         batch_size: int = 100,
         enable_db: bool = True,
     ):
@@ -86,7 +86,7 @@ class DataLoader:
         }
 
         # Khởi tạo PostgresStorage nếu enable_db
-        self.db_storage: Optional[PostgresStorage] = None
+        self.db_storage: PostgresStorage | None = None
         if self.enable_db:
             try:
                 self.db_storage = PostgresStorage(
@@ -104,11 +104,11 @@ class DataLoader:
 
     def load_products(
         self,
-        products: List[Dict[str, Any]],
-        save_to_file: Optional[str] = None,
+        products: list[dict[str, Any]],
+        save_to_file: str | None = None,
         upsert: bool = True,
         validate_before_load: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Load danh sách products vào database và/hoặc file
 
@@ -206,9 +206,9 @@ class DataLoader:
         self,
         input_file: str,
         save_to_db: bool = True,
-        save_to_file: Optional[str] = None,
+        save_to_file: str | None = None,
         upsert: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Load products từ file JSON
 
@@ -229,7 +229,7 @@ class DataLoader:
             return self.stats
 
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             # Extract products từ data
@@ -271,7 +271,7 @@ class DataLoader:
             logger.error(f"❌ {error_msg}")
             return self.stats
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Lấy thống kê load"""
         return self.stats.copy()
 
@@ -280,4 +280,3 @@ class DataLoader:
         if self.db_storage:
             self.db_storage.close()
             logger.info("✅ Đã đóng kết nối database")
-

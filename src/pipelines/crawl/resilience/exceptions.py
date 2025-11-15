@@ -3,17 +3,17 @@ Custom Exceptions cho Tiki Crawl Pipeline
 Phân loại rõ ràng các loại lỗi để dễ xử lý và debug
 """
 
-from typing import Optional, Dict, Any
+from typing import Any
 
 
 class CrawlError(Exception):
     """Base exception cho tất cả các lỗi crawl"""
-    
+
     def __init__(
         self,
         message: str,
-        context: Optional[Dict[str, Any]] = None,
-        original_error: Optional[Exception] = None,
+        context: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
     ):
         """
         Args:
@@ -25,15 +25,15 @@ class CrawlError(Exception):
         self.message = message
         self.context = context or {}
         self.original_error = original_error
-    
+
     def __str__(self) -> str:
         base_msg = self.message
         if self.context:
             context_str = ", ".join(f"{k}={v}" for k, v in self.context.items())
             return f"{base_msg} [{context_str}]"
         return base_msg
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert exception thành dict để log/serialize"""
         return {
             "error_type": self.__class__.__name__,
@@ -45,14 +45,14 @@ class CrawlError(Exception):
 
 class NetworkError(CrawlError):
     """Lỗi liên quan đến network (timeout, connection, DNS, etc.)"""
-    
+
     def __init__(
         self,
         message: str,
-        url: Optional[str] = None,
-        status_code: Optional[int] = None,
-        context: Optional[Dict[str, Any]] = None,
-        original_error: Optional[Exception] = None,
+        url: str | None = None,
+        status_code: int | None = None,
+        context: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
     ):
         context = context or {}
         if url:
@@ -64,14 +64,14 @@ class NetworkError(CrawlError):
 
 class ParseError(CrawlError):
     """Lỗi khi parse HTML/JSON (missing data, invalid format, etc.)"""
-    
+
     def __init__(
         self,
         message: str,
-        url: Optional[str] = None,
-        element: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        original_error: Optional[Exception] = None,
+        url: str | None = None,
+        element: str | None = None,
+        context: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
     ):
         context = context or {}
         if url:
@@ -83,14 +83,14 @@ class ParseError(CrawlError):
 
 class StorageError(CrawlError):
     """Lỗi khi lưu/đọc dữ liệu (database, file, cache, etc.)"""
-    
+
     def __init__(
         self,
         message: str,
-        storage_type: Optional[str] = None,
-        operation: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        original_error: Optional[Exception] = None,
+        storage_type: str | None = None,
+        operation: str | None = None,
+        context: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
     ):
         context = context or {}
         if storage_type:
@@ -102,14 +102,14 @@ class StorageError(CrawlError):
 
 class ValidationError(CrawlError):
     """Lỗi validation dữ liệu (missing required fields, invalid format, etc.)"""
-    
+
     def __init__(
         self,
         message: str,
-        field: Optional[str] = None,
-        value: Optional[Any] = None,
-        context: Optional[Dict[str, Any]] = None,
-        original_error: Optional[Exception] = None,
+        field: str | None = None,
+        value: Any | None = None,
+        context: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
     ):
         context = context or {}
         if field:
@@ -121,13 +121,13 @@ class ValidationError(CrawlError):
 
 class RateLimitError(CrawlError):
     """Lỗi khi vượt quá rate limit"""
-    
+
     def __init__(
         self,
         message: str = "Rate limit exceeded",
-        retry_after: Optional[int] = None,
-        context: Optional[Dict[str, Any]] = None,
-        original_error: Optional[Exception] = None,
+        retry_after: int | None = None,
+        context: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
     ):
         context = context or {}
         if retry_after:
@@ -137,14 +137,14 @@ class RateLimitError(CrawlError):
 
 class TimeoutError(CrawlError):
     """Lỗi timeout (request timeout, operation timeout, etc.)"""
-    
+
     def __init__(
         self,
         message: str,
-        timeout: Optional[float] = None,
-        operation: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        original_error: Optional[Exception] = None,
+        timeout: float | None = None,
+        operation: str | None = None,
+        context: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
     ):
         context = context or {}
         if timeout:
@@ -156,13 +156,13 @@ class TimeoutError(CrawlError):
 
 class SeleniumError(CrawlError):
     """Lỗi liên quan đến Selenium (driver, browser, etc.)"""
-    
+
     def __init__(
         self,
         message: str,
-        driver_error: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        original_error: Optional[Exception] = None,
+        driver_error: str | None = None,
+        context: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
     ):
         context = context or {}
         if driver_error:
@@ -172,13 +172,13 @@ class SeleniumError(CrawlError):
 
 class ConfigurationError(CrawlError):
     """Lỗi cấu hình (missing config, invalid config, etc.)"""
-    
+
     def __init__(
         self,
         message: str,
-        config_key: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        original_error: Optional[Exception] = None,
+        config_key: str | None = None,
+        context: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
     ):
         context = context or {}
         if config_key:
@@ -186,25 +186,29 @@ class ConfigurationError(CrawlError):
         super().__init__(message, context=context, original_error=original_error)
 
 
-def classify_error(error: Exception, context: Optional[Dict[str, Any]] = None) -> CrawlError:
+def classify_error(error: Exception, context: dict[str, Any] | None = None) -> CrawlError:
     """
     Phân loại generic exception thành custom exception
-    
+
     Args:
         error: Exception gốc
         context: Context thêm
-        
+
     Returns:
         CrawlError instance
     """
     error_type = type(error).__name__
     error_msg = str(error)
     error_msg_lower = error_msg.lower()
-    
+
     context = context or {}
-    
+
     # Network errors
-    if isinstance(error, (ConnectionError, TimeoutError)) or "connection" in error_msg_lower or "timeout" in error_msg_lower:
+    if (
+        isinstance(error, (ConnectionError, TimeoutError))
+        or "connection" in error_msg_lower
+        or "timeout" in error_msg_lower
+    ):
         if "timeout" in error_msg_lower or isinstance(error, TimeoutError):
             return TimeoutError(
                 f"Timeout: {error_msg}",
@@ -216,13 +220,14 @@ def classify_error(error: Exception, context: Optional[Dict[str, Any]] = None) -
             context=context,
             original_error=error,
         )
-    
+
     # Rate limit
     if "rate limit" in error_msg_lower or "429" in error_msg:
         retry_after = None
         if "retry-after" in error_msg_lower:
             # Try to extract retry-after value
             import re
+
             match = re.search(r"retry[-_]after[:\s]+(\d+)", error_msg_lower)
             if match:
                 retry_after = int(match.group(1))
@@ -232,7 +237,7 @@ def classify_error(error: Exception, context: Optional[Dict[str, Any]] = None) -
             context=context,
             original_error=error,
         )
-    
+
     # Storage errors
     if "database" in error_msg_lower or "postgres" in error_msg_lower or "redis" in error_msg_lower:
         return StorageError(
@@ -240,7 +245,7 @@ def classify_error(error: Exception, context: Optional[Dict[str, Any]] = None) -
             context=context,
             original_error=error,
         )
-    
+
     # Parse errors
     if "parse" in error_msg_lower or "json" in error_msg_lower or "html" in error_msg_lower:
         return ParseError(
@@ -248,19 +253,22 @@ def classify_error(error: Exception, context: Optional[Dict[str, Any]] = None) -
             context=context,
             original_error=error,
         )
-    
+
     # Selenium errors
-    if "selenium" in error_msg_lower or "webdriver" in error_msg_lower or "chrome" in error_msg_lower:
+    if (
+        "selenium" in error_msg_lower
+        or "webdriver" in error_msg_lower
+        or "chrome" in error_msg_lower
+    ):
         return SeleniumError(
             f"Selenium error: {error_msg}",
             context=context,
             original_error=error,
         )
-    
+
     # Default: wrap as generic CrawlError
     return CrawlError(
         f"{error_type}: {error_msg}",
         context=context,
         original_error=error,
     )
-

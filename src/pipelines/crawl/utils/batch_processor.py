@@ -3,22 +3,22 @@ Batch Processing Utilities với parallel processing support
 Tối ưu cho xử lý dữ liệu lớn
 """
 
-import time
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from typing import Any, Callable, List, Optional, TypeVar, Iterator
+from collections.abc import Callable, Iterator
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from typing import TypeVar
 
-T = TypeVar('T')
-R = TypeVar('R')
+T = TypeVar("T")
+R = TypeVar("R")
 
 
-def chunk_list(items: List[T], chunk_size: int) -> Iterator[List[T]]:
+def chunk_list(items: list[T], chunk_size: int) -> Iterator[list[T]]:
     """
     Chia list thành các chunks
-    
+
     Args:
         items: List cần chia
         chunk_size: Kích thước mỗi chunk
-        
+
     Yields:
         Các chunks
     """
@@ -27,25 +27,25 @@ def chunk_list(items: List[T], chunk_size: int) -> Iterator[List[T]]:
 
 
 def process_batch_sequential(
-    items: List[T],
+    items: list[T],
     processor: Callable[[T], R],
     batch_size: int = 100,
-    on_error: Optional[Callable[[T, Exception], None]] = None,
-) -> List[R]:
+    on_error: Callable[[T, Exception], None] | None = None,
+) -> list[R]:
     """
     Xử lý batch tuần tự
-    
+
     Args:
         items: List items cần xử lý
         processor: Function xử lý từng item
         batch_size: Kích thước batch
         on_error: Callback khi có lỗi (item, exception)
-        
+
     Returns:
         List kết quả
     """
     results = []
-    
+
     for batch in chunk_list(items, batch_size):
         for item in batch:
             try:
@@ -56,21 +56,21 @@ def process_batch_sequential(
                 if on_error:
                     on_error(item, e)
                 continue
-    
+
     return results
 
 
 def process_batch_parallel_threads(
-    items: List[T],
+    items: list[T],
     processor: Callable[[T], R],
     max_workers: int = 5,
-    batch_size: Optional[int] = None,
-    on_error: Optional[Callable[[T, Exception], None]] = None,
-    timeout: Optional[float] = None,
-) -> List[R]:
+    batch_size: int | None = None,
+    on_error: Callable[[T, Exception], None] | None = None,
+    timeout: float | None = None,
+) -> list[R]:
     """
     Xử lý batch song song với threads (I/O-bound tasks)
-    
+
     Args:
         items: List items cần xử lý
         processor: Function xử lý từng item
@@ -78,12 +78,12 @@ def process_batch_parallel_threads(
         batch_size: Kích thước batch (None = xử lý tất cả cùng lúc)
         on_error: Callback khi có lỗi
         timeout: Timeout cho mỗi item (giây)
-        
+
     Returns:
         List kết quả
     """
     results = []
-    
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         if batch_size:
             # Process theo batches
@@ -92,7 +92,7 @@ def process_batch_parallel_threads(
                 for item in batch:
                     future = executor.submit(processor, item)
                     futures[future] = item
-                
+
                 # Collect results từ batch này
                 for future in as_completed(futures, timeout=timeout):
                     item = futures.pop(future)
@@ -106,7 +106,7 @@ def process_batch_parallel_threads(
         else:
             # Process tất cả cùng lúc
             futures = {executor.submit(processor, item): item for item in items}
-            
+
             for future in as_completed(futures, timeout=timeout):
                 item = futures[future]
                 try:
@@ -116,38 +116,38 @@ def process_batch_parallel_threads(
                 except Exception as e:
                     if on_error:
                         on_error(item, e)
-    
+
     return results
 
 
 def process_batch_parallel_processes(
-    items: List[T],
+    items: list[T],
     processor: Callable[[T], R],
     max_workers: int = 4,
-    batch_size: Optional[int] = None,
-    on_error: Optional[Callable[[T, Exception], None]] = None,
-) -> List[R]:
+    batch_size: int | None = None,
+    on_error: Callable[[T, Exception], None] | None = None,
+) -> list[R]:
     """
     Xử lý batch song song với processes (CPU-bound tasks)
-    
+
     Args:
         items: List items cần xử lý
         processor: Function xử lý từng item (phải pickle-able)
         max_workers: Số processes tối đa
         batch_size: Kích thước batch
         on_error: Callback khi có lỗi
-        
+
     Returns:
         List kết quả
     """
     results = []
-    
+
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         if batch_size:
             # Process theo batches
             for batch in chunk_list(items, batch_size):
                 futures = {executor.submit(processor, item): item for item in batch}
-                
+
                 for future in as_completed(futures):
                     item = futures[future]
                     try:
@@ -160,7 +160,7 @@ def process_batch_parallel_processes(
         else:
             # Process tất cả cùng lúc
             futures = {executor.submit(processor, item): item for item in items}
-            
+
             for future in as_completed(futures):
                 item = futures[future]
                 try:
@@ -170,22 +170,22 @@ def process_batch_parallel_processes(
                 except Exception as e:
                     if on_error:
                         on_error(item, e)
-    
+
     return results
 
 
 def process_batch_with_progress(
-    items: List[T],
+    items: list[T],
     processor: Callable[[T], R],
     mode: str = "sequential",
     max_workers: int = 5,
     batch_size: int = 100,
-    on_error: Optional[Callable[[T, Exception], None]] = None,
-    progress_callback: Optional[Callable[[int, int], None]] = None,
-) -> List[R]:
+    on_error: Callable[[T, Exception], None] | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> list[R]:
     """
     Xử lý batch với progress tracking
-    
+
     Args:
         items: List items cần xử lý
         processor: Function xử lý từng item
@@ -194,13 +194,13 @@ def process_batch_with_progress(
         batch_size: Kích thước batch
         on_error: Callback khi có lỗi
         progress_callback: Callback để update progress (processed, total)
-        
+
     Returns:
         List kết quả
     """
     total = len(items)
     processed = 0
-    
+
     def processor_with_progress(item: T) -> R:
         nonlocal processed
         result = processor(item)
@@ -208,7 +208,7 @@ def process_batch_with_progress(
         if progress_callback:
             progress_callback(processed, total)
         return result
-    
+
     if mode == "sequential":
         return process_batch_sequential(
             items, processor_with_progress, batch_size=batch_size, on_error=on_error
@@ -227,13 +227,13 @@ def process_batch_with_progress(
 
 class BatchProcessor:
     """Batch processor với configurable options"""
-    
+
     def __init__(
         self,
         mode: str = "threads",
         max_workers: int = 5,
         batch_size: int = 100,
-        on_error: Optional[Callable[[T, Exception], None]] = None,
+        on_error: Callable[[T, Exception], None] | None = None,
     ):
         """
         Args:
@@ -246,8 +246,8 @@ class BatchProcessor:
         self.max_workers = max_workers
         self.batch_size = batch_size
         self.on_error = on_error
-    
-    def process(self, items: List[T], processor: Callable[[T], R]) -> List[R]:
+
+    def process(self, items: list[T], processor: Callable[[T], R]) -> list[R]:
         """Xử lý items"""
         return process_batch_with_progress(
             items,
@@ -257,4 +257,3 @@ class BatchProcessor:
             batch_size=self.batch_size,
             on_error=self.on_error,
         )
-

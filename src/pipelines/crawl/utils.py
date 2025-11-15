@@ -266,9 +266,7 @@ def ensure_dir(path: str | Path) -> Path:
     return path_obj
 
 
-def atomic_write_json(
-    filepath: str | Path, data: Any, compress: bool = False, **kwargs
-) -> bool:
+def atomic_write_json(filepath: str | Path, data: Any, compress: bool = False, **kwargs) -> bool:
     """
     Ghi JSON file một cách atomic (tránh corrupt file) với optional compression
 
@@ -292,12 +290,14 @@ def atomic_write_json(
             # Sử dụng compression
             try:
                 from ..storage.compression import write_compressed_json
+
                 if write_compressed_json(temp_file, data):
                     # Atomic move cho compressed file
                     if os.name == "nt":  # Windows
                         if filepath.exists():
                             filepath.unlink()
                         import shutil
+
                         shutil.move(str(temp_file), str(filepath))
                     else:  # Unix/Linux
                         os.rename(str(temp_file), str(filepath))
@@ -347,17 +347,18 @@ def safe_read_json(filepath: str | Path, default: Any = None, try_compressed: bo
         Dữ liệu JSON hoặc default
     """
     filepath = Path(filepath)
-    
+
     # Thử đọc compressed version trước
     if try_compressed:
         try:
             from ..storage.compression import read_compressed_json
+
             result = read_compressed_json(filepath, default=None)
             if result is not None:
                 return result
         except ImportError:
             pass
-    
+
     # Fallback về normal read
     if not filepath.exists():
         return default

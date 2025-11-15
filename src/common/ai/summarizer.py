@@ -5,7 +5,7 @@ Module để tổng hợp dữ liệu sử dụng Groq AI
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any
 
 import requests
 
@@ -41,7 +41,7 @@ class AISummarizer:
         if not self.enabled:
             logger.warning("⚠️  GROQ_ENABLED chưa được bật")
 
-    def summarize_data(self, data_summary: Dict[str, Any], max_tokens: int = 2000) -> str:
+    def summarize_data(self, data_summary: dict[str, Any], max_tokens: int = 2000) -> str:
         """
         Tổng hợp dữ liệu sử dụng Groq AI
 
@@ -74,7 +74,7 @@ class AISummarizer:
             logger.error(f"❌ Lỗi khi tổng hợp dữ liệu với Groq AI: {e}")
             return ""
 
-    def _create_prompt(self, data_summary: Dict[str, Any]) -> str:
+    def _create_prompt(self, data_summary: dict[str, Any]) -> str:
         """Tạo prompt cho AI từ dữ liệu tổng hợp"""
         prompt = f"""Bạn là một chuyên gia phân tích dữ liệu. Hãy phân tích và tổng hợp thông tin sau về dữ liệu sản phẩm Tiki:
 
@@ -107,7 +107,9 @@ Hãy viết một cách tự nhiên, không quá kỹ thuật, phù hợp để 
                 "llama-3.1-8b-instant": "llama-3.1-8b-instant",  # Vẫn còn hỗ trợ
             }
             if model in deprecated_models:
-                logger.info(f"ℹ️  Model {model} đã deprecated, tự động chuyển sang {deprecated_models[model]}")
+                logger.info(
+                    f"ℹ️  Model {model} đã deprecated, tự động chuyển sang {deprecated_models[model]}"
+                )
                 model = deprecated_models[model]
 
             payload = {
@@ -146,9 +148,14 @@ Hãy viết một cách tự nhiên, không quá kỹ thuật, phù hợp để 
                     error_detail = e.response.json()
                     error_msg = error_detail.get("error", {}).get("message", "")
                     logger.error(f"   Chi tiết lỗi: {error_detail}")
-                    
+
                     # Tự động xử lý model deprecated hoặc không tồn tại
-                    if "decommissioned" in error_msg.lower() or "deprecated" in error_msg.lower() or "does not exist" in error_msg.lower() or "not found" in error_msg.lower():
+                    if (
+                        "decommissioned" in error_msg.lower()
+                        or "deprecated" in error_msg.lower()
+                        or "does not exist" in error_msg.lower()
+                        or "not found" in error_msg.lower()
+                    ):
                         logger.warning("⚠️  Model không khả dụng, thử với model thay thế...")
                         # Thử với các model thay thế theo thứ tự ưu tiên
                         fallback_models = [
@@ -160,7 +167,7 @@ Hãy viết một cách tự nhiên, không quá kỹ thuật, phù hợp để 
                         current_model_index = -1
                         if self.model in fallback_models:
                             current_model_index = fallback_models.index(self.model)
-                        
+
                         # Thử model tiếp theo trong danh sách
                         if current_model_index < len(fallback_models) - 1:
                             next_model = fallback_models[current_model_index + 1]
@@ -169,10 +176,9 @@ Hãy viết một cách tự nhiên, không quá kỹ thuật, phù hợp để 
                             return self._call_groq_api(prompt, max_tokens)
                         else:
                             logger.error("❌ Đã thử tất cả model thay thế nhưng không thành công")
-                except:
+                except Exception:
                     logger.error(f"   Response text: {e.response.text}")
             return ""
         except Exception as e:
             logger.error(f"❌ Lỗi không xác định khi gọi Groq API: {e}")
             return ""
-
