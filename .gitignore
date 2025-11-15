@@ -3,7 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-full_page.html
+
+
+airflow/config/airflow.cfg
+
 
 # C extensions
 *.so
@@ -34,6 +37,7 @@ venv.bak/
 .coverage.*
 coverage.xml
 htmlcov/
+
 
 # Jupyter
 .ipynb_checkpoints/

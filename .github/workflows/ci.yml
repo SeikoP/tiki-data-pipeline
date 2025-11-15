@@ -85,18 +85,24 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install Airflow
+      - name: Install Airflow and dependencies
         run: |
           python -m pip install --upgrade pip
           pip install apache-airflow==3.1.2
+          pip install -r requirements.txt
 
       - name: Validate DAGs
         run: |
           mkdir -p airflow/dags airflow/logs airflow/config airflow/plugins
+          mkdir -p src/pipelines/crawl data/raw/products
+          # Tạo file __init__.py nếu chưa có
+          touch src/__init__.py src/pipelines/__init__.py src/pipelines/crawl/__init__.py
           python -c "
           import sys
           import os
           os.environ['AIRFLOW_HOME'] = 'airflow'
+          # Thêm src vào path để DAG có thể import
+          sys.path.insert(0, os.path.abspath('src'))
           from airflow.models import DagBag
           
           dag_bag = DagBag(dag_folder='airflow/dags', include_examples=False)

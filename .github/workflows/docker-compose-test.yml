@@ -26,6 +26,8 @@ jobs:
           POSTGRES_USER=postgres
           POSTGRES_PASSWORD=postgres
           REDIS_PASSWORD=
+          _AIRFLOW_WWW_USER_USERNAME=admin
+          _AIRFLOW_WWW_USER_PASSWORD=admin
           EOF
 
       - name: Build Docker images
@@ -38,8 +40,10 @@ jobs:
 
       - name: Wait for services to be healthy
         run: |
+          echo "Waiting for services to start..."
           timeout 300 bash -c 'until docker-compose ps | grep -q "healthy"; do sleep 5; done' || true
-          sleep 30
+          sleep 60
+          docker-compose ps
 
       - name: Check service status
         run: |
