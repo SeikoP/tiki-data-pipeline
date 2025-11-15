@@ -1,5 +1,5 @@
 # Dockerfile custom cho Airflow với Chrome/Chromium để chạy Selenium
-FROM apache/airflow:3.1.2
+FROM apache/airflow:3.1.3
 
 USER root
 

@@ -16,7 +16,7 @@ x-airflow-common:
   build:
     context: ${AIRFLOW_PROJ_DIR:-.}
     dockerfile: airflow/Dockerfile
-  image: ${AIRFLOW_IMAGE_NAME:-tiki-airflow:3.1.2}
+  image: ${AIRFLOW_IMAGE_NAME:-tiki-airflow:3.1.3}
   env_file:
     - ${ENV_FILE_PATH:-.env}
   environment:
@@ -28,12 +28,10 @@ x-airflow-common:
     # Yêu cầu: POSTGRES_USER và POSTGRES_PASSWORD phải được set trong .env file
     # Thêm port :5432 để force TCP/IP connection thay vì Unix socket
     # Format: postgresql+psycopg2://user:password@host:port/database
-    # Sử dụng airflow_local_settings.py để set connect_args force TCP/IP
-    # Force TCP/IP connection bằng cách chỉ định rõ host và port trong connect_args
+    # Connection string đã có host và port (postgres:5432) nên psycopg2 sẽ tự động dùng TCP/IP connection
+    # Không cần thêm connect_args vì connection string đã đủ thông tin
     # ggignore
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
-    # ggignore
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONNECT_ARGS: airflow_local_settings.connect_args
     # ggignore
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
     # Redis: Airflow dùng database 0
@@ -72,9 +70,17 @@ services:
   # ============================================
   postgres:
     image: postgres:16
+    # Load biến môi trường từ file .env (docker-compose tự động load .env, nhưng khai báo rõ ràng hơn)
+    env_file:
+      - ${ENV_FILE_PATH:-.env}
     environment:
       # Yêu cầu: POSTGRES_USER và POSTGRES_PASSWORD phải được set trong .env file
       # Xem .env.example để biết cách cấu hình
+      # LƯU Ý: PostgreSQL chỉ sử dụng POSTGRES_USER và POSTGRES_PASSWORD khi KHỞI TẠO database lần đầu
+      # Nếu database đã tồn tại (volume cũ), các giá trị này sẽ BỊ BỎ QUA
+      # Để thay đổi user/password sau khi database đã được tạo, cần chạy script reset password
+      # POSTGRES_DB: Database mặc định được tạo khi khởi tạo (dùng cho các script init)
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:

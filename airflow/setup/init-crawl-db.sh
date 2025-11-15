@@ -3,7 +3,8 @@ set -e
 
 echo "Creating crawl_data database for crawled products and categories..."
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+# Sử dụng database mặc định (postgres) hoặc POSTGRES_DB nếu được set
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-postgres}" <<-EOSQL
     -- Tạo database cho dữ liệu crawl
     CREATE DATABASE crawl_data;
     GRANT ALL PRIVILEGES ON DATABASE crawl_data TO $POSTGRES_USER;
