@@ -1247,8 +1247,62 @@ def merge_product_details(**context) -> Dict[str, Any]:
                 pass
         
         # Số lượng products thực tế được crawl (map_index count)
-        actual_crawl_count = len(products_to_crawl) if products_to_crawl else 0
-        logger.info(f"📊 Số products thực tế được crawl (map_index count): {actual_crawl_count}")
+        expected_crawl_count = len(products_to_crawl) if products_to_crawl else 0
+        logger.info(f"📊 Số products dự kiến được crawl (từ prepare_products_for_detail): {expected_crawl_count}")
+        
+        # Tự động phát hiện số lượng map_index thực tế có sẵn bằng cách thử lấy XCom
+        # Điều này giúp xử lý trường hợp một số tasks đã fail hoặc chưa chạy xong
+        actual_crawl_count = expected_crawl_count
+        if expected_crawl_count > 0:
+            # Thử lấy XCom từ map_index cuối cùng để xác định số lượng thực tế
+            # Tìm map_index cao nhất có XCom
+            task_id = 'crawl_product_details.crawl_product_detail'
+            max_found_index = -1
+            
+            # Binary search để tìm map_index cao nhất có XCom (tối ưu hơn linear search)
+            # Nhưng để đơn giản, thử từ cuối về đầu với step size lớn
+            test_indices = []
+            if expected_crawl_count > 1000:
+                # Với số lượng lớn, test một số điểm
+                step = max(100, expected_crawl_count // 20)
+                test_indices = list(range(0, expected_crawl_count, step))
+                test_indices.append(expected_crawl_count - 1)
+            else:
+                # Với số lượng nhỏ, test tất cả
+                test_indices = list(range(expected_crawl_count))
+            
+            for test_idx in reversed(test_indices):
+                try:
+                    result = ti.xcom_pull(
+                        task_ids=task_id,
+                        key='return_value',
+                        map_indexes=[test_idx]
+                    )
+                    if result:
+                        max_found_index = test_idx
+                        break
+                except:
+                    pass
+            
+            if max_found_index >= 0:
+                # Tìm chính xác map_index cao nhất bằng cách tìm từ max_found_index
+                # Thử từ max_found_index đến expected_crawl_count
+                for idx in range(max_found_index, min(max_found_index + 200, expected_crawl_count)):
+                    try:
+                        result = ti.xcom_pull(
+                            task_ids=task_id,
+                            key='return_value',
+                            map_indexes=[idx]
+                        )
+                        if result:
+                            max_found_index = idx
+                    except:
+                        break
+                
+                actual_crawl_count = max_found_index + 1
+                logger.info(f"✅ Phát hiện {actual_crawl_count} map_index thực tế có XCom (dự kiến: {expected_crawl_count})")
+            else:
+                logger.warning(f"⚠️  Không tìm thấy XCom nào, sử dụng expected_crawl_count: {expected_crawl_count}")
         
         if actual_crawl_count == 0:
             logger.warning("⚠️  Không có products nào được crawl detail, bỏ qua merge detail")
