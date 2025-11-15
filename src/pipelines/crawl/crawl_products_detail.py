@@ -121,7 +121,8 @@ def crawl_product_detail_with_selenium(
     for attempt in range(max_retries):
         try:
             # Sử dụng shared utility để tạo driver
-            driver = create_selenium_driver(headless=True)
+            # Tăng timeout lên 120s để tránh timeout khi có nhiều tasks chạy song song
+            driver = create_selenium_driver(headless=True, timeout=120)
             if not driver:
                 raise ImportError("Selenium chưa được cài đặt hoặc không thể tạo driver")
 
@@ -221,8 +222,11 @@ def crawl_product_detail_with_selenium(
                     f"Không thể crawl sau {max_retries} lần thử. Lỗi cuối: {error_type}: {error_msg}"
                 ) from e
 
-            # Chờ một chút trước khi retry
-            time.sleep(1)
+            # Chờ một chút trước khi retry (tăng delay để giảm tải hệ thống)
+            retry_delay = (attempt + 1) * 3  # Exponential backoff: 3s, 6s, 9s...
+            if verbose:
+                print(f"[Selenium] Chờ {retry_delay}s trước khi retry...")
+            time.sleep(retry_delay)
 
     # Không bao giờ đến đây, nhưng để an toàn
     if driver:
