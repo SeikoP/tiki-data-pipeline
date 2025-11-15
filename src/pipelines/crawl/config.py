@@ -1,15 +1,14 @@
 """
 Configuration cho crawl pipeline
 """
+
 import os
 from typing import Dict, Any
 
 
 def get_config() -> Dict[str, Any]:
     """Get configuration từ environment variables"""
-    return {
-        "firecrawl_api_url": os.getenv("FIRECRAWL_API_URL", "http://localhost:3002")
-    }
+    return {"firecrawl_api_url": os.getenv("FIRECRAWL_API_URL", "http://localhost:3002")}
 
 
 # Groq configuration
@@ -21,5 +20,3 @@ GROQ_CONFIG = {
 
 # Firecrawl API URL
 FIRECRAWL_API_URL = os.getenv("FIRECRAWL_API_URL", "http://localhost:3002")
-
-

@@ -105,14 +105,19 @@ jobs:
           import os
           import warnings
           warnings.filterwarnings('ignore')
-          os.environ['AIRFLOW_HOME'] = 'airflow'
+          # Sử dụng absolute path cho AIRFLOW_HOME
+          airflow_home = os.path.abspath('airflow')
+          os.environ['AIRFLOW_HOME'] = airflow_home
+          # Set SQL_ALCHEMY_CONN với absolute path để tránh lỗi SQLite
+          os.environ['AIRFLOW__DATABASE__SQL_ALCHEMY_CONN'] = f'sqlite:///{airflow_home}/airflow.db'
           # Thêm src vào path để DAG có thể import
           sys.path.insert(0, os.path.abspath('src'))
           sys.path.insert(0, os.path.abspath('src/pipelines/crawl'))
           from airflow.models import DagBag
           
           try:
-              dag_bag = DagBag(dag_folder='airflow/dags', include_examples=False)
+              dag_folder = os.path.abspath('airflow/dags')
+              dag_bag = DagBag(dag_folder=dag_folder, include_examples=False)
               if dag_bag.import_errors:
                   print('❌ DAG Import Errors:')
                   for filename, error in dag_bag.import_errors.items():
@@ -152,5 +157,5 @@ jobs:
 
       - name: Test Docker Compose
         run: |
-          docker-compose config
+          docker compose config
 

@@ -8,6 +8,7 @@ from threading import Lock
 from collections import defaultdict
 from urllib.parse import urljoin, urlparse, parse_qs
 import requests
+
 # Lazy import BeautifulSoup để tránh timeout khi load DAG
 # from bs4 import BeautifulSoup  # Moved to function level
 
@@ -25,17 +26,19 @@ try:
         normalize_url,
         RateLimiter,
         DEFAULT_DATA_DIR,
-        DEFAULT_CACHE_DIR
+        DEFAULT_CACHE_DIR,
     )
 except ImportError:
     # Fallback: absolute import (khi được load qua importlib)
     import sys
     import os
+
     # Tìm utils.py trong cùng thư mục
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    utils_path = os.path.join(current_dir, 'utils.py')
+    utils_path = os.path.join(current_dir, "utils.py")
     if os.path.exists(utils_path):
         import importlib.util
+
         spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
         if spec and spec.loader:
             utils_module = importlib.util.module_from_spec(spec)
@@ -59,12 +62,14 @@ except ImportError:
 # Setup UTF-8 encoding
 setup_utf8_encoding()
 
+
 # Lazy import tqdm để tránh timeout khi load DAG
 # Sẽ import trong functions khi cần
 def _get_tqdm():
     """Lazy import tqdm - chỉ import khi cần"""
     try:
         from tqdm import tqdm
+
         return tqdm
     except ImportError:
         # Fallback: tạo fake tqdm class nếu không có
@@ -75,13 +80,13 @@ def _get_tqdm():
                 self.desc = desc
                 self.n = 0
                 self.start_time = time.time()
-            
+
             def __enter__(self):
                 return self
-            
+
             def __exit__(self, *args):
                 pass
-            
+
             def __iter__(self):
                 if self.iterable:
                     for item in self.iterable:
@@ -90,7 +95,7 @@ def _get_tqdm():
                         yield item
                 else:
                     return self
-            
+
             def update(self, n=1):
                 self.n += n
                 if self.total > 0:
@@ -99,62 +104,72 @@ def _get_tqdm():
                     if self.n > 0:
                         rate = self.n / elapsed if elapsed > 0 else 0
                         eta = (self.total - self.n) / rate if rate > 0 else 0
-                        print(f"\r{self.desc} {self.n}/{self.total} ({pct:.1f}%) | "
-                              f"Tốc độ: {rate:.2f}/s | ETA: {eta:.0f}s", end='', flush=True)
-            
+                        print(
+                            f"\r{self.desc} {self.n}/{self.total} ({pct:.1f}%) | "
+                            f"Tốc độ: {rate:.2f}/s | ETA: {eta:.0f}s",
+                            end="",
+                            flush=True,
+                        )
+
             def set_postfix(self, postfix=None):
                 pass
+
         return FakeTqdm
+
 
 # Lazy import Selenium và webdriver_manager để tránh timeout khi load DAG
 # Không import ở top level - sẽ import trong functions khi cần
 HAS_SELENIUM = None  # Sẽ được check khi cần
 HAS_WEBDRIVER_MANAGER = None  # Sẽ được check khi cần
 
+
 def _check_selenium_available():
     """Check xem Selenium có sẵn không (lazy check)"""
     global HAS_SELENIUM, HAS_WEBDRIVER_MANAGER
     if HAS_SELENIUM is not None:
         return HAS_SELENIUM
-    
+
     try:
         from selenium import webdriver
+
         HAS_SELENIUM = True
-        
+
         # Thử import webdriver-manager
         try:
             from webdriver_manager.chrome import ChromeDriverManager
+
             HAS_WEBDRIVER_MANAGER = True
         except ImportError:
             HAS_WEBDRIVER_MANAGER = False
     except ImportError:
         HAS_SELENIUM = False
         HAS_WEBDRIVER_MANAGER = False
-    
+
     return HAS_SELENIUM
 
+
 # Tạo thư mục output
-os.makedirs('data/demo/products', exist_ok=True)
-os.makedirs('data/demo/products/cache', exist_ok=True)
+os.makedirs("data/demo/products", exist_ok=True)
+os.makedirs("data/demo/products/cache", exist_ok=True)
 # Giữ thư mục cũ để tương thích
-os.makedirs('data/raw/products', exist_ok=True)
-os.makedirs('data/raw/products/cache', exist_ok=True)
+os.makedirs("data/raw/products", exist_ok=True)
+os.makedirs("data/raw/products/cache", exist_ok=True)
 
 # Thread-safe locks và stats
 stats_lock = Lock()
 stats = {
-    'total_categories': 0,
-    'total_products': 0,
-    'total_pages': 0,
-    'total_success': 0,
-    'total_failed': 0,
-    'start_time': time.time()
+    "total_categories": 0,
+    "total_products": 0,
+    "total_pages": 0,
+    "total_success": 0,
+    "total_failed": 0,
+    "start_time": time.time(),
 }
 
 
 def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limiting=True):
     """Lấy HTML của trang với Selenium (cho dynamic content)
-    
+
     Args:
         url: URL cần crawl
         timeout: Timeout cho page load
@@ -165,6 +180,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
     if use_redis_cache:
         try:
             from pipelines.crawl.redis_cache import get_redis_cache
+
             redis_cache = get_redis_cache("redis://redis:6379/1")
             if redis_cache:
                 cached_html = redis_cache.get_cached_html(url)
@@ -172,62 +188,68 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
                     return cached_html
         except Exception:
             pass  # Fallback về crawl
-    
+
     # Rate limiting - kiểm tra và đợi nếu cần
     if use_rate_limiting:
         try:
             from pipelines.crawl.redis_cache import get_redis_rate_limiter
+
             rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
             if rate_limiter:
                 # Extract domain từ URL để rate limit theo domain
                 from urllib.parse import urlparse
+
                 domain = urlparse(url).netloc or "tiki.vn"
-                
+
                 # Kiểm tra rate limit, đợi nếu cần
                 if not rate_limiter.is_allowed(domain):
                     rate_limiter.wait_if_needed(domain)
         except Exception:
             # Nếu rate limiter không available, fallback về sleep cố định
             time.sleep(2)  # Delay cơ bản cho Selenium (lâu hơn requests)
-    
+
     # Lazy import để tránh timeout khi load DAG
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
-    
+
     # Check Selenium availability
     if not _check_selenium_available():
         raise ImportError("Selenium chưa được cài đặt")
-    
+
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    
+    chrome_options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+
     prefs = {
         "profile.managed_default_content_settings.images": 2,
-        "profile.default_content_setting_values.notifications": 2
+        "profile.default_content_setting_values.notifications": 2,
     }
     chrome_options.add_experimental_option("prefs", prefs)
-    
+
     # Ưu tiên dùng ChromeDriver có sẵn trong PATH (nhanh nhất)
     try:
         driver = webdriver.Chrome(options=chrome_options)
     except Exception as e:
         # Nếu không có ChromeDriver trong PATH, thử webdriver-manager
         error_msg = str(e).lower()
-        if 'chromedriver' in error_msg or 'driver' in error_msg:
+        if "chromedriver" in error_msg or "driver" in error_msg:
             if HAS_WEBDRIVER_MANAGER:
                 try:
                     from webdriver_manager.chrome import ChromeDriverManager
+
                     # Tắt log của webdriver_manager để giảm noise
                     import logging
-                    wdm_logger = logging.getLogger('WDM')
+
+                    wdm_logger = logging.getLogger("WDM")
                     wdm_logger.setLevel(logging.WARNING)
-                    
+
                     service = Service(ChromeDriverManager().install())
                     driver = webdriver.Chrome(service=service, options=chrome_options)
                 except Exception:
@@ -242,25 +264,26 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
         driver.set_page_load_timeout(timeout)
         driver.get(url)
         time.sleep(2)  # Chờ JavaScript load
-        
+
         # Scroll để load lazy images
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
         time.sleep(1)
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(1)
-        
+
         html = driver.page_source
-        
+
         # Cache HTML vào Redis sau khi crawl thành công
         if use_redis_cache and html:
             try:
                 from pipelines.crawl.redis_cache import get_redis_cache
+
                 redis_cache = get_redis_cache("redis://redis:6379/1")
                 if redis_cache:
                     redis_cache.cache_html(url, html, ttl=86400)  # Cache 24 giờ
             except Exception:
                 pass  # Ignore cache errors
-        
+
         return html
     finally:
         driver.quit()
@@ -268,7 +291,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
 
 def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_limiting=True):
     """Lấy HTML của trang với requests (nhanh hơn nhưng không hỗ trợ JS)
-    
+
     Args:
         url: URL cần crawl
         max_retries: Số lần retry tối đa
@@ -279,6 +302,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
     if use_redis_cache:
         try:
             from pipelines.crawl.redis_cache import get_redis_cache
+
             redis_cache = get_redis_cache("redis://redis:6379/1")
             if redis_cache:
                 cached_html = redis_cache.get_cached_html(url)
@@ -286,56 +310,59 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
                     return cached_html
         except Exception:
             pass  # Fallback về crawl
-    
+
     # Rate limiting - kiểm tra và đợi nếu cần
     if use_rate_limiting:
         try:
             from pipelines.crawl.redis_cache import get_redis_rate_limiter
+
             rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
             if rate_limiter:
                 # Extract domain từ URL để rate limit theo domain
                 from urllib.parse import urlparse
+
                 domain = urlparse(url).netloc or "tiki.vn"
-                
+
                 # Kiểm tra rate limit, đợi nếu cần
                 if not rate_limiter.is_allowed(domain):
                     rate_limiter.wait_if_needed(domain)
         except Exception:
             # Nếu rate limiter không available, fallback về sleep cố định
             time.sleep(1)  # Delay cơ bản
-    
+
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
     }
-    
+
     for attempt in range(max_retries):
         try:
             response = requests.get(url, headers=headers, timeout=30)
             response.raise_for_status()
-            response.encoding = 'utf-8'
+            response.encoding = "utf-8"
             html = response.text
-            
+
             # Cache HTML vào Redis sau khi crawl thành công
             if use_redis_cache and html:
                 try:
                     from pipelines.crawl.redis_cache import get_redis_cache
+
                     redis_cache = get_redis_cache("redis://redis:6379/1")
                     if redis_cache:
                         redis_cache.cache_html(url, html, ttl=86400)  # Cache 24 giờ
                 except Exception:
                     pass  # Ignore cache errors
-            
+
             return html
         except requests.exceptions.RequestException as e:
             if attempt == max_retries - 1:
                 raise
-            time.sleep(2 ** attempt)  # Exponential backoff
-    
+            time.sleep(2**attempt)  # Exponential backoff
+
     return None
 
 
@@ -343,122 +370,134 @@ def parse_products_from_next_data(html_content):
     """Parse sản phẩm từ __NEXT_DATA__ (Next.js)"""
     # Lazy import để tránh timeout khi load DAG
     from bs4 import BeautifulSoup
-    
+
     products = []
-    
+
     try:
         # Tìm script tag chứa __NEXT_DATA__
-        soup = BeautifulSoup(html_content, 'html.parser')
-        next_data_script = soup.find('script', id='__NEXT_DATA__')
-        
+        soup = BeautifulSoup(html_content, "html.parser")
+        next_data_script = soup.find("script", id="__NEXT_DATA__")
+
         if not next_data_script:
             return []
-        
+
         # Parse JSON
         next_data = json.loads(next_data_script.string)
-        
+
         # Đi sâu vào cấu trúc Next.js để tìm product data
         # Tiki có thể lưu products ở nhiều nơi trong cấu trúc
         def find_products_in_dict(obj, path=""):
             """Đệ quy tìm products trong nested dict"""
             if isinstance(obj, dict):
                 # Kiểm tra các key có thể chứa products
-                if 'products' in obj and isinstance(obj['products'], list):
-                    return obj['products']
-                if 'items' in obj and isinstance(obj['items'], list):
+                if "products" in obj and isinstance(obj["products"], list):
+                    return obj["products"]
+                if "items" in obj and isinstance(obj["items"], list):
                     # Kiểm tra xem có phải product items không
-                    if obj['items'] and isinstance(obj['items'][0], dict):
-                        if any(key in obj['items'][0] for key in ['id', 'product_id', 'name', 'price']):
-                            return obj['items']
-                if 'data' in obj:
-                    result = find_products_in_dict(obj['data'], path + ".data")
+                    if obj["items"] and isinstance(obj["items"][0], dict):
+                        if any(
+                            key in obj["items"][0] for key in ["id", "product_id", "name", "price"]
+                        ):
+                            return obj["items"]
+                if "data" in obj:
+                    result = find_products_in_dict(obj["data"], path + ".data")
                     if result:
                         return result
-                if 'props' in obj:
-                    result = find_products_in_dict(obj['props'], path + ".props")
+                if "props" in obj:
+                    result = find_products_in_dict(obj["props"], path + ".props")
                     if result:
                         return result
-                if 'pageProps' in obj:
-                    result = find_products_in_dict(obj['pageProps'], path + ".pageProps")
+                if "pageProps" in obj:
+                    result = find_products_in_dict(obj["pageProps"], path + ".pageProps")
                     if result:
                         return result
-                if 'initialState' in obj:
-                    result = find_products_in_dict(obj['initialState'], path + ".initialState")
+                if "initialState" in obj:
+                    result = find_products_in_dict(obj["initialState"], path + ".initialState")
                     if result:
                         return result
-                
+
                 # Đệ quy tất cả values
                 for key, value in obj.items():
                     result = find_products_in_dict(value, f"{path}.{key}")
                     if result:
                         return result
-            
+
             elif isinstance(obj, list):
                 # Nếu là list, kiểm tra phần tử đầu tiên
                 if obj and isinstance(obj[0], dict):
                     # Kiểm tra xem có phải product objects không
                     first_item = obj[0]
-                    if any(key in first_item for key in ['id', 'product_id', 'name', 'price']):
+                    if any(key in first_item for key in ["id", "product_id", "name", "price"]):
                         return obj
-                
+
                 # Đệ quy các phần tử
                 for i, item in enumerate(obj):
                     result = find_products_in_dict(item, f"{path}[{i}]")
                     if result:
                         return result
-            
+
             return None
-        
+
         product_data = find_products_in_dict(next_data)
-        
+
         if product_data:
             for item in product_data:
                 try:
                     # Extract thông tin sản phẩm
-                    product_id = str(item.get('id') or item.get('product_id') or item.get('sku') or '')
+                    product_id = str(
+                        item.get("id") or item.get("product_id") or item.get("sku") or ""
+                    )
                     if not product_id:
                         continue
-                    
-                    name = item.get('name') or item.get('title') or ''
-                    
+
+                    name = item.get("name") or item.get("title") or ""
+
                     # Lấy URL
-                    url = item.get('url') or item.get('link') or ''
-                    if not url or not url.startswith('http'):
+                    url = item.get("url") or item.get("link") or ""
+                    if not url or not url.startswith("http"):
                         if product_id:
                             url = f"https://tiki.vn/p/{product_id}"
-                    
+
                     # Lấy image (để có thể dùng preview)
-                    image_url = item.get('image_url') or item.get('thumbnail_url') or item.get('images', [{}])[0].get('url', '') if isinstance(item.get('images'), list) else ''
-                    
+                    image_url = (
+                        item.get("image_url")
+                        or item.get("thumbnail_url")
+                        or item.get("images", [{}])[0].get("url", "")
+                        if isinstance(item.get("images"), list)
+                        else ""
+                    )
+
                     # Extract số lượng bán - dùng shared utility
-                    sales_count_raw = (item.get('sales_count') or 
-                                      item.get('quantity_sold') or 
-                                      item.get('sold_count') or 
-                                      item.get('total_sold') or 
-                                      item.get('order_count') or 
-                                      item.get('sales_quantity') or
-                                      item.get('quantity') or
-                                      item.get('sold') or
-                                      item.get('total_quantity_sold'))
+                    sales_count_raw = (
+                        item.get("sales_count")
+                        or item.get("quantity_sold")
+                        or item.get("sold_count")
+                        or item.get("total_sold")
+                        or item.get("order_count")
+                        or item.get("sales_quantity")
+                        or item.get("quantity")
+                        or item.get("sold")
+                        or item.get("total_quantity_sold")
+                    )
                     sales_count = parse_sales_count(sales_count_raw)
-                    
+
                     product = {
-                        'product_id': product_id,
-                        'name': name,
-                        'url': url,
-                        'image_url': image_url,
-                        'sales_count': sales_count
+                        "product_id": product_id,
+                        "name": name,
+                        "url": url,
+                        "image_url": image_url,
+                        "sales_count": sales_count,
                     }
-                    
+
                     if product_id and name:
                         products.append(product)
-                
+
                 except Exception as e:
                     continue
-        
+
     except Exception as e:
         pass
-    
+
     return products
 
 
@@ -466,118 +505,126 @@ def parse_products_from_html(html_content, category_url):
     """Parse danh sách sản phẩm từ HTML"""
     # Lazy import để tránh timeout khi load DAG
     from bs4 import BeautifulSoup
-    
-    soup = BeautifulSoup(html_content, 'html.parser')
+
+    soup = BeautifulSoup(html_content, "html.parser")
     products = []
-    
+
     # Cách 1: Parse từ __NEXT_DATA__ (ưu tiên)
     next_data_products = parse_products_from_next_data(html_content)
     if next_data_products:
         # Thêm category_url và đảm bảo sales_count có trong mỗi product
         for product in next_data_products:
-            product['category_url'] = category_url
-            product['crawled_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
+            product["category_url"] = category_url
+            product["crawled_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             # Đảm bảo sales_count luôn có (kể cả None)
-            if 'sales_count' not in product:
-                product['sales_count'] = None
+            if "sales_count" not in product:
+                product["sales_count"] = None
         products.extend(next_data_products)
         return products
-    
+
     # Cách 2: Parse từ HTML elements (fallback)
     # Tìm tất cả link có pattern /p/
-    all_links = soup.find_all('a', href=re.compile(r'/p/\d+'))
-    
+    all_links = soup.find_all("a", href=re.compile(r"/p/\d+"))
+
     seen_product_ids = set()
-    
+
     for link in all_links:
         try:
-            product_url = link.get('href', '')
+            product_url = link.get("href", "")
             if not product_url:
                 continue
-            
+
             # Chuẩn hóa URL
-            if product_url.startswith('/'):
-                product_url = urljoin('https://tiki.vn', product_url)
-            elif not product_url.startswith('http'):
+            if product_url.startswith("/"):
+                product_url = urljoin("https://tiki.vn", product_url)
+            elif not product_url.startswith("http"):
                 continue
-            
+
             # Extract product ID từ URL
-            product_id_match = re.search(r'/p/(\d+)', product_url)
+            product_id_match = re.search(r"/p/(\d+)", product_url)
             if not product_id_match:
                 continue
-            
+
             product_id = product_id_match.group(1)
             if product_id in seen_product_ids:
                 continue
-            
+
             seen_product_ids.add(product_id)
-            
+
             # Tìm parent container
             parent = link.find_parent()
             if not parent:
                 parent = link
-            
+
             # Lấy tên sản phẩm từ parent hoặc link
-            name = ''
+            name = ""
             # Thử từ title
-            name = link.get('title', '') or link.get('aria-label', '')
-            
+            name = link.get("title", "") or link.get("aria-label", "")
+
             # Thử tìm trong parent
             if not name:
-                title_elem = parent.find(['h3', 'h2', 'div'], class_=re.compile(r'title|name', re.I))
+                title_elem = parent.find(
+                    ["h3", "h2", "div"], class_=re.compile(r"title|name", re.I)
+                )
                 if title_elem:
                     name = title_elem.get_text(strip=True)
-            
+
             if not name:
                 # Lấy text từ link
                 name = link.get_text(strip=True)
-            
+
             # Lấy hình ảnh (để có thể dùng preview)
-            image_url = ''
-            img_elem = parent.find('img') or link.find('img')
+            image_url = ""
+            img_elem = parent.find("img") or link.find("img")
             if img_elem:
-                image_url = img_elem.get('src', '') or img_elem.get('data-src', '') or img_elem.get('data-lazy-src', '')
+                image_url = (
+                    img_elem.get("src", "")
+                    or img_elem.get("data-src", "")
+                    or img_elem.get("data-lazy-src", "")
+                )
                 if image_url:
-                    if image_url.startswith('//'):
-                        image_url = 'https:' + image_url
-                    elif image_url.startswith('/'):
-                        image_url = urljoin('https://tiki.vn', image_url)
-            
+                    if image_url.startswith("//"):
+                        image_url = "https:" + image_url
+                    elif image_url.startswith("/"):
+                        image_url = urljoin("https://tiki.vn", image_url)
+
             # Extract số lượng bán từ HTML
             sales_count = None
             # Tìm text chứa "đã bán", "bán", "sold"
-            sales_text = ''
-            sales_elem = parent.find(string=re.compile(r'đã\s*bán|bán|sold', re.I))
+            sales_text = ""
+            sales_elem = parent.find(string=re.compile(r"đã\s*bán|bán|sold", re.I))
             if sales_elem:
                 sales_text = sales_elem.strip()
             else:
                 # Tìm trong các thẻ con
-                for elem in parent.find_all(['span', 'div', 'p'], string=re.compile(r'đã\s*bán|bán|sold', re.I)):
+                for elem in parent.find_all(
+                    ["span", "div", "p"], string=re.compile(r"đã\s*bán|bán|sold", re.I)
+                ):
                     sales_text = elem.get_text(strip=True)
                     break
-            
+
             if sales_text:
                 # Parse số từ text - dùng shared utility
                 sales_count = parse_sales_count(sales_text)
-            
+
             # Tạo object sản phẩm
             product = {
-                'product_id': product_id,
-                'name': name,
-                'url': product_url,
-                'category_url': category_url,
-                'image_url': image_url,
-                'sales_count': sales_count,
-                'crawled_at': time.strftime('%Y-%m-%d %H:%M:%S')
+                "product_id": product_id,
+                "name": name,
+                "url": product_url,
+                "category_url": category_url,
+                "image_url": image_url,
+                "sales_count": sales_count,
+                "crawled_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
-            
+
             # Chỉ thêm nếu có đủ thông tin cơ bản
             if product_id and name:
                 products.append(product)
-        
+
         except Exception as e:
             continue
-    
+
     return products
 
 
@@ -585,22 +632,22 @@ def get_total_pages(html_content):
     """Lấy tổng số trang từ HTML"""
     # Lazy import để tránh timeout khi load DAG
     from bs4 import BeautifulSoup
-    
-    soup = BeautifulSoup(html_content, 'html.parser')
-    
+
+    soup = BeautifulSoup(html_content, "html.parser")
+
     # Tìm phần phân trang
     pagination_selectors = [
-        '.pagination',
+        ".pagination",
         '[class*="pagination"]',
-        '[data-view-id="product_list_pagination"]'
+        '[data-view-id="product_list_pagination"]',
     ]
-    
+
     max_page = 1
     for selector in pagination_selectors:
         pagination = soup.select_one(selector)
         if pagination:
             # Tìm các link phân trang
-            page_links = pagination.find_all('a')
+            page_links = pagination.find_all("a")
             for link in page_links:
                 page_text = link.get_text(strip=True)
                 if page_text.isdigit():
@@ -609,36 +656,42 @@ def get_total_pages(html_content):
                         max_page = max(max_page, page_num)
                     except:
                         pass
-    
+
     # Hoặc thử tìm từ text "Trang X/Y"
-    page_info = soup.find(string=re.compile(r'trang\s*\d+', re.I))
+    page_info = soup.find(string=re.compile(r"trang\s*\d+", re.I))
     if page_info:
-        page_match = re.search(r'trang\s*\d+.*?(\d+)', page_info, re.I)
+        page_match = re.search(r"trang\s*\d+.*?(\d+)", page_info, re.I)
         if page_match:
             try:
                 max_page = int(page_match.group(1))
             except:
                 pass
-    
+
     return max_page
 
 
 def get_category_page_url(category_url, page=1):
     """Tạo URL trang phân trang của danh mục"""
-    if '?' in category_url:
+    if "?" in category_url:
         # Nếu đã có query params
-        base_url, query_string = category_url.split('?', 1)
+        base_url, query_string = category_url.split("?", 1)
         params = parse_qs(query_string)
-        params['page'] = [str(page)]
-        new_query = '&'.join([f"{k}={v[0]}" for k, v in params.items()])
+        params["page"] = [str(page)]
+        new_query = "&".join([f"{k}={v[0]}" for k, v in params.items()])
         return f"{base_url}?{new_query}"
     else:
         return f"{category_url}?page={page}"
 
 
-def crawl_category_products(category_url, max_pages=None, use_selenium=False, cache_dir='data/demo/products/cache', use_redis_cache=True):
+def crawl_category_products(
+    category_url,
+    max_pages=None,
+    use_selenium=False,
+    cache_dir="data/demo/products/cache",
+    use_redis_cache=True,
+):
     """Crawl tất cả sản phẩm từ một danh mục
-    
+
     Args:
         category_url: URL của category
         max_pages: Số trang tối đa để crawl
@@ -646,14 +699,15 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
         cache_dir: Thư mục cache (fallback nếu Redis không available)
         use_redis_cache: Có dùng Redis cache không (mặc định True)
     """
-    
+
     all_products = []
-    
+
     # Thử Redis cache trước (nhanh hơn, distributed)
     redis_cache = None
     if use_redis_cache:
         try:
             from pipelines.crawl.redis_cache import get_redis_cache
+
             redis_cache = get_redis_cache("redis://redis:6379/1")
             if redis_cache:
                 cached_products = redis_cache.get_cached_products(category_url)
@@ -663,32 +717,43 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
         except Exception as e:
             # Redis không available, fallback về file cache
             pass  # Silent fallback
-    
+
     # Fallback: Kiểm tra file cache
     cache_file = None
     if cache_dir:
         import hashlib
+
         url_hash = hashlib.md5(category_url.encode()).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
-        
+
         cached_data = safe_read_json(cache_file)
         if cached_data:
-            cached_products = cached_data.get('products', [])
+            cached_products = cached_data.get("products", [])
             if cached_products:  # Chỉ return cache nếu có sản phẩm
                 print(f"[File Cache] ✅ Hit cache cho {category_url[:60]}...")
                 return cached_products
-    
+
     try:
         # Lấy trang đầu để xác định số trang
         html = None
         if use_selenium:
             if _check_selenium_available():
-                html = get_page_with_selenium(category_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
+                html = get_page_with_selenium(
+                    category_url,
+                    use_redis_cache=use_redis_cache,
+                    use_rate_limiting=use_rate_limiting,
+                )
             else:
                 print(f"⚠️  Selenium chưa được cài đặt, dùng requests thay thế")
-                html = get_page_with_requests(category_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
+                html = get_page_with_requests(
+                    category_url,
+                    use_redis_cache=use_redis_cache,
+                    use_rate_limiting=use_rate_limiting,
+                )
         else:
-            html = get_page_with_requests(category_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
+            html = get_page_with_requests(
+                category_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting
+            )
             # Nếu không tìm thấy sản phẩm với requests, thử Selenium
             if html:
                 products_test = parse_products_from_html(html, category_url)
@@ -696,43 +761,56 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
                     print(f"⚠️  Không tìm thấy sản phẩm với requests, thử Selenium...")
                     html = get_page_with_selenium(category_url)
                     use_selenium = True  # Đánh dấu đã dùng Selenium
-        
+
         if not html:
             return []
-        
+
         # Parse sản phẩm từ trang đầu
         products = parse_products_from_html(html, category_url)
         all_products.extend(products)
-        
+
         # Nếu không tìm thấy sản phẩm, return sớm
         if not products:
             # Lưu cache rỗng để đánh dấu đã thử
             if cache_file:
                 try:
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        json.dump({
-                            'category_url': category_url,
-                            'products': [],
-                            'crawled_at': time.strftime('%Y-%m-%d %H:%M:%S')
-                        }, f, ensure_ascii=False, indent=2)
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        json.dump(
+                            {
+                                "category_url": category_url,
+                                "products": [],
+                                "crawled_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            },
+                            f,
+                            ensure_ascii=False,
+                            indent=2,
+                        )
                 except:
                     pass
             return []
-        
+
         # Lấy tổng số trang
         total_pages = get_total_pages(html)
         if max_pages:
             total_pages = min(total_pages, max_pages)
-        
+
         # Crawl các trang tiếp theo
         for page in range(2, total_pages + 1):
             try:
                 page_url = get_category_page_url(category_url, page)
                 if use_selenium and _check_selenium_available():
-                    html = get_page_with_selenium(page_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
+                    html = get_page_with_selenium(
+                        page_url,
+                        use_redis_cache=use_redis_cache,
+                        use_rate_limiting=use_rate_limiting,
+                    )
                 else:
-                    html = get_page_with_requests(page_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting)
-                
+                    html = get_page_with_requests(
+                        page_url,
+                        use_redis_cache=use_redis_cache,
+                        use_rate_limiting=use_rate_limiting,
+                    )
+
                 if html:
                     products = parse_products_from_html(html, category_url)
                     if products:
@@ -740,46 +818,53 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
                     else:
                         # Nếu không tìm thấy sản phẩm ở trang này, có thể đã hết
                         break
-                
+
                 # Rate limiting đã được xử lý trong get_page_with_requests/selenium
                 # Chỉ sleep nếu không dùng rate limiting
                 if not use_rate_limiting:
                     time.sleep(1)  # Delay giữa các trang
-                
+
             except Exception as e:
                 continue
-        
+
         # Loại bỏ trùng lặp theo product_id
         seen_ids = set()
         unique_products = []
         for product in all_products:
-            if product['product_id'] not in seen_ids:
-                seen_ids.add(product['product_id'])
+            if product["product_id"] not in seen_ids:
+                seen_ids.add(product["product_id"])
                 unique_products.append(product)
-        
+
         # Lưu cache - ưu tiên Redis, fallback về file
         # Redis cache (nhanh, distributed)
         if redis_cache:
             try:
                 redis_cache.cache_products(category_url, unique_products, ttl=43200)  # 12 giờ
-                print(f"[Redis Cache] ✅ Đã cache {len(unique_products)} products cho {category_url[:60]}...")
+                print(
+                    f"[Redis Cache] ✅ Đã cache {len(unique_products)} products cho {category_url[:60]}..."
+                )
             except Exception as e:
                 print(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
-        
+
         # File cache (fallback)
         if cache_file:
             try:
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    json.dump({
-                        'category_url': category_url,
-                        'products': unique_products,
-                        'crawled_at': time.strftime('%Y-%m-%d %H:%M:%S')
-                    }, f, ensure_ascii=False, indent=2)
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "category_url": category_url,
+                            "products": unique_products,
+                            "crawled_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        },
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
             except:
                 pass
-        
+
         return unique_products
-        
+
     except Exception as e:
         return []
 
@@ -787,40 +872,44 @@ def crawl_category_products(category_url, max_pages=None, use_selenium=False, ca
 def crawl_single_category(category, max_pages=None, use_selenium=False):
     """Crawl sản phẩm từ một danh mục (wrapper cho threading)"""
     global stats
-    
-    category_url = category.get('url', '')
+
+    category_url = category.get("url", "")
     if not category_url:
         with stats_lock:
-            stats['total_failed'] += 1
+            stats["total_failed"] += 1
         return None, []
-    
+
     try:
         products = crawl_category_products(
-            category_url,
-            max_pages=max_pages,
-            use_selenium=use_selenium
+            category_url, max_pages=max_pages, use_selenium=use_selenium
         )
-        
+
         with stats_lock:
-            stats['total_categories'] += 1
-            stats['total_products'] += len(products)
-            stats['total_success'] += 1
-        
+            stats["total_categories"] += 1
+            stats["total_products"] += len(products)
+            stats["total_success"] += 1
+
         return category, products
-        
+
     except Exception as e:
         with stats_lock:
-            stats['total_categories'] += 1
-            stats['total_failed'] += 1
+            stats["total_categories"] += 1
+            stats["total_failed"] += 1
         return category, []
 
 
-def crawl_products_from_categories(categories_file, output_file=None, max_categories=None, 
-                                   max_pages_per_category=None, max_workers=5, 
-                                   use_selenium=False, categories_filter=None):
+def crawl_products_from_categories(
+    categories_file,
+    output_file=None,
+    max_categories=None,
+    max_pages_per_category=None,
+    max_workers=5,
+    use_selenium=False,
+    categories_filter=None,
+):
     """
     Crawl sản phẩm từ file danh mục
-    
+
     Args:
         categories_file: Đường dẫn file JSON chứa danh mục
         output_file: File output (mặc định: data/demo/products/products.json)
@@ -831,47 +920,47 @@ def crawl_products_from_categories(categories_file, output_file=None, max_catego
         categories_filter: Function filter danh mục (cat) -> bool
     """
     global stats
-    
+
     # Reset stats
     stats = {
-        'total_categories': 0,
-        'total_products': 0,
-        'total_pages': 0,
-        'total_success': 0,
-        'total_failed': 0,
-        'start_time': time.time()
+        "total_categories": 0,
+        "total_products": 0,
+        "total_pages": 0,
+        "total_success": 0,
+        "total_failed": 0,
+        "start_time": time.time(),
     }
-    
+
     # Đọc danh mục
     print(f"📖 Đang đọc danh mục từ: {categories_file}")
     try:
-        with open(categories_file, 'r', encoding='utf-8') as f:
+        with open(categories_file, "r", encoding="utf-8") as f:
             categories = json.load(f)
         print(f"✓ Đã đọc {len(categories)} danh mục")
     except Exception as e:
         print(f"❌ Lỗi khi đọc file: {e}")
         return []
-    
+
     # Lọc danh mục nếu có filter
     if categories_filter:
         categories = [cat for cat in categories if categories_filter(cat)]
         print(f"✓ Sau khi lọc: {len(categories)} danh mục")
-    
+
     # Giới hạn số danh mục
     if max_categories:
         categories = categories[:max_categories]
         print(f"✓ Giới hạn: {len(categories)} danh mục")
-    
+
     # Crawl song song
     print(f"\n🚀 Bắt đầu crawl sản phẩm...")
     print(f"📊 Số thread: {max_workers}")
     print(f"🔧 Sử dụng Selenium: {use_selenium}")
     print(f"📄 Trang tối đa mỗi danh mục: {max_pages_per_category or 'Tất cả'}")
-    print("="*70)
-    
+    print("=" * 70)
+
     all_products = []
     category_results = {}
-    
+
     # Lazy import tqdm
     tqdm = _get_tqdm()
     with tqdm(total=len(categories), desc="Crawl danh mục", unit="danh mục") as pbar:
@@ -883,10 +972,10 @@ def crawl_products_from_categories(categories_file, output_file=None, max_catego
                     crawl_single_category,
                     category,
                     max_pages=max_pages_per_category,
-                    use_selenium=use_selenium
+                    use_selenium=use_selenium,
                 )
                 future_to_category[future] = category
-            
+
             # Xử lý kết quả
             for future in as_completed(future_to_category):
                 category = future_to_category[future]
@@ -894,102 +983,110 @@ def crawl_products_from_categories(categories_file, output_file=None, max_catego
                     cat, products = future.result(timeout=300)
                     if products:
                         all_products.extend(products)
-                        category_results[category.get('url', '')] = len(products)
-                    
-                    pbar.set_postfix({
-                        '✅': stats['total_success'],
-                        '❌': stats['total_failed'],
-                        '📦': stats['total_products']
-                    })
+                        category_results[category.get("url", "")] = len(products)
+
+                    pbar.set_postfix(
+                        {
+                            "✅": stats["total_success"],
+                            "❌": stats["total_failed"],
+                            "📦": stats["total_products"],
+                        }
+                    )
                 except Exception as e:
                     with stats_lock:
-                        stats['total_failed'] += 1
-                    pbar.set_postfix({
-                        '✅': stats['total_success'],
-                        '❌': stats['total_failed'],
-                        '📦': stats['total_products']
-                    })
-                
+                        stats["total_failed"] += 1
+                    pbar.set_postfix(
+                        {
+                            "✅": stats["total_success"],
+                            "❌": stats["total_failed"],
+                            "📦": stats["total_products"],
+                        }
+                    )
+
                 pbar.update(1)
-    
+
     # Loại bỏ trùng lặp theo product_id
     seen_ids = set()
     unique_products = []
     for product in all_products:
-        if product['product_id'] not in seen_ids:
-            seen_ids.add(product['product_id'])
+        if product["product_id"] not in seen_ids:
+            seen_ids.add(product["product_id"])
             unique_products.append(product)
-    
+
     # Lưu kết quả
     if not output_file:
-        output_file = 'data/demo/products/products.json'
-    
+        output_file = "data/demo/products/products.json"
+
     print(f"\n💾 Đang lưu kết quả vào: {output_file}")
     print(f"📝 Lưu ý: Crawl thông tin cơ bản (ID, tên, URL, hình, số lượng bán)")
     print(f"          Giá, đánh giá chi tiết sẽ được crawl detail sau")
-    
+
     # Đảm bảo tất cả products có sales_count (kể cả None)
     for product in unique_products:
-        if 'sales_count' not in product:
-            product['sales_count'] = None
-    
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump({
-            'total_products': len(unique_products),
-            'total_categories': stats['total_categories'],
-            'crawled_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'note': 'Crawl thông tin cơ bản bao gồm số lượng bán (sales_count) - giá và đánh giá chi tiết sẽ crawl sau',
-            'products': unique_products
-        }, f, ensure_ascii=False, indent=2)
-    
+        if "sales_count" not in product:
+            product["sales_count"] = None
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "total_products": len(unique_products),
+                "total_categories": stats["total_categories"],
+                "crawled_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "note": "Crawl thông tin cơ bản bao gồm số lượng bán (sales_count) - giá và đánh giá chi tiết sẽ crawl sau",
+                "products": unique_products,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
     # In thống kê
-    elapsed = time.time() - stats['start_time']
-    print("\n" + "="*70)
+    elapsed = time.time() - stats["start_time"]
+    print("\n" + "=" * 70)
     print("📈 THỐNG KÊ")
-    print("="*70)
+    print("=" * 70)
     print(f"⏱  Thời gian: {elapsed:.1f}s")
     print(f"📁 Danh mục đã crawl: {stats['total_categories']}")
     print(f"✅ Thành công: {stats['total_success']}")
     print(f"❌ Thất bại: {stats['total_failed']}")
     print(f"📦 Tổng sản phẩm: {len(unique_products)}")
     print(f"⚡ Tốc độ: {stats['total_products']/elapsed:.2f} sản phẩm/s" if elapsed > 0 else "")
-    print("="*70)
-    
+    print("=" * 70)
+
     return unique_products
 
 
 def main():
     """Hàm main"""
-    categories_file = 'data/raw/categories_recursive_optimized.json'
-    output_file = 'data/demo/products/products.json'
-    
+    categories_file = "data/raw/categories_recursive_optimized.json"
+    output_file = "data/demo/products/products.json"
+
     # Tùy chọn
     max_categories = 10  # None để crawl tất cả
     max_pages_per_category = 3  # None để crawl tất cả trang
     max_workers = 5  # Số thread song song
     use_selenium = False  # True nếu cần JS rendering
-    
-    print("="*70)
+
+    print("=" * 70)
     print("🛍️  CRAWL SẢN PHẨM TỪ DANH MỤC TIKI")
-    print("="*70)
+    print("=" * 70)
     print(f"📁 File danh mục: {categories_file}")
     print(f"📁 File output: {output_file}")
     print(f"📊 Số danh mục tối đa: {max_categories or 'Tất cả'}")
     print(f"📄 Trang tối đa mỗi danh mục: {max_pages_per_category or 'Tất cả'}")
     print(f"⚙️  Số thread: {max_workers}")
     print(f"🔧 Sử dụng Selenium: {use_selenium}")
-    print("="*70)
-    
+    print("=" * 70)
+
     crawl_products_from_categories(
         categories_file=categories_file,
         output_file=output_file,
         max_categories=max_categories,
         max_pages_per_category=max_pages_per_category,
         max_workers=max_workers,
-        use_selenium=use_selenium
+        use_selenium=use_selenium,
     )
 
 
 if __name__ == "__main__":
     main()
-

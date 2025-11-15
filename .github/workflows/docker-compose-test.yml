@@ -32,11 +32,11 @@ jobs:
 
       - name: Build Docker images
         run: |
-          docker-compose build
+          docker compose build
 
       - name: Start services
         run: |
-          docker-compose up -d
+          docker compose up -d
           echo "Services started, waiting for initialization..."
 
       - name: Wait for services to be healthy
@@ -45,7 +45,7 @@ jobs:
           max_wait=300
           elapsed=0
           while [ $elapsed -lt $max_wait ]; do
-            if docker-compose ps | grep -q "healthy"; then
+            if docker compose ps | grep -q "healthy"; then
               echo "Services are healthy!"
               break
             fi
@@ -54,13 +54,13 @@ jobs:
             elapsed=$((elapsed + 10))
           done
           sleep 30
-          docker-compose ps
+          docker compose ps
 
       - name: Check service status
         run: |
-          docker-compose ps
+          docker compose ps
           echo "Checking service health..."
-          docker-compose ps | grep -E "(healthy|unhealthy|starting)" || true
+          docker compose ps | grep -E "(healthy|unhealthy|starting)" || true
 
       - name: Test Airflow API
         run: |
@@ -78,16 +78,16 @@ jobs:
 
       - name: Validate DAGs in container
         run: |
-          docker-compose exec -T airflow-scheduler airflow dags list || true
-          docker-compose exec -T airflow-scheduler airflow dags list-import-errors || true
+          docker compose exec -T airflow-scheduler airflow dags list || true
+          docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
 
       - name: Show logs on failure
         if: failure()
         run: |
-          docker-compose logs --tail=100
+          docker compose logs --tail=100
 
       - name: Stop services
         if: always()
         run: |
-          docker-compose down -v
+          docker compose down -v
 
