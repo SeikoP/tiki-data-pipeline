@@ -6,12 +6,11 @@ Test từ crawl_products.py và crawl_products_detail.py
 import json
 import os
 import sys
-from pathlib import Path
 
 # Thêm src vào path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src", "pipelines", "crawl"))
 
-from crawl_products import crawl_category_products, get_page_with_requests, parse_products_from_html
+from crawl_products import crawl_category_products
 from crawl_products_detail import crawl_product_detail_with_selenium, extract_product_detail
 
 
@@ -42,7 +41,7 @@ def test_crawl_products_sales_count():
         products_with_sales = [p for p in products if p.get("sales_count") is not None]
         products_without_sales = [p for p in products if p.get("sales_count") is None]
 
-        print(f"\n📊 Thống kê:")
+        print("\n📊 Thống kê:")
         print(f"   - Tổng số products: {len(products)}")
         print(
             f"   - Có sales_count: {len(products_with_sales)} ({len(products_with_sales)/len(products)*100:.1f}%)"
@@ -53,7 +52,7 @@ def test_crawl_products_sales_count():
 
         # Hiển thị một số ví dụ
         if products_with_sales:
-            print(f"\n✅ Ví dụ products CÓ sales_count:")
+            print("\n✅ Ví dụ products CÓ sales_count:")
             for i, product in enumerate(products_with_sales[:5], 1):
                 sales_count = product.get("sales_count")
                 sales_str = (
@@ -68,7 +67,7 @@ def test_crawl_products_sales_count():
                 print()
 
         if products_without_sales:
-            print(f"\n⚠️  Ví dụ products KHÔNG có sales_count:")
+            print("\n⚠️  Ví dụ products KHÔNG có sales_count:")
             for i, product in enumerate(products_without_sales[:3], 1):
                 print(f"   {i}. {product.get('name', 'N/A')[:50]}")
                 print(f"      ID: {product.get('product_id')}")
@@ -117,7 +116,7 @@ def test_crawl_product_detail_sales_count():
     try:
         test_file = "data/test_output/test_products_sales_count.json"
         if os.path.exists(test_file):
-            with open(test_file, "r", encoding="utf-8") as f:
+            with open(test_file, encoding="utf-8") as f:
                 data = json.load(f)
                 products = data.get("products", [])
                 if products:
@@ -145,7 +144,7 @@ def test_crawl_product_detail_sales_count():
             "https://tiki.vn/dien-thoai-iphone-15-pro-max-256gb-chinh-hang-vn-a-p293100123.html",
             "https://tiki.vn/samsung-galaxy-s24-ultra-5g-256gb-chinh-hang-vn-p293100124.html",
         ]
-        print(f"   📋 Sử dụng URLs mặc định")
+        print("   📋 Sử dụng URLs mặc định")
 
     results = []
 
@@ -190,7 +189,7 @@ def test_crawl_product_detail_sales_count():
 
             results.append(result)
 
-            print(f"   📊 Kết quả:")
+            print("   📊 Kết quả:")
             print(f"      - Product ID: {product_id}")
             print(f"      - Tên: {name[:60]}...")
             sales_str = (
@@ -215,7 +214,7 @@ def test_crawl_product_detail_sales_count():
             results.append({"url": url, "error": str(e), "has_sales_count": False})
 
     # Thống kê tổng
-    print(f"\n📊 Thống kê tổng:")
+    print("\n📊 Thống kê tổng:")
     total = len(results)
     with_sales = len([r for r in results if r.get("has_sales_count")])
     without_sales = total - with_sales
@@ -272,7 +271,7 @@ def main():
 
     if products:
         products_with_sales = len([p for p in products if p.get("sales_count") is not None])
-        print(f"✅ Test 1 (Crawl Products):")
+        print("✅ Test 1 (Crawl Products):")
         print(f"   - Tổng: {len(products)} products")
         print(
             f"   - Có sales_count: {products_with_sales} ({products_with_sales/len(products)*100:.1f}%)"
@@ -280,7 +279,7 @@ def main():
 
     if detail_results:
         detail_with_sales = len([r for r in detail_results if r.get("has_sales_count")])
-        print(f"\n✅ Test 2 (Crawl Product Detail):")
+        print("\n✅ Test 2 (Crawl Product Detail):")
         print(f"   - Tổng: {len(detail_results)} products")
         print(
             f"   - Có sales_count: {detail_with_sales} ({detail_with_sales/len(detail_results)*100:.1f}%)"

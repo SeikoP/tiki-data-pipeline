@@ -21,13 +21,13 @@ if sys.platform == "win32":
 
         if hasattr(sys.stdout, "buffer") and not sys.stdout.closed:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except:
+    except Exception:
         try:
             import io
 
             if hasattr(sys.stdout, "buffer"):
                 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        except:
+        except Exception:
             pass
 
 # Tạo thư mục output nếu chưa có
@@ -199,7 +199,7 @@ def main():
         print(f"  Level {level}: {level_counts[level]} danh mục")
 
     # In cây danh mục
-    print(f"\n🌳 Cây danh mục (mẫu):")
+    print("\n🌳 Cây danh mục (mẫu):")
     for category in unique_categories[:15]:  # Chỉ in 15 danh mục đầu
         indent = "  " * category.get("level", 0)
         level = category.get("level", 0)

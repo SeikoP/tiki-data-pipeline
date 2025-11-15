@@ -25,13 +25,13 @@ if sys.platform == "win32":
 
         if hasattr(sys.stdout, "buffer") and not sys.stdout.closed:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except:
+    except Exception:
         try:
             import io
 
             if hasattr(sys.stdout, "buffer"):
                 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        except:
+        except Exception:
             pass
 
 # Thử import tqdm, nếu không có thì dùng fallback
@@ -123,13 +123,13 @@ def crawl_single_category(
 
         if os.path.exists(cache_file):
             try:
-                with open(cache_file, "r", encoding="utf-8") as f:
+                with open(cache_file, encoding="utf-8") as f:
                     cached_data = json.load(f)
                 with stats_lock:
                     stats["total_crawled"] += 1
                     stats["total_success"] += 1
                 return True, cached_data.get("categories", []), None
-            except:
+            except Exception:
                 pass
 
     try:
@@ -155,7 +155,7 @@ def crawl_single_category(
                         ensure_ascii=False,
                         indent=2,
                     )
-            except:
+            except Exception:
                 pass
 
         # Update stats
@@ -194,7 +194,7 @@ def crawl_level_parallel(urls_to_crawl, parent_urls, level, max_level, visited_u
 
     # Lọc các URL chưa crawl
     tasks = []
-    for url, parent_url in zip(urls_to_crawl, parent_urls):
+    for url, parent_url in zip(urls_to_crawl, parent_urls, strict=False):
         if url not in visited_urls:
             tasks.append((url, parent_url))
 
@@ -279,7 +279,7 @@ def crawl_category_recursive_optimized(
         # Lọc các URL chưa crawl
         new_urls = []
         new_parents = []
-        for url, parent in zip(urls_to_crawl, parent_urls):
+        for url, parent in zip(urls_to_crawl, parent_urls, strict=False):
             if url not in visited_urls:
                 new_urls.append(url)
                 new_parents.append(parent)
@@ -332,7 +332,7 @@ def print_stats():
         print(f"⚡ Tốc độ: {rate:.2f} danh mục/s")
 
         if stats["by_level"]:
-            print(f"\n📋 Theo level:")
+            print("\n📋 Theo level:")
             for level in sorted(stats["by_level"].keys()):
                 print(f"  Level {level}: {stats['by_level'][level]} danh mục")
 
@@ -355,7 +355,7 @@ def main():
     print(f"URL gốc: {root_url}")
     print(f"Độ sâu tối đa: {max_level}")
     print(f"Số thread song song: {max_workers}")
-    print(f"Cache: data/raw/cache/")
+    print("Cache: data/raw/cache/")
     print("=" * 70)
 
     # Reset stats
@@ -403,7 +403,7 @@ def main():
         level_counts[level] += 1
 
     if level_counts:
-        print(f"\n📋 Thống kê theo level:")
+        print("\n📋 Thống kê theo level:")
         for level in sorted(level_counts.keys()):
             print(f"  Level {level}: {level_counts[level]} danh mục")
 

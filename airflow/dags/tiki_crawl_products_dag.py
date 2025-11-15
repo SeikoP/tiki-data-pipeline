@@ -14,23 +14,18 @@ Tính năng:
 - Tối ưu: batch processing, rate limiting, caching
 """
 
-import hashlib
 import json
 import os
 import shutil
 import sys
-import tempfile
 import time
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from airflow.configuration import conf
 from airflow.providers.standard.operators.python import PythonOperator
-from airflow.utils.session import provide_session
 
 from airflow import DAG
 
@@ -158,7 +153,7 @@ if utils_path and os.path.exists(utils_path):
         # Nếu import lỗi, log và tiếp tục (sẽ fail khi chạy task)
         import warnings
 
-        warnings.warn(f"Không thể import utils module: {e}")
+        warnings.warn(f"Không thể import utils module: {e}", stacklevel=2)
 
 # Import module crawl_products
 if crawl_products_path and os.path.exists(crawl_products_path):
@@ -181,11 +176,13 @@ if crawl_products_path and os.path.exists(crawl_products_path):
         # Nếu import lỗi, log và tiếp tục (sẽ fail khi chạy task)
         import warnings
 
-        warnings.warn(f"Không thể import crawl_products module: {e}")
+        warnings.warn(f"Không thể import crawl_products module: {e}", stacklevel=2)
 
         # Tạo dummy functions để tránh NameError
+        error_msg = str(e)
+
         def crawl_category_products(*args, **kwargs):
-            raise ImportError(f"Module crawl_products chưa được import: {e}")
+            raise ImportError(f"Module crawl_products chưa được import: {error_msg}")
 
         get_page_with_requests = crawl_category_products
         parse_products_from_html = crawl_category_products
@@ -196,12 +193,7 @@ else:
         sys.path.insert(0, crawl_module_path)
 
     try:
-        from crawl_products import (
-            crawl_category_products,
-            get_page_with_requests,
-            get_total_pages,
-            parse_products_from_html,
-        )
+        from crawl_products import crawl_category_products
     except ImportError as e:
         # Debug: kiểm tra xem thư mục có tồn tại không
         debug_info = {
@@ -217,12 +209,12 @@ else:
         if os.path.exists("/opt/airflow/src"):
             try:
                 debug_info["opt_airflow_src_contents"] = os.listdir("/opt/airflow/src")
-            except:
+            except Exception:
                 pass
 
         raise ImportError(
             f"Không tìm thấy module crawl_products.\n" f"Debug info: {debug_info}\n" f"Lỗi gốc: {e}"
-        )
+        ) from e
 
 # Import module crawl_products_detail
 crawl_products_detail_path = None
@@ -253,11 +245,13 @@ if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
         # Nếu import lỗi, log và tiếp tục (sẽ fail khi chạy task)
         import warnings
 
-        warnings.warn(f"Không thể import crawl_products_detail module: {e}")
+        warnings.warn(f"Không thể import crawl_products_detail module: {e}", stacklevel=2)
 
         # Tạo dummy functions để tránh NameError
+        error_msg = str(e)
+
         def crawl_product_detail_with_selenium(*args, **kwargs):
-            raise ImportError(f"Module crawl_products_detail chưa được import: {e}")
+            raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
 
         extract_product_detail = crawl_product_detail_with_selenium
 else:
@@ -269,7 +263,7 @@ else:
             f"Không tìm thấy module crawl_products_detail.\n"
             f"Path: {crawl_products_detail_path}\n"
             f"Lỗi gốc: {e}"
-        )
+        ) from e
 
 # Cấu hình mặc định
 DEFAULT_ARGS = {
@@ -288,7 +282,7 @@ DEFAULT_ARGS = {
 # Có thể set Variable 'TIKI_DAG_SCHEDULE_MODE' = 'scheduled' để chạy tự động
 try:
     schedule_mode = Variable.get("TIKI_DAG_SCHEDULE_MODE", default_var="manual")
-except:
+except Exception:
     schedule_mode = "manual"  # Mặc định là manual để test
 
 # Xác định schedule dựa trên mode
@@ -375,7 +369,7 @@ def get_logger(context):
         return logging.getLogger("airflow.task")
 
 
-def load_categories(**context) -> List[Dict[str, Any]]:
+def load_categories(**context) -> list[dict[str, Any]]:
     """
     Task 1: Load danh sách danh mục từ file
 
@@ -394,7 +388,7 @@ def load_categories(**context) -> List[Dict[str, Any]]:
         if not os.path.exists(categories_file):
             raise FileNotFoundError(f"Không tìm thấy file: {categories_file}")
 
-        with open(categories_file, "r", encoding="utf-8") as f:
+        with open(categories_file, encoding="utf-8") as f:
             categories = json.load(f)
 
         logger.info(f"✅ Đã load {len(categories)} danh mục")
@@ -417,7 +411,7 @@ def load_categories(**context) -> List[Dict[str, Any]]:
             if max_categories > 0:
                 categories = categories[:max_categories]
                 logger.info(f"✓ Giới hạn: {max_categories} danh mục")
-        except:
+        except Exception:
             pass
 
         # Push categories lên XCom để các task khác dùng
@@ -428,7 +422,7 @@ def load_categories(**context) -> List[Dict[str, Any]]:
         raise
 
 
-def crawl_single_category(category: Dict[str, Any] = None, **context) -> Dict[str, Any]:
+def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
     """
     Task 2: Crawl sản phẩm từ một danh mục (Dynamic Task Mapping)
 
@@ -545,7 +539,7 @@ def crawl_single_category(category: Dict[str, Any] = None, **context) -> Dict[st
     return result
 
 
-def merge_products(**context) -> Dict[str, Any]:
+def merge_products(**context) -> dict[str, Any]:
     """
     Task 3: Merge sản phẩm từ tất cả các danh mục
 
@@ -558,11 +552,8 @@ def merge_products(**context) -> Dict[str, Any]:
     logger.info("=" * 70)
 
     try:
-        from airflow.models import TaskInstance
-        from airflow.models.dagrun import DagRun
 
         ti = context["ti"]
-        dag_run = context["dag_run"]
 
         # Lấy categories từ task load_categories (trong TaskGroup load_and_prepare)
         # Thử nhiều cách để lấy categories
@@ -807,7 +798,7 @@ def save_products(**context) -> str:
         # Cách 1: Lấy từ task_id với TaskGroup prefix
         try:
             merge_result = ti.xcom_pull(task_ids="process_and_save.merge_products")
-            logger.info(f"Lấy merge_result từ 'process_and_save.merge_products'")
+            logger.info("Lấy merge_result từ 'process_and_save.merge_products'")
         except Exception as e:
             logger.warning(f"Không lấy được từ 'process_and_save.merge_products': {e}")
 
@@ -815,7 +806,7 @@ def save_products(**context) -> str:
         if not merge_result:
             try:
                 merge_result = ti.xcom_pull(task_ids="merge_products")
-                logger.info(f"Lấy merge_result từ 'merge_products'")
+                logger.info("Lấy merge_result từ 'merge_products'")
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'merge_products': {e}")
 
@@ -868,7 +859,7 @@ def save_products(**context) -> str:
         raise
 
 
-def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
+def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
     """
     Task: Chuẩn bị danh sách products để crawl detail
 
@@ -893,16 +884,16 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
         merge_result = None
         try:
             merge_result = ti.xcom_pull(task_ids="process_and_save.merge_products")
-        except:
+        except Exception:
             try:
                 merge_result = ti.xcom_pull(task_ids="merge_products")
-            except:
+            except Exception:
                 pass
 
         if not merge_result:
             # Thử lấy từ file output
             if OUTPUT_FILE.exists():
-                with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                with open(OUTPUT_FILE, encoding="utf-8") as f:
                     data = json.load(f)
                     merge_result = {"products": data.get("products", [])}
 
@@ -922,7 +913,7 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
 
         if PROGRESS_FILE.exists():
             try:
-                with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+                with open(PROGRESS_FILE, encoding="utf-8") as f:
                     saved_progress = json.load(f)
                     progress["crawled_product_ids"] = set(
                         saved_progress.get("crawled_product_ids", [])
@@ -979,7 +970,7 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
             has_valid_cache = False
             if cache_file.exists():
                 try:
-                    with open(cache_file, "r", encoding="utf-8") as f:
+                    with open(cache_file, encoding="utf-8") as f:
                         cached_detail = json.load(f)
                         # Kiểm tra cache có đầy đủ không: cần có price và sales_count
                         has_price = cached_detail.get("price", {}).get("current_price")
@@ -992,7 +983,7 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
                             already_crawled += 1
                             has_valid_cache = True
                         # Nếu cache thiếu sales_count, vẫn cần crawl lại
-                except:
+                except Exception:
                     pass
 
             # Nếu chưa có cache hợp lệ, thêm vào danh sách crawl
@@ -1052,7 +1043,7 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
 
         # Debug: Log một vài products đầu tiên
         if products_to_crawl:
-            logger.info(f"📋 Sample products (first 3):")
+            logger.info("📋 Sample products (first 3):")
             for i, p in enumerate(products_to_crawl[:3]):
                 logger.info(
                     f"  {i+1}. Product ID: {p.get('product_id')}, URL: {p.get('url')[:80]}..."
@@ -1070,7 +1061,7 @@ def prepare_products_for_detail(**context) -> List[Dict[str, Any]]:
         raise
 
 
-def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) -> Dict[str, Any]:
+def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) -> dict[str, Any]:
     """
     Task: Crawl detail cho một product (Dynamic Task Mapping)
 
@@ -1181,7 +1172,7 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
                     logger.info(
                         f"[Redis Cache] ⚠️  Cache không đầy đủ cho product {product_id}, sẽ crawl lại"
                     )
-    except Exception as e:
+    except Exception:
         # Redis không available, fallback về file cache
         pass
 
@@ -1189,7 +1180,7 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
     cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
     if cache_file.exists():
         try:
-            with open(cache_file, "r", encoding="utf-8") as f:
+            with open(cache_file, encoding="utf-8") as f:
                 cached_detail = json.load(f)
                 # Kiểm tra cache có đầy đủ không: cần có price và sales_count
                 has_price = cached_detail.get("price", {}).get("current_price")
@@ -1360,7 +1351,7 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
                 if detail.get("sales_count") is not None:
                     logger.info(f"   📊 sales_count: {detail.get('sales_count')}")
                 else:
-                    logger.warning(f"   ⚠️  sales_count: None (không tìm thấy)")
+                    logger.warning("   ⚠️  sales_count: None (không tìm thấy)")
             else:
                 logger.error(f"❌ Cache file không được tạo: {cache_file}")
         except Exception as e:
@@ -1394,7 +1385,7 @@ def crawl_single_product_detail(product_info: Dict[str, Any] = None, **context) 
         return default_result
 
 
-def merge_product_details(**context) -> Dict[str, Any]:
+def merge_product_details(**context) -> dict[str, Any]:
     """
     Task: Merge product details vào products list
 
@@ -1413,16 +1404,16 @@ def merge_product_details(**context) -> Dict[str, Any]:
         merge_result = None
         try:
             merge_result = ti.xcom_pull(task_ids="process_and_save.merge_products")
-        except:
+        except Exception:
             try:
                 merge_result = ti.xcom_pull(task_ids="merge_products")
-            except:
+            except Exception:
                 pass
 
         if not merge_result:
             # Thử lấy từ file
             if OUTPUT_FILE.exists():
-                with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                with open(OUTPUT_FILE, encoding="utf-8") as f:
                     data = json.load(f)
                     merge_result = {"products": data.get("products", [])}
 
@@ -1439,10 +1430,10 @@ def merge_product_details(**context) -> Dict[str, Any]:
             products_to_crawl = ti.xcom_pull(
                 task_ids="crawl_product_details.prepare_products_for_detail"
             )
-        except:
+        except Exception:
             try:
                 products_to_crawl = ti.xcom_pull(task_ids="prepare_products_for_detail")
-            except:
+            except Exception:
                 pass
 
         # Số lượng products thực tế được crawl (map_index count)
@@ -1480,7 +1471,7 @@ def merge_product_details(**context) -> Dict[str, Any]:
                     if result:
                         max_found_index = test_idx
                         break
-                except:
+                except Exception:
                     pass
 
             if max_found_index >= 0:
@@ -1493,7 +1484,7 @@ def merge_product_details(**context) -> Dict[str, Any]:
                         )
                         if result:
                             max_found_index = idx
-                    except:
+                    except Exception:
                         break
 
                 actual_crawl_count = max_found_index + 1
@@ -1726,10 +1717,10 @@ def save_products_with_detail(**context) -> str:
         merge_result = None
         try:
             merge_result = ti.xcom_pull(task_ids="crawl_product_details.merge_product_details")
-        except:
+        except Exception:
             try:
                 merge_result = ti.xcom_pull(task_ids="merge_product_details")
-            except:
+            except Exception:
                 pass
 
         if not merge_result:
@@ -1762,7 +1753,7 @@ def save_products_with_detail(**context) -> str:
         raise
 
 
-def validate_data(**context) -> Dict[str, Any]:
+def validate_data(**context) -> dict[str, Any]:
     """
     Task 5: Validate dữ liệu đã crawl
 
@@ -1798,7 +1789,7 @@ def validate_data(**context) -> Dict[str, Any]:
 
         logger.info(f"Đang validate file: {output_file}")
 
-        with open(output_file, "r", encoding="utf-8") as f:
+        with open(output_file, encoding="utf-8") as f:
             data = json.load(f)
 
         products = data.get("products", [])
@@ -2017,14 +2008,14 @@ with DAG(**DAG_CONFIG) as dag:
                         task_ids="crawl_product_details.prepare_products_for_detail"
                     )
                     logger.info(
-                        f"✅ Lấy XCom từ task_id: crawl_product_details.prepare_products_for_detail"
+                        "✅ Lấy XCom từ task_id: crawl_product_details.prepare_products_for_detail"
                     )
                 except Exception as e1:
                     logger.warning(f"⚠️  Không lấy được với task_id đầy đủ: {e1}")
                     try:
                         # Thử với task_id không có prefix (fallback)
                         products_to_crawl = ti.xcom_pull(task_ids="prepare_products_for_detail")
-                        logger.info(f"✅ Lấy XCom từ task_id: prepare_products_for_detail")
+                        logger.info("✅ Lấy XCom từ task_id: prepare_products_for_detail")
                     except Exception as e2:
                         logger.error(f"❌ Không thể lấy XCom với cả 2 cách: {e1}, {e2}")
 
@@ -2055,7 +2046,7 @@ with DAG(**DAG_CONFIG) as dag:
 
             logger.info(f"🔢 Tạo {len(op_kwargs_list)} op_kwargs cho Dynamic Task Mapping")
             if op_kwargs_list:
-                logger.info(f"📋 Sample op_kwargs (first 2):")
+                logger.info("📋 Sample op_kwargs (first 2):")
                 for i, kwargs in enumerate(op_kwargs_list[:2]):
                     product_info = kwargs.get("product_info", {})
                     logger.info(

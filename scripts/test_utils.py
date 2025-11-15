@@ -1,8 +1,8 @@
 """
 Script test các utilities để đảm bảo không có lỗi
 """
-import sys
 import os
+import sys
 
 # Thêm src vào path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'pipelines', 'crawl'))
@@ -12,16 +12,8 @@ def test_utils_imports():
     print("="*70)
     print("TEST UTILS IMPORTS")
     print("="*70)
-    
+
     try:
-        from utils import (
-            setup_utf8_encoding,
-            parse_sales_count,
-            parse_price,
-            extract_product_id_from_url,
-            normalize_url,
-            RateLimiter
-        )
         print("OK: Import utilities thanh cong")
         return True
     except Exception as e:
@@ -33,10 +25,10 @@ def test_parse_sales_count():
     print("\n" + "="*70)
     print("TEST PARSE_SALES_COUNT")
     print("="*70)
-    
+
     try:
         from utils import parse_sales_count
-        
+
         test_cases = [
             (1000, 1000),
             ("2k", 2000),
@@ -47,7 +39,7 @@ def test_parse_sales_count():
             ("", None),
             ({"text": "Đã bán 16", "value": 16}, 16),
         ]
-        
+
         all_passed = True
         for input_val, expected in test_cases:
             result = parse_sales_count(input_val)
@@ -57,7 +49,7 @@ def test_parse_sales_count():
             # Tránh lỗi encoding với dict
             input_str = str(input_val) if not isinstance(input_val, dict) else f"dict({input_val.get('value', 'N/A')})"
             print(f"  {status}: Input={input_str} -> Output={result} (Expected: {expected})")
-        
+
         return all_passed
     except Exception as e:
         print(f"FAIL: Test parse_sales_count loi: {e}")
@@ -70,10 +62,10 @@ def test_parse_price():
     print("\n" + "="*70)
     print("TEST PARSE_PRICE")
     print("="*70)
-    
+
     try:
         from utils import parse_price
-        
+
         test_cases = [
             ("389.000", 389000),
             ("1.500.000", 1500000),
@@ -81,7 +73,7 @@ def test_parse_price():
             (None, None),
             ("", None),
         ]
-        
+
         all_passed = True
         for input_val, expected in test_cases:
             result = parse_price(input_val)
@@ -89,7 +81,7 @@ def test_parse_price():
             if result != expected:
                 all_passed = False
             print(f"  {status}: Input={input_val} -> Output={result} (Expected: {expected})")
-        
+
         return all_passed
     except Exception as e:
         print(f"FAIL: Test parse_price loi: {e}")
@@ -102,17 +94,17 @@ def test_extract_product_id():
     print("\n" + "="*70)
     print("TEST EXTRACT_PRODUCT_ID_FROM_URL")
     print("="*70)
-    
+
     try:
         from utils import extract_product_id_from_url
-        
+
         test_cases = [
             ("https://tiki.vn/p/123456", "123456"),
             ("https://tiki.vn/product-p123456.html", "123456"),
             ("https://tiki.vn/something-p789012.html", "789012"),
             ("invalid", None),
         ]
-        
+
         all_passed = True
         for url, expected in test_cases:
             result = extract_product_id_from_url(url)
@@ -120,7 +112,7 @@ def test_extract_product_id():
             if result != expected:
                 all_passed = False
             print(f"  {status}: URL={url[:50]}... -> Product ID={result} (Expected: {expected})")
-        
+
         return all_passed
     except Exception as e:
         print(f"FAIL: Test extract_product_id loi: {e}")
@@ -133,12 +125,12 @@ def test_crawl_products_import():
     print("\n" + "="*70)
     print("TEST CRAWL_PRODUCTS IMPORT")
     print("="*70)
-    
+
     try:
         # Test import với fallback
         import importlib.util
         crawl_products_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'pipelines', 'crawl', 'crawl_products.py')
-        
+
         if os.path.exists(crawl_products_path):
             spec = importlib.util.spec_from_file_location("crawl_products", crawl_products_path)
             if spec and spec.loader:
@@ -161,11 +153,11 @@ def test_crawl_products_detail_import():
     print("\n" + "="*70)
     print("TEST CRAWL_PRODUCTS_DETAIL IMPORT")
     print("="*70)
-    
+
     try:
         import importlib.util
         detail_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'pipelines', 'crawl', 'crawl_products_detail.py')
-        
+
         if os.path.exists(detail_path):
             spec = importlib.util.spec_from_file_location("crawl_products_detail", detail_path)
             if spec and spec.loader:
@@ -188,9 +180,9 @@ def main():
     print("="*70)
     print("TEST UTILITIES VA MODULES")
     print("="*70)
-    
+
     results = []
-    
+
     # Test imports
     results.append(("Utils Imports", test_utils_imports()))
     results.append(("Parse Sales Count", test_parse_sales_count()))
@@ -198,21 +190,21 @@ def main():
     results.append(("Extract Product ID", test_extract_product_id()))
     results.append(("Crawl Products Import", test_crawl_products_import()))
     results.append(("Crawl Products Detail Import", test_crawl_products_detail_import()))
-    
+
     # Tổng kết
     print("\n" + "="*70)
     print("TONG KET")
     print("="*70)
-    
+
     passed = sum(1 for _, result in results if result)
     total = len(results)
-    
+
     for test_name, result in results:
         status = "PASS" if result else "FAIL"
         print(f"  {status}: {test_name}")
-    
+
     print(f"\nKet qua: {passed}/{total} tests passed")
-    
+
     if passed == total:
         print("Tat ca tests PASSED!")
         return 0

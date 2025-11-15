@@ -67,7 +67,7 @@ def test_crawl_single_category():
     categories_file = "data/raw/categories_recursive_optimized.json"
 
     try:
-        with open(categories_file, "r", encoding="utf-8") as f:
+        with open(categories_file, encoding="utf-8") as f:
             categories = json.load(f)
 
         # Chọn danh mục có nhiều sản phẩm - thử với danh mục level 2-3 và có nhiều sản phẩm
@@ -104,7 +104,6 @@ def test_crawl_single_category():
             test_categories = categories[:10] if len(categories) > 10 else categories
 
         # Chọn ngẫu nhiên hoặc lấy danh mục thứ 3 để test với danh mục khác
-        import random
 
         test_category = (
             test_categories[2]
@@ -122,8 +121,8 @@ def test_crawl_single_category():
         print(f"📁 Danh mục: {category_name}")
         print(f"🔗 URL: {category_url}")
         print(f"📊 Level: {test_category.get('level', 0)}")
-        print(f"📝 Lưu ý: Chỉ crawl thông tin cơ bản (ID, tên, URL, hình) - sẽ crawl detail sau")
-        print(f"\n⏳ Đang crawl...")
+        print("📝 Lưu ý: Chỉ crawl thông tin cơ bản (ID, tên, URL, hình) - sẽ crawl detail sau")
+        print("\n⏳ Đang crawl...")
 
         # Crawl với giới hạn 2 trang để test nhanh
         # Thử với Selenium nếu requests không tìm thấy sản phẩm
@@ -134,14 +133,14 @@ def test_crawl_single_category():
         print(f"\n✅ Tìm thấy {len(products)} sản phẩm")
 
         if products:
-            print(f"\n📦 Mẫu sản phẩm (5 sản phẩm đầu):")
+            print("\n📦 Mẫu sản phẩm (5 sản phẩm đầu):")
             for i, product in enumerate(products[:5], 1):
                 print(f"  {i}. {product.get('name', 'N/A')}")
                 print(f"     ID: {product.get('product_id')}")
                 print(f"     URL: {product.get('url')}")
                 if product.get("image_url"):
                     print(f"     Hình: {product.get('image_url')[:50]}...")
-                print(f"     (Giá, đánh giá, số lượng bán sẽ crawl detail sau)")
+                print("     (Giá, đánh giá, số lượng bán sẽ crawl detail sau)")
                 print()
 
         if len(products) == 0:
@@ -178,7 +177,7 @@ def test_crawl_multiple_categories():
     output_file = "data/demo/products/products.json"
 
     try:
-        with open(categories_file, "r", encoding="utf-8") as f:
+        with open(categories_file, encoding="utf-8") as f:
             all_categories = json.load(f)
 
         # Filter lấy các danh mục ở DEEP LEVEL (level 3-4) - có nhiều sản phẩm cụ thể
@@ -215,9 +214,9 @@ def test_crawl_multiple_categories():
 
         print(f"📖 Đã chọn {len(selected_categories)} danh mục ở deep level (level 3-4)")
         print(f"📁 File output: {output_file}")
-        print(f"📝 Lưu ý: Crawl HẾT sản phẩm (TẤT CẢ trang) trong các danh mục này")
-        print(f"          Chỉ lấy thông tin cơ bản (ID, tên, URL, hình)")
-        print(f"          Giá, đánh giá, số lượng bán sẽ crawl detail sau")
+        print("📝 Lưu ý: Crawl HẾT sản phẩm (TẤT CẢ trang) trong các danh mục này")
+        print("          Chỉ lấy thông tin cơ bản (ID, tên, URL, hình)")
+        print("          Giá, đánh giá, số lượng bán sẽ crawl detail sau")
         print(f"\n📋 Danh sách {len(selected_categories)} danh mục sẽ crawl:")
         for i, cat in enumerate(selected_categories, 1):
             print(f"   {i}. {cat.get('name')} (Level {cat.get('level')})")
@@ -240,7 +239,7 @@ def test_crawl_multiple_categories():
             categories_filter=filter_selected_categories,  # Chỉ crawl các danh mục đã chọn
         )
 
-        print(f"\n✅ Crawl hoàn thành!")
+        print("\n✅ Crawl hoàn thành!")
         print(f"📦 Tổng sản phẩm: {len(products)}")
         print(f"📁 File output: {output_file}")
 
@@ -262,7 +261,7 @@ def test_crawl_multiple_categories():
                         cat_url.split("/")[-2] if "/" in cat_url else "Unknown"
                     )
 
-            print(f"\n📊 Thống kê theo danh mục:")
+            print("\n📊 Thống kê theo danh mục:")
             print(f"   Số danh mục: {len(category_stats)}")
             print(f"   Tổng sản phẩm: {len(products)}")
 

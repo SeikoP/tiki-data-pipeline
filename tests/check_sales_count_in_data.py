@@ -22,7 +22,7 @@ for file_path in files_to_check:
     print(f"{'='*70}")
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
 
         # Lấy products
@@ -66,12 +66,12 @@ for file_path in files_to_check:
         print(f"   Khong co sales_count: {min(100, total) - has_sales_count}/{min(100, total)}")
 
         if sales_count_types:
-            print(f"\n   Loai sales_count:")
+            print("\n   Loai sales_count:")
             for stype, count in sales_count_types.items():
                 print(f"      - {stype}: {count}")
 
         if sales_count_samples:
-            print(f"\n   Vi du sales_count:")
+            print("\n   Vi du sales_count:")
             for sample in sales_count_samples:
                 print(
                     f"      - Product {sample['product_id']}: {sample['sales_count']} (type: {sample['type']})"
@@ -80,7 +80,7 @@ for file_path in files_to_check:
         # Hiển thị các fields có trong product
         if products:
             sample_product = products[0]
-            print(f"\n   Cac fields trong product:")
+            print("\n   Cac fields trong product:")
             for key in sorted(sample_product.keys()):
                 value = sample_product[key]
                 value_type = type(value).__name__

@@ -1,12 +1,10 @@
 import json
 import os
 import re
-import sys
 import time
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, urljoin
 
 import requests
 
@@ -32,7 +30,6 @@ try:
 except ImportError:
     # Fallback: absolute import (khi được load qua importlib)
     import os
-    import sys
 
     # Tìm utils.py trong cùng thư mục
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -56,9 +53,9 @@ except ImportError:
             DEFAULT_DATA_DIR = utils_module.DEFAULT_DATA_DIR
             DEFAULT_CACHE_DIR = utils_module.DEFAULT_CACHE_DIR
         else:
-            raise ImportError(f"Không thể load utils từ {utils_path}")
+            raise ImportError(f"Không thể load utils từ {utils_path}") from None
     else:
-        raise ImportError(f"Không tìm thấy utils.py tại {utils_path}")
+        raise ImportError(f"Không tìm thấy utils.py tại {utils_path}") from None
 
 # Setup UTF-8 encoding
 setup_utf8_encoding()
@@ -131,13 +128,13 @@ def _check_selenium_available():
         return HAS_SELENIUM
 
     try:
-        from selenium import webdriver
+        from selenium import webdriver  # noqa: F401
 
         HAS_SELENIUM = True
 
         # Thử import webdriver-manager
         try:
-            from webdriver_manager.chrome import ChromeDriverManager
+            from webdriver_manager.chrome import ChromeDriverManager  # noqa: F401
 
             HAS_WEBDRIVER_MANAGER = True
         except ImportError:
@@ -255,9 +252,9 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
                     driver = webdriver.Chrome(service=service, options=chrome_options)
                 except Exception:
                     # Nếu webdriver-manager cũng fail, raise lỗi gốc
-                    raise e
+                    raise e from None
             else:
-                raise e
+                raise e from None
         else:
             # Lỗi khác, raise ngay
             raise
@@ -359,7 +356,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
                     pass  # Ignore cache errors
 
             return html
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             if attempt == max_retries - 1:
                 raise
             time.sleep(2**attempt)  # Exponential backoff
@@ -493,10 +490,10 @@ def parse_products_from_next_data(html_content):
                     if product_id and name:
                         products.append(product)
 
-                except Exception as e:
+                except Exception:
                     continue
 
-    except Exception as e:
+    except Exception:
         pass
 
     return products
@@ -623,7 +620,7 @@ def parse_products_from_html(html_content, category_url):
             if product_id and name:
                 products.append(product)
 
-        except Exception as e:
+        except Exception:
             continue
 
     return products
@@ -655,7 +652,7 @@ def get_total_pages(html_content):
                     try:
                         page_num = int(page_text)
                         max_page = max(max_page, page_num)
-                    except:
+                    except Exception:
                         pass
 
     # Hoặc thử tìm từ text "Trang X/Y"
@@ -665,7 +662,7 @@ def get_total_pages(html_content):
         if page_match:
             try:
                 max_page = int(page_match.group(1))
-            except:
+            except Exception:
                 pass
 
     return max_page
@@ -690,6 +687,7 @@ def crawl_category_products(
     use_selenium=False,
     cache_dir="data/demo/products/cache",
     use_redis_cache=True,
+    use_rate_limiting=True,
 ):
     """Crawl tất cả sản phẩm từ một danh mục
 
@@ -715,7 +713,7 @@ def crawl_category_products(
                 if cached_products:
                     print(f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}...")
                     return cached_products
-        except Exception as e:
+        except Exception:
             # Redis không available, fallback về file cache
             pass  # Silent fallback
 
@@ -745,7 +743,7 @@ def crawl_category_products(
                     use_rate_limiting=use_rate_limiting,
                 )
             else:
-                print(f"⚠️  Selenium chưa được cài đặt, dùng requests thay thế")
+                print("⚠️  Selenium chưa được cài đặt, dùng requests thay thế")
                 html = get_page_with_requests(
                     category_url,
                     use_redis_cache=use_redis_cache,
@@ -759,7 +757,7 @@ def crawl_category_products(
             if html:
                 products_test = parse_products_from_html(html, category_url)
                 if not products_test and _check_selenium_available():
-                    print(f"⚠️  Không tìm thấy sản phẩm với requests, thử Selenium...")
+                    print("⚠️  Không tìm thấy sản phẩm với requests, thử Selenium...")
                     html = get_page_with_selenium(category_url)
                     use_selenium = True  # Đánh dấu đã dùng Selenium
 
@@ -786,7 +784,7 @@ def crawl_category_products(
                             ensure_ascii=False,
                             indent=2,
                         )
-                except:
+                except Exception:
                     pass
             return []
 
@@ -825,7 +823,7 @@ def crawl_category_products(
                 if not use_rate_limiting:
                     time.sleep(1)  # Delay giữa các trang
 
-            except Exception as e:
+            except Exception:
                 continue
 
         # Loại bỏ trùng lặp theo product_id
@@ -861,12 +859,12 @@ def crawl_category_products(
                         ensure_ascii=False,
                         indent=2,
                     )
-            except:
+            except Exception:
                 pass
 
         return unique_products
 
-    except Exception as e:
+    except Exception:
         return []
 
 
@@ -892,7 +890,7 @@ def crawl_single_category(category, max_pages=None, use_selenium=False):
 
         return category, products
 
-    except Exception as e:
+    except Exception:
         with stats_lock:
             stats["total_categories"] += 1
             stats["total_failed"] += 1
@@ -935,7 +933,7 @@ def crawl_products_from_categories(
     # Đọc danh mục
     print(f"📖 Đang đọc danh mục từ: {categories_file}")
     try:
-        with open(categories_file, "r", encoding="utf-8") as f:
+        with open(categories_file, encoding="utf-8") as f:
             categories = json.load(f)
         print(f"✓ Đã đọc {len(categories)} danh mục")
     except Exception as e:
@@ -953,7 +951,7 @@ def crawl_products_from_categories(
         print(f"✓ Giới hạn: {len(categories)} danh mục")
 
     # Crawl song song
-    print(f"\n🚀 Bắt đầu crawl sản phẩm...")
+    print("\n🚀 Bắt đầu crawl sản phẩm...")
     print(f"📊 Số thread: {max_workers}")
     print(f"🔧 Sử dụng Selenium: {use_selenium}")
     print(f"📄 Trang tối đa mỗi danh mục: {max_pages_per_category or 'Tất cả'}")
@@ -993,7 +991,7 @@ def crawl_products_from_categories(
                             "📦": stats["total_products"],
                         }
                     )
-                except Exception as e:
+                except Exception:
                     with stats_lock:
                         stats["total_failed"] += 1
                     pbar.set_postfix(
@@ -1019,8 +1017,8 @@ def crawl_products_from_categories(
         output_file = "data/demo/products/products.json"
 
     print(f"\n💾 Đang lưu kết quả vào: {output_file}")
-    print(f"📝 Lưu ý: Crawl thông tin cơ bản (ID, tên, URL, hình, số lượng bán)")
-    print(f"          Giá, đánh giá chi tiết sẽ được crawl detail sau")
+    print("📝 Lưu ý: Crawl thông tin cơ bản (ID, tên, URL, hình, số lượng bán)")
+    print("          Giá, đánh giá chi tiết sẽ được crawl detail sau")
 
     # Đảm bảo tất cả products có sales_count (kể cả None)
     for product in unique_products:

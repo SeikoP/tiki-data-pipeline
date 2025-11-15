@@ -8,8 +8,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
 
 # Thử import webdriver-manager
 try:
@@ -92,10 +90,10 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
                     btn.click()
                     time.sleep(0.3)  # Giảm từ 0.5 xuống 0.3
                     if verbose:
-                        print(f"[Selenium] Đã click expand danh mục")
-                except:
+                        print("[Selenium] Đã click expand danh mục")
+                except Exception:
                     continue
-        except:
+        except Exception:
             pass
 
         # Scroll thêm để đảm bảo load hết
@@ -176,7 +174,7 @@ def parse_categories(html_content, parent_url=None, level=0):
 
     # Nếu không tìm thấy section có hình ảnh, báo lỗi
     if not category_section:
-        print(f"[Parse] ⚠ Không tìm thấy phần 'Khám phá theo danh mục' có hình ảnh")
+        print("[Parse] ⚠ Không tìm thấy phần 'Khám phá theo danh mục' có hình ảnh")
         return []
 
     # Tìm tất cả link có pattern danh mục trong section
@@ -352,7 +350,7 @@ if __name__ == "__main__":
     categories = parse_categories(html_content)
 
     # In vài danh mục đầu
-    print(f"\nVài danh mục đầu tiên:")
+    print("\nVài danh mục đầu tiên:")
     for category in categories[:10]:
         print(f"  - {category['name']}: {category['url']}")
 

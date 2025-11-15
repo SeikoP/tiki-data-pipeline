@@ -1,5 +1,4 @@
 import json
-import os
 import sys
 
 # Set UTF-8 encoding cho stdout trên Windows
@@ -9,13 +8,13 @@ if sys.platform == "win32":
 
         if hasattr(sys.stdout, "buffer") and not sys.stdout.closed:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except:
+    except Exception:
         try:
             import io
 
             if hasattr(sys.stdout, "buffer"):
                 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        except:
+        except Exception:
             pass
 
 
@@ -161,7 +160,7 @@ def main():
     # Đọc dữ liệu từ file
     print(f"📖 Đang đọc: {input_file}")
     try:
-        with open(input_file, "r", encoding="utf-8") as f:
+        with open(input_file, encoding="utf-8") as f:
             categories = json.load(f)
         print(f"✓ Đã đọc {len(categories)} danh mục")
     except FileNotFoundError:
@@ -172,7 +171,7 @@ def main():
         return
 
     # Xây dựng cây phân cấp
-    print(f"\n🔨 Đang xây dựng cây phân cấp...")
+    print("\n🔨 Đang xây dựng cây phân cấp...")
     tree = build_category_tree(categories)
 
     # Tính thống kê
@@ -183,7 +182,7 @@ def main():
     print(f"✓ Độ sâu tối đa: {stats['max_depth']}")
 
     # In thống kê theo level
-    print(f"\n📊 Thống kê theo level:")
+    print("\n📊 Thống kê theo level:")
     for level in sorted(stats["level_counts"].keys()):
         print(f"  Level {level}: {stats['level_counts'][level]} danh mục")
 
@@ -191,10 +190,10 @@ def main():
     print(f"\n💾 Đang lưu vào: {output_file}")
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(tree, f, ensure_ascii=False, indent=2)
-    print(f"✓ Đã lưu thành công!")
+    print("✓ Đã lưu thành công!")
 
     # In preview cây (chỉ 3 level đầu)
-    print(f"\n🌳 Preview cây phân cấp (3 level đầu):")
+    print("\n🌳 Preview cây phân cấp (3 level đầu):")
     print("=" * 70)
     for root in tree[:5]:  # Chỉ in 5 root đầu
         print_tree(root, max_depth=3)

@@ -152,7 +152,7 @@ def main():
         print(f"  Level {level}: {level_counts[level]} danh mục")
 
     # In vài danh mục đầu
-    print(f"\nVài danh mục đầu tiên:")
+    print("\nVài danh mục đầu tiên:")
     for category in unique_categories[:10]:
         indent = "  " * category.get("level", 0)
         level = category.get("level", 0)

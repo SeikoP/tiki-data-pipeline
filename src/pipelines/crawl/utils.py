@@ -9,7 +9,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 
 # ============================================================================
@@ -21,7 +21,7 @@ def setup_utf8_encoding():
         try:
             if hasattr(sys.stdout, "buffer") and not sys.stdout.closed:
                 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except:
+        except Exception:
             try:
                 import io
 
@@ -29,14 +29,14 @@ def setup_utf8_encoding():
                     sys.stdout = io.TextIOWrapper(
                         sys.stdout.buffer, encoding="utf-8", errors="replace"
                     )
-            except:
+            except Exception:
                 pass
 
 
 # ============================================================================
 # Selenium Setup (shared configuration)
 # ============================================================================
-def get_selenium_options(headless: bool = True) -> Optional[Any]:
+def get_selenium_options(headless: bool = True) -> Any | None:
     """
     Tạo Chrome options cho Selenium (shared config)
     Tối ưu hóa để khởi động nhanh hơn
@@ -93,7 +93,7 @@ def get_selenium_options(headless: bool = True) -> Optional[Any]:
         return None
 
 
-def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Optional[Any]:
+def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | None:
     """
     Tạo Selenium WebDriver với cấu hình tối ưu và timeout
 
@@ -182,7 +182,7 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Optional
 # ============================================================================
 # Sales Count Parsing (shared logic)
 # ============================================================================
-def parse_sales_count(value: Union[str, int, float, Dict, None]) -> Optional[int]:
+def parse_sales_count(value: str | int | float | dict | None) -> int | None:
     """
     Parse sales_count từ nhiều format khác nhau
 
@@ -226,7 +226,7 @@ def parse_sales_count(value: Union[str, int, float, Dict, None]) -> Optional[int
             # Thử parse số trực tiếp
             try:
                 return int(re.sub(r"[^\d]", "", value))
-            except:
+            except Exception:
                 return None
 
     return None
@@ -235,7 +235,7 @@ def parse_sales_count(value: Union[str, int, float, Dict, None]) -> Optional[int
 # ============================================================================
 # Price Parsing (shared logic)
 # ============================================================================
-def parse_price(price_text: Optional[str]) -> Optional[int]:
+def parse_price(price_text: str | None) -> int | None:
     """
     Parse giá từ text (ví dụ: '389.000₫' -> 389000)
 
@@ -252,21 +252,21 @@ def parse_price(price_text: Optional[str]) -> Optional[int]:
     price_clean = re.sub(r"[^\d]", "", str(price_text))
     try:
         return int(price_clean) if price_clean else None
-    except:
+    except Exception:
         return None
 
 
 # ============================================================================
 # File Operations (optimized)
 # ============================================================================
-def ensure_dir(path: Union[str, Path]) -> Path:
+def ensure_dir(path: str | Path) -> Path:
     """Đảm bảo thư mục tồn tại"""
     path_obj = Path(path)
     path_obj.mkdir(parents=True, exist_ok=True)
     return path_obj
 
 
-def atomic_write_json(filepath: Union[str, Path], data: Any, **kwargs) -> bool:
+def atomic_write_json(filepath: str | Path, data: Any, **kwargs) -> bool:
     """
     Ghi JSON file một cách atomic (tránh corrupt file)
 
@@ -300,17 +300,17 @@ def atomic_write_json(filepath: Union[str, Path], data: Any, **kwargs) -> bool:
             os.rename(str(temp_file), str(filepath))
 
         return True
-    except Exception as e:
+    except Exception:
         # Xóa temp file nếu có lỗi
         try:
             if temp_file.exists():
                 temp_file.unlink()
-        except:
+        except Exception:
             pass
         return False
 
 
-def safe_read_json(filepath: Union[str, Path], default: Any = None) -> Any:
+def safe_read_json(filepath: str | Path, default: Any = None) -> Any:
     """
     Đọc JSON file một cách an toàn
 
@@ -326,16 +326,16 @@ def safe_read_json(filepath: Union[str, Path], default: Any = None) -> Any:
         return default
 
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             return json.load(f)
-    except:
+    except Exception:
         return default
 
 
 # ============================================================================
 # URL Utilities
 # ============================================================================
-def extract_product_id_from_url(url: str) -> Optional[str]:
+def extract_product_id_from_url(url: str) -> str | None:
     """
     Extract product ID từ URL Tiki
 

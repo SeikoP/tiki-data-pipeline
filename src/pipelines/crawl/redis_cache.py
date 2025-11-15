@@ -11,8 +11,7 @@ Các tính năng:
 import hashlib
 import json
 import time
-from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 try:
     import redis
@@ -43,18 +42,18 @@ class RedisCache:
         """Tạo key với prefix"""
         return f"{self.prefix}{key}"
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Lấy giá trị từ cache"""
         try:
             value = self.client.get(self._make_key(key))
             if value:
                 return json.loads(value)
             return None
-        except Exception as e:
+        except Exception:
             # Nếu lỗi, return None để fallback về file cache
             return None
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+    def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
         """Lưu giá trị vào cache"""
         try:
             ttl = ttl or self.default_ttl
@@ -82,12 +81,12 @@ class RedisCache:
         url_hash = hashlib.md5(url.encode()).hexdigest()
         return f"{cache_type}:{url_hash}"
 
-    def cache_html(self, url: str, html: str, ttl: Optional[int] = None) -> bool:
+    def cache_html(self, url: str, html: str, ttl: int | None = None) -> bool:
         """Cache HTML content"""
         key = self.get_cache_key(url, "html")
         return self.set(key, {"url": url, "html": html, "cached_at": time.time()}, ttl)
 
-    def get_cached_html(self, url: str) -> Optional[str]:
+    def get_cached_html(self, url: str) -> str | None:
         """Lấy cached HTML"""
         key = self.get_cache_key(url, "html")
         cached = self.get(key)
@@ -95,14 +94,14 @@ class RedisCache:
             return cached.get("html")
         return None
 
-    def cache_products(self, category_url: str, products: list, ttl: Optional[int] = None) -> bool:
+    def cache_products(self, category_url: str, products: list, ttl: int | None = None) -> bool:
         """Cache products từ category"""
         key = self.get_cache_key(category_url, "products")
         return self.set(
             key, {"category_url": category_url, "products": products, "cached_at": time.time()}, ttl
         )
 
-    def get_cached_products(self, category_url: str) -> Optional[list]:
+    def get_cached_products(self, category_url: str) -> list | None:
         """Lấy cached products"""
         key = self.get_cache_key(category_url, "products")
         cached = self.get(key)
@@ -111,7 +110,7 @@ class RedisCache:
         return None
 
     def cache_product_detail(
-        self, product_id: str, detail: dict, ttl: Optional[int] = None
+        self, product_id: str, detail: dict, ttl: int | None = None
     ) -> bool:
         """Cache product detail"""
         key = f"detail:{product_id}"
@@ -119,7 +118,7 @@ class RedisCache:
             key, {"product_id": product_id, "detail": detail, "cached_at": time.time()}, ttl
         )
 
-    def get_cached_product_detail(self, product_id: str) -> Optional[dict]:
+    def get_cached_product_detail(self, product_id: str) -> dict | None:
         """Lấy cached product detail"""
         key = f"detail:{product_id}"
         cached = self.get(key)
@@ -212,7 +211,7 @@ class RedisLock:
         """Tạo key với prefix"""
         return f"{self.prefix}{key}"
 
-    def acquire(self, key: str, timeout: Optional[int] = None, blocking: bool = True) -> bool:
+    def acquire(self, key: str, timeout: int | None = None, blocking: bool = True) -> bool:
         """
         Acquire lock
 
@@ -265,7 +264,7 @@ _redis_rate_limiter_instance = None
 _redis_lock_instance = None
 
 
-def get_redis_cache(redis_url: str = "redis://redis:6379/1") -> Optional[RedisCache]:
+def get_redis_cache(redis_url: str = "redis://redis:6379/1") -> RedisCache | None:
     """Lấy Redis cache instance (singleton)"""
     global _redis_cache_instance
     if not REDIS_AVAILABLE:
@@ -278,7 +277,7 @@ def get_redis_cache(redis_url: str = "redis://redis:6379/1") -> Optional[RedisCa
     return _redis_cache_instance
 
 
-def get_redis_rate_limiter(redis_url: str = "redis://redis:6379/2") -> Optional[RedisRateLimiter]:
+def get_redis_rate_limiter(redis_url: str = "redis://redis:6379/2") -> RedisRateLimiter | None:
     """Lấy Redis rate limiter instance (singleton)"""
     global _redis_rate_limiter_instance
     if not REDIS_AVAILABLE:
@@ -291,7 +290,7 @@ def get_redis_rate_limiter(redis_url: str = "redis://redis:6379/2") -> Optional[
     return _redis_rate_limiter_instance
 
 
-def get_redis_lock(redis_url: str = "redis://redis:6379/2") -> Optional[RedisLock]:
+def get_redis_lock(redis_url: str = "redis://redis:6379/2") -> RedisLock | None:
     """Lấy Redis lock instance (singleton)"""
     global _redis_lock_instance
     if not REDIS_AVAILABLE:

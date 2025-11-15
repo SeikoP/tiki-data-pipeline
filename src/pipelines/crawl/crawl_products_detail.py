@@ -6,10 +6,8 @@
 # from bs4 import BeautifulSoup
 import json
 import re
-import sys
 import time
 from datetime import datetime
-from urllib.parse import parse_qs, urlparse
 
 # Import shared utilities - hỗ trợ cả relative và absolute import
 try:
@@ -26,7 +24,6 @@ try:
 except ImportError:
     # Fallback: absolute import (khi được load qua importlib)
     import os
-    import sys
 
     # Tìm utils.py trong cùng thư mục
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -46,9 +43,9 @@ except ImportError:
             atomic_write_json = utils_module.atomic_write_json
             ensure_dir = utils_module.ensure_dir
         else:
-            raise ImportError(f"Không thể load utils từ {utils_path}")
+            raise ImportError(f"Không thể load utils từ {utils_path}") from None
     else:
-        raise ImportError(f"Không tìm thấy utils.py tại {utils_path}")
+        raise ImportError(f"Không tìm thấy utils.py tại {utils_path}") from None
 
 # Setup UTF-8 encoding
 setup_utf8_encoding()
@@ -115,7 +112,7 @@ def crawl_product_detail_with_selenium(
         except Exception:
             # Nếu rate limiter không available, fallback về sleep cố định
             if verbose:
-                print(f"[Rate Limiter] ⚠️  Rate limiter không available, dùng delay cố định")
+                print("[Rate Limiter] ⚠️  Rate limiter không available, dùng delay cố định")
             time.sleep(2)  # Delay cơ bản cho Selenium
 
     driver = None
@@ -210,7 +207,7 @@ def crawl_product_detail_with_selenium(
             if driver:
                 try:
                     driver.quit()
-                except:
+                except Exception:
                     pass
                 driver = None
 
@@ -231,7 +228,7 @@ def crawl_product_detail_with_selenium(
     if driver:
         try:
             driver.quit()
-        except:
+        except Exception:
             pass
 
     raise (
@@ -347,7 +344,7 @@ def extract_product_detail(html_content, url, verbose=True):
             if rating_match:
                 try:
                     product_data["rating"]["average"] = float(rating_match.group(1))
-                except:
+                except Exception:
                     pass
             break
 
@@ -365,7 +362,7 @@ def extract_product_detail(html_content, url, verbose=True):
             if count_match:
                 try:
                     product_data["rating"]["total_reviews"] = int(count_match.group(1))
-                except:
+                except Exception:
                     pass
             break
 
