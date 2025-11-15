@@ -4,29 +4,29 @@
 # from selenium.webdriver.support.ui import WebDriverWait
 # from selenium.webdriver.support import expected_conditions as EC
 # from bs4 import BeautifulSoup
-import time
 import json
 import re
 import sys
+import time
 from datetime import datetime
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 # Import shared utilities - hỗ trợ cả relative và absolute import
 try:
     # Thử relative import trước (khi chạy như package)
     from .utils import (
-        setup_utf8_encoding,
-        parse_sales_count,
-        parse_price,
-        extract_product_id_from_url,
-        create_selenium_driver,
         atomic_write_json,
+        create_selenium_driver,
         ensure_dir,
+        extract_product_id_from_url,
+        parse_price,
+        parse_sales_count,
+        setup_utf8_encoding,
     )
 except ImportError:
     # Fallback: absolute import (khi được load qua importlib)
-    import sys
     import os
+    import sys
 
     # Tìm utils.py trong cùng thư mục
     current_dir = os.path.dirname(os.path.abspath(__file__))

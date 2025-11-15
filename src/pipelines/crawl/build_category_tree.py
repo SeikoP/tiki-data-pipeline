@@ -1,6 +1,6 @@
 import json
-import sys
 import os
+import sys
 
 # Set UTF-8 encoding cho stdout trên Windows
 if sys.platform == "win32":

@@ -1,13 +1,12 @@
-import json
-import sys
-import os
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
-from collections import defaultdict
-
 # Import từ file cùng thư mục
 import importlib.util
+import json
+import os
+import sys
+import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 spec = importlib.util.spec_from_file_location(
     "extract_category_link_selenium",

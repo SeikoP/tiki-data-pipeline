@@ -28,10 +28,11 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Optional
 
-from airflow import DAG
 from airflow.configuration import conf
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.utils.session import provide_session
+
+from airflow import DAG
 
 # Import Variable và TaskGroup với suppress warning
 try:
@@ -198,8 +199,8 @@ else:
         from crawl_products import (
             crawl_category_products,
             get_page_with_requests,
-            parse_products_from_html,
             get_total_pages,
+            parse_products_from_html,
         )
     except ImportError as e:
         # Debug: kiểm tra xem thư mục có tồn tại không

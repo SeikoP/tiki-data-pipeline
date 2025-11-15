@@ -3,13 +3,13 @@ Shared utilities cho crawl pipeline
 Tối ưu: loại bỏ code duplication, cải thiện performance
 """
 
-import sys
+import json
 import os
 import re
-import json
+import sys
 import time
-from typing import Optional, Union, Dict, Any
 from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 
 # ============================================================================
@@ -109,9 +109,10 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Optional
         WebDriver object hoặc None nếu Selenium không có
     """
     try:
+        import threading
+
         from selenium import webdriver
         from selenium.webdriver.chrome.service import Service
-        import threading
 
         chrome_options = get_selenium_options(headless)
         if not chrome_options:
@@ -141,10 +142,10 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Optional
 
                     # Ưu tiên 2: Thử dùng webdriver-manager (chậm hơn, có thể download)
                     try:
-                        from webdriver_manager.chrome import ChromeDriverManager
-
                         # Tắt log của webdriver_manager để giảm noise
                         import logging
+
+                        from webdriver_manager.chrome import ChromeDriverManager
 
                         wdm_logger = logging.getLogger("WDM")
                         wdm_logger.setLevel(logging.WARNING)

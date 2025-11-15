@@ -1,12 +1,13 @@
 import json
-import sys
 import os
-import time
 import re
+import sys
+import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
-from collections import defaultdict
-from urllib.parse import urljoin, urlparse, parse_qs
+from urllib.parse import parse_qs, urljoin, urlparse
+
 import requests
 
 # Lazy import BeautifulSoup để tránh timeout khi load DAG
@@ -16,22 +17,22 @@ import requests
 try:
     # Thử relative import trước (khi chạy như package)
     from .utils import (
-        setup_utf8_encoding,
-        parse_sales_count,
-        parse_price,
-        ensure_dir,
+        DEFAULT_CACHE_DIR,
+        DEFAULT_DATA_DIR,
+        RateLimiter,
         atomic_write_json,
-        safe_read_json,
+        ensure_dir,
         extract_product_id_from_url,
         normalize_url,
-        RateLimiter,
-        DEFAULT_DATA_DIR,
-        DEFAULT_CACHE_DIR,
+        parse_price,
+        parse_sales_count,
+        safe_read_json,
+        setup_utf8_encoding,
     )
 except ImportError:
     # Fallback: absolute import (khi được load qua importlib)
-    import sys
     import os
+    import sys
 
     # Tìm utils.py trong cùng thư mục
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -242,10 +243,10 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
         if "chromedriver" in error_msg or "driver" in error_msg:
             if HAS_WEBDRIVER_MANAGER:
                 try:
-                    from webdriver_manager.chrome import ChromeDriverManager
-
                     # Tắt log của webdriver_manager để giảm noise
                     import logging
+
+                    from webdriver_manager.chrome import ChromeDriverManager
 
                     wdm_logger = logging.getLogger("WDM")
                     wdm_logger.setLevel(logging.WARNING)

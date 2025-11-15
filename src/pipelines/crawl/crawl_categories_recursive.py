@@ -1,9 +1,8 @@
-import json
-import sys
-import os
-
 # Import từ file cùng thư mục
 import importlib.util
+import json
+import os
+import sys
 
 spec = importlib.util.spec_from_file_location(
     "extract_category_link_selenium",

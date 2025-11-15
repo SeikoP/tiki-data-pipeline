@@ -3,7 +3,7 @@ Configuration cho crawl pipeline
 """
 
 import os
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 def get_config() -> Dict[str, Any]:
