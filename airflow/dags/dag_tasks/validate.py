@@ -1,15 +1,23 @@
 """
 Validate and aggregate tasks for Tiki crawl products DAG
 """
-import json
 import os
+import sys
+
+# CRITICAL: Phải thêm sys.path TRƯỚC tất cả imports khác
+_dags_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _dags_dir not in sys.path:
+    sys.path.insert(0, _dags_dir)
+
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..dag_helpers.config import OUTPUT_FILE, OUTPUT_FILE_WITH_DETAIL
-from ..dag_helpers.shared_state import DataAggregator, AISummarizer, DiscordNotifier
-from ..dag_helpers.utils import Variable, get_logger
+# Sử dụng absolute imports thay vì relative imports
+from dag_helpers.config import OUTPUT_FILE, OUTPUT_FILE_WITH_DETAIL
+from dag_helpers.shared_state import DataAggregator, AISummarizer, DiscordNotifier
+from dag_helpers.utils import Variable, get_logger
 
 
 def validate_data(**context) -> dict[str, Any]:

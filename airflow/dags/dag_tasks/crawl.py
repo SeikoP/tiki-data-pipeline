@@ -1,8 +1,15 @@
 """
 Crawl tasks for Tiki crawl products DAG
 """
-import json
 import os
+import sys
+
+# CRITICAL: Phải thêm sys.path TRƯỚC tất cả imports khác
+_dags_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _dags_dir not in sys.path:
+    sys.path.insert(0, _dags_dir)
+
+import json
 import shutil
 import time
 from datetime import datetime
@@ -10,8 +17,9 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from ..dag_helpers.config import CACHE_DIR, OUTPUT_DIR, OUTPUT_FILE
-from ..dag_helpers.shared_state import (
+# Sử dụng absolute imports thay vì relative imports
+from dag_helpers.config import CACHE_DIR, OUTPUT_DIR, OUTPUT_FILE
+from dag_helpers.shared_state import (
     tiki_circuit_breaker,
     tiki_dlq,
     tiki_degradation,
@@ -19,7 +27,7 @@ from ..dag_helpers.shared_state import (
     CircuitBreakerOpenError,
     classify_error,
 )
-from ..dag_helpers.utils import Variable, get_logger, atomic_write_file
+from dag_helpers.utils import Variable, get_logger, atomic_write_file
 
 
 def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:

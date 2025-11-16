@@ -1,16 +1,23 @@
 """
 Transform and load tasks for Tiki crawl products DAG
 """
-import json
 import os
 import sys
+
+# CRITICAL: Phải thêm sys.path TRƯỚC tất cả imports khác
+_dags_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _dags_dir not in sys.path:
+    sys.path.insert(0, _dags_dir)
+
+import json
 import importlib.util
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..dag_helpers.config import DATA_DIR, OUTPUT_DIR, OUTPUT_FILE_WITH_DETAIL, get_dag_file_dir
-from ..dag_helpers.utils import Variable, get_logger
+# Sử dụng absolute imports thay vì relative imports
+from dag_helpers.config import DATA_DIR, OUTPUT_DIR, OUTPUT_FILE_WITH_DETAIL, get_dag_file_dir
+from dag_helpers.utils import Variable, get_logger
 
 # Get DAG file directory
 dag_file_dir = get_dag_file_dir()

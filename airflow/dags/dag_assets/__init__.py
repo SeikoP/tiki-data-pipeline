@@ -1,7 +1,15 @@
 """
 Asset/Dataset definitions for Tiki crawl products DAG
 """
-from ..dag_helpers.utils import Variable
+import os
+import sys
+
+# CRITICAL: Phải thêm sys.path TRƯỚC tất cả imports khác
+_dags_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _dags_dir not in sys.path:
+    sys.path.insert(0, _dags_dir)
+
+from dag_helpers.utils import Variable
 
 # Check if Dataset is available (Airflow 2.7+)
 try:

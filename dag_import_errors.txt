@@ -1,0 +1,55 @@
+/home/airflow/.local/lib/python3.12/site-packages/airflow/providers/fab/auth_manager/fab_auth_manager.py:108 RemovedInAirflow4Warning: The airflow.security.permissions module is deprecated; please see https://airflow.apache.org/docs/apache-airflow/stable/security/deprecated_permissions.html
+bundle_name | filepath               | error                                                                                               
+============+========================+=====================================================================================================
+dags-folder | dag_tasks/extract.py   | Traceback (most recent call last):                                                                  
+            |                        |   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed                      
+            |                        |   File "/opt/airflow/dags/dag_tasks/extract.py", line 11, in <module>                               
+            |                        |     from ..dag_helpers.config import CATEGORIES_FILE, CATEGORIES_TREE_FILE                          
+            |                        | ImportError: attempted relative import with no known parent package                                 
+            |                        |                                                                                                     
+dags-folder | dag_assets/__init__.py | Traceback (most recent call last):                                                                  
+            |                        |   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed                      
+            |                        |   File "/opt/airflow/dags/dag_assets/__init__.py", line 4, in <module>                              
+            |                        |     from ..dag_helpers.utils import Variable                                                        
+            |                        | ImportError: attempted relative import beyond top-level package                                     
+            |                        |                                                                                                     
+dags-folder | dag_helpers/config.py  | Traceback (most recent call last):                                                                  
+            |                        |   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed                      
+            |                        |   File "/opt/airflow/dags/dag_helpers/config.py", line 8, in <module>                               
+            |                        |     from .utils import Variable                                                                     
+            |                        | ImportError: attempted relative import with no known parent package                                 
+            |                        |                                                                                                     
+dags-folder | dag_tasks/detail.py    | Traceback (most recent call last):                                                                  
+            |                        |   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed                      
+            |                        |   File "/opt/airflow/dags/dag_tasks/detail.py", line 25, in <module>                                
+            |                        |     from dag_helpers.shared_state import (                                                          
+            |                        |   File "/opt/airflow/dags/dag_helpers/shared_state.py", line 39                                     
+            |                        |     global (                                                                                        
+            |                        |            ^                                                                                        
+            |                        | SyntaxError: invalid syntax                                                                         
+            |                        |                                                                                                     
+dags-folder | dag_tasks/crawl.py     | Traceback (most recent call last):                                                                  
+            |                        |   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed                      
+            |                        |   File "/opt/airflow/dags/dag_tasks/crawl.py", line 26, in <module>                                 
+            |                        |     from dag_helpers.shared_state import (                                                          
+            |                        |   File "/opt/airflow/dags/dag_helpers/shared_state.py", line 39                                     
+            |                        |     global (                                                                                        
+            |                        |            ^                                                                                        
+            |                        | SyntaxError: invalid syntax                                                                         
+            |                        |                                                                                                     
+dags-folder | dag_tasks/validate.py  | Traceback (most recent call last):                                                                  
+            |                        |   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed                      
+            |                        |   File "/opt/airflow/dags/dag_tasks/validate.py", line 23, in <module>                              
+            |                        |     from dag_helpers.shared_state import DataAggregator, AISummarizer, DiscordNotifier              
+            |                        |   File "/opt/airflow/dags/dag_helpers/shared_state.py", line 39                                     
+            |                        |     global (                                                                                        
+            |                        |            ^                                                                                        
+            |                        | SyntaxError: invalid syntax                                                                         
+            |                        |                                                                                                     
+dags-folder | dag_tasks/transform.py | Traceback (most recent call last):                                                                  
+            |                        |   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed                      
+            |                        |   File "/opt/airflow/dags/dag_tasks/transform.py", line 12, in <module>                             
+            |                        |     from ..dag_helpers.config import DATA_DIR, OUTPUT_DIR, OUTPUT_FILE_WITH_DETAIL, get_dag_file_dir
+            |                        | ImportError: attempted relative import with no known parent package                                 
+            |                        |                                                                                                     
+                                                                                                                                           

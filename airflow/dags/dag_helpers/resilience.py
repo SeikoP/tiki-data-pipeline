@@ -1,11 +1,19 @@
 """
 Resilience patterns setup for Tiki crawl products DAG
 """
+import os
+import sys
+
+# CRITICAL: Phải thêm sys.path TRƯỚC tất cả imports khác
+_dags_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _dags_dir not in sys.path:
+    sys.path.insert(0, _dags_dir)
+
 from pathlib import Path
 
-from .config import DATA_DIR
-from .imports import import_resilience_patterns
-from .utils import Variable
+from dag_helpers.config import DATA_DIR
+from dag_helpers.imports import import_resilience_patterns
+from dag_helpers.utils import Variable
 
 
 def setup_resilience_patterns(dag_file_dir):

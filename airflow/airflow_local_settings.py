@@ -10,6 +10,13 @@ connect_args sẽ được sử dụng bởi SQLAlchemy để force TCP/IP conne
 # Điều này đảm bảo psycopg2 không cố dùng Unix socket
 # Bằng cách chỉ định rõ host và port trong connect_args
 import os
+import sys
+
+# CRITICAL: Thêm /opt/airflow/dags vào sys.path để absolute imports hoạt động
+# Airflow có thể không tự động thêm dags folder vào sys.path
+_dags_dir = "/opt/airflow/dags"
+if _dags_dir not in sys.path:
+    sys.path.insert(0, _dags_dir)
 
 connect_args = {
     "host": os.getenv("POSTGRES_HOST", "postgres"),  # Hostname trong Docker network

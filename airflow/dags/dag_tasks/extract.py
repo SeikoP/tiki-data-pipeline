@@ -1,15 +1,23 @@
 """
 Extract and load tasks for Tiki crawl products DAG
 """
-import json
 import os
 import sys
+
+# CRITICAL: Phải thêm sys.path TRƯỚC tất cả imports khác
+# Airflow có thể không tự động thêm /opt/airflow/dags vào sys.path
+_dags_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _dags_dir not in sys.path:
+    sys.path.insert(0, _dags_dir)
+
+import json
 import importlib.util
 from pathlib import Path
 from typing import Any
 
-from ..dag_helpers.config import CATEGORIES_FILE, CATEGORIES_TREE_FILE
-from ..dag_helpers.utils import get_logger, Variable
+# Sử dụng absolute imports thay vì relative imports
+from dag_helpers.config import CATEGORIES_FILE, CATEGORIES_TREE_FILE
+from dag_helpers.utils import get_logger, Variable
 
 
 def extract_and_load_categories_to_db(**context) -> dict[str, Any]:

@@ -36,22 +36,11 @@ def set_shared_state(
     DiscordNotifier_val=None,
 ):
     """Set shared state values"""
-    global (
-        tiki_circuit_breaker,
-        tiki_dlq,
-        tiki_degradation,
-        crawl_category_products,
-        get_page_with_requests,
-        parse_products_from_html,
-        get_total_pages,
-        crawl_product_detail_with_selenium,
-        extract_product_detail,
-        CircuitBreakerOpenError,
-        classify_error,
-        DataAggregator,
-        AISummarizer,
-        DiscordNotifier,
-    )
+    global tiki_circuit_breaker, tiki_dlq, tiki_degradation
+    global crawl_category_products, get_page_with_requests, parse_products_from_html
+    global get_total_pages, crawl_product_detail_with_selenium, extract_product_detail
+    global CircuitBreakerOpenError, classify_error
+    global DataAggregator, AISummarizer, DiscordNotifier
     
     if tiki_circuit_breaker_val is not None:
         tiki_circuit_breaker = tiki_circuit_breaker_val
