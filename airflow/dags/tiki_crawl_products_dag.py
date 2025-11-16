@@ -18,6 +18,7 @@ Dependencies được quản lý bằng >> operator giữa các tasks.
 
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -1970,15 +1971,80 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
                     
                     # Kiểm tra nếu crawl_product_detail_async trả về HTML string (do fallback về Selenium)
                     if isinstance(detail, str) and detail.strip().startswith("<"):
-                        logger.info(f"ℹ️  crawl_product_detail_async trả về HTML (fallback Selenium) cho product {product_id}, đang parse HTML")
-                        # Parse HTML thành dict
-                        try:
-                            detail = extract_product_detail(detail, product_url, verbose=False)
-                            if detail and isinstance(detail, dict):
-                                logger.info(f"✅ Đã parse HTML thành công cho product {product_id}")
-                        except Exception as parse_error:
-                            logger.warning(f"⚠️  Lỗi khi parse HTML từ crawl_product_detail_async: {parse_error}")
+                        # Phân tích HTML để xác định loại
+                        html_preview = detail[:500] if len(detail) > 500 else detail
+                        html_lower = detail.lower()
+                        
+                        # Kiểm tra các trường hợp đặc biệt
+                        # Kiểm tra error page - cần kiểm tra kỹ hơn để tránh false positive
+                        # Error page thường có title hoặc heading chứa "404", "not found", etc.
+                        is_error_page = False
+                        error_keywords = [
+                            "404", "not found", "page not found", 
+                            "500", "internal server error",
+                            "403", "forbidden", "access denied"
+                        ]
+                        # Chỉ coi là error page nếu có keyword trong title hoặc heading, không phải trong toàn bộ HTML
+                        # Vì một số product có thể có "404" trong tên hoặc mô tả
+                        if any(keyword in html_lower for keyword in error_keywords):
+                            # Kiểm tra trong title tag hoặc h1 tag (nơi thường có error message)
+                            title_match = re.search(r'<title[^>]*>(.*?)</title>', html_lower, re.IGNORECASE | re.DOTALL)
+                            h1_match = re.search(r'<h1[^>]*>(.*?)</h1>', html_lower, re.IGNORECASE | re.DOTALL)
+                            
+                            title_text = title_match.group(1) if title_match else ""
+                            h1_text = h1_match.group(1) if h1_match else ""
+                            
+                            # Chỉ coi là error nếu keyword xuất hiện trong title hoặc h1
+                            is_error_page = any(
+                                keyword in title_text or keyword in h1_text 
+                                for keyword in error_keywords
+                            )
+                        
+                        is_captcha = any(keyword in html_lower for keyword in [
+                            "captcha", "recaptcha", "cloudflare", "checking your browser"
+                        ])
+                        has_next_data = "__next_data__" in html_lower or 'id="__NEXT_DATA__"' in html_lower
+                        
+                        # Kiểm tra xem có phải là HTML bình thường của Tiki không
+                        is_tiki_page = any(indicator in html_lower for indicator in [
+                            "tiki.vn", "tiki", "pdp_product_name", "product-detail",
+                            "data-view-id", "pdp-product"
+                        ])
+                        
+                        if is_error_page:
+                            logger.warning(f"⚠️  HTML là error page cho product {product_id}: {html_preview[:200]}...")
                             detail = None
+                        elif is_captcha:
+                            logger.warning(f"⚠️  HTML là captcha/block page cho product {product_id}")
+                            detail = None
+                        elif not is_tiki_page and not has_next_data:
+                            # Nếu không phải Tiki page và không có __NEXT_DATA__, có thể là page lạ
+                            logger.warning(f"⚠️  HTML không giống Tiki product page cho product {product_id}")
+                            logger.warning(f"   - Có __NEXT_DATA__: {has_next_data}")
+                            logger.warning(f"   - HTML preview: {html_preview[:300]}...")
+                            # Vẫn thử parse, có thể vẫn extract được một số thông tin
+                        else:
+                            logger.info(f"ℹ️  crawl_product_detail_async trả về HTML (fallback Selenium) cho product {product_id}")
+                            logger.info(f"   - HTML length: {len(detail)} chars")
+                            logger.info(f"   - Có __NEXT_DATA__: {has_next_data}")
+                            
+                            # Parse HTML thành dict
+                            try:
+                                detail = extract_product_detail(detail, product_url, verbose=False)
+                                if detail and isinstance(detail, dict):
+                                    # Kiểm tra xem có đầy đủ thông tin không
+                                    has_name = bool(detail.get("name"))
+                                    has_price = bool(detail.get("price", {}).get("current_price"))
+                                    has_sales = detail.get("sales_count") is not None
+                                    logger.info(f"✅ Đã parse HTML thành công cho product {product_id}")
+                                    logger.info(f"   - Có name: {has_name}, có price: {has_price}, có sales_count: {has_sales}")
+                                else:
+                                    logger.warning(f"⚠️  extract_product_detail trả về None hoặc không phải dict cho product {product_id}")
+                                    detail = None
+                            except Exception as parse_error:
+                                logger.warning(f"⚠️  Lỗi khi parse HTML từ crawl_product_detail_async: {parse_error}")
+                                logger.debug(f"   HTML preview: {html_preview}")
+                                detail = None
                     
                     # Đảm bảo detail là dict
                     if detail and not isinstance(detail, dict):
