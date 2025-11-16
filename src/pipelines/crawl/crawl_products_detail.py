@@ -8,6 +8,7 @@ import json
 import re
 import time
 from datetime import datetime
+from typing import Any
 
 # Import shared utilities - hỗ trợ cả relative và absolute import
 try:
@@ -764,6 +765,98 @@ def extract_product_detail(html_content, url, verbose=True):
             pass
 
     return product_data
+
+
+async def crawl_product_detail_async(
+    url: str,
+    session=None,
+    use_selenium_fallback: bool = True,
+    verbose: bool = False,
+) -> dict[str, Any] | None:
+    """Crawl product detail bằng aiohttp (async) với Selenium fallback
+    
+    Hybrid approach:
+    - Thử crawl bằng aiohttp trước (nhanh hơn)
+    - Nếu thiếu dynamic content (sales_count), fallback về Selenium
+    
+    Args:
+        url: URL sản phẩm cần crawl
+        session: aiohttp ClientSession (nếu None sẽ tạo mới)
+        use_selenium_fallback: Có dùng Selenium fallback không
+        verbose: Có in log không
+    
+    Returns:
+        Dict product detail hoặc None nếu lỗi
+    """
+    try:
+        import aiohttp
+    except ImportError:
+        if verbose:
+            print("[Async] ⚠️  aiohttp chưa được cài đặt, dùng Selenium fallback")
+        if use_selenium_fallback:
+            return crawl_product_detail_with_selenium(url, verbose=verbose)
+        return None
+    
+    # Tạo session nếu chưa có
+    create_session = session is None
+    if create_session:
+        timeout = aiohttp.ClientTimeout(total=30)
+        session = aiohttp.ClientSession(
+            timeout=timeout,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        )
+    
+    try:
+        # Thử crawl bằng aiohttp
+        async with session.get(url) as response:
+            if response.status != 200:
+                if verbose:
+                    print(f"[Async] ⚠️  HTTP {response.status} cho {url[:60]}...")
+                if use_selenium_fallback:
+                    if create_session:
+                        await session.close()
+                    return crawl_product_detail_with_selenium(url, verbose=verbose)
+                return None
+            
+            html_content = await response.text()
+            
+            # Extract product detail từ HTML
+            product_data = extract_product_detail(html_content, url, verbose=verbose)
+            
+            # Kiểm tra xem có đầy đủ thông tin không (đặc biệt là sales_count)
+            has_price = product_data.get("price", {}).get("current_price") is not None
+            has_sales_count = product_data.get("sales_count") is not None
+            
+            # Nếu thiếu sales_count và có fallback, dùng Selenium
+            if not has_sales_count and use_selenium_fallback:
+                if verbose:
+                    print(f"[Async] ⚠️  Thiếu sales_count, fallback về Selenium cho {url[:60]}...")
+                if create_session:
+                    await session.close()
+                return crawl_product_detail_with_selenium(url, verbose=verbose)
+            
+            # Cập nhật metadata
+            product_data["_metadata"]["extraction_method"] = "aiohttp" if has_sales_count else "aiohttp+selenium_fallback"
+            
+            if verbose:
+                print(f"[Async] ✅ Crawl thành công: {product_data.get('name', 'Unknown')[:50]}...")
+            
+            return product_data
+            
+    except Exception as e:
+        if verbose:
+            print(f"[Async] ❌ Lỗi khi crawl với aiohttp: {e}")
+        # Fallback về Selenium nếu có lỗi
+        if use_selenium_fallback:
+            if create_session:
+                await session.close()
+            return crawl_product_detail_with_selenium(url, verbose=verbose)
+        return None
+    finally:
+        if create_session and session:
+            await session.close()
 
 
 def main():

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -177,6 +178,112 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
 
     except ImportError:
         return None
+
+
+# ============================================================================
+# Selenium Driver Pool (for batch processing optimization)
+# ============================================================================
+class SeleniumDriverPool:
+    """Thread-safe pool để reuse Selenium WebDriver instances
+    
+    Tối ưu: Giảm overhead tạo driver bằng cách reuse drivers trong batch processing
+    """
+
+    def __init__(self, pool_size: int = 5, headless: bool = True, timeout: int = 60):
+        """
+        Args:
+            pool_size: Số lượng drivers tối đa trong pool
+            headless: Chạy headless mode hay không
+            timeout: Timeout cho việc tạo driver (giây)
+        """
+        self.pool_size = pool_size
+        self.headless = headless
+        self.timeout = timeout
+        self.pool: list[Any] = []
+        self.lock = threading.Lock()
+        self.created_count = 0  # Track số lượng drivers đã tạo
+
+    def get_driver(self) -> Any | None:
+        """Lấy driver từ pool hoặc tạo mới nếu pool rỗng
+        
+        Returns:
+            WebDriver object hoặc None nếu không thể tạo
+        """
+        with self.lock:
+            if self.pool:
+                driver = self.pool.pop()
+                # Kiểm tra driver còn hoạt động không
+                try:
+                    # Test driver bằng cách lấy current_url
+                    _ = driver.current_url
+                    return driver
+                except Exception:
+                    # Driver đã bị close hoặc corrupt, tạo mới
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
+                    # Fall through để tạo driver mới
+
+            # Pool rỗng hoặc driver không hợp lệ, tạo mới
+            if self.created_count < self.pool_size * 2:  # Cho phép tạo thêm một chút
+                driver = create_selenium_driver(headless=self.headless, timeout=self.timeout)
+                if driver:
+                    self.created_count += 1
+                return driver
+            else:
+                # Đã tạo quá nhiều drivers, không tạo thêm
+                return None
+
+    def return_driver(self, driver: Any) -> None:
+        """Trả driver về pool hoặc đóng nếu pool đầy
+        
+        Args:
+            driver: WebDriver object cần trả về pool
+        """
+        if not driver:
+            return
+
+        with self.lock:
+            # Kiểm tra driver còn hoạt động không
+            try:
+                _ = driver.current_url
+            except Exception:
+                # Driver đã bị close, không trả về pool
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                return
+
+            # Trả về pool nếu còn chỗ
+            if len(self.pool) < self.pool_size:
+                self.pool.append(driver)
+            else:
+                # Pool đầy, đóng driver
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
+    def cleanup(self) -> None:
+        """Đóng tất cả drivers trong pool"""
+        with self.lock:
+            for driver in self.pool:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+            self.pool.clear()
+            self.created_count = 0
+
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - cleanup pool"""
+        self.cleanup()
 
 
 # ============================================================================

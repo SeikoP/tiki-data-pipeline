@@ -140,6 +140,8 @@ class DataLoader:
             "failed_count": 0,
             "db_loaded": 0,
             "file_loaded": 0,
+            "inserted_count": 0,  # Số products mới được INSERT
+            "updated_count": 0,    # Số products đã có được UPDATE
             "errors": [],
         }
 
@@ -209,12 +211,29 @@ class DataLoader:
         # Load vào database
         if self.enable_db and self.db_storage:
             try:
-                saved_count = self.db_storage.save_products(
+                result = self.db_storage.save_products(
                     products, upsert=upsert, batch_size=self.batch_size
                 )
-                self.stats["db_loaded"] = saved_count
-                self.stats["success_count"] = saved_count
-                logger.info(f"✅ Đã load {saved_count} products vào database")
+                
+                # Xử lý kết quả (có thể là int hoặc dict)
+                if isinstance(result, dict):
+                    # Kết quả từ upsert=True: có thống kê INSERT vs UPDATE
+                    saved_count = result.get("saved_count", 0)
+                    inserted_count = result.get("inserted_count", 0)
+                    updated_count = result.get("updated_count", 0)
+                    self.stats["db_loaded"] = saved_count
+                    self.stats["success_count"] = saved_count
+                    self.stats["inserted_count"] = inserted_count
+                    self.stats["updated_count"] = updated_count
+                    logger.info(f"✅ Đã load {saved_count} products vào database")
+                    logger.info(f"   - INSERT (mới): {inserted_count}")
+                    logger.info(f"   - UPDATE (đã có): {updated_count}")
+                else:
+                    # Kết quả từ upsert=False: chỉ có số lượng
+                    saved_count = result
+                    self.stats["db_loaded"] = saved_count
+                    self.stats["success_count"] = saved_count
+                    logger.info(f"✅ Đã load {saved_count} products vào database")
             except Exception as e:
                 error_msg = f"Lỗi khi load vào database: {str(e)}"
                 self.stats["errors"].append(error_msg)
