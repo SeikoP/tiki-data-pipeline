@@ -1,6 +1,6 @@
 # Kết nối Database từ Máy Local
 
-Hướng dẫn kết nối đến PostgreSQL database trong Docker từ máy local (không phải trong container).
+Hướng dẫn kết nối đến PostgreSQL database trong Docker từ máy local 
 
 ## 📋 Yêu cầu
 

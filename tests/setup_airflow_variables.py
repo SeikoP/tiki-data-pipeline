@@ -29,6 +29,20 @@ try:
 
             # Cấu hình save
             'TIKI_SAVE_BATCH_SIZE': '10000',  # Số sản phẩm mỗi batch khi save
+
+            # Cấu hình DAG schedule
+            'TIKI_DAG_SCHEDULE_MODE': 'manual',  # 'manual' hoặc 'scheduled'
+
+            # Circuit Breaker
+            'TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD': '5',  # Số lỗi tối đa trước khi mở circuit
+            'TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT': '60',  # Thời gian chờ trước khi thử lại (giây)
+
+            # Graceful Degradation
+            'TIKI_DEGRADATION_FAILURE_THRESHOLD': '3',  # Số lỗi tối đa trước khi degrade
+            'TIKI_DEGRADATION_RECOVERY_THRESHOLD': '5',  # Số thành công tối thiểu để recover
+
+            # Redis (cho Dead Letter Queue)
+            'REDIS_URL': 'redis://redis:6379/3',  # Redis URL cho DLQ
         }
 
         print("="*70)

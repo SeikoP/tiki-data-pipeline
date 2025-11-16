@@ -488,7 +488,7 @@ DEFAULT_ARGS = {
     "depends_on_past": False,
     "email_on_failure": False,
     "email_on_retry": False,
-    "retries": 3,  # Retry 3 lần
+    "retries": 1,  # TEST MODE: Giảm retries xuống 1
     "retry_delay": timedelta(minutes=2),  # Delay 2 phút giữa các retry
     "retry_exponential_backoff": True,  # Exponential backoff
     "max_retry_delay": timedelta(minutes=10),
@@ -506,15 +506,15 @@ except Exception:
 if schedule_mode == "scheduled":
     dag_schedule = timedelta(days=1)  # Chạy tự động hàng ngày
     dag_description = (
-        "Crawl sản phẩm Tiki với Dynamic Task Mapping và tối ưu hóa (Tự động chạy hàng ngày)"
+        "TEST - Crawl sản phẩm Tiki với cấu hình tối giản để test E2E (Tự động chạy hàng ngày)"
     )
-    dag_tags = ["tiki", "crawl", "products", "data-pipeline", "scheduled"]
+    dag_tags = ["tiki", "crawl", "products", "data-pipeline", "scheduled", "test"]
 else:
     dag_schedule = None  # Chỉ chạy khi trigger thủ công
     dag_description = (
-        "Crawl sản phẩm Tiki với Dynamic Task Mapping và tối ưu hóa (Chạy thủ công - Test mode)"
+        "TEST - Crawl sản phẩm Tiki với cấu hình tối giản để test E2E (Chạy thủ công - Test mode)"
     )
-    dag_tags = ["tiki", "crawl", "products", "data-pipeline", "manual"]
+    dag_tags = ["tiki", "crawl", "products", "data-pipeline", "manual", "test"]
 
 # Cấu hình DAG schedule
 dag_schedule_config = dag_schedule
@@ -523,7 +523,7 @@ dag_schedule_config = dag_schedule
 dag_doc_md = "Crawl sản phẩm từ Tiki.vn với Dynamic Task Mapping và Selenium"
 
 DAG_CONFIG = {
-    "dag_id": "tiki_crawl_products",
+    "dag_id": "tiki_crawl_products_test",
     "description": dag_description,
     "doc_md": dag_doc_md,
     "default_args": DEFAULT_ARGS,
@@ -532,7 +532,7 @@ DAG_CONFIG = {
     "catchup": False,  # Không chạy lại các task đã bỏ lỡ
     "tags": dag_tags,
     "max_active_runs": 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
-    "max_active_tasks": 10,  # Giảm xuống 10 tasks song song để tránh quá tải khi tạo Selenium driver
+    "max_active_tasks": 3,  # TEST MODE: Giảm xuống 3 tasks song song để test nhanh
 }
 
 # Thư mục dữ liệu
@@ -556,7 +556,7 @@ if not DATA_DIR:
 
 CATEGORIES_FILE = DATA_DIR / "raw" / "categories_recursive_optimized.json"
 CATEGORIES_TREE_FILE = DATA_DIR / "raw" / "categories_tree.json"
-OUTPUT_DIR = DATA_DIR / "raw" / "products"
+OUTPUT_DIR = DATA_DIR / "test_output" / "products"
 CACHE_DIR = OUTPUT_DIR / "cache"
 DETAIL_CACHE_DIR = OUTPUT_DIR / "detail" / "cache"
 OUTPUT_FILE = OUTPUT_DIR / "products.json"
@@ -979,7 +979,8 @@ def load_categories(**context) -> list[dict[str, Any]]:
 
         # Giới hạn số danh mục nếu cần (để test)
         try:
-            max_categories = int(Variable.get("TIKI_MAX_CATEGORIES", default_var="0"))
+            # TEST MODE: Hardcode giới hạn 3 categories
+            max_categories = 3  # Hardcode cho test
             if max_categories > 0:
                 categories = categories[:max_categories]
                 logger.info(f"✓ Giới hạn: {max_categories} danh mục")
@@ -1066,11 +1067,9 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
             return result
 
         # Lấy cấu hình từ Airflow Variables
-        max_pages = int(
-            Variable.get("TIKI_MAX_PAGES_PER_CATEGORY", default_var="20")
-        )  # Mặc định 20 trang để tránh timeout
+        max_pages = 2  # TEST MODE: Hardcode 2 pages cho test  # Mặc định 20 trang để tránh timeout
         use_selenium = Variable.get("TIKI_USE_SELENIUM", default_var="false").lower() == "true"
-        timeout = int(Variable.get("TIKI_CRAWL_TIMEOUT", default_var="300"))  # 5 phút mặc định
+        timeout = 120  # TEST MODE: Giảm timeout xuống 2 phút  # 5 phút mặc định
         rate_limit_delay = float(
             Variable.get("TIKI_RATE_LIMIT_DELAY", default_var="1.0")
         )  # Delay 1s giữa các request
@@ -1592,9 +1591,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         products_per_day = int(
             Variable.get("TIKI_PRODUCTS_PER_DAY", default_var="245")
         )  # Mặc định 280 products/ngày (~30 phút)
-        max_products = int(
-            Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default_var="0")
-        )  # 0 = không giới hạn
+        max_products = 10  # TEST MODE: Hardcode 10 products cho test  # 0 = không giới hạn
 
         logger.info(
             f"⚙️  Cấu hình: {products_per_day} products/ngày, max: {max_products if max_products > 0 else 'không giới hạn'}"
@@ -1899,7 +1896,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
                     product_url,
                     save_html=False,
                     verbose=False,  # Không verbose trong Airflow
-                    max_retries=3,  # Retry 3 lần (tăng từ 2)
+                    max_retries=2,  # TEST MODE: Giảm retry xuống 2
                     timeout=60,  # Timeout 60s (tăng từ 25s để đủ thời gian cho Selenium)
                     use_redis_cache=True,  # Sử dụng Redis cache
                     use_rate_limiting=True,  # Sử dụng rate limiting
@@ -3042,8 +3039,8 @@ def transform_products(**context) -> dict[str, Any]:
             logger.info(f"🔄 Duplicates removed: {transform_stats['duplicates_removed']}")
             logger.info("=" * 70)
 
-            # Lưu transformed products vào file
-            processed_dir = DATA_DIR / "processed"
+            # Lưu transformed products vào file (TEST MODE: dùng test_output)
+            processed_dir = DATA_DIR / "test_output" / "processed"
             processed_dir.mkdir(parents=True, exist_ok=True)
             transformed_file = processed_dir / "products_transformed.json"
 
@@ -3104,8 +3101,8 @@ def load_products(**context) -> dict[str, Any]:
                 pass
 
         if not transform_result:
-            # Fallback: tìm file transformed
-            processed_dir = DATA_DIR / "processed"
+            # Fallback: tìm file transformed (TEST MODE: dùng test_output)
+            processed_dir = DATA_DIR / "test_output" / "processed"
             transformed_file = processed_dir / "products_transformed.json"
             if transformed_file.exists():
                 transform_result = {"transformed_file": str(transformed_file)}
@@ -3172,8 +3169,8 @@ def load_products(**context) -> dict[str, Any]:
             )
 
             try:
-                # Lưu vào processed directory
-                processed_dir = DATA_DIR / "processed"
+                # Lưu vào processed directory (TEST MODE: dùng test_output)
+                processed_dir = DATA_DIR / "test_output" / "processed"
                 processed_dir.mkdir(parents=True, exist_ok=True)
                 final_file = processed_dir / "products_final.json"
 
@@ -3585,7 +3582,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_extract_and_load_categories = PythonOperator(
             task_id="extract_and_load_categories_to_db",
             python_callable=extract_and_load_categories_to_db,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút
             pool="default_pool",
         )
 
@@ -3679,7 +3676,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_crawl_category = PythonOperator.partial(
             task_id="crawl_category",
             python_callable=crawl_single_category,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút mỗi category
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút
             pool="default_pool",  # Có thể tạo pool riêng nếu cần
             retries=1,  # Retry 1 lần (tổng 2 lần thử: 1 lần đầu + 1 retry)
         ).expand(op_kwargs=task_prepare_crawl.output)
@@ -3689,7 +3686,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_merge_products = PythonOperator(
             task_id="merge_products",
             python_callable=merge_products,
-            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=10),  # TEST MODE: Giảm timeout xuống 10 phút
             pool="default_pool",
             trigger_rule="all_done",  # QUAN TRỌNG: Chạy khi tất cả upstream tasks done (success hoặc failed)
         )
@@ -3697,7 +3694,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_save_products = PythonOperator(
             task_id="save_products",
             python_callable=save_products,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút
             pool="default_pool",
         )
 
@@ -3819,14 +3816,14 @@ with DAG(**DAG_CONFIG) as dag:
                 minutes=15
             ),  # Tăng timeout lên 15 phút để đủ thời gian cho Selenium và xử lý
             pool="default_pool",
-            retries=3,  # Tăng retry lên 3 lần để giảm failed tasks
+            retries=1,  # TEST MODE: Giảm retry xuống 1
             retry_delay=timedelta(minutes=1),  # Delay 1 phút giữa các retry
         ).expand(op_kwargs=task_prepare_detail_kwargs.output)
 
         task_merge_product_details = PythonOperator(
             task_id="merge_product_details",
             python_callable=merge_product_details,
-            execution_timeout=timedelta(minutes=60),  # Tăng timeout lên 60 phút cho nhiều products
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút
             pool="default_pool",
             trigger_rule="all_done",  # Chạy khi tất cả upstream tasks done
             # Tăng heartbeat interval để tránh timeout khi xử lý nhiều dữ liệu
@@ -3835,7 +3832,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_save_products_with_detail = PythonOperator(
             task_id="save_products_with_detail",
             python_callable=save_products_with_detail,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút
             pool="default_pool",
         )
 
@@ -3853,14 +3850,14 @@ with DAG(**DAG_CONFIG) as dag:
         task_transform_products = PythonOperator(
             task_id="transform_products",
             python_callable=transform_products,
-            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=10),  # TEST MODE: Giảm timeout xuống 10 phút
             pool="default_pool",
         )
 
         task_load_products = PythonOperator(
             task_id="load_products",
             python_callable=load_products,
-            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=10),  # TEST MODE: Giảm timeout xuống 10 phút
             pool="default_pool",
         )
 
@@ -3881,7 +3878,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_aggregate_and_notify = PythonOperator(
             task_id="aggregate_and_notify",
             python_callable=aggregate_and_notify,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút
             pool="default_pool",
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
