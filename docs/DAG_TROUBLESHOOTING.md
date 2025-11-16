@@ -153,9 +153,81 @@ docker-compose exec airflow-scheduler airflow variables get TIKI_DAG_SCHEDULE_MO
 3. Click vào DAG Run gần nhất
 4. Click vào task để xem log chi tiết
 
+### 4. XCom Warnings - No XCom value found
+
+**Vấn đề:** Các warnings xuất hiện khi task `merge_product_details` cố gắng lấy XCom từ các task `crawl_product_detail` không có value:
+
+```
+WARNING - No XCom value found; defaulting to None. 
+key=return_value 
+dag_id=tiki_crawl_products 
+task_id=crawl_product_details.crawl_product_detail 
+run_id=manual__2025-11-16T09:09:56+00:00 
+map_index=144
+```
+
+**Nguyên nhân:**
+1. **Task timeout:** Task `crawl_product_detail` có `execution_timeout=15 phút`. Nếu task chạy quá lâu, Airflow sẽ kill task trước khi return XCom value.
+2. **Task fail sớm:** Task có thể fail ngay từ đầu (trước khi vào function) do lỗi import, memory error, hoặc lỗi khác.
+3. **Exception không được catch:** Một số exception có thể không được catch đúng cách, khiến task fail mà không return value.
+
+**Giải pháp:**
+
+**1. Code đã xử lý:**
+- Task `merge_product_details` đã có xử lý để bỏ qua các map_index không có XCom (try-except)
+- Function `crawl_single_product_detail` đã được cải thiện để đảm bảo luôn return result hợp lệ
+
+**2. Kiểm tra logs của các task bị thiếu XCom:**
+```bash
+# Xem log của task cụ thể với map_index
+docker-compose exec airflow-scheduler airflow tasks logs \
+  tiki_crawl_products \
+  crawl_product_details.crawl_product_detail \
+  <run_id> \
+  --map-index 144
+```
+
+**3. Nếu nhiều tasks bị timeout:**
+- Tăng `execution_timeout` cho task `crawl_product_detail` (hiện tại: 15 phút)
+- Giảm số lượng products crawl cùng lúc (chia nhỏ batch)
+- Tối ưu code crawl để chạy nhanh hơn
+
+**4. Nếu tasks fail do lỗi:**
+- Xem log của từng task để biết lỗi cụ thể
+- Kiểm tra Redis connection (nếu dùng cache)
+- Kiểm tra Selenium/Chrome driver (nếu dùng Selenium)
+- Kiểm tra memory usage (có thể cần tăng memory limit)
+
+**5. Suppress warnings (nếu đã xử lý):**
+Warnings này không ảnh hưởng đến kết quả vì `merge_product_details` đã xử lý để bỏ qua. Có thể suppress bằng cách:
+- Cấu hình Airflow logging level
+- Hoặc bỏ qua warnings này vì đã được xử lý trong code
+
+**Kiểm tra task sau `crawl_product_detail`:**
+
+**Task `merge_product_details`:**
+- Đã xử lý để bỏ qua các map_index không có XCom
+- Log sẽ hiển thị số lượng results thực tế lấy được
+- Nếu thiếu > 20%, sẽ có warning và thử lấy từng map_index riêng lẻ
+
+**Task `save_products_with_detail`:**
+- Lấy kết quả từ `merge_product_details` qua XCom
+- Nếu không có XCom, sẽ fallback về file output
+- Task này sẽ chạy thành công ngay cả khi một số products không có detail
+
+**Task `transform_products`:**
+- Lấy file từ `save_products_with_detail`
+- Transform tất cả products có trong file
+- Products không có detail sẽ được transform với dữ liệu cơ bản
+
+**Task `load_to_database`:**
+- Load tất cả products đã transform vào database
+- Products không có detail vẫn được load (với detail = NULL)
+
 ## Lưu Ý
 
 - Các Variables có default values nên DAG vẫn chạy được ngay cả khi thiếu
 - Log errors về missing variables không chặn DAG chạy, chỉ gây noise trong log
 - DAG đang chạy ở chế độ manual, cần trigger thủ công hoặc set `TIKI_DAG_SCHEDULE_MODE=scheduled` để chạy tự động
+- **XCom warnings không ảnh hưởng đến kết quả:** Code đã xử lý để bỏ qua các tasks không có XCom value. Warnings chỉ để thông báo, không chặn pipeline chạy.
 

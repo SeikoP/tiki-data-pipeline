@@ -294,7 +294,7 @@ class PostgresStorage:
 
     def save_products(
         self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
-    ) -> int:
+    ) -> int | dict[str, Any]:
         """
         Lưu danh sách products vào database (batch insert để tối ưu)
 
@@ -304,12 +304,37 @@ class PostgresStorage:
             batch_size: Số products insert mỗi lần
 
         Returns:
-            Số products đã lưu thành công
+            Nếu upsert=True: dict với keys: saved_count, inserted_count, updated_count
+            Nếu upsert=False: int (số products đã lưu thành công)
         """
         if not products:
-            return 0
+            return {"saved_count": 0, "inserted_count": 0, "updated_count": 0} if upsert else 0
 
         saved_count = 0
+        inserted_count = 0
+        updated_count = 0
+        
+        # Lấy danh sách product_id đã có trong DB (để phân biệt INSERT vs UPDATE)
+        existing_product_ids = set()
+        if upsert:
+            try:
+                with self.get_connection() as conn:
+                    with conn.cursor() as cur:
+                        product_ids = [p.get("product_id") for p in products if p.get("product_id")]
+                        if product_ids:
+                            # Chia nhỏ query nếu có quá nhiều product_ids
+                            for i in range(0, len(product_ids), 1000):
+                                batch_ids = product_ids[i : i + 1000]
+                                placeholders = ",".join(["%s"] * len(batch_ids))
+                                cur.execute(
+                                    f"SELECT product_id FROM products WHERE product_id IN ({placeholders})",
+                                    batch_ids,
+                                )
+                                existing_product_ids.update(row[0] for row in cur.fetchall())
+            except Exception as e:
+                # Nếu không lấy được, tiếp tục với upsert bình thường
+                print(f"⚠️  Không thể lấy danh sách products đã có: {e}")
+        
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 # Chia nhỏ thành batches
@@ -362,6 +387,13 @@ class PostgresStorage:
                         ]
 
                         if upsert:
+                            # Đếm số products mới vs đã có trong batch này
+                            batch_inserted = sum(
+                                1 for p in batch 
+                                if p.get("product_id") and p.get("product_id") not in existing_product_ids
+                            )
+                            batch_updated = len(batch) - batch_inserted
+                            
                             # Batch INSERT ... ON CONFLICT UPDATE
                             execute_values(
                                 cur,
@@ -411,6 +443,15 @@ class PostgresStorage:
                                 """,
                                 values,
                             )
+                            
+                            # Cập nhật existing_product_ids sau khi insert
+                            for product in batch:
+                                product_id = product.get("product_id")
+                                if product_id:
+                                    existing_product_ids.add(product_id)
+                            
+                            inserted_count += batch_inserted
+                            updated_count += batch_updated
                         else:
                             # Batch INSERT, bỏ qua nếu đã tồn tại
                             execute_values(
@@ -436,11 +477,22 @@ class PostgresStorage:
                         # Thử lưu từng product một nếu batch fail
                         for product in batch:
                             try:
-                                self.save_products([product], upsert=upsert, batch_size=1)
-                                saved_count += 1
+                                result = self.save_products([product], upsert=upsert, batch_size=1)
+                                if upsert and isinstance(result, dict):
+                                    saved_count += 1
+                                    inserted_count += result.get("inserted_count", 0)
+                                    updated_count += result.get("updated_count", 0)
+                                else:
+                                    saved_count += 1
                             except Exception:
                                 continue
 
+        if upsert:
+            return {
+                "saved_count": saved_count,
+                "inserted_count": inserted_count,
+                "updated_count": updated_count,
+            }
         return saved_count
 
     def log_crawl_history(
