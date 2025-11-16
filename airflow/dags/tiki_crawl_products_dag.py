@@ -4297,6 +4297,170 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
         return result
 
 
+def backup_database(**context) -> dict[str, Any]:
+    """
+    Task: Backup PostgreSQL database
+    
+    Backup database crawl_data vào thư mục backups/postgres sau khi các tasks khác hoàn thành.
+    
+    Returns:
+        Dict: Kết quả backup
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("💾 TASK: Backup Database")
+    logger.info("=" * 70)
+    
+    try:
+        import subprocess
+        from pathlib import Path
+        
+        # Đường dẫn script backup
+        script_path = Path("/opt/airflow/scripts/helper/backup_postgres.py")
+        if not script_path.exists():
+            # Fallback: thử đường dẫn tương đối
+            script_path = Path(__file__).parent.parent.parent / "scripts" / "helper" / "backup_postgres.py"
+        
+        if not script_path.exists():
+            logger.warning(f"⚠️  Không tìm thấy script backup tại: {script_path}")
+            logger.info("💡 Sử dụng pg_dump trực tiếp...")
+            
+            # Fallback: sử dụng pg_dump trực tiếp
+            container_name = "tiki-data-pipeline-postgres-1"
+            # Thử nhiều đường dẫn backup
+            backup_dirs = [
+                Path("/opt/airflow/backups/postgres"),  # Trong container Airflow
+                Path("/backups"),  # Mount từ postgres container
+                Path("/opt/airflow/data/backups/postgres"),  # Fallback
+            ]
+            backup_dir = None
+            for bd in backup_dirs:
+                try:
+                    bd.mkdir(parents=True, exist_ok=True)
+                    # Test write
+                    test_file = bd / ".test_write"
+                    test_file.write_text("test")
+                    test_file.unlink()
+                    backup_dir = bd
+                    break
+                except Exception:
+                    continue
+            
+            if not backup_dir:
+                logger.warning("⚠️  Không tìm thấy thư mục backup có thể ghi, sử dụng /tmp")
+                backup_dir = Path("/tmp/backups")
+                backup_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = backup_dir / f"crawl_data_{timestamp}.dump"
+            
+            # Lấy thông tin từ environment variables
+            postgres_user = os.getenv("POSTGRES_USER", "airflow_user")
+            postgres_password = os.getenv("POSTGRES_PASSWORD", "")
+            
+            if not postgres_password:
+                logger.warning("⚠️  Không tìm thấy POSTGRES_PASSWORD trong environment")
+                return {"status": "skipped", "reason": "No password"}
+            
+            logger.info(f"📦 Đang backup database: crawl_data...")
+            logger.info(f"   File: {backup_file}")
+            
+            # Chạy pg_dump trong container
+            cmd = [
+                "docker", "exec",
+                "-e", f"PGPASSWORD={postgres_password}",
+                container_name,
+                "pg_dump",
+                "-U", postgres_user,
+                "-Fc",  # Custom format
+                "crawl_data"
+            ]
+            
+            try:
+                with open(backup_file, "wb") as f:
+                    result = subprocess.run(
+                        cmd,
+                        stdout=f,
+                        stderr=subprocess.PIPE,
+                        check=False,
+                        timeout=600  # 10 phút timeout
+                    )
+                
+                if result.returncode == 0:
+                    file_size = backup_file.stat().st_size
+                    size_mb = file_size / (1024 * 1024)
+                    logger.info(f"✅ Đã backup thành công: {backup_file.name}")
+                    logger.info(f"   Size: {size_mb:.2f} MB")
+                    return {
+                        "status": "success",
+                        "backup_file": str(backup_file),
+                        "size_mb": round(size_mb, 2),
+                    }
+                else:
+                    error_msg = result.stderr.decode("utf-8", errors="ignore")
+                    logger.error(f"❌ Lỗi khi backup: {error_msg}")
+                    if backup_file.exists():
+                        backup_file.unlink()
+                    return {"status": "failed", "error": error_msg}
+                    
+            except subprocess.TimeoutExpired:
+                logger.error("❌ Timeout khi backup database")
+                if backup_file.exists():
+                    backup_file.unlink()
+                return {"status": "failed", "error": "Timeout"}
+            except Exception as e:
+                logger.error(f"❌ Exception khi backup: {e}")
+                if backup_file.exists():
+                    backup_file.unlink()
+                return {"status": "failed", "error": str(e)}
+        else:
+            # Sử dụng script backup
+            logger.info(f"📦 Đang backup database bằng script: {script_path}")
+            
+            cmd = [
+                "python",
+                str(script_path),
+                "--database", "crawl_data",
+                "--format", "custom"
+            ]
+            
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=600  # 10 phút timeout
+                )
+                
+                if result.returncode == 0:
+                    logger.info("✅ Backup thành công!")
+                    logger.info(result.stdout)
+                    return {
+                        "status": "success",
+                        "output": result.stdout,
+                    }
+                else:
+                    logger.warning(f"⚠️  Backup có lỗi (exit code: {result.returncode})")
+                    logger.warning(result.stderr)
+                    # Không fail task, chỉ log warning
+                    return {
+                        "status": "warning",
+                        "error": result.stderr,
+                    }
+            except subprocess.TimeoutExpired:
+                logger.error("❌ Timeout khi backup database")
+                return {"status": "failed", "error": "Timeout"}
+            except Exception as e:
+                logger.error(f"❌ Exception khi backup: {e}")
+                return {"status": "failed", "error": str(e)}
+                
+    except Exception as e:
+        logger.error(f"❌ Lỗi trong backup_database task: {e}", exc_info=True)
+        # Không fail task, chỉ log lỗi
+        return {"status": "failed", "error": str(e)}
+
+
 # Tạo DAG duy nhất với schedule có thể config qua Variable
 with DAG(**DAG_CONFIG) as dag:
 
@@ -4618,6 +4782,16 @@ with DAG(**DAG_CONFIG) as dag:
             pool="default_pool",
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
+    
+    # TaskGroup: Backup Database
+    with TaskGroup("backup") as backup_group:
+        task_backup_database = PythonOperator(
+            task_id="backup_database",
+            python_callable=backup_database,
+            execution_timeout=timedelta(minutes=15),  # Timeout 15 phút
+            pool="default_pool",
+            trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
+        )
 
     # Định nghĩa dependencies
     # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Transform -> Load -> Validate -> Aggregate
@@ -4638,11 +4812,12 @@ with DAG(**DAG_CONFIG) as dag:
     # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> validate -> aggregate and notify
     task_save_products >> task_prepare_detail
     # Dependencies trong detail group đã được định nghĩa ở dòng 1800
-    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify
+    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> backup_database
     (
         task_save_products_with_detail
         >> task_transform_products
         >> task_load_products
         >> task_validate_data
         >> task_aggregate_and_notify
+        >> task_backup_database
     )
