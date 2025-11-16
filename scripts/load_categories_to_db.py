@@ -40,7 +40,7 @@ def main():
         return 1
 
     # 2. Load vào database
-    print(f"\n💾 Bước 2: Load categories vào database")
+    print("\n💾 Bước 2: Load categories vào database")
 
     # Lấy credentials từ environment variables
     loader = DataLoader(
@@ -61,7 +61,7 @@ def main():
             validate_before_load=True,
         )
 
-        print(f"\n📊 Kết quả:")
+        print("\n📊 Kết quả:")
         print(f"  - Tổng số categories: {stats['total_loaded']}")
         print(f"  - Đã load vào DB: {stats['db_loaded']}")
         print(f"  - Thành công: {stats['success_count']}")
@@ -89,4 +89,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

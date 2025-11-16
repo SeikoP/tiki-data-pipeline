@@ -19,7 +19,7 @@ user = os.getenv("POSTGRES_USER", "airflow_user")
 password = os.getenv("POSTGRES_PASSWORD", "")
 database = os.getenv("POSTGRES_DB", "airflow")
 
-print(f"Testing PostgreSQL connection...")
+print("Testing PostgreSQL connection...")
 print(f"Host: {host}, Port: {port}, User: {user}, Database: {database}")
 
 # Test 1: Connection với host và port rõ ràng (TCP/IP)
@@ -59,4 +59,3 @@ except Exception as e:
     print(f"❌ DSN format failed: {e}")
 
 print("\n✅ Hoàn tất test!")
-

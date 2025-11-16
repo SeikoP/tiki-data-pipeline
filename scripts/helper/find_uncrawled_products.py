@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
 
 # Đường dẫn files
 SCRIPT_DIR = Path(__file__).parent
@@ -34,11 +33,11 @@ def get_existing_product_ids(product_ids: list[str]) -> set[str]:
     """Lấy danh sách product_ids đã có trong DB (có price và sales_count)"""
     if not product_ids:
         return set()
-    
+
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         existing_ids = set()
-        
+
         with conn.cursor() as cur:
             # Chia nhỏ query nếu có quá nhiều product_ids
             for i in range(0, len(product_ids), 1000):
@@ -46,16 +45,16 @@ def get_existing_product_ids(product_ids: list[str]) -> set[str]:
                 placeholders = ",".join(["%s"] * len(batch_ids))
                 cur.execute(
                     f"""
-                    SELECT product_id 
-                    FROM products 
+                    SELECT product_id
+                    FROM products
                     WHERE product_id IN ({placeholders})
-                      AND price IS NOT NULL 
+                      AND price IS NOT NULL
                       AND sales_count IS NOT NULL
                     """,
                     batch_ids,
                 )
                 existing_ids.update(row[0] for row in cur.fetchall())
-        
+
         return existing_ids
     except Exception as e:
         print(f"❌ Lỗi khi kết nối database: {e}")
@@ -72,13 +71,13 @@ def get_all_product_ids_in_db() -> set[str]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT product_id 
-                FROM products 
-                WHERE price IS NOT NULL 
+                SELECT product_id
+                FROM products
+                WHERE price IS NOT NULL
                   AND sales_count IS NOT NULL
                 """
             )
-            return set(row[0] for row in cur.fetchall())
+            return {row[0] for row in cur.fetchall()}
     except Exception as e:
         print(f"❌ Lỗi khi kết nối database: {e}")
         return set()
@@ -110,7 +109,7 @@ def analyze_products():
     print(f"📊 Số products có product_id: {len(product_ids)}")
 
     # Kiểm tra trong DB
-    print(f"\n🔍 Đang kiểm tra trong database...")
+    print("\n🔍 Đang kiểm tra trong database...")
     existing_ids = get_existing_product_ids(product_ids)
     print(f"✅ Tìm thấy {len(existing_ids)} products đã có trong DB (có price và sales_count)")
 
@@ -119,7 +118,7 @@ def analyze_products():
     print(f"🆕 Số products chưa có trong DB: {len(uncrawled_ids)}")
 
     # Thống kê tổng trong DB
-    print(f"\n🔍 Đang kiểm tra tổng số products trong DB...")
+    print("\n🔍 Đang kiểm tra tổng số products trong DB...")
     all_db_ids = get_all_product_ids_in_db()
     print(f"📊 Tổng số products trong DB (có price và sales_count): {len(all_db_ids)}")
 
@@ -127,7 +126,7 @@ def analyze_products():
     print("\n" + "=" * 70)
     print("📊 PHÂN TÍCH")
     print("=" * 70)
-    
+
     if len(uncrawled_ids) == 0:
         print("⚠️  TẤT CẢ PRODUCTS TRONG FILE ĐÃ CÓ TRONG DB!")
         print("\n💡 GIẢI PHÁP:")
@@ -144,15 +143,15 @@ def analyze_products():
         print(f"✅ Có {len(uncrawled_ids)} products chưa có trong DB")
         print(f"   - Tỷ lệ: {len(uncrawled_ids)/len(product_ids)*100:.1f}% chưa crawl")
         print(f"   - Tỷ lệ: {len(existing_ids)/len(product_ids)*100:.1f}% đã crawl")
-        
+
         print("\n💡 KHUYẾN NGHỊ:")
         print("1. Hệ thống sẽ tự động ưu tiên crawl products chưa có trong DB")
         print("2. Products đã có trong DB sẽ được skip (trừ khi force refresh)")
         print("3. Tiếp tục chạy DAG để crawl products mới")
-        
+
         # Hiển thị một số product_ids chưa crawl
         if len(uncrawled_ids) > 0:
-            print(f"\n📋 Một số products chưa crawl (hiển thị 10 đầu tiên):")
+            print("\n📋 Một số products chưa crawl (hiển thị 10 đầu tiên):")
             for i, pid in enumerate(list(uncrawled_ids)[:10]):
                 product = next((p for p in products if p.get("product_id") == pid), None)
                 name = product.get("name", "N/A")[:60] if product else "N/A"
@@ -163,10 +162,11 @@ def analyze_products():
     print("=" * 70)
     print(f"📦 Products trong file: {len(product_ids)}")
     print(f"✅ Đã có trong DB: {len(existing_ids)} ({len(existing_ids)/len(product_ids)*100:.1f}%)")
-    print(f"🆕 Chưa có trong DB: {len(uncrawled_ids)} ({len(uncrawled_ids)/len(product_ids)*100:.1f}%)")
+    print(
+        f"🆕 Chưa có trong DB: {len(uncrawled_ids)} ({len(uncrawled_ids)/len(product_ids)*100:.1f}%)"
+    )
     print(f"📊 Tổng trong DB: {len(all_db_ids)} products")
 
 
 if __name__ == "__main__":
     analyze_products()
-

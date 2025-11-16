@@ -72,7 +72,7 @@ class DiscordNotifier:
 
             if fields:
                 embed["fields"] = fields
-            
+
             if footer:
                 embed["footer"] = {"text": footer}
 
@@ -134,7 +134,7 @@ class DiscordNotifier:
         with_detail = stats.get("with_detail", 0)
         failed = stats.get("failed", 0)
         timeout = stats.get("timeout", 0)
-        
+
         # Chọn màu dựa trên tỷ lệ thành công
         if crawled_count > 0:
             success_rate = (with_detail / crawled_count) * 100
@@ -150,7 +150,7 @@ class DiscordNotifier:
         if stats:
             total_products = stats.get("total_products", 0)
             products_saved = stats.get("products_saved", 0)
-            
+
             # Row 1: Tổng quan
             if total_products > 0:
                 fields.append(
@@ -160,7 +160,7 @@ class DiscordNotifier:
                         "inline": True,
                     }
                 )
-            
+
             if crawled_count > 0:
                 fields.append(
                     {
@@ -169,7 +169,7 @@ class DiscordNotifier:
                         "inline": True,
                     }
                 )
-            
+
             if products_saved > 0:
                 fields.append(
                     {
@@ -178,7 +178,7 @@ class DiscordNotifier:
                         "inline": True,
                     }
                 )
-            
+
             # Row 2: Kết quả crawl detail
             if crawled_count > 0:
                 success_rate = (with_detail / crawled_count) * 100
@@ -189,7 +189,7 @@ class DiscordNotifier:
                         "inline": True,
                     }
                 )
-            
+
             if timeout > 0:
                 timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0
                 fields.append(
@@ -199,7 +199,7 @@ class DiscordNotifier:
                         "inline": True,
                     }
                 )
-            
+
             if failed > 0:
                 failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0
                 fields.append(
@@ -213,7 +213,9 @@ class DiscordNotifier:
         # Giới hạn độ dài AI summary để tránh vượt quá Discord limit (2000 chars cho description)
         max_summary_length = 1800  # Để lại chỗ cho format
         if len(ai_summary) > max_summary_length:
-            ai_summary = ai_summary[:max_summary_length] + "...\n\n*(Đã cắt ngắn do giới hạn độ dài)*"
+            ai_summary = (
+                ai_summary[:max_summary_length] + "...\n\n*(Đã cắt ngắn do giới hạn độ dài)*"
+            )
 
         return self.send_message(
             content=ai_summary,

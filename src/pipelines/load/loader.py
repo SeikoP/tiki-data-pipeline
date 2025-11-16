@@ -44,15 +44,15 @@ except ImportError:
         from ...crawl.storage.postgres_storage import PostgresStorage
     except ImportError:
         try:
-            import sys
-            import os
             import importlib.util
+            import os
+            import sys
             from pathlib import Path
 
             # Tìm đường dẫn đến postgres_storage.py
             # Lấy đường dẫn tuyệt đối của file hiện tại
             current_file = Path(__file__).resolve()
-            
+
             # Tìm đường dẫn src (có thể là parent hoặc grandparent)
             # loader.py ở: src/pipelines/load/loader.py
             # postgres_storage.py ở: src/pipelines/crawl/storage/postgres_storage.py
@@ -62,9 +62,18 @@ except ImportError:
                 # Từ current file: loader.py -> pipelines -> crawl/storage/postgres_storage.py
                 current_file.parent.parent / "crawl" / "storage" / "postgres_storage.py",
                 # Từ current file lên 1 cấp nữa (trong trường hợp đặc biệt)
-                current_file.parent.parent.parent / "pipelines" / "crawl" / "storage" / "postgres_storage.py",
+                current_file.parent.parent.parent
+                / "pipelines"
+                / "crawl"
+                / "storage"
+                / "postgres_storage.py",
                 # Từ current working directory
-                Path(os.getcwd()) / "src" / "pipelines" / "crawl" / "storage" / "postgres_storage.py",
+                Path(os.getcwd())
+                / "src"
+                / "pipelines"
+                / "crawl"
+                / "storage"
+                / "postgres_storage.py",
                 # Từ workspace root
                 Path("/workspace/src/pipelines/crawl/storage/postgres_storage.py"),
             ]
@@ -92,18 +101,16 @@ except ImportError:
                 src_path = current_file.parent.parent.parent
                 if src_path.exists() and str(src_path) not in sys.path:
                     sys.path.insert(0, str(src_path))
-                
+
                 try:
                     from pipelines.crawl.storage import PostgresStorage
                 except ImportError:
                     try:
                         from pipelines.crawl.storage.postgres_storage import PostgresStorage
-                    except ImportError:
-                        raise ImportError("Không tìm thấy postgres_storage.py")
+                    except ImportError as e:
+                        raise ImportError("Không tìm thấy postgres_storage.py") from e
         except Exception as e:
-            logger.warning(
-                f"⚠️  Không thể import PostgresStorage: {e}. Chỉ hỗ trợ load từ file."
-            )
+            logger.warning(f"⚠️  Không thể import PostgresStorage: {e}. Chỉ hỗ trợ load từ file.")
             PostgresStorage = None
 
 
@@ -141,7 +148,7 @@ class DataLoader:
             "db_loaded": 0,
             "file_loaded": 0,
             "inserted_count": 0,  # Số products mới được INSERT
-            "updated_count": 0,    # Số products đã có được UPDATE
+            "updated_count": 0,  # Số products đã có được UPDATE
             "errors": [],
         }
 
@@ -214,7 +221,7 @@ class DataLoader:
                 result = self.db_storage.save_products(
                     products, upsert=upsert, batch_size=self.batch_size
                 )
-                
+
                 # Xử lý kết quả (có thể là int hoặc dict)
                 if isinstance(result, dict):
                     # Kết quả từ upsert=True: có thống kê INSERT vs UPDATE

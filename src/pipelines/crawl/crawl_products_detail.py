@@ -774,17 +774,17 @@ async def crawl_product_detail_async(
     verbose: bool = False,
 ) -> dict[str, Any] | None:
     """Crawl product detail bằng aiohttp (async) với Selenium fallback
-    
+
     Hybrid approach:
     - Thử crawl bằng aiohttp trước (nhanh hơn)
     - Nếu thiếu dynamic content (sales_count), fallback về Selenium
-    
+
     Args:
         url: URL sản phẩm cần crawl
         session: aiohttp ClientSession (nếu None sẽ tạo mới)
         use_selenium_fallback: Có dùng Selenium fallback không
         verbose: Có in log không
-    
+
     Returns:
         Dict product detail hoặc None nếu lỗi
     """
@@ -796,7 +796,7 @@ async def crawl_product_detail_async(
         if use_selenium_fallback:
             return crawl_product_detail_with_selenium(url, verbose=verbose)
         return None
-    
+
     # Tạo session nếu chưa có
     create_session = session is None
     if create_session:
@@ -805,9 +805,9 @@ async def crawl_product_detail_async(
             timeout=timeout,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
+            },
         )
-    
+
     try:
         # Thử crawl bằng aiohttp
         async with session.get(url) as response:
@@ -819,16 +819,15 @@ async def crawl_product_detail_async(
                         await session.close()
                     return crawl_product_detail_with_selenium(url, verbose=verbose)
                 return None
-            
+
             html_content = await response.text()
-            
+
             # Extract product detail từ HTML
             product_data = extract_product_detail(html_content, url, verbose=verbose)
-            
+
             # Kiểm tra xem có đầy đủ thông tin không (đặc biệt là sales_count)
-            has_price = product_data.get("price", {}).get("current_price") is not None
             has_sales_count = product_data.get("sales_count") is not None
-            
+
             # Nếu thiếu sales_count và có fallback, dùng Selenium
             if not has_sales_count and use_selenium_fallback:
                 if verbose:
@@ -836,15 +835,17 @@ async def crawl_product_detail_async(
                 if create_session:
                     await session.close()
                 return crawl_product_detail_with_selenium(url, verbose=verbose)
-            
+
             # Cập nhật metadata
-            product_data["_metadata"]["extraction_method"] = "aiohttp" if has_sales_count else "aiohttp+selenium_fallback"
-            
+            product_data["_metadata"]["extraction_method"] = (
+                "aiohttp" if has_sales_count else "aiohttp+selenium_fallback"
+            )
+
             if verbose:
                 print(f"[Async] ✅ Crawl thành công: {product_data.get('name', 'Unknown')[:50]}...")
-            
+
             return product_data
-            
+
     except Exception as e:
         if verbose:
             print(f"[Async] ❌ Lỗi khi crawl với aiohttp: {e}")

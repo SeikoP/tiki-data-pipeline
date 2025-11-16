@@ -313,7 +313,7 @@ class PostgresStorage:
         saved_count = 0
         inserted_count = 0
         updated_count = 0
-        
+
         # Lấy danh sách product_id đã có trong DB (để phân biệt INSERT vs UPDATE)
         existing_product_ids = set()
         if upsert:
@@ -334,7 +334,7 @@ class PostgresStorage:
             except Exception as e:
                 # Nếu không lấy được, tiếp tục với upsert bình thường
                 print(f"⚠️  Không thể lấy danh sách products đã có: {e}")
-        
+
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 # Chia nhỏ thành batches
@@ -350,7 +350,11 @@ class PostgresStorage:
                                 product.get("image_url"),
                                 product.get("category_url"),
                                 product.get("category_id"),  # Thêm category_id
-                                Json(product.get("category_path")) if product.get("category_path") else None,  # Thêm category_path (JSONB)
+                                (
+                                    Json(product.get("category_path"))
+                                    if product.get("category_path")
+                                    else None
+                                ),  # Thêm category_path (JSONB)
                                 product.get("sales_count"),
                                 product.get("price"),
                                 product.get("original_price"),
@@ -389,11 +393,13 @@ class PostgresStorage:
                         if upsert:
                             # Đếm số products mới vs đã có trong batch này
                             batch_inserted = sum(
-                                1 for p in batch 
-                                if p.get("product_id") and p.get("product_id") not in existing_product_ids
+                                1
+                                for p in batch
+                                if p.get("product_id")
+                                and p.get("product_id") not in existing_product_ids
                             )
                             batch_updated = len(batch) - batch_inserted
-                            
+
                             # Batch INSERT ... ON CONFLICT UPDATE
                             execute_values(
                                 cur,
@@ -443,13 +449,13 @@ class PostgresStorage:
                                 """,
                                 values,
                             )
-                            
+
                             # Cập nhật existing_product_ids sau khi insert
                             for product in batch:
                                 product_id = product.get("product_id")
                                 if product_id:
                                     existing_product_ids.add(product_id)
-                            
+
                             inserted_count += batch_inserted
                             updated_count += batch_updated
                         else:

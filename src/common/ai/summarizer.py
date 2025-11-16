@@ -83,13 +83,13 @@ class AISummarizer:
         with_detail = stats.get("with_detail", 0)
         failed = stats.get("failed", 0)
         timeout = stats.get("timeout", 0)
-        
+
         # Tính toán các tỷ lệ
         success_rate = (with_detail / crawled_count * 100) if crawled_count > 0 else 0.0
         timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0.0
         failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0.0
         total_error_rate = ((timeout + failed) / crawled_count * 100) if crawled_count > 0 else 0.0
-        
+
         # Tạo context rõ ràng cho AI
         context_note = ""
         if crawled_count > 0:
@@ -100,7 +100,7 @@ class AISummarizer:
 - Tỷ lệ thành công crawl detail: {success_rate:.1f}% ({with_detail}/{crawled_count})
 - Khi phân tích, hãy SO SÁNH với số lượng ĐÃ CRAWL ({crawled_count:,}) chứ KHÔNG phải tổng số ({total_products:,})
 """
-        
+
         prompt = f"""Bạn là một chuyên gia phân tích dữ liệu. Hãy phân tích và tổng hợp thông tin sau về dữ liệu sản phẩm Tiki:
 
 {context_note}

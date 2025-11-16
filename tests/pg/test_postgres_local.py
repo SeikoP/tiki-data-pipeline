@@ -29,12 +29,13 @@ postgres_db = "crawl_data"
 if env_file.exists():
     try:
         from dotenv import load_dotenv
+
         load_dotenv(env_file, override=True)
         print(f"[OK] Da load .env tu: {env_file}")
     except ImportError:
         print("[WARN] python-dotenv chua duoc cai dat, doc .env thu cong...")
         # Đọc thủ công
-        with open(env_file, "r", encoding="utf-8") as f:
+        with open(env_file, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("POSTGRES_USER="):
@@ -77,18 +78,18 @@ try:
         connect_timeout=10,
     )
     print("[OK] TCP/IP connection thanh cong!")
-    
+
     # Test query
     with conn.cursor() as cur:
         cur.execute("SELECT version();")
         version = cur.fetchone()
         print(f"   PostgreSQL version: {version[0][:50]}...")
-        
+
         # Kiểm tra databases
         cur.execute("SELECT datname FROM pg_database WHERE datistemplate = false;")
         databases = [row[0] for row in cur.fetchall()]
         print(f"   Databases available: {', '.join(databases)}")
-    
+
     conn.close()
 except psycopg2.OperationalError as e:
     print(f"[ERROR] TCP/IP connection failed: {e}")
@@ -128,7 +129,7 @@ print("\n4. Testing voi PostgresStorage class...")
 try:
     sys.path.insert(0, str(project_root / "src"))
     from pipelines.crawl.storage.postgres_storage import PostgresStorage
-    
+
     storage = PostgresStorage(
         host=postgres_host,
         port=postgres_port,
@@ -136,14 +137,16 @@ try:
         user=postgres_user,
         password=postgres_password,
     )
-    
+
     with storage.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';")
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';"
+            )
             table_count = cur.fetchone()[0]
-            print(f"[OK] PostgresStorage connection thanh cong!")
+            print("[OK] PostgresStorage connection thanh cong!")
             print(f"   So tables trong database: {table_count}")
-    
+
     storage.close()
 except ImportError as e:
     print(f"[WARN] Khong the import PostgresStorage: {e}")
@@ -161,11 +164,10 @@ print(f"   Database: {postgres_db}")
 print(f"   User: {postgres_user}")
 print()
 print("[INFO] Su dung trong code:")
-print(f'   storage = PostgresStorage(')
+print("   storage = PostgresStorage(")
 print(f'       host="{postgres_host}",')
-print(f'       port={postgres_port},')
+print(f"       port={postgres_port},")
 print(f'       database="{postgres_db}",')
 print(f'       user="{postgres_user}",')
 print(f'       password="{postgres_password}"')
-print(f'   )')
-
+print("   )")

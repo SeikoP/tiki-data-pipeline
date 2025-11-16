@@ -5,9 +5,9 @@ Script E2E để load dữ liệu đã crawl trước đó vào database
 - Đảm bảo liên kết giữa products và categories
 """
 
+import json
 import os
 import sys
-import json
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,7 @@ if not src_path.exists():
             found = True
             break
         current = current.parent
-    
+
     if not found:
         raise FileNotFoundError(f"Không tìm thấy thư mục src. Đã thử: {src_path}")
 
@@ -80,6 +80,7 @@ def load_categories_e2e(loader: DataLoader, tree_file: Path) -> dict[str, Any]:
     except Exception as e:
         print(f"❌ Lỗi khi load categories: {e}")
         import traceback
+
         traceback.print_exc()
         return {"error": str(e), "total_loaded": 0, "db_loaded": 0}
 
@@ -87,27 +88,27 @@ def load_categories_e2e(loader: DataLoader, tree_file: Path) -> dict[str, Any]:
 def load_products_from_cache(cache_dir: Path) -> dict[str, dict[str, Any]]:
     """Load products từ cache folder (detail/cache)"""
     cache_products = {}
-    
+
     if not cache_dir.exists():
         return cache_products
-    
+
     print(f"📂 Đang quét cache folder: {cache_dir}")
     cache_files = list(cache_dir.glob("*.json"))
     print(f"   Tìm thấy {len(cache_files)} file cache")
-    
+
     loaded_count = 0
     error_count = 0
-    
+
     for cache_file in cache_files:
         try:
             with open(cache_file, encoding="utf-8") as f:
                 product_detail = json.load(f)
-            
+
             product_id = product_detail.get("product_id")
             if not product_id:
                 # Thử extract từ tên file
                 product_id = cache_file.stem
-            
+
             if product_id:
                 cache_products[product_id] = product_detail
                 loaded_count += 1
@@ -115,16 +116,16 @@ def load_products_from_cache(cache_dir: Path) -> dict[str, dict[str, Any]]:
             error_count += 1
             if error_count <= 5:  # Chỉ log 5 lỗi đầu tiên
                 print(f"   ⚠️  Lỗi khi đọc {cache_file.name}: {e}")
-    
+
     print(f"✅ Đã load {loaded_count} products từ cache")
     if error_count > 5:
         print(f"   ⚠️  Có thêm {error_count - 5} lỗi khác")
-    
+
     return cache_products
 
 
 def load_products_e2e(
-    loader: DataLoader, 
+    loader: DataLoader,
     cache_dir: Path | None = None,
     products_with_detail_file: Path | None = None,
     products_file: Path | None = None,
@@ -141,7 +142,7 @@ def load_products_e2e(
         try:
             with open(products_file, encoding="utf-8") as f:
                 data = json.load(f)
-            
+
             products_list = []
             if isinstance(data, list):
                 products_list = data
@@ -150,22 +151,22 @@ def load_products_e2e(
                     products_list = data["products"]
                 elif "data" in data and isinstance(data["data"], dict):
                     products_list = data["data"].get("products", [])
-            
+
             for product in products_list:
                 product_id = product.get("product_id")
                 category_url = product.get("category_url")
                 if product_id and category_url:
                     category_url_mapping[product_id] = category_url
-            
+
             print(f"✅ Đã load {len(category_url_mapping)} category_url mappings từ products.json")
         except Exception as e:
             print(f"⚠️  Lỗi khi đọc products.json: {e}")
-    
+
     # Bước 1: Load từ cache folder (nếu có) - đầy đủ nhất
     cache_products = {}
     if cache_dir and cache_dir.exists():
         cache_products = load_products_from_cache(cache_dir)
-    
+
     # Bước 2: Load từ products_with_detail.json (nếu có) - đầy đủ
     products_with_detail = []
     if products_with_detail_file and products_with_detail_file.exists():
@@ -173,63 +174,63 @@ def load_products_e2e(
         try:
             with open(products_with_detail_file, encoding="utf-8") as f:
                 data = json.load(f)
-            
+
             if isinstance(data, list):
                 products_with_detail = data
             elif isinstance(data, dict) and "products" in data:
                 products_with_detail = data["products"]
-            
+
             print(f"✅ Đã đọc {len(products_with_detail)} products từ products_with_detail.json")
         except Exception as e:
             print(f"⚠️  Lỗi khi đọc products_with_detail.json: {e}")
-    
+
     # Bước 3: Merge và loại bỏ duplicate (ưu tiên cache > products_with_detail)
     print("\n🔄 Đang merge và loại bỏ duplicate...")
     merged_products = {}
     duplicate_count = 0
     seen_in_detail = set()  # Đếm products unique từ products_with_detail
-    
+
     # Ưu tiên 1: Cache (đầy đủ nhất) - mỗi file cache là unique product_id
     for product_id, product in cache_products.items():
         # Bổ sung category_url từ mapping nếu chưa có
         if not product.get("category_url") and product_id in category_url_mapping:
             product["category_url"] = category_url_mapping[product_id]
         merged_products[product_id] = product
-    
+
     # Ưu tiên 2: products_with_detail (nếu chưa có trong cache)
     # Loại bỏ duplicate trong cùng list products_with_detail
     for product in products_with_detail:
         product_id = product.get("product_id")
         if not product_id:
             continue
-        
+
         # Nếu đã có trong cache, bỏ qua
         if product_id in merged_products:
             duplicate_count += 1
             continue
-        
+
         # Nếu đã thấy trong products_with_detail list, bỏ qua (duplicate trong cùng file)
         if product_id in seen_in_detail:
             duplicate_count += 1
             continue
-        
+
         seen_in_detail.add(product_id)
         # Bổ sung category_url từ mapping nếu chưa có
         if not product.get("category_url") and product_id in category_url_mapping:
             product["category_url"] = category_url_mapping[product_id]
         merged_products[product_id] = product
-    
+
     products = list(merged_products.values())
-    
+
     if duplicate_count > 0:
         print(f"   ⚠️  Đã loại bỏ {duplicate_count} products duplicate")
-    
+
     if not products:
         print("⚠️  Không tìm thấy products nào có detail để load")
         print("   💡 Lưu ý: products.json chỉ chứa danh sách cơ bản, không có detail")
         print("   💡 Cần có dữ liệu từ cache folder hoặc products_with_detail.json")
         return {"skipped": True, "total_loaded": 0, "db_loaded": 0}
-    
+
     print(f"✅ Tổng hợp: {len(products)} products unique có detail")
     print(f"   - Từ cache: {len(cache_products)}")
     print(f"   - Từ products_with_detail: {len(seen_in_detail)}")
@@ -252,6 +253,7 @@ def load_products_e2e(
             if not product.get("product_id") and product.get("url"):
                 try:
                     from pipelines.crawl.utils import extract_product_id_from_url
+
                     product_id = extract_product_id_from_url(product["url"])
                     if product_id:
                         product["product_id"] = product_id
@@ -270,17 +272,18 @@ def load_products_e2e(
                     product["category_url"] = category_url_mapping[product_id]
                 else:
                     product["category_url"] = None
-            
+
             # Extract category_id từ category_url nếu chưa có
             if not product.get("category_id") and product.get("category_url"):
                 try:
                     from pipelines.crawl.utils import extract_category_id_from_url
+
                     category_id = extract_category_id_from_url(product["category_url"])
                     if category_id:
                         product["category_id"] = category_id
                 except Exception:
                     pass  # Nếu không import được, bỏ qua
-            
+
             # Đảm bảo category_path được giữ lại (nếu có trong cache)
             # category_path đã có sẵn từ cache, không cần xử lý thêm
 
@@ -293,7 +296,7 @@ def load_products_e2e(
         transformer = DataTransformer()
         transformed_products = []
         transform_failed = 0
-        
+
         for product in valid_products:
             try:
                 # Transform product (flatten nested dicts: price, rating, seller, stock)
@@ -305,8 +308,10 @@ def load_products_e2e(
             except Exception as e:
                 transform_failed += 1
                 if transform_failed <= 5:  # Chỉ log 5 lỗi đầu tiên
-                    print(f"   ⚠️  Lỗi transform product {product.get('product_id', 'unknown')}: {e}")
-        
+                    print(
+                        f"   ⚠️  Lỗi transform product {product.get('product_id', 'unknown')}: {e}"
+                    )
+
         if transform_failed > 0:
             print(f"   ⚠️  Có {transform_failed} products transform thất bại")
         print(f"✅ Đã transform {len(transformed_products)} products thành công")
@@ -317,10 +322,10 @@ def load_products_e2e(
 
         # Load vào database
         print("\n💾 Đang load products vào database...")
-        print(f"   📌 Đảm bảo không duplicate:")
-        print(f"      - Đã loại bỏ duplicate trong memory (dựa trên product_id)")
-        print(f"      - Database có UNIQUE constraint trên product_id")
-        print(f"      - Sử dụng UPSERT (ON CONFLICT UPDATE) để update nếu đã tồn tại")
+        print("   📌 Đảm bảo không duplicate:")
+        print("      - Đã loại bỏ duplicate trong memory (dựa trên product_id)")
+        print("      - Database có UNIQUE constraint trên product_id")
+        print("      - Sử dụng UPSERT (ON CONFLICT UPDATE) để update nếu đã tồn tại")
         stats = loader.load_products(
             transformed_products,
             save_to_file=None,
@@ -343,6 +348,7 @@ def load_products_e2e(
     except Exception as e:
         print(f"❌ Lỗi khi load products: {e}")
         import traceback
+
         traceback.print_exc()
         return {"error": str(e), "total_loaded": 0, "db_loaded": 0}
 
@@ -360,6 +366,7 @@ def verify_data_links(loader: DataLoader) -> dict[str, Any]:
             return {"skipped": True}
 
         from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
         storage: PostgresStorage = loader.db_storage
 
         # Đếm categories
@@ -377,45 +384,53 @@ def verify_data_links(loader: DataLoader) -> dict[str, Any]:
                 products_with_category = cur.fetchone()[0]
 
                 # Đếm products có category_url match với categories
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT COUNT(DISTINCT p.id)
                     FROM products p
                     INNER JOIN categories c ON p.category_url = c.url
-                """)
+                """
+                )
                 products_linked = cur.fetchone()[0]
 
                 # Đếm products có category_url nhưng không match
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT COUNT(DISTINCT p.id)
                     FROM products p
                     LEFT JOIN categories c ON p.category_url = c.url
                     WHERE p.category_url IS NOT NULL AND c.url IS NULL
-                """)
+                """
+                )
                 products_unlinked = cur.fetchone()[0]
 
                 # Lấy sample các category_url không match (để debug)
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT DISTINCT p.category_url
                     FROM products p
                     LEFT JOIN categories c ON p.category_url = c.url
                     WHERE p.category_url IS NOT NULL AND c.url IS NULL
                     LIMIT 10
-                """)
+                """
+                )
                 unlinked_urls = [row[0] for row in cur.fetchall()]
 
                 # Thống kê theo level categories
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT level, COUNT(*) as count
                     FROM categories
                     GROUP BY level
                     ORDER BY level
-                """)
+                """
+                )
                 categories_by_level = {row[0]: row[1] for row in cur.fetchall()}
 
-        print(f"📊 Thống kê:")
+        print("📊 Thống kê:")
         print(f"   - Tổng số categories: {category_count}")
         if categories_by_level:
-            print(f"   - Categories theo level:")
+            print("   - Categories theo level:")
             for level in sorted(categories_by_level.keys()):
                 print(f"     Level {level}: {categories_by_level[level]} categories")
         print(f"   - Tổng số products: {product_count}")
@@ -424,9 +439,11 @@ def verify_data_links(loader: DataLoader) -> dict[str, Any]:
         print(f"   - Products chưa link (category_url không tồn tại): {products_unlinked}")
 
         if products_unlinked > 0:
-            print(f"\n⚠️  Có {products_unlinked} products có category_url nhưng không tìm thấy category tương ứng")
+            print(
+                f"\n⚠️  Có {products_unlinked} products có category_url nhưng không tìm thấy category tương ứng"
+            )
             if unlinked_urls:
-                print(f"   Sample category_urls không tìm thấy (10 đầu tiên):")
+                print("   Sample category_urls không tìm thấy (10 đầu tiên):")
                 for url in unlinked_urls[:5]:
                     print(f"     - {url}")
             print("   Có thể do:")
@@ -436,7 +453,9 @@ def verify_data_links(loader: DataLoader) -> dict[str, Any]:
         # Tính tỷ lệ link
         if products_with_category > 0:
             link_rate = (products_linked / products_with_category) * 100
-            print(f"\n   📈 Tỷ lệ link: {link_rate:.2f}% ({products_linked}/{products_with_category})")
+            print(
+                f"\n   📈 Tỷ lệ link: {link_rate:.2f}% ({products_linked}/{products_with_category})"
+            )
 
         return {
             "category_count": category_count,
@@ -451,6 +470,7 @@ def verify_data_links(loader: DataLoader) -> dict[str, Any]:
     except Exception as e:
         print(f"❌ Lỗi khi verify: {e}")
         import traceback
+
         traceback.print_exc()
         return {"error": str(e)}
 
@@ -458,39 +478,49 @@ def verify_data_links(loader: DataLoader) -> dict[str, Any]:
 def check_required_files() -> tuple[bool, list[str]]:
     """Kiểm tra các file cần thiết có tồn tại không"""
     missing_files = []
-    
+
     # Kiểm tra folder data/raw
     data_raw = project_root / "data" / "raw"
     if not data_raw.exists():
         missing_files.append(f"Folder: {data_raw}")
         return False, missing_files
-    
+
     # Kiểm tra categories_tree.json (không bắt buộc)
     tree_file = data_raw / "categories_tree.json"
     if not tree_file.exists():
         missing_files.append(f"File (optional): {tree_file}")
-    
+
     # Kiểm tra folder products
     products_dir = data_raw / "products"
     if not products_dir.exists():
         missing_files.append(f"Folder: {products_dir}")
         return False, missing_files
-    
+
     # Kiểm tra các nguồn dữ liệu có detail (ít nhất 1 trong 2 phải có)
     cache_dir = products_dir / "detail" / "cache"
     products_with_detail_file = products_dir / "products_with_detail.json"
-    
+
     has_cache = cache_dir.exists() and any(cache_dir.glob("*.json"))
     has_products_with_detail = products_with_detail_file.exists()
-    
+
     if not (has_cache or has_products_with_detail):
         missing_files.append("Ít nhất một trong các nguồn sau (có detail đầy đủ):")
         missing_files.append(f"  - Cache folder: {cache_dir} (có file .json)")
         missing_files.append(f"  - File: {products_with_detail_file}")
         missing_files.append("")
         missing_files.append("  ⚠️  Lưu ý: products.json chỉ chứa danh sách cơ bản, không có detail")
-    
-    return len([f for f in missing_files if not f.startswith("  -") and not f.startswith("File (optional)")]) == 0, missing_files
+
+    return (
+        len(
+            [
+                f
+                for f in missing_files
+                if not f.startswith("  -") and not f.startswith("File (optional)")
+            ]
+        )
+        == 0,
+        missing_files,
+    )
 
 
 def main():
@@ -510,17 +540,17 @@ def main():
     # Kiểm tra files cần thiết
     print("\n🔍 Kiểm tra files cần thiết...")
     files_ok, missing_files = check_required_files()
-    
+
     if not files_ok:
         print("❌ Thiếu các file/folder sau:")
         for file in missing_files:
             print(f"   - {file}")
         print("\n💡 Tạo các folder cần thiết...")
-        
+
         # Tạo các folder nếu chưa có
         (project_root / "data" / "raw").mkdir(parents=True, exist_ok=True)
         (project_root / "data" / "raw" / "products").mkdir(parents=True, exist_ok=True)
-        
+
         print("✅ Đã tạo các folder cần thiết")
         print("⚠️  Vui lòng đảm bảo ít nhất một trong các nguồn sau tồn tại:")
         print("   - data/raw/products/detail/cache/*.json (có file .json)")
@@ -539,14 +569,14 @@ def main():
 
     # Khởi tạo DataLoader
     print("\n🔌 Đang kết nối database...")
-    
+
     # Lấy credentials từ environment hoặc .env file
     postgres_host = os.getenv("POSTGRES_HOST", "localhost")
     postgres_port = int(os.getenv("POSTGRES_PORT", "5432"))
     postgres_user = os.getenv("POSTGRES_USER", "airflow_user")
     postgres_password = os.getenv("POSTGRES_PASSWORD", "")
     postgres_db = os.getenv("POSTGRES_DB", "crawl_data")
-    
+
     # Thử đọc từ .env file nếu có
     env_file = project_root / ".env"
     if env_file.exists():
@@ -555,6 +585,7 @@ def main():
             # Thử dùng python-dotenv nếu có
             try:
                 from dotenv import load_dotenv
+
                 load_dotenv(env_file, override=True)
                 postgres_host = os.getenv("POSTGRES_HOST", postgres_host)
                 postgres_port = int(os.getenv("POSTGRES_PORT", postgres_port))
@@ -588,15 +619,15 @@ def main():
                 print("✅ Đã load .env thủ công")
         except Exception as e:
             print(f"⚠️  Không thể đọc .env: {e}")
-    
+
     # Hiển thị thông tin kết nối (ẩn password)
-    print(f"\n📋 Thông tin kết nối:")
+    print("\n📋 Thông tin kết nối:")
     print(f"   - Host: {postgres_host}")
     print(f"   - Port: {postgres_port}")
     print(f"   - User: {postgres_user}")
     print(f"   - Database: {postgres_db}")
     print(f"   - Password: {'***' if postgres_password else '(chưa set)'}")
-    
+
     loader = DataLoader(
         database=postgres_db,
         host=postgres_host,
@@ -620,19 +651,19 @@ def main():
         print("\n   3. Hoặc chạy trong Docker với:")
         print("      docker-compose up -d postgres")
         print("\n⚠️  Script sẽ chỉ validate dữ liệu, không load vào database")
-        
+
         # Chạy ở chế độ validate only
         print("\n" + "=" * 70)
         print("📋 VALIDATE MODE (Không có database)")
         print("=" * 70)
-        
+
         # Validate categories
         try:
             categories = extract_categories_from_tree_file(tree_file)
             print(f"✅ Categories: {len(categories)} categories hợp lệ")
         except Exception as e:
             print(f"❌ Lỗi validate categories: {e}")
-        
+
         # Validate products (chỉ từ cache hoặc products_with_detail)
         products_count = 0
         cache_products = {}
@@ -643,7 +674,7 @@ def main():
                 products_count += len(cache_products)
                 if cache_products:
                     print(f"✅ Products từ cache: {len(cache_products)} products hợp lệ")
-            
+
             # Thử load từ products_with_detail
             if products_with_detail_file.exists():
                 with open(products_with_detail_file, encoding="utf-8") as f:
@@ -654,8 +685,10 @@ def main():
                 new_products = [p for p in products_detail if p.get("product_id") not in cache_ids]
                 products_count += len(new_products)
                 if new_products:
-                    print(f"✅ Products từ products_with_detail: {len(new_products)} products hợp lệ (chưa có trong cache)")
-            
+                    print(
+                        f"✅ Products từ products_with_detail: {len(new_products)} products hợp lệ (chưa có trong cache)"
+                    )
+
             if products_count == 0:
                 print("⚠️  Không tìm thấy products có detail để validate")
                 print("   💡 Cần có dữ liệu từ cache folder hoặc products_with_detail.json")
@@ -663,7 +696,7 @@ def main():
                 print(f"✅ Tổng cộng: {products_count} products có detail hợp lệ")
         except Exception as e:
             print(f"❌ Lỗi validate products: {e}")
-        
+
         return 1
 
     print("✅ Đã kết nối database")
@@ -675,7 +708,7 @@ def main():
         # Bước 2: Load products có detail (từ cache hoặc products_with_detail.json)
         # Truyền products_file để lấy category_url mapping
         products_stats = load_products_e2e(
-            loader, 
+            loader,
             cache_dir=cache_dir,
             products_with_detail_file=products_with_detail_file,
             products_file=products_file,
@@ -688,18 +721,18 @@ def main():
         print("\n" + "=" * 70)
         print("📊 TỔNG KẾT")
         print("=" * 70)
-        print(f"\nCategories:")
+        print("\nCategories:")
         print(f"  - Đã load: {categories_stats.get('db_loaded', 0)}")
         print(f"  - Thành công: {categories_stats.get('success_count', 0)}")
         print(f"  - Thất bại: {categories_stats.get('failed_count', 0)}")
 
-        print(f"\nProducts:")
+        print("\nProducts:")
         print(f"  - Đã load: {products_stats.get('db_loaded', 0)}")
         print(f"  - Thành công: {products_stats.get('success_count', 0)}")
         print(f"  - Thất bại: {products_stats.get('failed_count', 0)}")
 
         if verify_stats and not verify_stats.get("skipped"):
-            print(f"\nLinks:")
+            print("\nLinks:")
             print(f"  - Categories: {verify_stats.get('category_count', 0)}")
             print(f"  - Products: {verify_stats.get('product_count', 0)}")
             print(f"  - Products linked: {verify_stats.get('products_linked', 0)}")
@@ -711,6 +744,7 @@ def main():
     except Exception as e:
         print(f"\n❌ Lỗi trong quá trình xử lý: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
@@ -721,4 +755,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
