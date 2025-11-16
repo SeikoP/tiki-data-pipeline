@@ -10,8 +10,8 @@ Chạy: python scripts/sync_test_dag.py
 """
 
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, List, Tuple, Union
 
 # Đường dẫn files
 SCRIPT_DIR = Path(__file__).parent
@@ -22,12 +22,12 @@ TEST_DAG_PATH = PROJECT_ROOT / "airflow" / "dags" / "tiki_crawl_products_test_da
 
 def replace_max_products(match: re.Match) -> str:
     """Thay thế max_products với giá trị test"""
-    return 'max_products = 10  # TEST MODE: Hardcode 10 products cho test  # 0 = không giới hạn'
+    return "max_products = 10  # TEST MODE: Hardcode 10 products cho test  # 0 = không giới hạn"
 
 
 def replace_execution_timeout(match: re.Match) -> str:
     """Giảm execution_timeout xuống tối đa 5-10 phút cho test"""
-    minutes_match = re.search(r'minutes=(\d+)', match.group(0))
+    minutes_match = re.search(r"minutes=(\d+)", match.group(0))
     if minutes_match:
         original_minutes = int(minutes_match.group(1))
         # Giảm xuống tối đa 5 phút (hoặc 10 phút nếu > 10)
@@ -44,7 +44,7 @@ def replace_execution_timeout(match: re.Match) -> str:
 # Các thay đổi cần thiết cho test mode
 # Format: (pattern, replacement, description)
 # replacement có thể là string hoặc callable function
-TEST_REPLACEMENTS: List[Tuple[str, Union[str, Callable], str]] = [
+TEST_REPLACEMENTS: list[tuple[str, str | Callable, str]] = [
     # DAG ID
     (
         r'"dag_id":\s*"tiki_crawl_products"',
@@ -77,7 +77,7 @@ TEST_REPLACEMENTS: List[Tuple[str, Union[str, Callable], str]] = [
     ),
     # max_products trong prepare_products_for_detail
     (
-        r'max_products\s*=\s*int\(\s*Variable\.get\([^)]+\)\s*\)',
+        r"max_products\s*=\s*int\(\s*Variable\.get\([^)]+\)\s*\)",
         replace_max_products,
         "Giới hạn max_products = 10",
     ),
@@ -89,31 +89,31 @@ TEST_REPLACEMENTS: List[Tuple[str, Union[str, Callable], str]] = [
     ),
     # Thêm giới hạn max_categories trong load_categories (TEST MODE)
     (
-        r'(# Giới hạn số danh mục nếu cần \(để test\))\s*\n\s*try:\s*\n\s*max_categories\s*=\s*int\(\s*Variable\.get\([^)]+\)\s*\)',
+        r"(# Giới hạn số danh mục nếu cần \(để test\))\s*\n\s*try:\s*\n\s*max_categories\s*=\s*int\(\s*Variable\.get\([^)]+\)\s*\)",
         r'\1\n        # TEST MODE: Hardcode giới hạn 2 categories cho test\n        max_categories = 2  # TEST MODE: Hardcode 2 categories cho test\n        if max_categories > 0 and len(categories) > max_categories:\n            logger.info(f"⚠️  TEST MODE: Giới hạn từ {len(categories)} xuống {max_categories} categories")\n            categories = categories[:max_categories]\n            logger.info(f"✅ Đã giới hạn: {len(categories)} categories để crawl")\n        \n        # Vẫn kiểm tra Variable nếu có (để override nếu cần)\n        try:\n            var_max_categories = int(Variable.get("TIKI_MAX_CATEGORIES", default_var="0"))',
         "Thêm giới hạn max_categories trong load_categories",
     ),
     # max_pages
     (
-        r'max_pages\s*=\s*\d+\s*#.*Mặc định',
+        r"max_pages\s*=\s*\d+\s*#.*Mặc định",
         "max_pages = 2  # TEST MODE: Hardcode 2 pages cho test  # Mặc định 20 trang để tránh timeout",
         "Giảm max_pages = 2",
     ),
     # timeout
     (
-        r'timeout\s*=\s*\d+\s*#.*phút mặc định',
+        r"timeout\s*=\s*\d+\s*#.*phút mặc định",
         "timeout = 120  # TEST MODE: Giảm timeout xuống 2 phút  # 5 phút mặc định",
         "Giảm timeout = 120",
     ),
     # max_retries
     (
-        r'max_retries=\d+',
+        r"max_retries=\d+",
         "max_retries=2,  # TEST MODE: Giảm retry xuống 2",
         "Giảm max_retries = 2",
     ),
     # execution_timeout
     (
-        r'execution_timeout=timedelta\(minutes=\d+\)',
+        r"execution_timeout=timedelta\(minutes=\d+\)",
         replace_execution_timeout,
         "Giảm execution_timeout",
     ),
@@ -171,7 +171,7 @@ def sync_test_dag():
 
     print(f"📖 Đọc DAG chính: {MAIN_DAG_PATH}")
     try:
-        with open(MAIN_DAG_PATH, "r", encoding="utf-8") as f:
+        with open(MAIN_DAG_PATH, encoding="utf-8") as f:
             main_dag_content = f.read()
     except Exception as e:
         print(f"❌ Lỗi khi đọc DAG chính: {e}")
@@ -200,7 +200,7 @@ def sync_test_dag():
     # So sánh số dòng
     main_lines = main_dag_content.count("\n")
     test_lines = test_dag_content.count("\n")
-    print(f"\n📊 Thống kê:")
+    print("\n📊 Thống kê:")
     print(f"   - DAG chính: {main_lines} dòng")
     print(f"   - Test DAG: {test_lines} dòng")
     print(f"   - Chênh lệch: {abs(main_lines - test_lines)} dòng")
@@ -217,4 +217,3 @@ def sync_test_dag():
 if __name__ == "__main__":
     success = sync_test_dag()
     exit(0 if success else 1)
-

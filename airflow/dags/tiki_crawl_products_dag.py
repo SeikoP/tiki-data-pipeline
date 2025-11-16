@@ -265,16 +265,17 @@ if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
             raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
 
         extract_product_detail = crawl_product_detail_with_selenium
-        
+
         async def crawl_product_detail_async(*args, **kwargs):
             raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
+
 else:
     # Fallback: thử import thông thường
     try:
         from crawl_products_detail import (
+            crawl_product_detail_async,
             crawl_product_detail_with_selenium,
             extract_product_detail,
-            crawl_product_detail_async,
         )
     except ImportError as e:
         raise ImportError(
@@ -772,41 +773,45 @@ def _fix_sys_path_for_pipelines_import(logger=None):
     xóa các fake modules khỏi sys.modules, và chỉ giữ lại /opt/airflow/src.
     """
     import logging
+
     if logger is None:
         logger = logging.getLogger("airflow.task")
-    
+
     # Xóa các fake modules khỏi sys.modules (quan trọng!)
     # Các fake modules này được tạo ở đầu file và gây lỗi 'pipelines' is not a package
-    modules_to_remove = []
-    for module_name in list(sys.modules.keys()):
-        if module_name.startswith('pipelines'):
-            modules_to_remove.append(module_name)
-    
+    modules_to_remove = [
+        module_name
+        for module_name in list(sys.modules.keys())
+        if module_name.startswith("pipelines")
+    ]
+
     for module_name in modules_to_remove:
         del sys.modules[module_name]
         if logger:
             logger.info(f"🗑️  Đã xóa fake module khỏi sys.modules: {module_name}")
-    
+
     # Xóa các đường dẫn con khỏi sys.path (gây lỗi 'pipelines' is not a package)
     paths_to_remove = []
     for path in sys.path:
         # Xóa các đường dẫn như /opt/airflow/src/pipelines hoặc /opt/airflow/src/pipelines/crawl
-        normalized_path = path.replace('\\', '/')
-        if normalized_path.endswith('/pipelines') or normalized_path.endswith('/pipelines/crawl'):
+        normalized_path = path.replace("\\", "/")
+        if normalized_path.endswith("/pipelines") or normalized_path.endswith("/pipelines/crawl"):
             paths_to_remove.append(path)
-    
+
     for path in paths_to_remove:
         if path in sys.path:
             sys.path.remove(path)
             if logger:
                 logger.info(f"🗑️  Đã xóa đường dẫn sai khỏi sys.path: {path}")
-    
+
     # Đảm bảo /opt/airflow/src có trong sys.path
     possible_src_paths = [
         "/opt/airflow/src",  # Docker default path
-        os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")),  # Local dev
+        os.path.abspath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")
+        ),  # Local dev
     ]
-    
+
     for src_path in possible_src_paths:
         if os.path.exists(src_path) and os.path.isdir(src_path):
             if src_path not in sys.path:
@@ -814,7 +819,7 @@ def _fix_sys_path_for_pipelines_import(logger=None):
                 if logger:
                     logger.info(f"✅ Đã thêm vào sys.path: {src_path}")
             return src_path
-    
+
     return None
 
 
@@ -834,14 +839,22 @@ def extract_and_load_categories_to_db(**context) -> dict[str, Any]:
         # Import extract và load modules
         try:
             # Thử import từ đường dẫn trong Docker/Airflow
-            import sys
             import importlib.util
+            import sys
             from pathlib import Path
 
             # Tìm đường dẫn đến extract_categories.py
             possible_paths = [
                 "/opt/airflow/src/pipelines/extract/extract_categories.py",
-                os.path.join(os.path.dirname(__file__), "..", "..", "src", "pipelines", "extract", "extract_categories.py"),
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "..",
+                    "src",
+                    "pipelines",
+                    "extract",
+                    "extract_categories.py",
+                ),
                 os.path.join(os.getcwd(), "src", "pipelines", "extract", "extract_categories.py"),
             ]
 
@@ -853,11 +866,15 @@ def extract_and_load_categories_to_db(**context) -> dict[str, Any]:
                     break
 
             if extract_module_path:
-                spec = importlib.util.spec_from_file_location("extract_categories", extract_module_path)
+                spec = importlib.util.spec_from_file_location(
+                    "extract_categories", extract_module_path
+                )
                 if spec and spec.loader:
                     extract_module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(extract_module)
-                    extract_categories_from_tree_file = extract_module.extract_categories_from_tree_file
+                    extract_categories_from_tree_file = (
+                        extract_module.extract_categories_from_tree_file
+                    )
                 else:
                     raise ImportError("Không thể load extract_categories module")
             else:
@@ -872,7 +889,9 @@ def extract_and_load_categories_to_db(**context) -> dict[str, Any]:
                 # Sửa sys.path và thử lại
                 _fix_sys_path_for_pipelines_import(logger)
                 try:
-                    from pipelines.extract.extract_categories import extract_categories_from_tree_file
+                    from pipelines.extract.extract_categories import (
+                        extract_categories_from_tree_file,
+                    )
                 except ImportError as e:
                     logger.error(f"❌ Không thể import extract_categories: {e}")
                     logger.error(f"   sys.path: {sys.path}")
@@ -881,12 +900,14 @@ def extract_and_load_categories_to_db(**context) -> dict[str, Any]:
         # Import DataLoader
         try:
             from pipelines.load.loader import DataLoader
+
             logger.info("✅ Đã import DataLoader thành công")
         except ImportError:
             # Sửa sys.path và thử lại
             _fix_sys_path_for_pipelines_import(logger)
             try:
                 from pipelines.load.loader import DataLoader
+
                 logger.info("✅ Đã import DataLoader thành công")
             except ImportError as e:
                 logger.error(f"❌ Không thể import DataLoader: {e}")
@@ -1625,12 +1646,22 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 logger.warning("⚠️  Không thể import PostgresStorage, bỏ qua kiểm tra database")
             else:
                 # Lấy database config
-                db_host = Variable.get("POSTGRES_HOST", default_var=os.getenv("POSTGRES_HOST", "postgres"))
-                db_port = int(Variable.get("POSTGRES_PORT", default_var=os.getenv("POSTGRES_PORT", "5432")))
-                db_name = Variable.get("POSTGRES_DB", default_var=os.getenv("POSTGRES_DB", "crawl_data"))
-                db_user = Variable.get("POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres"))
-                db_password = Variable.get("POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres"))
-                
+                db_host = Variable.get(
+                    "POSTGRES_HOST", default_var=os.getenv("POSTGRES_HOST", "postgres")
+                )
+                db_port = int(
+                    Variable.get("POSTGRES_PORT", default_var=os.getenv("POSTGRES_PORT", "5432"))
+                )
+                db_name = Variable.get(
+                    "POSTGRES_DB", default_var=os.getenv("POSTGRES_DB", "crawl_data")
+                )
+                db_user = Variable.get(
+                    "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
+                )
+                db_password = Variable.get(
+                    "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
+                )
+
                 storage = PostgresStorage(
                     host=db_host,
                     port=db_port,
@@ -1638,12 +1669,16 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     user=db_user,
                     password=db_password,
                 )
-                
+
                 # Lấy danh sách product_ids từ products list
-                product_ids_to_check = [p.get("product_id") for p in products if p.get("product_id")]
-                
+                product_ids_to_check = [
+                    p.get("product_id") for p in products if p.get("product_id")
+                ]
+
                 if product_ids_to_check:
-                    logger.info(f"🔍 Đang kiểm tra {len(product_ids_to_check)} products trong database...")
+                    logger.info(
+                        f"🔍 Đang kiểm tra {len(product_ids_to_check)} products trong database..."
+                    )
                     logger.info("   (chỉ skip products có price và sales_count - detail đầy đủ)")
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
@@ -1654,17 +1689,19 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                                 placeholders = ",".join(["%s"] * len(batch_ids))
                                 cur.execute(
                                     f"""
-                                    SELECT product_id 
-                                    FROM products 
+                                    SELECT product_id
+                                    FROM products
                                     WHERE product_id IN ({placeholders})
-                                      AND price IS NOT NULL 
+                                      AND price IS NOT NULL
                                       AND sales_count IS NOT NULL
                                     """,
                                     batch_ids,
                                 )
                                 existing_product_ids_in_db.update(row[0] for row in cur.fetchall())
-                    
-                    logger.info(f"✅ Tìm thấy {len(existing_product_ids_in_db)} products đã có detail đầy đủ trong database")
+
+                    logger.info(
+                        f"✅ Tìm thấy {len(existing_product_ids_in_db)} products đã có detail đầy đủ trong database"
+                    )
                     logger.info("   (có price và sales_count - sẽ skip crawl lại)")
                     storage.close()
         except Exception as e:
@@ -1673,15 +1710,15 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         # Bắt đầu từ index đã crawl
         start_index = progress["last_crawled_index"]
-        
+
         # Kiểm tra nếu start_index vượt quá số lượng products hiện tại
         # (có thể do test mode giới hạn số lượng products)
         if start_index >= len(products):
             logger.warning("=" * 70)
-            logger.warning(f"⚠️  RESET PROGRESS INDEX!")
+            logger.warning("⚠️  RESET PROGRESS INDEX!")
             logger.warning(f"   - Progress index: {start_index}")
             logger.warning(f"   - Số products hiện tại: {len(products)}")
-            logger.warning(f"   - Index vượt quá số lượng products")
+            logger.warning("   - Index vượt quá số lượng products")
             logger.warning("   - Có thể do test mode giới hạn số lượng products")
             logger.warning("   - Reset về index 0 để crawl lại từ đầu")
             logger.warning("=" * 70)
@@ -1690,7 +1727,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             progress["last_crawled_index"] = 0
             progress["total_crawled"] = 0
             # Giữ lại crawled_product_ids để tránh crawl lại products đã có
-        
+
         products_to_check = products[start_index:]
 
         logger.info(
@@ -1701,7 +1738,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Thay vì dừng khi đạt max_products nhưng toàn bộ là skip
         skipped_count = 0
         max_skipped_before_stop = 100  # Dừng nếu skip liên tiếp 100 products
-        
+
         for idx, product in enumerate(products_to_check):
             product_id = product.get("product_id")
             product_url = product.get("url")
@@ -1770,10 +1807,12 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             if max_products > 0 and len(products_to_crawl) >= max_products:
                 logger.info(f"✓ Đã đạt giới hạn tổng {max_products} products")
                 break
-            
+
             # Dừng nếu skip quá nhiều products liên tiếp (có thể đã hết products mới)
             if skipped_count >= max_skipped_before_stop:
-                logger.info(f"⚠️  Đã skip {skipped_count} products liên tiếp, có thể đã hết products mới")
+                logger.info(
+                    f"⚠️  Đã skip {skipped_count} products liên tiếp, có thể đã hết products mới"
+                )
                 logger.info(f"   - Đã tìm được {len(products_to_crawl)} products để crawl")
                 break
 
@@ -1790,18 +1829,24 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             f"📉 Còn lại: {len(products) - (progress['total_crawled'] + already_crawled + len(products_to_crawl))}"
         )
         logger.info("=" * 70)
-        
+
         if len(products_to_crawl) == 0:
             logger.warning("=" * 70)
             logger.warning("⚠️  KHÔNG CÓ PRODUCTS NÀO CẦN CRAWL DETAIL!")
             logger.warning("=" * 70)
             logger.warning("💡 Lý do:")
             if already_crawled > 0:
-                logger.warning(f"   - Đã có trong progress: {already_crawled - db_hits - cache_hits} products")
+                logger.warning(
+                    f"   - Đã có trong progress: {already_crawled - db_hits - cache_hits} products"
+                )
             if cache_hits > 0:
-                logger.warning(f"   - Đã có trong cache (có price và sales_count): {cache_hits} products")
+                logger.warning(
+                    f"   - Đã có trong cache (có price và sales_count): {cache_hits} products"
+                )
             if db_hits > 0:
-                logger.warning(f"   - Đã có trong database (có price và sales_count): {db_hits} products")
+                logger.warning(
+                    f"   - Đã có trong database (có price và sales_count): {db_hits} products"
+                )
             logger.warning("=" * 70)
             logger.warning("💡 Để force crawl lại, bạn có thể:")
             logger.warning("   1. Xóa progress file: data/processed/detail_crawl_progress.json")
@@ -1854,21 +1899,23 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         raise
 
 
-def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index: int = -1, **context) -> list[dict[str, Any]]:
+def crawl_product_batch(
+    product_batch: list[dict[str, Any]] = None, batch_index: int = -1, **context
+) -> list[dict[str, Any]]:
     """
     Task: Crawl detail cho một batch products (Batch Processing với Driver Pooling và Async)
-    
+
     Tối ưu:
     - Batch processing: 10 products/batch
     - Driver pooling: Reuse Selenium drivers trong batch
     - Async/aiohttp: Crawl parallel trong batch
     - Fallback Selenium: Nếu aiohttp thiếu sales_count
-    
+
     Args:
         product_batch: List products trong batch (từ expand_kwargs)
         batch_index: Index của batch
         context: Airflow context
-    
+
     Returns:
         List[Dict]: List kết quả crawl cho batch
     """
@@ -1876,8 +1923,9 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
         logger = get_logger(context)
     except Exception:
         import logging
+
         logger = logging.getLogger("airflow.task")
-    
+
     # Lấy product_batch từ op_kwargs nếu chưa có
     if not product_batch:
         ti = context.get("ti")
@@ -1886,11 +1934,13 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
             if op_kwargs:
                 product_batch = op_kwargs.get("product_batch")
                 batch_index = op_kwargs.get("batch_index", -1)
-        
+
         if not product_batch:
-            product_batch = context.get("product_batch") or context.get("op_kwargs", {}).get("product_batch")
+            product_batch = context.get("product_batch") or context.get("op_kwargs", {}).get(
+                "product_batch"
+            )
             batch_index = context.get("batch_index", -1)
-    
+
     if not product_batch:
         logger.error("=" * 70)
         logger.error("❌ KHÔNG TÌM THẤY PRODUCT_BATCH TRONG CONTEXT!")
@@ -1901,7 +1951,7 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
             logger.error(f"   - ti.op_kwargs: {getattr(ti, 'op_kwargs', 'N/A')}")
         logger.error("=" * 70)
         return []
-    
+
     # Validate product_batch
     if not isinstance(product_batch, list):
         logger.error("=" * 70)
@@ -1909,47 +1959,48 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
         logger.error(f"   - Value: {product_batch}")
         logger.error("=" * 70)
         return []
-    
+
     if len(product_batch) == 0:
         logger.warning("=" * 70)
         logger.warning(f"⚠️  BATCH {batch_index} RỖNG - Không có products nào")
         logger.warning("=" * 70)
         return []
-    
+
     logger.info("=" * 70)
     logger.info(f"📦 BATCH {batch_index}: Crawl {len(product_batch)} products")
     logger.info(f"   - Product IDs: {[p.get('product_id', 'unknown') for p in product_batch[:5]]}")
     if len(product_batch) > 5:
         logger.info(f"   - ... và {len(product_batch) - 5} products nữa")
     logger.info("=" * 70)
-    
+
     results = []
-    
+
     try:
         import asyncio
+
         # Sử dụng hàm đã được import ở đầu file
         # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file
         if SeleniumDriverPool is None:
             raise ImportError("SeleniumDriverPool chưa được import từ utils module")
-        
+
         # Tạo driver pool cho batch
         driver_pool = SeleniumDriverPool(pool_size=5, headless=True, timeout=60)
-        
+
         # Tạo event loop trước
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        
+
         # Session sẽ được tạo bên trong async function (cần async context)
         session = None
-        
+
         async def crawl_single_async(product_info: dict) -> dict[str, Any]:
             """Crawl một product với async"""
             product_id = product_info.get("product_id", "unknown")
             product_url = product_info.get("url", "")
-            
+
             result = {
                 "product_id": product_id,
                 "url": product_url,
@@ -1958,76 +2009,105 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
                 "detail": None,
                 "crawled_at": datetime.now().isoformat(),
             }
-            
+
             try:
                 # Thử async crawl trước
                 if session:
                     detail = await crawl_product_detail_async(
-                        product_url,
-                        session=session,
-                        use_selenium_fallback=True,
-                        verbose=False
+                        product_url, session=session, use_selenium_fallback=True, verbose=False
                     )
-                    
+
                     # Kiểm tra nếu crawl_product_detail_async trả về HTML string (do fallback về Selenium)
                     if isinstance(detail, str) and detail.strip().startswith("<"):
                         # Phân tích HTML để xác định loại
                         html_preview = detail[:500] if len(detail) > 500 else detail
                         html_lower = detail.lower()
-                        
+
                         # Kiểm tra các trường hợp đặc biệt
                         # Kiểm tra error page - cần kiểm tra kỹ hơn để tránh false positive
                         # Error page thường có title hoặc heading chứa "404", "not found", etc.
                         is_error_page = False
                         error_keywords = [
-                            "404", "not found", "page not found", 
-                            "500", "internal server error",
-                            "403", "forbidden", "access denied"
+                            "404",
+                            "not found",
+                            "page not found",
+                            "500",
+                            "internal server error",
+                            "403",
+                            "forbidden",
+                            "access denied",
                         ]
                         # Chỉ coi là error page nếu có keyword trong title hoặc heading, không phải trong toàn bộ HTML
                         # Vì một số product có thể có "404" trong tên hoặc mô tả
                         if any(keyword in html_lower for keyword in error_keywords):
                             # Kiểm tra trong title tag hoặc h1 tag (nơi thường có error message)
-                            title_match = re.search(r'<title[^>]*>(.*?)</title>', html_lower, re.IGNORECASE | re.DOTALL)
-                            h1_match = re.search(r'<h1[^>]*>(.*?)</h1>', html_lower, re.IGNORECASE | re.DOTALL)
-                            
+                            title_match = re.search(
+                                r"<title[^>]*>(.*?)</title>", html_lower, re.IGNORECASE | re.DOTALL
+                            )
+                            h1_match = re.search(
+                                r"<h1[^>]*>(.*?)</h1>", html_lower, re.IGNORECASE | re.DOTALL
+                            )
+
                             title_text = title_match.group(1) if title_match else ""
                             h1_text = h1_match.group(1) if h1_match else ""
-                            
+
                             # Chỉ coi là error nếu keyword xuất hiện trong title hoặc h1
                             is_error_page = any(
-                                keyword in title_text or keyword in h1_text 
+                                keyword in title_text or keyword in h1_text
                                 for keyword in error_keywords
                             )
-                        
-                        is_captcha = any(keyword in html_lower for keyword in [
-                            "captcha", "recaptcha", "cloudflare", "checking your browser"
-                        ])
-                        has_next_data = "__next_data__" in html_lower or 'id="__NEXT_DATA__"' in html_lower
-                        
+
+                        is_captcha = any(
+                            keyword in html_lower
+                            for keyword in [
+                                "captcha",
+                                "recaptcha",
+                                "cloudflare",
+                                "checking your browser",
+                            ]
+                        )
+                        has_next_data = (
+                            "__next_data__" in html_lower or 'id="__NEXT_DATA__"' in html_lower
+                        )
+
                         # Kiểm tra xem có phải là HTML bình thường của Tiki không
-                        is_tiki_page = any(indicator in html_lower for indicator in [
-                            "tiki.vn", "tiki", "pdp_product_name", "product-detail",
-                            "data-view-id", "pdp-product"
-                        ])
-                        
+                        is_tiki_page = any(
+                            indicator in html_lower
+                            for indicator in [
+                                "tiki.vn",
+                                "tiki",
+                                "pdp_product_name",
+                                "product-detail",
+                                "data-view-id",
+                                "pdp-product",
+                            ]
+                        )
+
                         if is_error_page:
-                            logger.warning(f"⚠️  HTML là error page cho product {product_id}: {html_preview[:200]}...")
+                            logger.warning(
+                                f"⚠️  HTML là error page cho product {product_id}: {html_preview[:200]}..."
+                            )
                             detail = None
                         elif is_captcha:
-                            logger.warning(f"⚠️  HTML là captcha/block page cho product {product_id}")
+                            logger.warning(
+                                f"⚠️  HTML là captcha/block page cho product {product_id}"
+                            )
                             detail = None
                         elif not is_tiki_page and not has_next_data:
                             # Nếu không phải Tiki page và không có __NEXT_DATA__, có thể là page lạ
-                            logger.warning(f"⚠️  HTML không giống Tiki product page cho product {product_id}")
+                            logger.warning(
+                                f"⚠️  HTML không giống Tiki product page cho product {product_id}"
+                            )
                             logger.warning(f"   - Có __NEXT_DATA__: {has_next_data}")
                             logger.warning(f"   - HTML preview: {html_preview[:300]}...")
                             # Vẫn thử parse, có thể vẫn extract được một số thông tin
                         else:
-                            logger.info(f"ℹ️  crawl_product_detail_async trả về HTML (fallback Selenium) cho product {product_id}")
+                            logger.info(
+                                f"ℹ️  crawl_product_detail_async trả về HTML (fallback Selenium) cho product {product_id}"
+                            )
                             logger.info(f"   - HTML length: {len(detail)} chars")
                             logger.info(f"   - Có __NEXT_DATA__: {has_next_data}")
-                            
+
                             # Parse HTML thành dict
                             try:
                                 detail = extract_product_detail(detail, product_url, verbose=False)
@@ -2036,19 +2116,29 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
                                     has_name = bool(detail.get("name"))
                                     has_price = bool(detail.get("price", {}).get("current_price"))
                                     has_sales = detail.get("sales_count") is not None
-                                    logger.info(f"✅ Đã parse HTML thành công cho product {product_id}")
-                                    logger.info(f"   - Có name: {has_name}, có price: {has_price}, có sales_count: {has_sales}")
+                                    logger.info(
+                                        f"✅ Đã parse HTML thành công cho product {product_id}"
+                                    )
+                                    logger.info(
+                                        f"   - Có name: {has_name}, có price: {has_price}, có sales_count: {has_sales}"
+                                    )
                                 else:
-                                    logger.warning(f"⚠️  extract_product_detail trả về None hoặc không phải dict cho product {product_id}")
+                                    logger.warning(
+                                        f"⚠️  extract_product_detail trả về None hoặc không phải dict cho product {product_id}"
+                                    )
                                     detail = None
                             except Exception as parse_error:
-                                logger.warning(f"⚠️  Lỗi khi parse HTML từ crawl_product_detail_async: {parse_error}")
+                                logger.warning(
+                                    f"⚠️  Lỗi khi parse HTML từ crawl_product_detail_async: {parse_error}"
+                                )
                                 logger.debug(f"   HTML preview: {html_preview}")
                                 detail = None
-                    
+
                     # Đảm bảo detail là dict
                     if detail and not isinstance(detail, dict):
-                        logger.warning(f"⚠️  crawl_product_detail_async trả về {type(detail)} thay vì dict cho product {product_id}")
+                        logger.warning(
+                            f"⚠️  crawl_product_detail_async trả về {type(detail)} thay vì dict cho product {product_id}"
+                        )
                         detail = None
                 else:
                     # Fallback về Selenium nếu không có aiohttp
@@ -2059,50 +2149,52 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
                         max_retries=2,
                         timeout=60,
                         use_redis_cache=True,
-                        use_rate_limiting=True
+                        use_rate_limiting=True,
                     )
                     if html:
                         # Sử dụng hàm đã được import ở đầu file
                         detail = extract_product_detail(html, product_url, verbose=False)
-                        
+
                         # Kiểm tra nếu extract_product_detail trả về HTML thay vì dict
                         if isinstance(detail, str) and detail.strip().startswith("<"):
-                            logger.warning(f"⚠️  extract_product_detail trả về HTML thay vì dict cho product {product_id}, thử parse lại")
+                            logger.warning(
+                                f"⚠️  extract_product_detail trả về HTML thay vì dict cho product {product_id}, thử parse lại"
+                            )
                             # Thử parse lại HTML
                             try:
                                 detail = extract_product_detail(html, product_url, verbose=False)
                             except Exception as parse_error:
                                 logger.warning(f"⚠️  Lỗi khi parse lại HTML: {parse_error}")
                                 detail = None
-                        
+
                         # Đảm bảo detail là dict, không phải HTML string
                         if not isinstance(detail, dict):
-                            logger.warning(f"⚠️  extract_product_detail trả về {type(detail)} thay vì dict cho product {product_id}")
+                            logger.warning(
+                                f"⚠️  extract_product_detail trả về {type(detail)} thay vì dict cho product {product_id}"
+                            )
                             detail = None
                     else:
                         detail = None
-                
+
                 if detail and isinstance(detail, dict):
                     result["detail"] = detail
                     result["status"] = "success"
                 else:
                     result["error"] = "Không thể crawl detail hoặc extract detail không hợp lệ"
                     result["status"] = "failed"
-                    
+
             except Exception as e:
                 result["error"] = str(e)
                 result["status"] = "failed"
                 logger.warning(f"⚠️  Lỗi khi crawl product {product_id}: {e}")
-            
+
             return result
-        
+
         # Crawl tất cả products trong batch song song với async
         # (Event loop đã được tạo ở trên)
         # Sử dụng asyncio.gather() để crawl parallel
-        rate_limit_delay = float(
-            Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default_var="1.5")
-        )
-        
+        rate_limit_delay = float(Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default_var="1.5"))
+
         # Tạo tasks với rate limiting: stagger start times
         async def crawl_batch_parallel():
             """Crawl batch với parallel processing và rate limiting"""
@@ -2112,6 +2204,7 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
             if session is None:
                 try:
                     import aiohttp
+
                     timeout = aiohttp.ClientTimeout(total=30)
                     # Tạo session trong async context (có event loop đang chạy)
                     # Đây là async function nên event loop đã có sẵn
@@ -2119,85 +2212,92 @@ def crawl_product_batch(product_batch: list[dict[str, Any]] = None, batch_index:
                         timeout=timeout,
                         headers={
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                        }
+                        },
                     )
                     logger.info("✅ Đã tạo aiohttp session trong async context")
                 except RuntimeError as e:
                     # Lỗi "no running event loop" - fallback về Selenium
-                    logger.warning(f"⚠️  Không thể tạo aiohttp session (no event loop): {e}, sẽ dùng Selenium")
+                    logger.warning(
+                        f"⚠️  Không thể tạo aiohttp session (no event loop): {e}, sẽ dùng Selenium"
+                    )
                     session = None
                 except Exception as e:
                     logger.warning(f"⚠️  Không thể tạo aiohttp session: {e}, sẽ dùng Selenium")
                     session = None
-            
+
             # Factory function để tránh closure issue
             def create_crawl_task(product_info, delay_value):
                 async def crawl_with_delay():
                     if delay_value > 0:
                         await asyncio.sleep(delay_value)
                     return await crawl_single_async(product_info)
+
                 return crawl_with_delay()
-            
+
             tasks = []
             for i, product in enumerate(product_batch):
                 delay = i * rate_limit_delay / len(product_batch)  # Phân tán delay
                 task = create_crawl_task(product, delay)
                 tasks.append(task)
-            
+
             # Chạy tất cả tasks song song
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             # Xử lý exceptions
             processed_results = []
             for i, result in enumerate(batch_results):
                 if isinstance(result, Exception):
                     product_info = product_batch[i]
-                    processed_results.append({
-                        "product_id": product_info.get("product_id", "unknown"),
-                        "url": product_info.get("url", ""),
-                        "status": "failed",
-                        "error": str(result),
-                        "detail": None,
-                        "crawled_at": datetime.now().isoformat(),
-                    })
+                    processed_results.append(
+                        {
+                            "product_id": product_info.get("product_id", "unknown"),
+                            "url": product_info.get("url", ""),
+                            "status": "failed",
+                            "error": str(result),
+                            "detail": None,
+                            "crawled_at": datetime.now().isoformat(),
+                        }
+                    )
                 else:
                     processed_results.append(result)
-            
+
             return processed_results
-        
+
         results = loop.run_until_complete(crawl_batch_parallel())
-        
+
         # Đóng session
         if session:
             loop.run_until_complete(session.close())
-        
+
         # Cleanup driver pool
         driver_pool.cleanup()
-        
+
         # Thống kê
         success_count = sum(1 for r in results if r.get("status") == "success")
         failed_count = len(results) - success_count
-        
+
         logger.info(f"✅ Batch {batch_index} hoàn thành:")
         logger.info(f"   - Success: {success_count}/{len(product_batch)}")
         logger.info(f"   - Failed: {failed_count}/{len(product_batch)}")
-        
+
     except Exception as e:
         logger.error(f"❌ Lỗi khi crawl batch {batch_index}: {e}", exc_info=True)
         # Trả về results với status failed cho tất cả
         if product_batch and isinstance(product_batch, list):
             for product_info in product_batch:
-                results.append({
-                    "product_id": product_info.get("product_id", "unknown"),
-                    "url": product_info.get("url", ""),
-                    "status": "failed",
-                    "error": f"Batch error: {str(e)}",
-                    "detail": None,
-                    "crawled_at": datetime.now().isoformat(),
-                })
+                results.append(
+                    {
+                        "product_id": product_info.get("product_id", "unknown"),
+                        "url": product_info.get("url", ""),
+                        "status": "failed",
+                        "error": f"Batch error: {str(e)}",
+                        "detail": None,
+                        "crawled_at": datetime.now().isoformat(),
+                    }
+                )
         else:
             logger.error("⚠️  Không thể tạo failed results vì product_batch không hợp lệ")
-    
+
     return results
 
 
@@ -2284,7 +2384,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
     # Kiểm tra cache trước - ưu tiên Redis, fallback về file
     # Kiểm tra xem có force refresh không (từ Airflow Variable)
     force_refresh = Variable.get("TIKI_FORCE_REFRESH_CACHE", default_var="false").lower() == "true"
-    
+
     if force_refresh:
         logger.info(f"🔄 FORCE REFRESH MODE: Bỏ qua cache cho product {product_id}")
     else:
@@ -2326,7 +2426,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         except Exception:
             # Redis không available, fallback về file cache
             pass
-        
+
         # Fallback: Kiểm tra file cache nếu Redis không available hoặc không có cache
         if not force_refresh:
             cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
@@ -2355,7 +2455,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
 
     # Tiếp tục crawl nếu không có cache hoặc force refresh
     # (File cache check đã được xử lý ở trên trong else block)
-    
+
     # Bắt đầu crawl product detail
     try:
         # Kiểm tra graceful degradation
@@ -2675,11 +2775,11 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
     # Đảm bảo luôn return result, không bao giờ raise exception
     # Kiểm tra result có hợp lệ không trước khi return
     if not result or not isinstance(result, dict):
-        logger.warning(f"⚠️  Result không hợp lệ, sử dụng default_result")
+        logger.warning("⚠️  Result không hợp lệ, sử dụng default_result")
         result = default_result.copy()
         result["error"] = "Result không hợp lệ"
         result["status"] = "failed"
-    
+
     # Đảm bảo result có đầy đủ các field cần thiết
     if "product_id" not in result:
         result["product_id"] = product_id if "product_id" in locals() else "unknown"
@@ -2689,7 +2789,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         result["status"] = "failed"
     if "crawled_at" not in result:
         result["crawled_at"] = datetime.now().isoformat()
-    
+
     try:
         return result
     except Exception as e:
@@ -2729,8 +2829,10 @@ def merge_product_details(**context) -> dict[str, Any]:
         if not merge_result:
             # Thử lấy từ file
             if OUTPUT_FILE.exists():
+                import json as json_module  # noqa: F401
+
                 with open(OUTPUT_FILE, encoding="utf-8") as f:
-                    data = json.load(f)
+                    data = json_module.load(f)
                     merge_result = {"products": data.get("products", [])}
 
         if not merge_result:
@@ -2756,8 +2858,14 @@ def merge_product_details(**context) -> dict[str, Any]:
         expected_products_count = len(products_to_crawl) if products_to_crawl else 0
         # Với batch processing, số map_index = số batches, không phải số products
         batch_size = 10
-        expected_crawl_count = (expected_products_count + batch_size - 1) // batch_size if expected_products_count > 0 else 0
-        logger.info(f"📊 Số products: {expected_products_count}, Số batches dự kiến: {expected_crawl_count}")
+        expected_crawl_count = (
+            (expected_products_count + batch_size - 1) // batch_size
+            if expected_products_count > 0
+            else 0
+        )
+        logger.info(
+            f"📊 Số products: {expected_products_count}, Số batches dự kiến: {expected_crawl_count}"
+        )
 
         # Tự động phát hiện số lượng map_index thực tế có sẵn bằng cách thử lấy XCom
         # Điều này giúp xử lý trường hợp một số tasks đã fail hoặc chưa chạy xong
@@ -3078,9 +3186,21 @@ def merge_product_details(**context) -> dict[str, Any]:
                     error = detail_result.get("error")
 
                     # Đếm số lượng products được crawl (tất cả các status trừ "not_crawled")
-                    if status in ["success", "cached", "failed", "timeout", "degraded", "circuit_breaker_open", "selenium_error", "network_error", "extract_error", "validation_error", "memory_error"]:
+                    if status in [
+                        "success",
+                        "cached",
+                        "failed",
+                        "timeout",
+                        "degraded",
+                        "circuit_breaker_open",
+                        "selenium_error",
+                        "network_error",
+                        "extract_error",
+                        "validation_error",
+                        "memory_error",
+                    ]:
                         stats["crawled_count"] += 1
-                    
+
                     if status == "success":
                         stats["with_detail"] += 1
                     elif status == "cached":
@@ -3195,13 +3315,13 @@ def merge_product_details(**context) -> dict[str, Any]:
                 if status == "success":
                     # Merge detail vào product
                     detail = detail_result["detail"]
-                    
+
                     # Kiểm tra nếu detail là None hoặc rỗng
                     if detail is None:
                         logger.warning(f"⚠️  Detail là None cho product {product_id}")
                         products_failed += 1
                         continue
-                    
+
                     # Kiểm tra nếu detail là string (JSON), parse nó
                     if isinstance(detail, str):
                         # Bỏ qua string rỗng
@@ -3209,21 +3329,26 @@ def merge_product_details(**context) -> dict[str, Any]:
                             logger.warning(f"⚠️  Detail là string rỗng cho product {product_id}")
                             products_failed += 1
                             continue
-                        
+
                         try:
                             import json
+
                             detail = json.loads(detail)
                         except (json.JSONDecodeError, TypeError) as e:
-                            logger.warning(f"⚠️  Không thể parse detail JSON cho product {product_id}: {e}, detail type: {type(detail)}, detail value: {str(detail)[:100]}")
+                            logger.warning(
+                                f"⚠️  Không thể parse detail JSON cho product {product_id}: {e}, detail type: {type(detail)}, detail value: {str(detail)[:100]}"
+                            )
                             products_failed += 1
                             continue
-                    
+
                     # Kiểm tra nếu detail không phải là dict
                     if not isinstance(detail, dict):
-                        logger.warning(f"⚠️  Detail không phải là dict cho product {product_id}: {type(detail)}, value: {str(detail)[:100]}")
+                        logger.warning(
+                            f"⚠️  Detail không phải là dict cho product {product_id}: {type(detail)}, value: {str(detail)[:100]}"
+                        )
                         products_failed += 1
                         continue
-                    
+
                     product_with_detail = {**product}
 
                     # Update các trường từ detail
@@ -3282,14 +3407,14 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         # Tính tổng có detail (success + cached)
         total_with_detail = stats["with_detail"] + stats["cached"]
-        
+
         # Tỷ lệ thành công dựa trên số lượng được crawl (quan trọng hơn)
         if stats["crawled_count"] > 0:
             success_rate = (stats["with_detail"] / stats["crawled_count"]) * 100
             logger.info(
                 f"📈 Tỷ lệ thành công (dựa trên crawled): {stats['with_detail']}/{stats['crawled_count']} ({success_rate:.1f}%)"
             )
-        
+
         # Tỷ lệ có detail trong tổng products (để tham khảo)
         if stats["total_products"] > 0:
             detail_coverage = total_with_detail / stats["total_products"] * 100
@@ -3383,7 +3508,7 @@ def save_products_with_detail(**context) -> str:
         note = merge_result.get("note", "Crawl từ Airflow DAG với product details")
 
         logger.info(f"💾 Đang lưu {len(products)} products với detail...")
-        
+
         # Log thông tin về crawl detail
         crawled_count = stats.get("crawled_count", 0)
         if crawled_count > 0:
@@ -3393,7 +3518,7 @@ def save_products_with_detail(**context) -> str:
                 logger.info(f"⏱️  Products timeout: {stats.get('timeout', 0)}")
             if stats.get("failed", 0) > 0:
                 logger.info(f"❌ Products failed: {stats.get('failed', 0)}")
-        
+
         if stats.get("products_skipped"):
             logger.info(f"🚫 Đã bỏ qua {stats.get('products_skipped')} products không có detail")
 
@@ -3459,7 +3584,7 @@ def transform_products(**context) -> dict[str, Any]:
         products = data.get("products", [])
         stats = data.get("stats", {})
         logger.info(f"📊 Tổng số products trong file: {len(products)}")
-        
+
         # Log thông tin về crawl detail nếu có
         crawled_count = stats.get("crawled_count", 0)
         if crawled_count > 0:
@@ -3468,7 +3593,7 @@ def transform_products(**context) -> dict[str, Any]:
 
         # Bổ sung category_url và category_id trước khi transform
         logger.info("🔗 Đang bổ sung category_url và category_id...")
-        
+
         # Bước 1: Load category_url mapping từ products.json (nếu có)
         category_url_mapping = {}  # product_id -> category_url
         products_file = OUTPUT_DIR / "products.json"
@@ -3477,7 +3602,7 @@ def transform_products(**context) -> dict[str, Any]:
                 logger.info(f"📖 Đang đọc category_url mapping từ: {products_file}")
                 with open(products_file, encoding="utf-8") as f:
                     products_data = json.load(f)
-                
+
                 products_list = []
                 if isinstance(products_data, list):
                     products_list = products_data
@@ -3486,17 +3611,19 @@ def transform_products(**context) -> dict[str, Any]:
                         products_list = products_data["products"]
                     elif "data" in products_data and isinstance(products_data["data"], dict):
                         products_list = products_data["data"].get("products", [])
-                
+
                 for product in products_list:
                     product_id = product.get("product_id")
                     category_url = product.get("category_url")
                     if product_id and category_url:
                         category_url_mapping[product_id] = category_url
-                
-                logger.info(f"✅ Đã load {len(category_url_mapping)} category_url mappings từ products.json")
+
+                logger.info(
+                    f"✅ Đã load {len(category_url_mapping)} category_url mappings từ products.json"
+                )
             except Exception as e:
                 logger.warning(f"⚠️  Lỗi khi đọc products.json: {e}")
-        
+
         # Bước 2: Import utility để extract category_id
         try:
             # Tìm đường dẫn utils module
@@ -3507,15 +3634,16 @@ def transform_products(**context) -> dict[str, Any]:
                 ),
                 os.path.join(os.getcwd(), "src", "pipelines", "crawl", "utils.py"),
             ]
-            
+
             utils_path = None
             for path in utils_paths:
                 if os.path.exists(path):
                     utils_path = path
                     break
-            
+
             if utils_path:
                 import importlib.util
+
                 spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
                 utils_module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(utils_module)
@@ -3523,6 +3651,7 @@ def transform_products(**context) -> dict[str, Any]:
             else:
                 # Fallback: định nghĩa hàm đơn giản
                 import re
+
                 def extract_category_id_from_url(url: str) -> str | None:
                     if not url:
                         return None
@@ -3530,9 +3659,11 @@ def transform_products(**context) -> dict[str, Any]:
                     if match:
                         return f"c{match.group(1)}"
                     return None
+
         except Exception as e:
             logger.warning(f"⚠️  Không thể import extract_category_id_from_url: {e}")
             import re
+
             def extract_category_id_from_url(url: str) -> str | None:
                 if not url:
                     return None
@@ -3540,20 +3671,20 @@ def transform_products(**context) -> dict[str, Any]:
                 if match:
                     return f"c{match.group(1)}"
                 return None
-        
+
         # Bước 3: Bổ sung category_url, category_id và đảm bảo category_path cho products
         updated_count = 0
         category_id_added = 0
         category_path_count = 0
-        
+
         for product in products:
             product_id = product.get("product_id")
-            
+
             # Bổ sung category_url nếu chưa có
             if not product.get("category_url") and product_id in category_url_mapping:
                 product["category_url"] = category_url_mapping[product_id]
                 updated_count += 1
-            
+
             # Extract category_id từ category_url nếu có
             category_url = product.get("category_url")
             if category_url and not product.get("category_id"):
@@ -3561,18 +3692,18 @@ def transform_products(**context) -> dict[str, Any]:
                 if category_id:
                     product["category_id"] = category_id
                     category_id_added += 1
-            
+
             # Đảm bảo category_path được giữ lại (đã có từ cache, không cần xử lý)
             if product.get("category_path"):
                 category_path_count += 1
-        
+
         if updated_count > 0:
             logger.info(f"✅ Đã bổ sung category_url cho {updated_count} products")
         if category_id_added > 0:
             logger.info(f"✅ Đã bổ sung category_id cho {category_id_added} products")
         if category_path_count > 0:
             logger.info(f"✅ Có {category_path_count} products có category_path (breadcrumb)")
-        
+
         # Import DataTransformer
         try:
             # Tìm đường dẫn transform module
@@ -3659,42 +3790,54 @@ def _import_postgres_storage():
     """
     Helper function để import PostgresStorage với fallback logic
     Hỗ trợ cả môi trường Airflow (importlib) và môi trường bình thường
-    
+
     Returns:
         PostgresStorage class hoặc None nếu không thể import
     """
     try:
         # Thử import từ __init__.py của storage module
         from pipelines.crawl.storage import PostgresStorage
+
         return PostgresStorage
     except ImportError:
         try:
             # Thử import trực tiếp từ file
             from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
             return PostgresStorage
         except ImportError:
             try:
                 import importlib.util
                 from pathlib import Path
-                
+
                 # Tìm đường dẫn đến postgres_storage.py
                 possible_paths = [
                     # Từ /opt/airflow/src (Docker default - ưu tiên)
                     Path("/opt/airflow/src/pipelines/crawl/storage/postgres_storage.py"),
                     # Từ dag_file_dir
-                    Path(dag_file_dir).parent.parent / "src" / "pipelines" / "crawl" / "storage" / "postgres_storage.py",
+                    Path(dag_file_dir).parent.parent
+                    / "src"
+                    / "pipelines"
+                    / "crawl"
+                    / "storage"
+                    / "postgres_storage.py",
                     # Từ current working directory
-                    Path(os.getcwd()) / "src" / "pipelines" / "crawl" / "storage" / "postgres_storage.py",
+                    Path(os.getcwd())
+                    / "src"
+                    / "pipelines"
+                    / "crawl"
+                    / "storage"
+                    / "postgres_storage.py",
                     # Từ workspace root
                     Path("/workspace/src/pipelines/crawl/storage/postgres_storage.py"),
                 ]
-                
+
                 postgres_storage_path = None
                 for path in possible_paths:
                     if path.exists() and path.is_file():
                         postgres_storage_path = path
                         break
-                
+
                 if postgres_storage_path:
                     # Sử dụng importlib để load trực tiếp từ file
                     spec = importlib.util.spec_from_file_location(
@@ -3704,27 +3847,29 @@ def _import_postgres_storage():
                         postgres_storage_module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(postgres_storage_module)
                         return postgres_storage_module.PostgresStorage
-                
+
                 # Nếu không tìm thấy file, thử thêm src vào path và import absolute
                 src_paths = [
                     Path("/opt/airflow/src"),
                     Path(dag_file_dir).parent.parent / "src",
                     Path(os.getcwd()) / "src",
                 ]
-                
+
                 for src_path in src_paths:
                     if src_path.exists() and str(src_path) not in sys.path:
                         sys.path.insert(0, str(src_path))
                         try:
                             from pipelines.crawl.storage import PostgresStorage
+
                             return PostgresStorage
                         except ImportError:
                             try:
                                 from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
                                 return PostgresStorage
                             except ImportError:
                                 continue
-                
+
                 return None
             except Exception:
                 return None
@@ -3806,11 +3951,21 @@ def load_products(**context) -> dict[str, Any]:
 
             # Lấy database config từ Airflow Variables hoặc environment variables
             # Ưu tiên: Airflow Variables > Environment Variables > Default
-            db_host = Variable.get("POSTGRES_HOST", default_var=os.getenv("POSTGRES_HOST", "postgres"))
-            db_port = int(Variable.get("POSTGRES_PORT", default_var=os.getenv("POSTGRES_PORT", "5432")))
-            db_name = Variable.get("POSTGRES_DB", default_var=os.getenv("POSTGRES_DB", "crawl_data"))
-            db_user = Variable.get("POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres"))
-            db_password = Variable.get("POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres"))
+            db_host = Variable.get(
+                "POSTGRES_HOST", default_var=os.getenv("POSTGRES_HOST", "postgres")
+            )
+            db_port = int(
+                Variable.get("POSTGRES_PORT", default_var=os.getenv("POSTGRES_PORT", "5432"))
+            )
+            db_name = Variable.get(
+                "POSTGRES_DB", default_var=os.getenv("POSTGRES_DB", "crawl_data")
+            )
+            db_user = Variable.get(
+                "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
+            )
+            db_password = Variable.get(
+                "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
+            )
 
             # Load vào database
             loader = DataLoader(
@@ -3885,9 +4040,11 @@ def load_products(**context) -> dict[str, Any]:
                         if diff > 0:
                             logger.info(f"✅ Đã thêm {diff} products mới vào DB")
                         elif diff == 0:
-                            logger.info(f"ℹ️  Không có products mới (chỉ UPDATE các products đã có)")
+                            logger.info("ℹ️  Không có products mới (chỉ UPDATE các products đã có)")
                         else:
-                            logger.warning(f"⚠️  Số lượng products giảm {abs(diff)} (có thể do xóa hoặc lỗi)")
+                            logger.warning(
+                                f"⚠️  Số lượng products giảm {abs(diff)} (có thể do xóa hoặc lỗi)"
+                            )
                 except Exception as e:
                     logger.warning(f"⚠️  Không thể kiểm tra số lượng products sau khi load: {e}")
                     count_after = None
@@ -3897,20 +4054,30 @@ def load_products(**context) -> dict[str, Any]:
                 logger.info("=" * 70)
                 logger.info(f"✅ DB loaded: {load_stats['db_loaded']} products")
                 if load_stats.get("inserted_count") is not None:
-                    logger.info(f"   - INSERT (products mới): {load_stats.get('inserted_count', 0)}")
-                    logger.info(f"   - UPDATE (products đã có): {load_stats.get('updated_count', 0)}")
+                    logger.info(
+                        f"   - INSERT (products mới): {load_stats.get('inserted_count', 0)}"
+                    )
+                    logger.info(
+                        f"   - UPDATE (products đã có): {load_stats.get('updated_count', 0)}"
+                    )
                 logger.info(f"✅ File loaded: {load_stats['file_loaded']}")
                 logger.info(f"❌ Failed: {load_stats['failed_count']}")
                 if count_before is not None and count_after is not None:
                     diff = count_after - count_before
-                    logger.info(f"📈 DB count: {count_before} → {count_after} (thay đổi: {diff:+d})")
+                    logger.info(
+                        f"📈 DB count: {count_before} → {count_after} (thay đổi: {diff:+d})"
+                    )
                     if diff == 0 and load_stats.get("inserted_count", 0) == 0:
                         logger.info("ℹ️  Không có products mới - chỉ UPDATE các products đã có")
                     elif diff > 0:
                         logger.info(f"✅ Đã thêm {diff} products mới vào DB")
                 logger.info("=" * 70)
-                logger.info("ℹ️  Lưu ý: Với upsert=True, products đã có sẽ được UPDATE (không tăng số lượng)")
-                logger.info("ℹ️  Chỉ products mới (product_id chưa có) mới được INSERT và tăng số lượng")
+                logger.info(
+                    "ℹ️  Lưu ý: Với upsert=True, products đã có sẽ được UPDATE (không tăng số lượng)"
+                )
+                logger.info(
+                    "ℹ️  Chỉ products mới (product_id chưa có) mới được INSERT và tăng số lượng"
+                )
                 logger.info("=" * 70)
 
                 return {
@@ -3953,9 +4120,13 @@ def validate_data(**context) -> dict[str, Any]:
         # Cách 1: Lấy từ task_id với TaskGroup prefix
         try:
             output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
-            logger.info(f"Lấy output_file từ 'crawl_product_details.save_products_with_detail': {output_file}")
+            logger.info(
+                f"Lấy output_file từ 'crawl_product_details.save_products_with_detail': {output_file}"
+            )
         except Exception as e:
-            logger.warning(f"Không lấy được từ 'crawl_product_details.save_products_with_detail': {e}")
+            logger.warning(
+                f"Không lấy được từ 'crawl_product_details.save_products_with_detail': {e}"
+            )
 
         # Cách 2: Thử không có prefix
         if not output_file:
@@ -3969,7 +4140,9 @@ def validate_data(**context) -> dict[str, Any]:
         if not output_file:
             try:
                 output_file = ti.xcom_pull(task_ids="process_and_save.save_products")
-                logger.info(f"Lấy output_file từ 'process_and_save.save_products' (fallback): {output_file}")
+                logger.info(
+                    f"Lấy output_file từ 'process_and_save.save_products' (fallback): {output_file}"
+                )
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'process_and_save.save_products': {e}")
 
@@ -4029,7 +4202,7 @@ def validate_data(**context) -> dict[str, Any]:
         logger.info("📊 VALIDATION RESULTS")
         logger.info("=" * 70)
         logger.info(f"📦 Tổng số products trong file: {validation_result['total_products']}")
-        
+
         # Log thông tin về crawl detail nếu có
         crawled_count = stats.get("crawled_count", 0)
         if crawled_count > 0:
@@ -4039,7 +4212,7 @@ def validate_data(**context) -> dict[str, Any]:
                 logger.info(f"⏱️  Products timeout: {stats.get('timeout', 0)}")
             if stats.get("failed", 0) > 0:
                 logger.info(f"❌ Products failed: {stats.get('failed', 0)}")
-        
+
         logger.info(f"✅ Valid products: {validation_result['valid_products']}")
         logger.info(f"❌ Invalid products: {validation_result['invalid_products']}")
         logger.info("=" * 70)
@@ -4115,22 +4288,24 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 
                     # Log thống kê
                     stats = summary.get("statistics", {})
-                    total_products = stats.get('total_products', 0)
-                    crawled_count = stats.get('crawled_count', 0)
-                    with_detail = stats.get('with_detail', 0)
-                    failed = stats.get('failed', 0)
-                    timeout = stats.get('timeout', 0)
-                    
+                    total_products = stats.get("total_products", 0)
+                    crawled_count = stats.get("crawled_count", 0)
+                    with_detail = stats.get("with_detail", 0)
+                    failed = stats.get("failed", 0)
+                    timeout = stats.get("timeout", 0)
+
                     logger.info(f"   📦 Tổng sản phẩm: {total_products}")
                     logger.info(f"   🔄 Products được crawl detail: {crawled_count}")
                     logger.info(f"   ✅ Có chi tiết (success): {with_detail}")
                     logger.info(f"   ❌ Thất bại: {failed}")
                     logger.info(f"   ⏱️  Timeout: {timeout}")
-                    
+
                     # Tính và hiển thị tỷ lệ thành công
                     if crawled_count > 0:
                         success_rate = (with_detail / crawled_count) * 100
-                        logger.info(f"   📈 Tỷ lệ thành công: {with_detail}/{crawled_count} ({success_rate:.1f}%)")
+                        logger.info(
+                            f"   📈 Tỷ lệ thành công: {with_detail}/{crawled_count} ({success_rate:.1f}%)"
+                        )
                     else:
                         logger.warning("   ⚠️  Không có products nào được crawl detail")
                 else:
@@ -4166,9 +4341,7 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                 if result.get("ai_summary"):
                     # Gửi với AI summary
                     stats = result.get("summary", {}).get("statistics", {})
-                    crawled_at = result.get("summary", {}).get("metadata", {}).get("crawled_at", "")
-                    footer_text = f"Crawl lúc: {crawled_at}" if crawled_at else "Tiki Data Pipeline"
-                    
+
                     success = notifier.send_summary(
                         ai_summary=result["ai_summary"],
                         stats=stats,
@@ -4181,14 +4354,16 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                 elif result.get("summary"):
                     # Gửi với summary thông thường (không có AI) - sử dụng fields thay vì text
                     stats = result.get("summary", {}).get("statistics", {})
-                    total_products = stats.get('total_products', 0)
-                    crawled_count = stats.get('crawled_count', 0)
-                    with_detail = stats.get('with_detail', 0)
-                    failed = stats.get('failed', 0)
-                    timeout = stats.get('timeout', 0)
-                    products_saved = stats.get('products_saved', 0)
-                    crawled_at = result.get("summary", {}).get("metadata", {}).get("crawled_at", "N/A")
-                    
+                    total_products = stats.get("total_products", 0)
+                    crawled_count = stats.get("crawled_count", 0)
+                    with_detail = stats.get("with_detail", 0)
+                    failed = stats.get("failed", 0)
+                    timeout = stats.get("timeout", 0)
+                    products_saved = stats.get("products_saved", 0)
+                    crawled_at = (
+                        result.get("summary", {}).get("metadata", {}).get("crawled_at", "N/A")
+                    )
+
                     # Tính tỷ lệ thành công để chọn màu
                     if crawled_count > 0:
                         success_rate = (with_detail / crawled_count) * 100
@@ -4201,63 +4376,75 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                     else:
                         color = 0x808080  # Xám
                         success_rate = 0
-                    
+
                     # Tạo fields cho Discord embed
                     fields = []
-                    
+
                     # Row 1: Tổng quan
                     if total_products > 0:
-                        fields.append({
-                            "name": "📦 Tổng sản phẩm",
-                            "value": f"**{total_products:,}**",
-                            "inline": True,
-                        })
-                    
+                        fields.append(
+                            {
+                                "name": "📦 Tổng sản phẩm",
+                                "value": f"**{total_products:,}**",
+                                "inline": True,
+                            }
+                        )
+
                     if crawled_count > 0:
-                        fields.append({
-                            "name": "🔄 Đã crawl detail",
-                            "value": f"**{crawled_count:,}**",
-                            "inline": True,
-                        })
-                    
+                        fields.append(
+                            {
+                                "name": "🔄 Đã crawl detail",
+                                "value": f"**{crawled_count:,}**",
+                                "inline": True,
+                            }
+                        )
+
                     if products_saved > 0:
-                        fields.append({
-                            "name": "💾 Đã lưu",
-                            "value": f"**{products_saved:,}**",
-                            "inline": True,
-                        })
-                    
+                        fields.append(
+                            {
+                                "name": "💾 Đã lưu",
+                                "value": f"**{products_saved:,}**",
+                                "inline": True,
+                            }
+                        )
+
                     # Row 2: Kết quả crawl
                     if crawled_count > 0:
-                        fields.append({
-                            "name": "✅ Thành công",
-                            "value": f"**{with_detail:,}** ({success_rate:.1f}%)",
-                            "inline": True,
-                        })
-                    
+                        fields.append(
+                            {
+                                "name": "✅ Thành công",
+                                "value": f"**{with_detail:,}** ({success_rate:.1f}%)",
+                                "inline": True,
+                            }
+                        )
+
                     if timeout > 0:
                         timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0
-                        fields.append({
-                            "name": "⏱️ Timeout",
-                            "value": f"**{timeout:,}** ({timeout_rate:.1f}%)",
-                            "inline": True,
-                        })
-                    
+                        fields.append(
+                            {
+                                "name": "⏱️ Timeout",
+                                "value": f"**{timeout:,}** ({timeout_rate:.1f}%)",
+                                "inline": True,
+                            }
+                        )
+
                     if failed > 0:
                         failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0
-                        fields.append({
-                            "name": "❌ Thất bại",
-                            "value": f"**{failed:,}** ({failed_rate:.1f}%)",
-                            "inline": True,
-                        })
-                    
+                        fields.append(
+                            {
+                                "name": "❌ Thất bại",
+                                "value": f"**{failed:,}** ({failed_rate:.1f}%)",
+                                "inline": True,
+                            }
+                        )
+
                     # Tạo content ngắn gọn
                     content = "📊 **Tổng hợp dữ liệu crawl từ Tiki.vn**\n\n"
                     if crawled_count > 0:
                         content += f"Tỷ lệ thành công: **{success_rate:.1f}%** ({with_detail}/{crawled_count} products)"
                     else:
                         content += "Chưa có products nào được crawl detail."
-                    
+
                     success = notifier.send_message(
                         content=content,
                         title="📊 Tổng hợp dữ liệu Tiki",
@@ -4300,9 +4487,9 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 def backup_database(**context) -> dict[str, Any]:
     """
     Task: Backup PostgreSQL database
-    
+
     Backup database crawl_data vào thư mục backups/postgres sau khi các tasks khác hoàn thành.
-    
+
     Returns:
         Dict: Kết quả backup
     """
@@ -4310,21 +4497,23 @@ def backup_database(**context) -> dict[str, Any]:
     logger.info("=" * 70)
     logger.info("💾 TASK: Backup Database")
     logger.info("=" * 70)
-    
+
     try:
         import subprocess
         from pathlib import Path
-        
+
         # Đường dẫn script backup
         script_path = Path("/opt/airflow/scripts/helper/backup_postgres.py")
         if not script_path.exists():
             # Fallback: thử đường dẫn tương đối
-            script_path = Path(__file__).parent.parent.parent / "scripts" / "helper" / "backup_postgres.py"
-        
+            script_path = (
+                Path(__file__).parent.parent.parent / "scripts" / "helper" / "backup_postgres.py"
+            )
+
         if not script_path.exists():
             logger.warning(f"⚠️  Không tìm thấy script backup tại: {script_path}")
             logger.info("💡 Sử dụng pg_dump trực tiếp...")
-            
+
             # Fallback: sử dụng pg_dump trực tiếp
             container_name = "tiki-data-pipeline-postgres-1"
             # Thử nhiều đường dẫn backup
@@ -4345,37 +4534,40 @@ def backup_database(**context) -> dict[str, Any]:
                     break
                 except Exception:
                     continue
-            
+
             if not backup_dir:
                 logger.warning("⚠️  Không tìm thấy thư mục backup có thể ghi, sử dụng /tmp")
                 backup_dir = Path("/tmp/backups")
                 backup_dir.mkdir(parents=True, exist_ok=True)
-            
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_file = backup_dir / f"crawl_data_{timestamp}.dump"
-            
+
             # Lấy thông tin từ environment variables
             postgres_user = os.getenv("POSTGRES_USER", "airflow_user")
             postgres_password = os.getenv("POSTGRES_PASSWORD", "")
-            
+
             if not postgres_password:
                 logger.warning("⚠️  Không tìm thấy POSTGRES_PASSWORD trong environment")
                 return {"status": "skipped", "reason": "No password"}
-            
-            logger.info(f"📦 Đang backup database: crawl_data...")
+
+            logger.info("📦 Đang backup database: crawl_data...")
             logger.info(f"   File: {backup_file}")
-            
+
             # Chạy pg_dump trong container
             cmd = [
-                "docker", "exec",
-                "-e", f"PGPASSWORD={postgres_password}",
+                "docker",
+                "exec",
+                "-e",
+                f"PGPASSWORD={postgres_password}",
                 container_name,
                 "pg_dump",
-                "-U", postgres_user,
+                "-U",
+                postgres_user,
                 "-Fc",  # Custom format
-                "crawl_data"
+                "crawl_data",
             ]
-            
+
             try:
                 with open(backup_file, "wb") as f:
                     result = subprocess.run(
@@ -4383,9 +4575,9 @@ def backup_database(**context) -> dict[str, Any]:
                         stdout=f,
                         stderr=subprocess.PIPE,
                         check=False,
-                        timeout=600  # 10 phút timeout
+                        timeout=600,  # 10 phút timeout
                     )
-                
+
                 if result.returncode == 0:
                     file_size = backup_file.stat().st_size
                     size_mb = file_size / (1024 * 1024)
@@ -4402,7 +4594,7 @@ def backup_database(**context) -> dict[str, Any]:
                     if backup_file.exists():
                         backup_file.unlink()
                     return {"status": "failed", "error": error_msg}
-                    
+
             except subprocess.TimeoutExpired:
                 logger.error("❌ Timeout khi backup database")
                 if backup_file.exists():
@@ -4416,23 +4608,14 @@ def backup_database(**context) -> dict[str, Any]:
         else:
             # Sử dụng script backup
             logger.info(f"📦 Đang backup database bằng script: {script_path}")
-            
-            cmd = [
-                "python",
-                str(script_path),
-                "--database", "crawl_data",
-                "--format", "custom"
-            ]
-            
+
+            cmd = ["python", str(script_path), "--database", "crawl_data", "--format", "custom"]
+
             try:
                 result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=600  # 10 phút timeout
+                    cmd, capture_output=True, text=True, check=False, timeout=600  # 10 phút timeout
                 )
-                
+
                 if result.returncode == 0:
                     logger.info("✅ Backup thành công!")
                     logger.info(result.stdout)
@@ -4454,7 +4637,7 @@ def backup_database(**context) -> dict[str, Any]:
             except Exception as e:
                 logger.error(f"❌ Exception khi backup: {e}")
                 return {"status": "failed", "error": str(e)}
-                
+
     except Exception as e:
         logger.error(f"❌ Lỗi trong backup_database task: {e}", exc_info=True)
         # Không fail task, chỉ log lỗi
@@ -4676,18 +4859,24 @@ with DAG(**DAG_CONFIG) as dag:
             for i in range(0, len(products_to_crawl), batch_size):
                 batch = products_to_crawl[i : i + batch_size]
                 batches.append(batch)
-            
-            logger.info(f"📦 Đã chia thành {len(batches)} batches (mỗi batch {batch_size} products)")
+
+            logger.info(
+                f"📦 Đã chia thành {len(batches)} batches (mỗi batch {batch_size} products)"
+            )
             logger.info(f"   - Batch đầu tiên: {len(batches[0]) if batches else 0} products")
             logger.info(f"   - Batch cuối cùng: {len(batches[-1]) if batches else 0} products")
 
             # Trả về list các dict để expand (mỗi dict là 1 batch)
-            op_kwargs_list = [{"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)]
+            op_kwargs_list = [
+                {"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
+            ]
 
-            logger.info(f"🔢 Tạo {len(op_kwargs_list)} op_kwargs cho Dynamic Task Mapping (batches)")
+            logger.info(
+                f"🔢 Tạo {len(op_kwargs_list)} op_kwargs cho Dynamic Task Mapping (batches)"
+            )
             if op_kwargs_list:
                 logger.info("📋 Sample batches (first 2):")
-                for i, kwargs in enumerate(op_kwargs_list[:2]):
+                for _i, kwargs in enumerate(op_kwargs_list[:2]):
                     batch = kwargs.get("product_batch", [])
                     batch_idx = kwargs.get("batch_index", -1)
                     logger.info(
@@ -4782,7 +4971,7 @@ with DAG(**DAG_CONFIG) as dag:
             pool="default_pool",
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
-    
+
     # TaskGroup: Backup Database
     with TaskGroup("backup") as backup_group:
         task_backup_database = PythonOperator(

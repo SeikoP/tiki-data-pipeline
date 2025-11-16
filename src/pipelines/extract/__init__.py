@@ -11,4 +11,3 @@ __all__ = [
     "extract_categories_from_tree_file",
     "flatten_category_tree",
 ]
-

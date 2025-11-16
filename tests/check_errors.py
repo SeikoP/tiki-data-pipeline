@@ -1,6 +1,7 @@
 """
 Script tổng hợp để kiểm tra lỗi trong dự án
 """
+
 import json
 import os
 import sys
@@ -8,15 +9,17 @@ import sys
 
 def check_imports():
     """Kiểm tra imports có hoạt động không"""
-    print("="*70)
+    print("=" * 70)
     print("KIEM TRA IMPORTS")
-    print("="*70)
+    print("=" * 70)
 
     errors = []
 
     # Test utils import
     try:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'pipelines', 'crawl'))
+        sys.path.insert(
+            0, os.path.join(os.path.dirname(__file__), "..", "src", "pipelines", "crawl")
+        )
         print("OK: Utils import thanh cong")
     except Exception as e:
         errors.append(f"Utils import loi: {e}")
@@ -25,7 +28,10 @@ def check_imports():
     # Test crawl_products import
     try:
         import importlib.util
-        crawl_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'pipelines', 'crawl', 'crawl_products.py')
+
+        crawl_path = os.path.join(
+            os.path.dirname(__file__), "..", "src", "pipelines", "crawl", "crawl_products.py"
+        )
         if os.path.exists(crawl_path):
             spec = importlib.util.spec_from_file_location("test_crawl", crawl_path)
             if spec and spec.loader:
@@ -42,7 +48,9 @@ def check_imports():
 
     # Test crawl_products_detail import
     try:
-        detail_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'pipelines', 'crawl', 'crawl_products_detail.py')
+        detail_path = os.path.join(
+            os.path.dirname(__file__), "..", "src", "pipelines", "crawl", "crawl_products_detail.py"
+        )
         if os.path.exists(detail_path):
             spec = importlib.util.spec_from_file_location("test_detail", detail_path)
             if spec and spec.loader:
@@ -59,22 +67,23 @@ def check_imports():
 
     return errors
 
+
 def check_file_structure():
     """Kiểm tra cấu trúc file"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("KIEM TRA CAU TRUC FILE")
-    print("="*70)
+    print("=" * 70)
 
     errors = []
     required_files = [
-        'src/pipelines/crawl/utils.py',
-        'src/pipelines/crawl/crawl_products.py',
-        'src/pipelines/crawl/crawl_products_detail.py',
-        'airflow/dags/tiki_crawl_products_dag.py'
+        "src/pipelines/crawl/utils.py",
+        "src/pipelines/crawl/crawl_products.py",
+        "src/pipelines/crawl/crawl_products_detail.py",
+        "airflow/dags/tiki_crawl_products_dag.py",
     ]
 
     for file_path in required_files:
-        full_path = os.path.join(os.path.dirname(__file__), '..', file_path)
+        full_path = os.path.join(os.path.dirname(__file__), "..", file_path)
         if os.path.exists(full_path):
             print(f"OK: {file_path}")
         else:
@@ -83,25 +92,26 @@ def check_file_structure():
 
     return errors
 
+
 def check_syntax():
     """Kiểm tra syntax errors"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("KIEM TRA SYNTAX")
-    print("="*70)
+    print("=" * 70)
 
     errors = []
     python_files = [
-        'src/pipelines/crawl/utils.py',
-        'src/pipelines/crawl/crawl_products.py',
-        'src/pipelines/crawl/crawl_products_detail.py',
+        "src/pipelines/crawl/utils.py",
+        "src/pipelines/crawl/crawl_products.py",
+        "src/pipelines/crawl/crawl_products_detail.py",
     ]
 
     for file_path in python_files:
-        full_path = os.path.join(os.path.dirname(__file__), '..', file_path)
+        full_path = os.path.join(os.path.dirname(__file__), "..", file_path)
         if os.path.exists(full_path):
             try:
-                with open(full_path, encoding='utf-8') as f:
-                    compile(f.read(), full_path, 'exec')
+                with open(full_path, encoding="utf-8") as f:
+                    compile(f.read(), full_path, "exec")
                 print(f"OK: {file_path} - syntax hop le")
             except SyntaxError as e:
                 errors.append(f"{file_path}: Syntax error at line {e.lineno}: {e.msg}")
@@ -112,25 +122,26 @@ def check_syntax():
 
     return errors
 
+
 def check_data_files():
     """Kiểm tra data files"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("KIEM TRA DATA FILES")
-    print("="*70)
+    print("=" * 70)
 
     errors = []
     data_files = [
-        'data/raw/products/products.json',
-        'data/raw/products/products_with_detail.json',
+        "data/raw/products/products.json",
+        "data/raw/products/products_with_detail.json",
     ]
 
     for file_path in data_files:
-        full_path = os.path.join(os.path.dirname(__file__), '..', file_path)
+        full_path = os.path.join(os.path.dirname(__file__), "..", file_path)
         if os.path.exists(full_path):
             try:
-                with open(full_path, encoding='utf-8') as f:
+                with open(full_path, encoding="utf-8") as f:
                     data = json.load(f)
-                products = data.get('products', [])
+                products = data.get("products", [])
                 print(f"OK: {file_path} - {len(products)} products")
             except Exception as e:
                 errors.append(f"{file_path}: {e}")
@@ -140,11 +151,12 @@ def check_data_files():
 
     return errors
 
+
 def main():
     """Chạy tất cả checks"""
-    print("="*70)
+    print("=" * 70)
     print("KIEM TRA LOI TRONG DU AN")
-    print("="*70)
+    print("=" * 70)
 
     all_errors = []
 
@@ -154,9 +166,9 @@ def main():
     all_errors.extend(check_data_files())
 
     # Tổng kết
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("TONG KET")
-    print("="*70)
+    print("=" * 70)
 
     if all_errors:
         print(f"Tim thay {len(all_errors)} loi:")
@@ -168,6 +180,6 @@ def main():
         print("Tat ca checks PASSED!")
         return 0
 
+
 if __name__ == "__main__":
     exit(main())
-

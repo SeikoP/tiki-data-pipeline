@@ -122,4 +122,3 @@ if __name__ == "__main__":
             print(f"  {i}. {cat['name']} (Level {cat['level']}) - {cat['url']}")
     except Exception as e:
         logger.error(f"❌ Lỗi: {e}", exc_info=True)
-

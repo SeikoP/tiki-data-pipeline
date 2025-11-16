@@ -10,8 +10,8 @@ Script kiểm tra code quality với các tools:
 
 import subprocess
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SRC_DIR = PROJECT_ROOT / "src" / "pipelines" / "crawl"
@@ -86,51 +86,52 @@ def check_mypy():
 
 def main():
     """Chạy tất cả checks"""
-    import sys
     import io
+    import sys
+
     # Set UTF-8 encoding cho stdout
-    if sys.stdout.encoding != 'utf-8':
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    
+    if sys.stdout.encoding != "utf-8":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
     print("Bắt đầu kiểm tra code quality...")
     print(f"Thư mục: {SRC_DIR}")
     print(f"Thời gian: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+
     results = []
-    
+
     # 1. Ruff PERF
     exit_code, output = check_ruff_perf()
     results.append(("Ruff PERF", exit_code, output))
-    
+
     # 1b. Ruff All
     exit_code, output = check_ruff_all()
     results.append(("Ruff All", exit_code, output))
-    
+
     # 2. Vulture
     exit_code, output = check_vulture()
     results.append(("Vulture", exit_code, output))
-    
+
     # 3. Radon Complexity
     exit_code, output = check_radon_complexity()
     results.append(("Radon CC", exit_code, output))
-    
+
     # 4. Radon Maintainability
     exit_code, output = check_radon_maintainability()
     results.append(("Radon MI", exit_code, output))
-    
+
     # 5. Pylint (optional)
     exit_code, output = check_pylint()
     results.append(("Pylint", exit_code, output))
-    
+
     # 6. Mypy (optional)
     exit_code, output = check_mypy()
     results.append(("Mypy", exit_code, output))
-    
+
     # Tổng hợp kết quả
     print(f"\n{'='*60}")
     print("TONG HOP KET QUA")
     print(f"{'='*60}")
-    
+
     total_issues = 0
     for name, exit_code, output in results:
         status = "[PASS]" if exit_code == 0 else "[FAIL]"
@@ -141,26 +142,25 @@ def main():
         print(f"{status} {name:20s} - {issues} issues")
         if exit_code != 0 and "chưa được cài đặt" not in output:
             total_issues += issues
-    
+
     print(f"\nTong so issues: {total_issues}")
-    
+
     # Lưu report
     report_file = PROJECT_ROOT / "code_quality_report.txt"
     with open(report_file, "w", encoding="utf-8") as f:
         f.write(f"Code Quality Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write("="*60 + "\n\n")
-        for name, exit_code, output in results:
+        f.write("=" * 60 + "\n\n")
+        for name, _exit_code, output in results:
             f.write(f"\n{'='*60}\n")
             f.write(f"{name}\n")
             f.write(f"{'='*60}\n")
             f.write(output)
             f.write("\n")
-    
+
     print(f"\nReport da duoc luu: {report_file}")
-    
+
     return 0 if total_issues == 0 else 1
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

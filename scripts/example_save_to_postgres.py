@@ -48,7 +48,7 @@ example_products = [
 
 def main():
     print("🔌 Kết nối đến PostgreSQL...")
-    
+
     # Khởi tạo PostgresStorage
     # Tự động lấy credentials từ environment variables
     storage = PostgresStorage(
@@ -109,6 +109,7 @@ def main():
     except Exception as e:
         print(f"❌ Lỗi: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         storage.close()
@@ -117,5 +118,5 @@ def main():
 
 if __name__ == "__main__":
     import os
-    main()
 
+    main()

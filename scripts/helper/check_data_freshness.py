@@ -38,8 +38,8 @@ def get_products_from_db(product_ids: list[str]) -> dict[str, dict]:
             placeholders = ",".join(["%s"] * len(product_ids))
             cur.execute(
                 f"""
-                SELECT 
-                    product_id, name, price, sales_count, 
+                SELECT
+                    product_id, name, price, sales_count,
                     updated_at
                 FROM products
                 WHERE product_id IN ({placeholders})
@@ -75,7 +75,7 @@ def check_data_freshness():
     stats = data.get("stats", {})
     crawled_at = data.get("crawled_at")
 
-    print(f"\n📊 Thống kê từ file:")
+    print("\n📊 Thống kê từ file:")
     print(f"   - Tổng products: {len(products)}")
     print(f"   - Cached: {stats.get('cached', 0)}")
     print(f"   - Success: {stats.get('with_detail', 0)}")
@@ -87,7 +87,7 @@ def check_data_freshness():
         print(f"\n⚠️  CẢNH BÁO: Có {cached_count} products dùng cache (không được crawl lại)")
         print("   → Để force refresh, set Airflow Variable: TIKI_FORCE_REFRESH_CACHE = true")
     else:
-        print(f"\n✅ Tất cả products đều được crawl lại (không dùng cache)")
+        print("\n✅ Tất cả products đều được crawl lại (không dùng cache)")
 
     # Lấy product_ids
     product_ids = [p.get("product_id") for p in products if p.get("product_id")]
@@ -164,4 +164,3 @@ def check_data_freshness():
 
 if __name__ == "__main__":
     check_data_freshness()
-

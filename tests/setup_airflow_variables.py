@@ -3,11 +3,12 @@ Script để setup Airflow Variables cho Tiki Crawl DAG
 
 Chạy script này để cấu hình các biến môi trường cho DAG crawl sản phẩm Tiki
 """
+
 import os
 import sys
 
 # Thêm đường dẫn airflow vào sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'airflow'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "airflow"))
 
 try:
     from airflow.models import Variable
@@ -19,35 +20,30 @@ try:
 
         variables = {
             # Cấu hình crawl
-            'TIKI_MAX_PAGES_PER_CATEGORY': '0',  # 0 = crawl tất cả trang
-            'TIKI_MAX_CATEGORIES': '0',  # 0 = crawl tất cả danh mục, >0 = giới hạn số danh mục
-            'TIKI_MIN_CATEGORY_LEVEL': '2',  # Level danh mục tối thiểu
-            'TIKI_MAX_CATEGORY_LEVEL': '4',  # Level danh mục tối đa
-            'TIKI_USE_SELENIUM': 'false',  # true/false - có dùng Selenium không
-            'TIKI_CRAWL_TIMEOUT': '300',  # Timeout mỗi category (giây)
-            'TIKI_RATE_LIMIT_DELAY': '1.0',  # Delay giữa các request (giây)
-
+            "TIKI_MAX_PAGES_PER_CATEGORY": "0",  # 0 = crawl tất cả trang
+            "TIKI_MAX_CATEGORIES": "0",  # 0 = crawl tất cả danh mục, >0 = giới hạn số danh mục
+            "TIKI_MIN_CATEGORY_LEVEL": "2",  # Level danh mục tối thiểu
+            "TIKI_MAX_CATEGORY_LEVEL": "4",  # Level danh mục tối đa
+            "TIKI_USE_SELENIUM": "false",  # true/false - có dùng Selenium không
+            "TIKI_CRAWL_TIMEOUT": "300",  # Timeout mỗi category (giây)
+            "TIKI_RATE_LIMIT_DELAY": "1.0",  # Delay giữa các request (giây)
             # Cấu hình save
-            'TIKI_SAVE_BATCH_SIZE': '10000',  # Số sản phẩm mỗi batch khi save
-
+            "TIKI_SAVE_BATCH_SIZE": "10000",  # Số sản phẩm mỗi batch khi save
             # Cấu hình DAG schedule
-            'TIKI_DAG_SCHEDULE_MODE': 'manual',  # 'manual' hoặc 'scheduled'
-
+            "TIKI_DAG_SCHEDULE_MODE": "manual",  # 'manual' hoặc 'scheduled'
             # Circuit Breaker
-            'TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD': '5',  # Số lỗi tối đa trước khi mở circuit
-            'TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT': '60',  # Thời gian chờ trước khi thử lại (giây)
-
+            "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD": "5",  # Số lỗi tối đa trước khi mở circuit
+            "TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT": "60",  # Thời gian chờ trước khi thử lại (giây)
             # Graceful Degradation
-            'TIKI_DEGRADATION_FAILURE_THRESHOLD': '3',  # Số lỗi tối đa trước khi degrade
-            'TIKI_DEGRADATION_RECOVERY_THRESHOLD': '5',  # Số thành công tối thiểu để recover
-
+            "TIKI_DEGRADATION_FAILURE_THRESHOLD": "3",  # Số lỗi tối đa trước khi degrade
+            "TIKI_DEGRADATION_RECOVERY_THRESHOLD": "5",  # Số thành công tối thiểu để recover
             # Redis (cho Dead Letter Queue)
-            'REDIS_URL': 'redis://redis:6379/3',  # Redis URL cho DLQ
+            "REDIS_URL": "redis://redis:6379/3",  # Redis URL cho DLQ
         }
 
-        print("="*70)
+        print("=" * 70)
         print("🔧 SETUP AIRFLOW VARIABLES CHO TIKI CRAWL DAG")
-        print("="*70)
+        print("=" * 70)
 
         for key, value in variables.items():
             try:
@@ -62,9 +58,9 @@ try:
             except Exception as e:
                 print(f"❌ Lỗi khi tạo variable '{key}': {e}")
 
-        print("="*70)
+        print("=" * 70)
         print("✅ HOÀN THÀNH!")
-        print("="*70)
+        print("=" * 70)
         print("\n💡 Để thay đổi giá trị, dùng Airflow UI hoặc CLI:")
         print("   airflow variables set TIKI_MAX_CATEGORIES 10")
         print("\n📖 Xem tất cả variables:")
@@ -85,4 +81,3 @@ except ImportError as e:
     print("   airflow variables set TIKI_CRAWL_TIMEOUT 300")
     print("   airflow variables set TIKI_RATE_LIMIT_DELAY 1.0")
     print("   airflow variables set TIKI_SAVE_BATCH_SIZE 10000")
-

@@ -185,7 +185,7 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
 # ============================================================================
 class SeleniumDriverPool:
     """Thread-safe pool để reuse Selenium WebDriver instances
-    
+
     Tối ưu: Giảm overhead tạo driver bằng cách reuse drivers trong batch processing
     """
 
@@ -205,7 +205,7 @@ class SeleniumDriverPool:
 
     def get_driver(self) -> Any | None:
         """Lấy driver từ pool hoặc tạo mới nếu pool rỗng
-        
+
         Returns:
             WebDriver object hoặc None nếu không thể tạo
         """
@@ -237,7 +237,7 @@ class SeleniumDriverPool:
 
     def return_driver(self, driver: Any) -> None:
         """Trả driver về pool hoặc đóng nếu pool đầy
-        
+
         Args:
             driver: WebDriver object cần trả về pool
         """
