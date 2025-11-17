@@ -1945,7 +1945,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         # Debug: Log một vài products đầu tiên
         if products_to_crawl:
-            sample_names = [p.get('product_id', 'N/A') for p in products_to_crawl[:3]]
+            sample_names = [p.get("product_id", "N/A") for p in products_to_crawl[:3]]
             logger.info(f"📋 Sample products: {', '.join(sample_names)}...")
         else:
             logger.warning("⚠️  Không có products nào cần crawl detail hôm nay!")
@@ -4580,7 +4580,9 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                 logger.info("⚡ PERFORMANCE SUMMARY")
                 logger.info(f"⏱️  Duration: {duration/60:.1f} min | Products: {total_products}")
                 if throughput > 0:
-                    logger.info(f"📈 Throughput: {throughput:.2f} products/s | Avg: {avg_time:.1f}s/product")
+                    logger.info(
+                        f"📈 Throughput: {throughput:.2f} products/s | Avg: {avg_time:.1f}s/product"
+                    )
                 logger.info("=" * 70)
 
                 result["performance"] = {
@@ -5274,9 +5276,7 @@ with DAG(**DAG_CONFIG) as dag:
                 {"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
             ]
 
-            logger.info(
-                f"🔢 Created {len(op_kwargs_list)} batches for Dynamic Task Mapping"
-            )
+            logger.info(f"🔢 Created {len(op_kwargs_list)} batches for Dynamic Task Mapping")
 
             return op_kwargs_list
 

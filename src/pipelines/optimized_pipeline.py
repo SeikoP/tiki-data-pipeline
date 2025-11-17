@@ -162,9 +162,12 @@ def run_optimized_pipeline(
     logger.info("PIPELINE COMPLETED")
     logger.info("=" * 70)
     logger.info(f"Total time: {stats['total_time']:.2f}s")
-    logger.info(f"Crawled: {stats['crawl'].get('succeeded', 0)}")
-    logger.info(f"Transformed: {stats['transform'].get('output_count', 0)}")
-    logger.info(f"Loaded: {stats['load'].get('db_loaded', 0)}")
+    crawl_stats: dict[str, Any] = stats.get("crawl", {})  # type: ignore[assignment]
+    transform_stats: dict[str, Any] = stats.get("transform", {})  # type: ignore[assignment]
+    load_stats: dict[str, Any] = stats.get("load", {})  # type: ignore[assignment]
+    logger.info(f"Crawled: {crawl_stats.get('succeeded', 0)}")
+    logger.info(f"Transformed: {transform_stats.get('output_count', 0)}")
+    logger.info(f"Loaded: {load_stats.get('db_loaded', 0)}")
 
     return stats
 
