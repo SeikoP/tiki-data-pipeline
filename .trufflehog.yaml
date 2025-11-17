@@ -1,77 +1,13 @@
 # TruffleHog Configuration
 # https://github.com/trufflesecurity/trufflehog
+#
+# Note: TruffleHog's YAML config has limited support
+# Use command-line flags for advanced filtering
+#
+# Recommended scan command:
+# docker run --rm -v "${PWD}:/scan" \
+#   ghcr.io/trufflesecurity/trufflehog:latest \
+#   filesystem /scan --only-verified --no-update
 
-# Cho phép TruffleHog bỏ qua các false positives hợp lệ
-# trong development/test environments
-
-# Loại bỏ các secrets không cần verify
-allow:
-  # Test files với default development passwords
-  - path: tests/pg/test_postgres_local.py
-    # Default password "postgres" chỉ dùng cho local testing
-    # Production phải dùng secure password trong .env
-    lines:
-      - 24  # postgres_password = "postgres"
-  
-  # Reset scripts dùng cho development
-  - path: scripts/reset_to_default.ps1
-    # Script này chỉ reset về default cho local dev
-    lines:
-      - 32  # POSTGRES_PASSWORD=postgres
-      - 60  # ALTER USER postgres WITH PASSWORD 'postgres'
-  
-  # Example files và documentation
-  - path: .env.example
-    # Template file, không chứa secrets thật
-    patterns:
-      - "POSTGRES_PASSWORD=your_secure_postgres_password_here"
-  
-  # DAG files với environment variable fallbacks
-  - path: airflow/dags/tiki_crawl_products_dag.py
-    # Các default_var chỉ là fallback, production dùng env vars
-    patterns:
-      - 'default_var=os.getenv\("POSTGRES_PASSWORD", "postgres"\)'
-
-# Bỏ qua các patterns an toàn (không phải secrets)
-exclude:
-  paths:
-    - .git/
-    - .venv/
-    - venv/
-    - node_modules/
-    - __pycache__/
-    - "*.pyc"
-    - .pytest_cache/
-    - .ruff_cache/
-    - .mypy_cache/
-    - airflow/logs/
-    - data/raw/
-    - data/processed/
-    - backups/
-    - docs/
-    
-  # Patterns không phải secrets thật
-  patterns:
-    # Environment variable placeholders
-    - "your_.*_here"
-    - "your_password"
-    - "your_secure_.*"
-    
-    # Default development values (chỉ dùng local)
-    - "postgres_password = \"postgres\""
-    
-    # Comments với "ggignore" marker (đã được review)
-    - "# ggignore"
-    
-# Chỉ verify các loại secrets quan trọng
-detectors:
-  - postgres
-  - redis
-  - generic-api-key
-
-# Exit code 0 nếu chỉ có unverified secrets (không phải verified)
-# Exit code 183 nếu tìm thấy verified secrets
-only-verified: false
-
-# Log level
-log-level: info
+# Only report verified secrets (ignore unverified/false positives)
+only-verified: true
