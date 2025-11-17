@@ -342,7 +342,7 @@ def crawl_product_detail_with_driver(
                     if verbose:
                         print(f"[Redis Cache] ✅ Đã cache HTML cho {url[:60]}...")
             except Exception:
-                pass
+                pass  # Ignore cache errors - caching is optional and shouldn't fail the crawl
 
         return full_html
 
