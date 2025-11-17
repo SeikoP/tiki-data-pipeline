@@ -92,6 +92,13 @@ def get_selenium_options(headless: bool = True) -> Any | None:
         }
         chrome_options.add_experimental_option("prefs", prefs)
         
+        # Faster page load: don't wait for all resources
+        try:
+            chrome_options.page_load_strategy = "eager"
+        except Exception:
+            # Older Selenium versions may not support the attribute
+            pass
+        
         # Additional performance flags
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-plugins")

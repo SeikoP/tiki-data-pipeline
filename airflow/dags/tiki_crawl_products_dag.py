@@ -252,6 +252,10 @@ if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
         )
         extract_product_detail = crawl_products_detail_module.extract_product_detail
         crawl_product_detail_async = crawl_products_detail_module.crawl_product_detail_async
+        # Optional pooled-driver variant (present in optimized module)
+        crawl_product_detail_with_driver = getattr(
+            crawl_products_detail_module, "crawl_product_detail_with_driver", None
+        )
     except Exception as e:
         # Nếu import lỗi, log và tiếp tục (sẽ fail khi chạy task)
         import warnings
@@ -262,6 +266,9 @@ if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
         error_msg = str(e)
 
         def crawl_product_detail_with_selenium(*args, **kwargs):
+            raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
+
+        def crawl_product_detail_with_driver(*args, **kwargs):
             raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
 
         extract_product_detail = crawl_product_detail_with_selenium
@@ -276,6 +283,7 @@ else:
             crawl_product_detail_async,
             crawl_product_detail_with_selenium,
             extract_product_detail,
+            crawl_product_detail_with_driver,
         )
     except ImportError as e:
         raise ImportError(
@@ -1627,7 +1635,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Lấy cấu hình cho multi-day crawling
         # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
-            Variable.get("TIKI_PRODUCTS_PER_DAY", default_var="120")
+            Variable.get("TIKI_PRODUCTS_PER_DAY", default_var="280")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
             Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default_var="0")
@@ -1983,8 +1991,9 @@ def crawl_product_batch(
         if SeleniumDriverPool is None:
             raise ImportError("SeleniumDriverPool chưa được import từ utils module")
 
-        # Tạo driver pool cho batch
-        driver_pool = SeleniumDriverPool(pool_size=5, headless=True, timeout=60)
+        # Tạo driver pool cho batch (pool size configurable via Airflow Variable)
+        pool_size = int(Variable.get("TIKI_DETAIL_POOL_SIZE", default_var="5"))
+        driver_pool = SeleniumDriverPool(pool_size=pool_size, headless=True, timeout=90)
 
         # Tạo event loop trước
         try:
@@ -2142,15 +2151,38 @@ def crawl_product_batch(
                         detail = None
                 else:
                     # Fallback về Selenium nếu không có aiohttp
-                    # Sử dụng hàm đã được import ở đầu file
-                    html = crawl_product_detail_with_selenium(
-                        product_url,
-                        verbose=False,
-                        max_retries=2,
-                        timeout=60,
-                        use_redis_cache=True,
-                        use_rate_limiting=True,
-                    )
+                    # Ưu tiên dùng driver pool nếu có
+                    html = None
+                    try:
+                        if 'crawl_product_detail_with_driver' in globals() and callable(crawl_product_detail_with_driver):
+                            drv = driver_pool.get_driver()
+                            if drv is not None:
+                                try:
+                                    html = crawl_product_detail_with_driver(
+                                        drv,
+                                        product_url,
+                                        save_html=False,
+                                        verbose=False,
+                                        timeout=60,
+                                        use_redis_cache=True,
+                                        use_rate_limiting=True,
+                                    )
+                                finally:
+                                    driver_pool.return_driver(drv)
+                    except Exception as pooled_err:
+                        logger.warning(f"⚠️  Lỗi khi dùng pooled driver: {pooled_err}")
+                        html = None
+
+                    # Fallback cuối cùng: tạo driver riêng qua hàm sẵn có
+                    if html is None:
+                        html = crawl_product_detail_with_selenium(
+                            product_url,
+                            verbose=False,
+                            max_retries=2,
+                            timeout=60,
+                            use_redis_cache=True,
+                            use_rate_limiting=True,
+                        )
                     if html:
                         # Sử dụng hàm đã được import ở đầu file
                         detail = extract_product_detail(html, product_url, verbose=False)
@@ -4854,7 +4886,7 @@ with DAG(**DAG_CONFIG) as dag:
             logger.info(f"✅ Đã lấy {len(products_to_crawl)} products từ XCom")
 
             # Batch Processing: Chia products thành batches 10 products/batch
-            batch_size = 10
+            batch_size = 15
             batches = []
             for i in range(0, len(products_to_crawl), batch_size):
                 batch = products_to_crawl[i : i + batch_size]

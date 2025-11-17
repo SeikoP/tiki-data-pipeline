@@ -243,6 +243,115 @@ def crawl_product_detail_with_selenium(
     )
 
 
+def crawl_product_detail_with_driver(
+    driver: Any,
+    url: str,
+    save_html: bool = False,
+    verbose: bool = True,
+    timeout: int = 30,
+    use_redis_cache: bool = True,
+    use_rate_limiting: bool = True,
+) -> str | None:
+    """Crawl trang sản phẩm sử dụng Selenium driver đã được cấp sẵn (reuse/pool).
+
+    Args:
+        driver: Selenium WebDriver đã được tạo sẵn
+        url: URL sản phẩm cần crawl
+        save_html: Có lưu HTML vào file không
+        verbose: Có in log không
+        timeout: Timeout cho page load (giây)
+        use_redis_cache: Có dùng Redis cache không
+        use_rate_limiting: Có dùng rate limiting không
+
+    Returns:
+        str | None: HTML content hoặc None nếu lỗi
+    """
+    # Redis cache trước
+    if use_redis_cache:
+        try:
+            from pipelines.crawl.storage.redis_cache import get_redis_cache
+
+            redis_cache = get_redis_cache("redis://redis:6379/1")
+            if redis_cache:
+                cached_html = redis_cache.get_cached_html(url)
+                if cached_html:
+                    if verbose:
+                        print(f"[Redis Cache] ✅ Hit cache cho {url[:60]}...")
+                    return cached_html
+        except Exception:
+            pass
+
+    # Rate limiting nếu cần
+    if use_rate_limiting:
+        try:
+            from pipelines.crawl.storage.redis_cache import get_redis_rate_limiter
+
+            rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
+            if rate_limiter:
+                from urllib.parse import urlparse
+
+                domain = urlparse(url).netloc or "tiki.vn"
+                if not rate_limiter.is_allowed(domain):
+                    if verbose:
+                        print(f"[Rate Limiter] ⏳ Đợi rate limit cho {domain}...")
+                    rate_limiter.wait_if_needed(domain)
+        except Exception:
+            if verbose:
+                print("[Rate Limiter] ⚠️  Rate limiter không available, dùng delay cố định")
+            time.sleep(2)
+
+    try:
+        driver.set_page_load_timeout(timeout)
+        driver.implicitly_wait(3)
+        if verbose:
+            print(f"[Selenium] Đang mở {url}... (reuse driver)")
+        driver.get(url)
+
+        # Optimized scrolling
+        try:
+            time.sleep(0.5)
+            driver.execute_script("window.scrollTo(0, 500);")
+            time.sleep(0.3)
+            driver.execute_script("window.scrollTo(0, 1500);")
+            time.sleep(0.5)
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+        except Exception as scroll_error:
+            if verbose:
+                print(f"[Selenium] Warning: Lỗi khi scroll: {scroll_error}")
+
+        full_html = driver.page_source
+        if not full_html or len(full_html) < 100:
+            raise ValueError(f"HTML content quá ngắn: {len(full_html) if full_html else 0} ký tự")
+
+        if save_html:
+            output_dir = ensure_dir("data/test_output")
+            html_file = output_dir / "selenium_product_detail.html"
+            with open(html_file, "w", encoding="utf-8") as f:
+                f.write(full_html)
+            if verbose:
+                print(f"[Selenium] ✓ Đã lưu HTML vào {html_file}")
+
+        if use_redis_cache and full_html:
+            try:
+                from pipelines.crawl.storage.redis_cache import get_redis_cache
+
+                redis_cache = get_redis_cache("redis://redis:6379/1")
+                if redis_cache:
+                    redis_cache.cache_html(url, full_html, ttl=86400)
+                    if verbose:
+                        print(f"[Redis Cache] ✅ Đã cache HTML cho {url[:60]}...")
+            except Exception:
+                pass
+
+        return full_html
+
+    except Exception as e:
+        if verbose:
+            print(f"[Selenium] Lỗi khi crawl (reuse driver): {type(e).__name__}: {e}")
+        return None
+
+
 # Sử dụng shared utilities thay vì định nghĩa lại
 # extract_product_id_from_url và parse_price đã được import từ utils
 

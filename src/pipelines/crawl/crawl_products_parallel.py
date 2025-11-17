@@ -12,11 +12,13 @@ from typing import List, Dict, Any
 # Import existing crawler
 from .crawl_products_detail import (
     crawl_product_detail_with_selenium,
+    crawl_product_detail_with_driver,
     extract_product_detail,
 )
 
 # Import parallel crawler
 from .parallel_crawler import ParallelCrawler
+from .utils import SeleniumDriverPool
 
 # Import monitoring
 import sys
@@ -25,6 +27,8 @@ from common.monitoring import PerformanceTimer
 from common.cache_utils import cache_in_memory
 
 logger = logging.getLogger(__name__)
+
+_driver_pool: SeleniumDriverPool | None = None
 
 
 @cache_in_memory(ttl=3600)  # Cache for 1 hour
@@ -39,14 +43,33 @@ def crawl_single_product_cached(url: str) -> Dict[str, Any]:
         Product data dictionary
     """
     try:
-        # Crawl HTML
-        html_content = crawl_product_detail_with_selenium(
-            url,
-            save_html=False,
-            verbose=False,
-            use_redis_cache=True,
-            use_rate_limiting=True,
-        )
+        # Crawl HTML (prefer driver pool when available)
+        html_content = None
+        if _driver_pool is not None:
+            driver = _driver_pool.get_driver()
+            if driver is not None:
+                try:
+                    html_content = crawl_product_detail_with_driver(
+                        driver,
+                        url,
+                        save_html=False,
+                        verbose=False,
+                        timeout=30,
+                        use_redis_cache=True,
+                        use_rate_limiting=True,
+                    )
+                finally:
+                    _driver_pool.return_driver(driver)
+
+        # Fallback: create a fresh driver if pool not available
+        if html_content is None:
+            html_content = crawl_product_detail_with_selenium(
+                url,
+                save_html=False,
+                verbose=False,
+                use_redis_cache=True,
+                use_rate_limiting=True,
+            )
         
         if not html_content:
             return None
@@ -85,12 +108,20 @@ def crawl_products_parallel(
             show_progress=show_progress,
             continue_on_error=True,
         )
-        
-        result = crawler.crawl_parallel(
-            urls,
-            crawl_single_product_cached,
-            total_count=len(urls),
-        )
+
+        # Initialize a Selenium driver pool for reuse across tasks
+        global _driver_pool
+        _driver_pool = SeleniumDriverPool(pool_size=max_workers, headless=True, timeout=90)
+        try:
+            result = crawler.crawl_parallel(
+                urls,
+                crawl_single_product_cached,
+                total_count=len(urls),
+            )
+        finally:
+            if _driver_pool is not None:
+                _driver_pool.cleanup()
+                _driver_pool = None
         
         # Filter out None results
         valid_results = [r for r in result["results"] if r is not None]

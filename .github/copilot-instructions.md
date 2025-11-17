@@ -50,7 +50,7 @@ This file tells an AI coding assistant how to be immediately productive in this 
 - **Database management**:
   - Schema initialization happens automatically via `airflow/setup/init-crawl-db.sh` on first Postgres startup
   - Manual schema updates: check `airflow/setup/add_computed_fields.sql` or `add_missing_columns.sql`
-  - Backup: `.\scripts\backup-postgres.ps1` or `scripts/backup-postgres.sh` (creates backup in `backups/postgres/`)
+  - Backup: `.\scripts\backup-postgres.ps1` (creates backup in `backups/postgres/`)
   - Restore: `.\scripts\restore-postgres.ps1` or similar (from `backups/postgres/`)
 
 - **Debugging tips**:

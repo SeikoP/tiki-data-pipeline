@@ -10,11 +10,8 @@ Script để backup PostgreSQL database vào thư mục `backups/postgres`.
 # Python script (khuyến nghị)
 python scripts/helper/backup_postgres.py
 
-# Hoặc PowerShell
+# PowerShell
 .\scripts\backup-postgres.ps1
-
-# Hoặc Bash
-bash scripts/backup-postgres.sh
 ```
 
 ### 2. Backup một database cụ thể
@@ -26,9 +23,6 @@ python scripts/helper/backup_postgres.py --database airflow
 
 # PowerShell
 .\scripts\backup-postgres.ps1 -Database crawl_data
-
-# Bash
-bash scripts/backup-postgres.sh crawl_data
 ```
 
 ### 3. Chọn format backup
@@ -68,14 +62,11 @@ Ví dụ:
 
 ## Restore backup
 
-Để restore backup, sử dụng script `restore-postgres.ps1` hoặc `restore-postgres.sh`:
+Để restore backup, sử dụng script `restore-postgres.ps1`:
 
 ```bash
 # PowerShell
 .\scripts\restore-postgres.ps1 -Database crawl_data -BackupFile backups/postgres/crawl_data_20251116_202329.dump
-
-# Bash
-bash scripts/restore-postgres.sh crawl_data backups/postgres/crawl_data_20251116_202329.dump
 ```
 
 ## Lưu ý
