@@ -4,52 +4,100 @@ This file tells an AI coding assistant how to be immediately productive in this 
 
 ## Quick orientation (big picture)
 
-- Repo purpose: a small data pipeline that crawls, processes and stores data from Tiki.vn. Key pieces are Airflow DAGs (scheduling), pipeline code under `src/pipelines/crawl/*`, and Docker Compose for multi-service runs (Airflow/worker stack).
-- Primary runtime environments: local Python process for quick runs (each pipeline script has a `main()` function) and Docker (see `docker-compose.yaml` at root) for multi-service runs (Airflow/worker stack).
+- **Repo purpose**: Full ETL data pipeline (Extract → Transform → Load) that crawls, processes and stores product data from Tiki.vn. Architecture is Airflow-orchestrated with Selenium crawling, Redis caching, and PostgreSQL storage.
+- **Key components**: 
+  - Airflow DAGs (orchestration with Dynamic Task Mapping for parallel execution)
+  - Pipeline code in `src/pipelines/{crawl,transform,load}/` (three-stage ETL)
+  - Docker Compose stack (Airflow scheduler/worker/API, PostgreSQL, Redis)
+  - Database schemas: `crawl_data` (products/categories) initialized via `airflow/setup/init-crawl-db.sh`
+- **Runtime environments**: 
+  - Docker (recommended): `docker-compose up -d --build` starts full stack
+  - Local Python: each pipeline script has standalone `main()` for testing (e.g., `python src/pipelines/crawl/crawl_products.py`)
 
 ## Important paths (examples to open first)
 
-- `airflow/dags/tiki_crawl_products_dag.py` — scheduler definitions; shows how pipelines are wired to Airflow.
-- `src/pipelines/crawl/` — pipeline implementation folder. Keep logic here and small, testable functions.
-- `src/pipelines/crawl/crawl_products.py`, `crawl_products_detail.py`, `crawl_categories_recursive.py` — main pipeline scripts with `main()` functions for local/manual runs.
-- `src/pipelines/crawl/config.py` — configuration settings and environment variable handling.
-- `src/pipelines/crawl/utils.py` — shared utilities for crawling operations.
-- `docker-compose.yaml` — brings up local services. Use this for reproducing multi-service workflows.
-- `data/raw/` and `data/demo/` — canonical input/output directories used by pipelines.
+- `airflow/dags/tiki_crawl_products_dag.py` — 5000+ line DAG with Dynamic Task Mapping, TaskGroups, XCom data sharing; shows orchestration patterns
+- `src/pipelines/crawl/` — Extract stage: Selenium-based crawlers with resilience patterns and Redis caching
+- `src/pipelines/transform/transformer.py` — Transform stage: `DataTransformer` class for normalization, validation, computed fields
+- `src/pipelines/load/loader.py` — Load stage: `DataLoader` class for PostgreSQL upserts with batch processing
+- `demos/demo_e2e_full.py` — End-to-end example showing Crawl → Transform → Load flow
+- `docker-compose.yaml` — Multi-service stack (Postgres, Redis, Airflow with Celery Executor); check volumes and environment variables here
+- `airflow/setup/init-crawl-db.sh` — Database schema initialization script (categories/products tables)
+- `data/raw/` and `data/demo/` — Canonical directories for pipeline inputs/outputs
 
 ## How to run (developer workflows)
 
-- Quick local run (single process):
-
+- **Quick local run (single process)**:
   - From repo root: `python src/pipelines/crawl/crawl_categories_recursive.py` (crawl categories)
   - From repo root: `python src/pipelines/crawl/crawl_products.py` (crawl products from categories)
   - From repo root: `python src/pipelines/crawl/crawl_products_detail.py` (crawl product details)
+  - E2E demo: `python demos/demo_e2e_full.py` (runs complete Crawl → Transform → Load pipeline)
   - Each script has a `main()` function that can be run directly.
 
-- Docker / multi-service (Airflow):
+- **Docker / multi-service (Airflow - recommended)**:
+  - Prerequisites: Create `.env` file from `.env.example` with `POSTGRES_USER`, `POSTGRES_PASSWORD`, `_AIRFLOW_WWW_USER_USERNAME`, `_AIRFLOW_WWW_USER_PASSWORD`
+  - From repo root: `docker-compose up -d --build` to start all services (PostgreSQL, Redis, Airflow stack)
+  - Access Airflow UI at http://localhost:8080 (default: username `airflow`, password `airflow`)
+  - PostgreSQL exposed at `localhost:5432` for external connections
+  - Trigger DAG: find `tiki_crawl_products` in UI and click "Play" button
 
-  - From repo root: `docker-compose up -d --build` to start all services.
-  - Access Airflow UI at http://localhost:8080 (username: `airflow`, password: `airflow`).
+- **Code quality & CI (Makefile/PowerShell)**:
+  - Unix/Linux/Mac: `make lint`, `make format`, `make test`, `make validate-dags`
+  - Windows PowerShell: `.\scripts\ci.ps1 lint`, `.\scripts\ci.ps1 format`, `.\scripts\ci.ps1 test`
+  - Full CI locally: `make ci-local` or `.\scripts\ci.ps1 ci-local` (runs linting, formatting, type-checking, tests, security checks)
+  - Tools used: `ruff` (linting), `black` + `isort` (formatting), `mypy` (type-checking), `pytest` (testing), `bandit` (security)
 
-- Debugging tips:
+- **Database management**:
+  - Schema initialization happens automatically via `airflow/setup/init-crawl-db.sh` on first Postgres startup
+  - Manual schema updates: check `airflow/setup/add_computed_fields.sql` or `add_missing_columns.sql`
+  - Backup: `.\scripts\backup-postgres.ps1` or `scripts/backup-postgres.sh` (creates backup in `backups/postgres/`)
+  - Restore: `.\scripts\restore-postgres.ps1` or similar (from `backups/postgres/`)
 
-  - Open the DAG file `airflow/dags/tiki_crawl_products_dag.py` to see task names and Python callable targets — match those names when testing locally.
-  - Check Airflow Variables in the UI (Admin → Variables) for configuration parameters.
-  - Inspect `src/pipelines/crawl/config.py` for configuration settings and environment variables.
+- **Debugging tips**:
+  - Open the DAG file `airflow/dags/tiki_crawl_products_dag.py` to see task names and Python callable targets — match those names when testing locally
+  - Check Airflow Variables in the UI (Admin → Variables) for configuration parameters like crawl limits
+  - Inspect `src/pipelines/crawl/config.py` for configuration settings and environment variables
+  - View logs: `docker-compose logs -f airflow-scheduler` or check `airflow/logs/` directory
+  - For DAG import errors: `docker exec tiki-data-pipeline-airflow-scheduler-1 python -c "from airflow.models import DagBag; print(DagBag().import_errors)"`
 
 ## Patterns & conventions specific to this repo
 
-- Configuration-first: runtime behavior is controlled via Airflow Variables and environment variables. When adding features, add configuration in `src/pipelines/crawl/config.py` and read from Airflow Variables or environment variables instead of hardcoding.
-- Small, pure functions in `src/pipelines/crawl/*`, side-effecting orchestration in DAGs or `main()` functions in pipeline scripts. This keeps unit testing simple.
-- Data layout: pipelines write to `data/raw/` (ingest) and `data/demo/` (demo/test outputs). Preserve these locations unless adding an explicit config override.
-- Redis caching: use `src/pipelines/crawl/redis_cache.py` for caching HTML content and rate limiting.
+- **Configuration-first**: runtime behavior is controlled via Airflow Variables and environment variables. When adding features, add configuration in `src/pipelines/crawl/config.py` and read from Airflow Variables or environment variables instead of hardcoding.
+- **Small, pure functions** in `src/pipelines/{crawl,transform,load}/*`, side-effecting orchestration in DAGs or `main()` functions in pipeline scripts. This keeps unit testing simple.
+- **Three-stage ETL architecture**:
+  - **Extract** (`src/pipelines/crawl/`): Selenium-based crawlers with `main()` entry points. Uses `resilience/` for retry patterns, `storage/` for atomic file writes
+  - **Transform** (`src/pipelines/transform/transformer.py`): `DataTransformer.transform_products()` normalizes JSON, validates fields, computes derived values (e.g., discount_percent)
+  - **Load** (`src/pipelines/load/loader.py`): `DataLoader.load_products()` performs batch upserts to PostgreSQL with conflict resolution
+- **Data layout**: pipelines write to `data/raw/` (ingest) and `data/demo/` (demo/test outputs). Preserve these locations unless adding an explicit config override.
+- **Redis caching**: use `src/pipelines/crawl/redis_cache.py` for caching HTML content and rate limiting (Airflow uses Redis DB 0, pipeline can use DB 1).
+- **Dynamic Task Mapping in DAGs**: the main DAG (`tiki_crawl_products_dag.py`) uses Airflow's Dynamic Task Mapping to parallelize crawling across categories. Tasks are grouped in TaskGroups for readability.
+- **XCom data sharing**: DAG tasks pass data via XCom (e.g., category lists, product counts). Keep XCom payloads small; write large data to `data/` and pass file paths.
+- **Atomic writes**: use `storage/atomic_writer.py` patterns for safe file writes (write to temp, then rename) to prevent corrupt files on failure.
+- **Windows + Unix compatibility**: scripts exist in both `.sh` (Unix) and `.ps1` (PowerShell) variants. Makefile for Unix, `scripts/ci.ps1` for Windows.
 
 ## Integration points / external dependencies
 
-- Airflow: DAGs live in `airflow/dags/`. Assume the runtime uses the compose stack; changes to DAGs usually require restarting the Airflow scheduler service in the compose stack.
-- Docker: `docker-compose.yaml` at root defines local composition — use it to run services like Airflow, PostgreSQL, Redis, or other dependencies.
-- Configuration: Airflow Variables (set in UI: Admin → Variables) and environment variables are authoritative for crawling schedules/targets.
-- Redis: Used for caching and rate limiting. Configured in `docker-compose.yaml` and accessed via `src/pipelines/crawl/redis_cache.py`.
+- **Airflow**: DAGs live in `airflow/dags/`. Assume the runtime uses the compose stack; changes to DAGs usually require restarting the Airflow scheduler service in the compose stack.
+  - Custom Airflow image built via `airflow/Dockerfile` (installs Chrome/Chromium for Selenium)
+  - Configuration in `airflow/config/airflow.cfg` and `airflow/airflow_local_settings.py`
+  - Volumes: dags, logs, plugins, and `src/` + `data/` are mounted for DAG access to pipeline code
+  - Executor: CeleryExecutor with Redis as broker (allows distributed task execution)
+- **Docker**: `docker-compose.yaml` at root defines local composition — use it to run services like Airflow, PostgreSQL, Redis, or other dependencies.
+  - Services: `postgres` (port 5432), `redis` (port 6379), `airflow-scheduler`, `airflow-worker`, `airflow-apiserver`, `airflow-webserver`
+  - Shared volume: `postgres-shared-volume` for database persistence
+  - Network: `backend` network for inter-service communication
+- **Configuration**: 
+  - Airflow Variables (set in UI: Admin → Variables) are authoritative for crawling schedules/targets (e.g., `tiki_max_products_per_category`)
+  - Environment variables in `.env` file (see `.env.example`) for credentials and service URLs
+  - Never commit `.env` file (already in `.gitignore`)
+- **Redis**: Used for caching and rate limiting in pipeline code. Configured in `docker-compose.yaml` and accessed via `src/pipelines/crawl/redis_cache.py`.
+  - DB 0: Airflow Celery broker/result backend
+  - DB 1+: Available for pipeline caching (configure in pipeline code)
+- **PostgreSQL**: 
+  - Two databases: `airflow` (Airflow metadata) and `crawl_data` (pipeline data)
+  - Schema initialization: `airflow/setup/init-crawl-db.sh` runs on first startup (via `docker-entrypoint-initdb.d/`)
+  - Tables: `categories`, `products` with JSONB columns for flexible schema
+  - Connection from local: `postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/crawl_data`
 
 ## What I (the AI) should do and avoid
 
