@@ -9,10 +9,11 @@ Features:
 """
 
 import time
-from typing import Any, Callable, Generator, Iterable, List
+from collections.abc import Callable, Generator, Iterable
+from typing import Any
 
 
-def create_batches(items: Iterable[Any], batch_size: int) -> Generator[List[Any], None, None]:
+def create_batches(items: Iterable[Any], batch_size: int) -> Generator[list[Any], None, None]:
     """
     Create batches from an iterable
 
@@ -55,7 +56,10 @@ class BatchProcessor:
         self.total_time = 0.0
 
     def process(
-        self, items: Iterable[Any], processor: Callable[[List[Any]], Any], total_count: int = None
+        self,
+        items: Iterable[Any],
+        processor: Callable[[list[Any]], Any],
+        total_count: int | None = None,
     ) -> dict:
         """
         Process items in batches

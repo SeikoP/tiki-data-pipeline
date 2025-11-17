@@ -11,7 +11,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from common.monitoring import PerformanceMetrics, PerformanceTimer, measure_time
+from common.monitoring import PerformanceMetrics, PerformanceTimer, measure_time  # noqa: E402
 
 print("=" * 70)
 print("🧪 TESTING PERFORMANCE OPTIMIZATIONS")
@@ -21,8 +21,7 @@ print()
 # Test 1: Verify imports
 print("1️⃣  Testing imports...")
 try:
-    import pipelines.crawl.utils as crawl_utils
-    from pipelines.crawl.storage.redis_cache import RedisCache, get_redis_pool
+    from pipelines.crawl.storage.redis_cache import get_redis_pool
 
     print("   ✅ All modules imported successfully")
 except Exception as e:

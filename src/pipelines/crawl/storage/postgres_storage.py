@@ -19,11 +19,11 @@ class PostgresStorage:
 
     def __init__(
         self,
-        host: str = None,
+        host: str | None = None,
         port: int = 5432,
         database: str = "crawl_data",
-        user: str = None,
-        password: str = None,
+        user: str | None = None,
+        password: str | None = None,
         minconn: int = 2,
         maxconn: int = 10,
         connect_timeout: int = 10,
@@ -506,10 +506,10 @@ class PostgresStorage:
         crawl_type: str,
         status: str,
         items_count: int = 0,
-        category_url: str = None,
-        product_id: str = None,
-        error_message: str = None,
-        started_at: datetime = None,
+        category_url: str | None = None,
+        product_id: str | None = None,
+        error_message: str | None = None,
+        started_at: datetime | None = None,
     ) -> int:
         """
         Ghi log lịch sử crawl

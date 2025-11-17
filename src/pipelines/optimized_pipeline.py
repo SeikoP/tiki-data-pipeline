@@ -11,20 +11,20 @@ Combines all Phase 4 optimizations:
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 def run_optimized_pipeline(
-    category_urls: List[str],
+    category_urls: list[str],
     output_dir: str = "data/optimized",
     max_crawl_workers: int = 5,
     crawl_rate_limit: float = 0.5,
     db_batch_size: int = 100,
     enable_db: bool = True,
     save_intermediate: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Run complete optimized ETL pipeline
 
@@ -69,7 +69,7 @@ def run_optimized_pipeline(
 
         # Get product URLs from categories first
         product_urls = []
-        for cat_url in category_urls:
+        for _cat_url in category_urls:
             # TODO: Extract product URLs from category
             # For now, assume we have them
             pass
@@ -179,7 +179,7 @@ def quick_test_optimized_pipeline(num_products: int = 10):
     logger.info(f"🧪 Quick test with {num_products} products")
 
     # Sample product URLs (replace with real URLs)
-    sample_urls = [f"https://tiki.vn/product-{i}.html" for i in range(num_products)]
+    _sample_urls = [f"https://tiki.vn/product-{i}.html" for i in range(num_products)]
 
     stats = run_optimized_pipeline(
         category_urls=[],  # Not needed for direct product crawl

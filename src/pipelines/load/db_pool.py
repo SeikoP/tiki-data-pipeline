@@ -9,11 +9,12 @@ Optimizations:
 """
 
 import os
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any
 
 try:
-    import psycopg2
+    import psycopg2  # noqa: F401
     from psycopg2 import pool
 
     PSYCOPG2_AVAILABLE = True
@@ -35,11 +36,11 @@ class PostgresConnectionPool:
 
     def initialize(
         self,
-        host: str = None,
+        host: str | None = None,
         port: int = 5432,
         database: str = "crawl_data",
-        user: str = None,
-        password: str = None,
+        user: str | None = None,
+        password: str | None = None,
         minconn: int = 2,
         maxconn: int = 10,
     ):

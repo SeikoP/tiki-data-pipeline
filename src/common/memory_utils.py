@@ -10,7 +10,7 @@ Features:
 
 import gc
 import sys
-from typing import Any, Dict, List
+from typing import Any
 
 
 def get_object_size(obj: Any) -> int:
@@ -18,7 +18,7 @@ def get_object_size(obj: Any) -> int:
     return sys.getsizeof(obj)
 
 
-def profile_memory() -> Dict[str, Any]:
+def profile_memory() -> dict[str, Any]:
     """
     Get current memory usage statistics
 
@@ -45,7 +45,7 @@ def force_gc():
     return collected
 
 
-def get_large_objects(limit: int = 10) -> List[tuple]:
+def get_large_objects(limit: int = 10) -> list[tuple]:
     """
     Get largest objects in memory
 
@@ -61,7 +61,7 @@ def get_large_objects(limit: int = 10) -> List[tuple]:
         try:
             size = sys.getsizeof(obj)
             objects.append((size, type(obj).__name__, str(obj)[:100]))
-        except:
+        except Exception:
             continue
 
     objects.sort(reverse=True, key=lambda x: x[0])
@@ -79,14 +79,14 @@ def optimize_dataframe_memory(df):
         Optimized DataFrame
     """
     try:
-        import pandas as pd
+        import pandas  # noqa: F401
     except ImportError:
         return df
 
     for col in df.columns:
         col_type = df[col].dtype
 
-        if col_type != object:
+        if str(col_type) != "object":
             c_min = df[col].min()
             c_max = df[col].max()
 

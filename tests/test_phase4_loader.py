@@ -23,27 +23,26 @@ print()
 print("📋 Step 1: Preparing test data...")
 print("-" * 70)
 
-test_products = []
-for i in range(100):  # 100 products cho test
-    test_products.append(
-        {
-            "product_id": f"test_{i}",
-            "category_url": "https://tiki.vn/test",
-            "name": f"Test Product {i}",
-            "url": f"https://tiki.vn/product-{i}.html",
-            "price": 100000 + (i * 1000),
-            "original_price": 150000 + (i * 1000),
-            "discount_percent": 33.33,
-            "rating_average": 4.5,
-            "review_count": 100,
-            "sales_count": 500,
-            "brand": "Test Brand",
-            "specifications": {"key": f"value_{i}"},
-            "images": {"thumbnail_url": f"https://example.com/img{i}.jpg"},
-            "description": f"Test description {i}",
-            "crawled_at": "2024-01-01T00:00:00",
-        }
-    )
+test_products = [
+    {
+        "product_id": f"test_{i}",
+        "category_url": "https://tiki.vn/test",
+        "name": f"Test Product {i}",
+        "url": f"https://tiki.vn/product-{i}.html",
+        "price": 100000 + (i * 1000),
+        "original_price": 150000 + (i * 1000),
+        "discount_percent": 33.33,
+        "rating_average": 4.5,
+        "review_count": 100,
+        "sales_count": 500,
+        "brand": "Test Brand",
+        "specifications": {"key": f"value_{i}"},
+        "images": {"thumbnail_url": f"https://example.com/img{i}.jpg"},
+        "description": f"Test description {i}",
+        "crawled_at": "2024-01-01T00:00:00",
+    }
+    for i in range(100)  # 100 products cho test
+]
 
 print(f"✅ Created {len(test_products)} test products")
 print()
@@ -157,7 +156,7 @@ try:
     print(f"   - Rate: {stats['total_products'] / load_time:.1f} items/s")
 
     # Verify file
-    with open(temp_file, "r", encoding="utf-8") as f:
+    with open(temp_file, encoding="utf-8") as f:
         data = json.load(f)
 
     print(f"   - File size: {len(data.get('products', []))} products")

@@ -4566,12 +4566,225 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
         )
         logger.info("=" * 70)
 
+        # Performance Summary
+        try:
+            from common.monitoring import PerformanceMetrics
+
+            # Lấy execution date để tính toán performance
+            dag_run = context.get("dag_run")
+            if dag_run:
+                start_time = dag_run.start_date
+                end_time = datetime.now()
+                duration = (end_time - start_time).total_seconds()
+
+                logger.info("=" * 70)
+                logger.info("⚡ PERFORMANCE SUMMARY")
+                logger.info("=" * 70)
+                logger.info(f"🕐 Start time: {start_time.isoformat()}")
+                logger.info(f"🕐 End time: {end_time.isoformat()}")
+                logger.info(f"⏱️  Total duration: {duration:.2f}s ({duration/60:.2f} minutes)")
+
+                # Tính toán throughput
+                total_products = result.get("total_count", 0)
+                if total_products > 0 and duration > 0:
+                    throughput = total_products / duration
+                    logger.info(f"📈 Throughput: {throughput:.2f} products/second")
+                    logger.info(
+                        f"📈 Average time per product: {duration/total_products:.2f}s"
+                    )
+
+                logger.info("=" * 70)
+                result["performance"] = {
+                    "start_time": start_time.isoformat(),
+                    "end_time": end_time.isoformat(),
+                    "duration_seconds": duration,
+                    "duration_minutes": round(duration / 60, 2),
+                    "throughput": round(throughput, 2) if total_products > 0 else 0,
+                }
+        except Exception as perf_error:
+            logger.warning(f"⚠️  Không thể tạo performance summary: {perf_error}")
+
         return result
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi tổng hợp và gửi thông báo: {e}", exc_info=True)
         # Không fail task, chỉ log lỗi
         return result
+
+
+def health_check_monitoring(**context) -> dict[str, Any]:
+    """
+    Task: Health check and monitoring
+
+    Thu thập metrics từ CircuitBreaker, PostgreSQL connection pool và các services khác
+    để monitoring health của hệ thống.
+
+    Returns:
+        Dict: Health check results
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("🏥 TASK: Health Check & Monitoring")
+    logger.info("=" * 70)
+
+    result = {
+        "status": "success",
+        "circuit_breaker_state": {},
+        "postgres_pool_stats": {},
+        "redis_stats": {},
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    try:
+        # 1. Circuit Breaker State
+        try:
+            circuit_breaker_state = tiki_circuit_breaker.get_state()
+            result["circuit_breaker_state"] = circuit_breaker_state
+            logger.info("🔌 Circuit Breaker State:")
+            logger.info(f"   - State: {circuit_breaker_state.get('state', 'unknown')}")
+            logger.info(f"   - Failure count: {circuit_breaker_state.get('failure_count', 0)}")
+            logger.info(
+                f"   - Last failure: {circuit_breaker_state.get('last_failure_time', 'N/A')}"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy circuit breaker state: {e}")
+            result["circuit_breaker_state"] = {"error": str(e)}
+
+        # 2. PostgreSQL Connection Pool Stats
+        try:
+            from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
+            # Khởi tạo PostgresStorage để lấy pool stats
+            postgres = PostgresStorage()
+            pool_stats = postgres.get_pool_stats()
+            result["postgres_pool_stats"] = pool_stats
+            logger.info("🐘 PostgreSQL Pool Stats:")
+            logger.info(f"   - Min connections: {pool_stats.get('minconn', 0)}")
+            logger.info(f"   - Max connections: {pool_stats.get('maxconn', 0)}")
+            logger.info(f"   - Current connections: {pool_stats.get('current_connections', 0)}")
+            logger.info(f"   - Available: {pool_stats.get('available_connections', 0)}")
+
+            # Close connection
+            try:
+                postgres.close()
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy postgres pool stats: {e}")
+            result["postgres_pool_stats"] = {"error": str(e)}
+
+        # 3. Redis Stats
+        try:
+            from pipelines.crawl.storage.redis_cache import get_redis_cache
+
+            redis_cache = get_redis_cache("redis://redis:6379/1")
+            if redis_cache:
+                redis_stats = redis_cache.get_stats()
+                result["redis_stats"] = redis_stats
+                logger.info("📦 Redis Stats:")
+                logger.info(f"   - Keys: {redis_stats.get('keys', 0)}")
+                logger.info(f"   - Memory: {redis_stats.get('used_memory_human', 'N/A')}")
+                logger.info(f"   - Hit rate: {redis_stats.get('hit_rate', 0):.1f}%")
+                logger.info(f"   - Evicted keys: {redis_stats.get('evicted_keys', 0)}")
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy redis stats: {e}")
+            result["redis_stats"] = {"error": str(e)}
+
+        # 4. Graceful Degradation Stats
+        try:
+            degradation_stats = tiki_degradation.get_all_stats()
+            result["degradation_stats"] = degradation_stats
+            logger.info("📊 Graceful Degradation Stats:")
+            for service, stats in degradation_stats.items():
+                logger.info(f"   - {service}:")
+                logger.info(f"     • State: {stats.get('state', 'unknown')}")
+                logger.info(f"     • Success rate: {stats.get('success_rate', 0):.1f}%")
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy degradation stats: {e}")
+            result["degradation_stats"] = {"error": str(e)}
+
+        logger.info("✅ Health check hoàn tất")
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi health check: {e}", exc_info=True)
+        result["status"] = "failed"
+        result["error"] = str(e)
+
+    logger.info("=" * 70)
+    return result
+
+
+def cleanup_redis_cache(**context) -> dict[str, Any]:
+    """
+    Task: Cleanup Redis cache
+
+    Cleanup Redis cache để giải phóng bộ nhớ và đảm bảo cache không quá cũ.
+    Task này chạy với trigger_rule="all_done" để chạy ngay cả khi upstream tasks fail.
+
+    Returns:
+        Dict: Kết quả cleanup
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("🧹 TASK: Cleanup Redis Cache")
+    logger.info("=" * 70)
+
+    result = {
+        "status": "failed",
+        "redis_reset": False,
+        "stats_before": {},
+        "stats_after": {},
+    }
+
+    try:
+        from pipelines.crawl.storage.redis_cache import get_redis_cache
+
+        # Kết nối Redis
+        redis_cache = get_redis_cache("redis://redis:6379/1")
+        if not redis_cache:
+            logger.warning("⚠️  Không thể kết nối Redis, skip cleanup")
+            result["status"] = "skipped"
+            result["reason"] = "Redis not available"
+            return result
+
+        # Lấy stats trước khi cleanup
+        try:
+            stats_before = redis_cache.get_stats()
+            result["stats_before"] = stats_before
+            logger.info("📊 Redis stats trước cleanup:")
+            logger.info(f"   - Keys: {stats_before.get('keys', 0)}")
+            logger.info(f"   - Memory used: {stats_before.get('used_memory_human', 'N/A')}")
+            logger.info(f"   - Hit rate: {stats_before.get('hit_rate', 0):.1f}%")
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy stats trước cleanup: {e}")
+
+        # Reset cache
+        logger.info("🧹 Đang cleanup Redis cache...")
+        redis_cache.reset()
+        result["redis_reset"] = True
+        logger.info("✅ Đã reset Redis cache thành công")
+
+        # Lấy stats sau khi cleanup
+        try:
+            time.sleep(1)  # Wait một chút để Redis update stats
+            stats_after = redis_cache.get_stats()
+            result["stats_after"] = stats_after
+            logger.info("📊 Redis stats sau cleanup:")
+            logger.info(f"   - Keys: {stats_after.get('keys', 0)}")
+            logger.info(f"   - Memory used: {stats_after.get('used_memory_human', 'N/A')}")
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy stats sau cleanup: {e}")
+
+        result["status"] = "success"
+        logger.info("✅ Cleanup Redis cache hoàn tất")
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi cleanup Redis cache: {e}", exc_info=True)
+        result["error"] = str(e)
+
+    logger.info("=" * 70)
+    return result
 
 
 def backup_database(**context) -> dict[str, Any]:
@@ -5174,6 +5387,26 @@ with DAG(**DAG_CONFIG) as dag:
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
+    # TaskGroup: Health Check
+    with TaskGroup("health_check") as health_check_group:
+        task_health_check = PythonOperator(
+            task_id="health_check_monitoring",
+            python_callable=health_check_monitoring,
+            execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
+            pool="default_pool",
+            trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
+        )
+
+    # TaskGroup: Cleanup Cache
+    with TaskGroup("cleanup") as cleanup_group:
+        task_cleanup_cache = PythonOperator(
+            task_id="cleanup_redis_cache",
+            python_callable=cleanup_redis_cache,
+            execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
+            pool="default_pool",
+            trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
+        )
+
     # TaskGroup: Backup Database
     with TaskGroup("backup") as backup_group:
         task_backup_database = PythonOperator(
@@ -5203,12 +5436,14 @@ with DAG(**DAG_CONFIG) as dag:
     # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> validate -> aggregate and notify
     task_save_products >> task_prepare_detail
     # Dependencies trong detail group đã được định nghĩa ở dòng 1800
-    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> backup_database
+    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database
     (
         task_save_products_with_detail
         >> task_transform_products
         >> task_load_products
         >> task_validate_data
         >> task_aggregate_and_notify
+        >> task_health_check
+        >> task_cleanup_cache
         >> task_backup_database
     )

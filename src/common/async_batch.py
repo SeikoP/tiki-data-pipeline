@@ -9,7 +9,8 @@ Features:
 
 import asyncio
 import logging
-from typing import Any, Callable, List
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,9 @@ class AsyncBatchProcessor:
 
     async def process_async(
         self,
-        items: List[Any],
+        items: list[Any],
         async_processor: Callable,
-        total_count: int = None,
+        total_count: int | None = None,
     ):
         """
         Process items asynchronously

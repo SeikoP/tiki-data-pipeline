@@ -142,7 +142,7 @@ print("-" * 70)
 
 try:
     dag_file = project_root / "airflow" / "dags" / "tiki_crawl_products_optimized_dag.py"
-    with open(dag_file, "r", encoding="utf-8") as f:
+    with open(dag_file, encoding="utf-8") as f:
         content = f.read()
 
     optimizations = [

@@ -289,7 +289,6 @@ class DataLoader:
     def load_from_file(
         self,
         input_file: str,
-        save_to_db: bool = True,
         save_to_file: str | None = None,
         upsert: bool = True,
     ) -> dict[str, Any]:

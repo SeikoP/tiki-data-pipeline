@@ -12,10 +12,10 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from ...common.batch_processor import BatchProcessor
-from ...common.monitoring import PerformanceTimer, measure_time
+from ...common.monitoring import PerformanceTimer
 from .db_pool import get_db_pool, initialize_db_pool
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class OptimizedDataLoader:
         self,
         batch_size: int = 100,
         enable_db: bool = True,
-        db_config: Dict[str, Any] = None,
+        db_config: dict[str, Any] | None = None,
         show_progress: bool = True,
         continue_on_error: bool = True,
     ):
@@ -74,7 +74,7 @@ class OptimizedDataLoader:
         self.show_progress = show_progress
         self.continue_on_error = continue_on_error
 
-        self.stats = {
+        self.stats: dict[str, Any] = {
             "total_products": 0,
             "db_loaded": 0,
             "file_loaded": 0,
@@ -105,11 +105,11 @@ class OptimizedDataLoader:
 
     def load_products(
         self,
-        products: List[Dict[str, Any]],
+        products: list[dict[str, Any]],
         upsert: bool = True,
         validate_before_load: bool = True,
-        save_to_file: str = None,
-    ) -> Dict[str, Any]:
+        save_to_file: str | None = None,
+    ) -> dict[str, Any]:
         """
         Load products vào database với connection pooling
 
@@ -149,7 +149,7 @@ class OptimizedDataLoader:
 
         return self.stats
 
-    def _validate_products(self, products: List[Dict]) -> List[Dict]:
+    def _validate_products(self, products: list[dict]) -> list[dict]:
         """Validate products và loại bỏ invalid ones"""
         valid_products = []
 
@@ -170,12 +170,12 @@ class OptimizedDataLoader:
 
         return valid_products
 
-    def _load_to_database(self, products: List[Dict], upsert: bool):
+    def _load_to_database(self, products: list[dict], upsert: bool):
         """Load products vào database với batch processing"""
         try:
             db_pool = get_db_pool()
 
-            def process_batch(batch: List[Dict]):
+            def process_batch(batch: list[dict]):
                 """Process một batch products"""
                 self._upsert_batch(batch, upsert, db_pool)
 
@@ -190,7 +190,7 @@ class OptimizedDataLoader:
             self.stats["failed_count"] += batch_stats["total_failed"]
 
             if self.show_progress:
-                logger.info(f"✅ Database loading completed:")
+                logger.info("✅ Database loading completed:")
                 logger.info(f"   - Processed: {batch_stats['total_processed']}")
                 logger.info(f"   - Failed: {batch_stats['total_failed']}")
                 logger.info(f"   - Rate: {batch_stats['avg_rate']:.1f} items/s")
@@ -202,7 +202,7 @@ class OptimizedDataLoader:
             self.stats["failed_count"] += len(products)
             logger.error(f"❌ {error_msg}")
 
-    def _upsert_batch(self, batch: List[Dict], upsert: bool, db_pool):
+    def _upsert_batch(self, batch: list[dict], upsert: bool, db_pool):
         """Upsert một batch vào database"""
         with db_pool.get_cursor(commit=True) as cursor:
             if upsert:
@@ -214,7 +214,7 @@ class OptimizedDataLoader:
                 for product in batch:
                     self._insert_product(cursor, product)
 
-    def _upsert_product(self, cursor, product: Dict):
+    def _upsert_product(self, cursor, product: dict):
         """Upsert một product với ON CONFLICT UPDATE"""
         # Serialize JSONB fields
         specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
@@ -274,7 +274,7 @@ class OptimizedDataLoader:
             # nhưng có thể dùng RETURNING hoặc subquery
             self.stats["inserted_count"] += 1
 
-    def _insert_product(self, cursor, product: Dict):
+    def _insert_product(self, cursor, product: dict):
         """Insert một product (không UPDATE)"""
         specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
         images = json.dumps(product.get("images", {}), ensure_ascii=False)
@@ -312,7 +312,7 @@ class OptimizedDataLoader:
             ),
         )
 
-    def _save_to_file(self, products: List[Dict], file_path: str):
+    def _save_to_file(self, products: list[dict], file_path: str):
         """Save products to JSON file"""
         try:
             path = Path(file_path)
@@ -347,10 +347,9 @@ class OptimizedDataLoader:
     def load_from_file(
         self,
         input_file: str,
-        save_to_db: bool = True,
-        save_to_file: str = None,
+        save_to_file: str | None = None,
         upsert: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Load products từ file JSON
 
@@ -364,7 +363,7 @@ class OptimizedDataLoader:
             Stats dictionary
         """
         try:
-            with open(input_file, "r", encoding="utf-8") as f:
+            with open(input_file, encoding="utf-8") as f:
                 data = json.load(f)
 
             products = data.get("products", [])

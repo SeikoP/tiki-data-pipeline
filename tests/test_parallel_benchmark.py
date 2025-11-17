@@ -48,7 +48,7 @@ for product_id in test_products:
 sequential_time = time.time() - start_time
 sequential_rate = len(test_products) / sequential_time
 
-print(f"✅ Sequential crawling:")
+print("✅ Sequential crawling:")
 print(f"   - Products: {len(sequential_results)}")
 print(f"   - Time: {sequential_time:.2f}s")
 print(f"   - Rate: {sequential_rate:.1f} products/s")
@@ -77,7 +77,7 @@ try:
     parallel_time = time.time() - start_time
 
     print()
-    print(f"✅ Parallel crawling:")
+    print("✅ Parallel crawling:")
     print(f"   - Products: {parallel_result['stats']['completed']}")
     print(f"   - Failed: {parallel_result['stats']['failed']}")
     print(f"   - Time: {parallel_time:.2f}s")
@@ -166,24 +166,24 @@ print("=" * 70)
 print()
 
 if "speedup" in locals():
-    print(f"🚀 Parallel Crawling:")
+    print("🚀 Parallel Crawling:")
     print(f"   - Speedup: {speedup:.2f}x faster")
-    print(f"   - Workers: 5 concurrent threads")
-    print(f"   - Best for: I/O-bound operations (network requests)")
+    print("   - Workers: 5 concurrent threads")
+    print("   - Best for: I/O-bound operations (network requests)")
     print()
 
 if "cache_speedup" in locals():
-    print(f"💾 Memory Cache:")
+    print("💾 Memory Cache:")
     print(f"   - Speedup: {cache_speedup:.2f}x faster")
     print(f"   - Hit rate: {stats_after_second['hit_rate']:.1f}%")
-    print(f"   - Best for: Repeated queries with same parameters")
+    print("   - Best for: Repeated queries with same parameters")
     print()
 
 print("🎯 Combined Impact (estimated):")
 if "speedup" in locals() and "cache_speedup" in locals():
     combined = speedup * 1.5  # Conservative estimate with caching
     print(f"   - Parallel + Cache: ~{combined:.1f}x overall speedup")
-    print(f"   - For 1000 products:")
+    print("   - For 1000 products:")
     print(f"     • Sequential: ~{1000 * 0.1:.0f}s ({1000 * 0.1 / 60:.1f} minutes)")
     print(
         f"     • Optimized: ~{1000 * 0.1 / combined:.0f}s ({1000 * 0.1 / combined / 60:.1f} minutes)"

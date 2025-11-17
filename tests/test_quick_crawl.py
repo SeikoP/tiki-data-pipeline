@@ -2,16 +2,14 @@
 Quick test: Crawl 5 products để test performance
 """
 
-import json
 import sys
-import time
 from pathlib import Path
 
 # Add src to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from common.monitoring import PerformanceMetrics, PerformanceTimer
+from common.monitoring import PerformanceMetrics, PerformanceTimer  # noqa: E402
 
 print("=" * 70)
 print("🚀 QUICK PERFORMANCE TEST - Crawl 5 Products")
@@ -36,9 +34,9 @@ metrics = PerformanceMetrics()
 print("⏱️  Starting crawl test (limit: 5 products)...")
 print()
 
-import requests
+import requests  # noqa: E402
 
-import pipelines.crawl.utils as crawl_utils_module
+import pipelines.crawl.utils as crawl_utils_module  # noqa: E402
 
 # Get functions from the actual utils.py file (not __init__.py)
 setup_utf8_encoding = getattr(crawl_utils_module, "setup_utf8_encoding", lambda: None)

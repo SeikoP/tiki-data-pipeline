@@ -7,8 +7,8 @@ Provides decorators and utilities for measuring and logging performance metrics
 import functools
 import logging
 import time
-from datetime import datetime
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class PerformanceTimer:
             logger.info(f"⏱️  Starting {self.operation_name}")
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, _exc_val, _exc_tb):
         self.end_time = time.time()
         self.duration = self.end_time - self.start_time
 
@@ -200,7 +200,7 @@ class _MetricsTimer:
         self.start_time = time.time()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, _exc_val, _exc_tb):
         duration = time.time() - self.start_time
         self.metrics.record(self.operation_name, duration)
         return False

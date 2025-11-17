@@ -60,7 +60,6 @@ checks = []
 try:
     with open(
         project_root / "src" / "pipelines" / "crawl" / "crawl_products_detail.py",
-        "r",
         encoding="utf-8",
     ) as f:
         content = f.read()
@@ -78,7 +77,6 @@ except Exception as e:
 try:
     with open(
         project_root / "src" / "pipelines" / "crawl" / "storage" / "redis_cache.py",
-        "r",
         encoding="utf-8",
     ) as f:
         content = f.read()
@@ -94,9 +92,7 @@ except Exception as e:
 
 # Check 3: Chrome optimization flags
 try:
-    with open(
-        project_root / "src" / "pipelines" / "crawl" / "utils.py", "r", encoding="utf-8"
-    ) as f:
+    with open(project_root / "src" / "pipelines" / "crawl" / "utils.py", encoding="utf-8") as f:
         content = f.read()
         if "--disable-images" in content or "blink-settings=imagesEnabled=false" in content:
             print("   ✅ Chrome image blocking enabled")
@@ -110,7 +106,7 @@ except Exception as e:
 
 # Check 4: Performance monitoring
 try:
-    with open(project_root / "src" / "common" / "monitoring.py", "r", encoding="utf-8") as f:
+    with open(project_root / "src" / "common" / "monitoring.py", encoding="utf-8") as f:
         content = f.read()
         if "PerformanceTimer" in content and "measure_time" in content:
             print("   ✅ Performance monitoring utilities present")

@@ -9,15 +9,15 @@ Features:
 """
 
 import hashlib
-import json
 import logging
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # In-memory cache
-_memory_cache = {}
+_memory_cache: dict[str, Any] = {}
 _cache_stats = {
     "hits": 0,
     "misses": 0,
@@ -30,12 +30,10 @@ def get_cache_key(prefix: str, *args, **kwargs) -> str:
     key_parts = [prefix]
 
     # Add args
-    for arg in args:
-        key_parts.append(str(arg))
+    key_parts.extend(str(arg) for arg in args)
 
     # Add sorted kwargs
-    for k in sorted(kwargs.keys()):
-        key_parts.append(f"{k}={kwargs[k]}")
+    key_parts.extend(f"{k}={kwargs[k]}" for k in sorted(kwargs.keys()))
 
     key_str = "|".join(key_parts)
 

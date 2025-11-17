@@ -109,7 +109,7 @@ def _get_tqdm():
                             flush=True,
                         )
 
-            def set_postfix(self, postfix=None):  # noqa: ARG002
+            def set_postfix(self, _postfix=None):
                 pass
 
         return FakeTqdm

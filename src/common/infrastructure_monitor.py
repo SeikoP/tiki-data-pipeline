@@ -11,12 +11,12 @@ Features:
 import json
 import logging
 import subprocess
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def get_docker_stats() -> List[Dict[str, Any]]:
+def get_docker_stats() -> list[dict[str, Any]]:
     """Get Docker container statistics"""
     try:
         result = subprocess.run(
@@ -26,10 +26,7 @@ def get_docker_stats() -> List[Dict[str, Any]]:
             check=True,
         )
 
-        stats = []
-        for line in result.stdout.strip().split("\n"):
-            if line:
-                stats.append(json.loads(line))
+        stats = [json.loads(line) for line in result.stdout.strip().split("\n") if line]
 
         return stats
 
@@ -38,7 +35,7 @@ def get_docker_stats() -> List[Dict[str, Any]]:
         return []
 
 
-def get_postgres_stats(conn_string: str) -> Dict[str, Any]:
+def get_postgres_stats(conn_string: str) -> dict[str, Any]:
     """
     Get PostgreSQL performance statistics
 
@@ -77,7 +74,7 @@ def get_postgres_stats(conn_string: str) -> Dict[str, Any]:
         # Cache hit ratio
         cursor.execute(
             """
-            SELECT 
+            SELECT
                 sum(heap_blks_hit) / nullif(sum(heap_blks_hit) + sum(heap_blks_read), 0) * 100 as cache_hit_ratio
             FROM pg_statio_user_tables
         """
@@ -88,7 +85,7 @@ def get_postgres_stats(conn_string: str) -> Dict[str, Any]:
         # Transaction stats
         cursor.execute(
             """
-            SELECT 
+            SELECT
                 xact_commit,
                 xact_rollback,
                 blks_read,
@@ -128,7 +125,7 @@ def get_postgres_stats(conn_string: str) -> Dict[str, Any]:
         return {}
 
 
-def get_redis_stats(redis_host: str = "localhost", redis_port: int = 6379) -> Dict[str, Any]:
+def get_redis_stats(redis_host: str = "localhost", redis_port: int = 6379) -> dict[str, Any]:
     """
     Get Redis statistics
 
@@ -167,7 +164,7 @@ def get_redis_stats(redis_host: str = "localhost", redis_port: int = 6379) -> Di
         return {}
 
 
-def get_system_resources() -> Dict[str, Any]:
+def get_system_resources() -> dict[str, Any]:
     """Get system resource usage"""
     try:
         import psutil

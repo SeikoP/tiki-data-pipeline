@@ -10,8 +10,9 @@ Features:
 
 import logging
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +50,10 @@ class ParallelCrawler:
 
     def crawl_parallel(
         self,
-        items: List[Any],
+        items: list[Any],
         crawler_func: Callable[[Any], Any],
-        total_count: int = None,
-    ) -> Dict[str, Any]:
+        total_count: int | None = None,
+    ) -> dict[str, Any]:
         """
         Crawl items in parallel
 
