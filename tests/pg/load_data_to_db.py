@@ -43,10 +43,10 @@ if env_file.exists():
 # Production MUST override with secure password in .env file
 # trufflehog:ignore - Test file with development defaults
 db_host = os.getenv("POSTGRES_HOST", "localhost")
-db_port = int(os.getenv("POSTGRES_PORT", "5432"))
+db_port = os.getenv("POSTGRES_PORT", "5432")
 db_name = os.getenv("POSTGRES_DB", "crawl_data")
 db_user = os.getenv("POSTGRES_USER", "postgres")
-db_password = os.getenv("POSTGRES_PASSWORD", "postgres")  # DEVELOPMENT ONLY
+db_password = os.getenv("POSTGRES_PASSWORD", "postgres")  # DEVELOPMENT ONLY  # trufflehog:ignore
 
 print("=" * 70)
 print("LOAD DU LIEU VAO DATABASE")

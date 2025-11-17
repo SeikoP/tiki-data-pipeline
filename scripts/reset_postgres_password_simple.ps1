@@ -28,8 +28,8 @@ Write-Host ""
 Write-Host "Kiểm tra user postgres..." -ForegroundColor Cyan
 $postgresExists = docker-compose exec -T postgres psql -U postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='postgres';" 2>&1
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($postgresExists)) {
-    Write-Host "Tạo user postgres với quyền superuser..." -ForegroundColor Yellow
-    docker-compose exec -T postgres psql -U bungmoto -d postgres -c "CREATE USER postgres WITH SUPERUSER PASSWORD 'postgres';" 2>&1 | Out-Null
+    Write-Host "Tạo user postgres với password mặc định..." -ForegroundColor Yellow
+    docker-compose exec -T postgres psql -U bungmoto -d postgres -c "CREATE USER postgres WITH SUPERUSER PASSWORD 'postgres';" 2>&1 | Out-Null  # trufflehog:ignore
     if ($LASTEXITCODE -ne 0) {
         Write-Host "⚠️  Không thể tạo user postgres, thử kết nối trực tiếp với user $postgresUser..." -ForegroundColor Yellow
         $usePostgres = $false

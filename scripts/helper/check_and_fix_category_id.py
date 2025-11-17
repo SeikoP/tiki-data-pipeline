@@ -35,7 +35,7 @@ def check_and_fix_category_id():
     db_port = int(os.getenv("POSTGRES_PORT", "5432"))
     db_name = os.getenv("POSTGRES_DB", "crawl_data")
     db_user = os.getenv("POSTGRES_USER", "postgres")
-    db_password = os.getenv("POSTGRES_PASSWORD", "postgres")  # DEVELOPMENT ONLY
+    db_password = os.getenv("POSTGRES_PASSWORD", "postgres")  # DEVELOPMENT ONLY  # trufflehog:ignore
 
     # Thử đọc từ .env file
     env_file = project_root / ".env"

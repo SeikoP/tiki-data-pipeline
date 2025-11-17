@@ -3,9 +3,12 @@
 # Script này reset về default passwords - KHÔNG BAO GIỜ dùng trong production
 # trufflehog:ignore - Safe script for local development reset only
 #
-# Giá trị mặc định:
+# WARNING: This script will reset your .env file to DEFAULT DEVELOPMENT credentials.
+# USE THIS ONLY FOR LOCAL DEVELOPMENT. DO NOT USE IN PRODUCTION!
+#
+# Default credentials:
 # - POSTGRES_USER=postgres
-# - POSTGRES_PASSWORD=postgres  # DEVELOPMENT ONLY
+# - POSTGRES_PASSWORD=postgres  # DEVELOPMENT ONLY  # trufflehog:ignore
 # - REDIS_PASSWORD= (empty)
 # - _AIRFLOW_WWW_USER_USERNAME=admin
 # - _AIRFLOW_WWW_USER_PASSWORD=admin
@@ -33,9 +36,8 @@ foreach ($line in $envContent) {
         $newContent += "POSTGRES_USER=postgres"
     }
     elseif ($line -match "^POSTGRES_PASSWORD=") {
-        # trufflehog:ignore - Development default only
-        $newContent += "POSTGRES_PASSWORD=postgres"
-    }
+        Write-Host "  - Resetting POSTGRES_PASSWORD to 'postgres'" -ForegroundColor Yellow
+        $newContent += "POSTGRES_PASSWORD=postgres"  # trufflehog:ignore
     elseif ($line -match "^REDIS_PASSWORD=") {
         $newContent += "REDIS_PASSWORD="
     }
