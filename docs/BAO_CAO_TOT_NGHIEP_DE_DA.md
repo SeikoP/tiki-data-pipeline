@@ -4,9 +4,7 @@
 
 ---
 
-**Tác giả:** [Tên Sinh viên]  
-**Ngành:** Khoa học Dữ liệu / Kỹ thuật Phần mềm  
-**Năm:** 2024-2025
+**Tác giả:** Nguyễn Hữu Cường 
 
 ---
 

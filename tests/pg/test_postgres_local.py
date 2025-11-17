@@ -19,9 +19,11 @@ except ImportError:
 project_root = Path(__file__).parent.parent
 env_file = project_root / ".env"
 
-# Load thông tin từ .env nếu có
+# SECURITY WARNING: Default values chỉ dùng cho local development/testing
+# Production PHẢI set environment variables trong .env file
+# trufflehog:ignore - Safe default values for local development only
 postgres_user = "postgres"
-postgres_password = "postgres"
+postgres_password = "postgres"  # DEVELOPMENT ONLY - Override in .env
 postgres_host = "localhost"
 postgres_port = 5432
 postgres_db = "crawl_data"

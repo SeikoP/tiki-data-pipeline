@@ -590,7 +590,7 @@ DAG_CONFIG = {
     "catchup": False,  # Không chạy lại các task đã bỏ lỡ
     "tags": dag_tags,
     "max_active_runs": 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
-    "max_active_tasks": 10,  # Giảm xuống 10 tasks song song để tránh quá tải khi tạo Selenium driver
+    "max_active_tasks": 15,  # Giảm xuống 10 tasks song song để tránh quá tải khi tạo Selenium driver
 }
 
 # Thư mục dữ liệu
@@ -1722,6 +1722,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 db_user = Variable.get(
                     "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
                 )
+                # trufflehog:ignore - Fallback for development, production uses Airflow Variables
                 db_password = Variable.get(
                     "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
                 )
@@ -4050,6 +4051,7 @@ def load_products(**context) -> dict[str, Any]:
             db_user = Variable.get(
                 "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
             )
+            # trufflehog:ignore - Fallback for development, production uses Airflow Variables
             db_password = Variable.get(
                 "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
             )

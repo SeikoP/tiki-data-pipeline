@@ -30,11 +30,12 @@ def check_and_fix_category_id():
     print("=" * 70)
 
     # Lấy database config
+    # trufflehog:ignore - Development defaults only, override with .env
     db_host = os.getenv("POSTGRES_HOST", "localhost")
     db_port = int(os.getenv("POSTGRES_PORT", "5432"))
     db_name = os.getenv("POSTGRES_DB", "crawl_data")
     db_user = os.getenv("POSTGRES_USER", "postgres")
-    db_password = os.getenv("POSTGRES_PASSWORD", "postgres")
+    db_password = os.getenv("POSTGRES_PASSWORD", "postgres")  # DEVELOPMENT ONLY
 
     # Thử đọc từ .env file
     env_file = project_root / ".env"

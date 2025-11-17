@@ -1,7 +1,11 @@
 # Script để reset cấu hình về mặc định (development)
+# ⚠️ SECURITY WARNING: CHỈ SỬ DỤNG CHO LOCAL DEVELOPMENT!
+# Script này reset về default passwords - KHÔNG BAO GIỜ dùng trong production
+# trufflehog:ignore - Safe script for local development reset only
+#
 # Giá trị mặc định:
 # - POSTGRES_USER=postgres
-# - POSTGRES_PASSWORD=postgres
+# - POSTGRES_PASSWORD=postgres  # DEVELOPMENT ONLY
 # - REDIS_PASSWORD= (empty)
 # - _AIRFLOW_WWW_USER_USERNAME=admin
 # - _AIRFLOW_WWW_USER_PASSWORD=admin
@@ -29,6 +33,7 @@ foreach ($line in $envContent) {
         $newContent += "POSTGRES_USER=postgres"
     }
     elseif ($line -match "^POSTGRES_PASSWORD=") {
+        # trufflehog:ignore - Development default only
         $newContent += "POSTGRES_PASSWORD=postgres"
     }
     elseif ($line -match "^REDIS_PASSWORD=") {
@@ -57,6 +62,7 @@ if ($LASTEXITCODE -eq 0 -and ($postgresStatus -match "Up" -or $postgresStatus -m
     Write-Host "Đang reset password trong database..." -ForegroundColor Cyan
     
     # Reset password cho user postgres
+    # trufflehog:ignore - Development reset command only
     $resetCmd = "ALTER USER postgres WITH PASSWORD 'postgres';"
     docker-compose exec -T postgres psql -U postgres -c $resetCmd 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
