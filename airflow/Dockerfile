@@ -6,48 +6,16 @@ USER root
 # Cài đặt timezone và cấu hình giờ Việt Nam (UTC+7)
 ENV TZ=Asia/Ho_Chi_Minh
 
-# Cài đặt Chrome và dependencies trong một layer duy nhất để giảm kích thước image
-# Sử dụng --no-install-recommends và dọn dẹp ngay sau khi cài để tiết kiệm không gian
+# Cài đặt Chromium và dependencies (nhẹ hơn Chrome, dễ cài hơn)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     tzdata \
-    wget \
-    gnupg \
-    ca-certificates \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libwayland-client0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    xdg-utils \
-    libu2f-udev \
-    libvulkan1 && \
-    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg && \
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends google-chrome-stable && \
-    # Cấu hình timezone cho giờ Việt Nam (UTC+7)
-    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
-    # Dọn dẹp để giảm kích thước image
-    apt-get remove -y wget gnupg && \
-    apt-get autoremove -y && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.cache /root/.wget-hsts && \
-    # Dọn dẹp Chrome cache và temporary files
-    rm -rf /opt/google/chrome/CrashReports /opt/google/chrome/swiftshader
+    chromium \
+    chromium-driver \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Chuyển về user airflow
 USER airflow

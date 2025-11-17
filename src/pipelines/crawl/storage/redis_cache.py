@@ -6,24 +6,57 @@ Các tính năng:
 2. Distributed rate limiting
 3. Distributed locking để tránh crawl trùng lặp
 4. Session storage
+5. Connection pooling for better performance
 """
 
 import hashlib
 import json
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     import redis
+    from redis import ConnectionPool
 
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
     redis = None
+    ConnectionPool = None
+
+# Global connection pool (shared across instances)
+_connection_pools = {}
+
+
+def get_redis_pool(redis_url: str, max_connections: int = 20) -> ConnectionPool:
+    """
+    Get or create a connection pool for the given Redis URL
+    
+    Args:
+        redis_url: Redis connection URL
+        max_connections: Maximum number of connections in the pool
+    
+    Returns:
+        ConnectionPool instance
+    """
+    if redis_url not in _connection_pools:
+        parsed = urlparse(redis_url)
+        _connection_pools[redis_url] = ConnectionPool(
+            host=parsed.hostname or 'localhost',
+            port=parsed.port or 6379,
+            db=int(parsed.path.lstrip('/')) if parsed.path else 0,
+            max_connections=max_connections,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            retry_on_timeout=True
+        )
+    return _connection_pools[redis_url]
 
 
 class RedisCache:
-    """Redis cache wrapper cho crawl pipeline"""
+    """Redis cache wrapper với connection pooling cho crawl pipeline"""
 
     def __init__(self, redis_url: str = "redis://redis:6379/1", default_ttl: int = 86400):
         """
@@ -34,7 +67,9 @@ class RedisCache:
         if not REDIS_AVAILABLE:
             raise ImportError("Redis chưa được cài đặt. Cài đặt: pip install redis")
 
-        self.client = redis.from_url(redis_url, decode_responses=True)
+        # Use connection pool for better performance
+        pool = get_redis_pool(redis_url)
+        self.client = redis.Redis(connection_pool=pool)
         self.default_ttl = default_ttl
         self.prefix = "tiki:crawl:"
 

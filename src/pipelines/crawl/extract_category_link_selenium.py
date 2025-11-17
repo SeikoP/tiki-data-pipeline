@@ -67,28 +67,28 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
             print(f"[Selenium] Đang mở {url}...")
         driver.get(url)
 
-        # Giảm thời gian chờ
-        time.sleep(2)  # Giảm từ 3 xuống 2
+        # Optimized wait time
+        time.sleep(0.5)  # Reduced from 2s to 0.5s
 
         # Scroll để load phần "Khám phá theo danh mục"
         if verbose:
             print("[Selenium] Đang scroll để load phần 'Khám phá theo danh mục'...")
         driver.execute_script("window.scrollTo(0, 500);")
-        time.sleep(0.5)  # Giảm từ 1 xuống 0.5
+        time.sleep(0.3)  # Reduced from 0.5s to 0.3s
         driver.execute_script("window.scrollTo(0, 1000);")
-        time.sleep(0.5)
+        time.sleep(0.3)  # Reduced from 0.5s to 0.3s
 
         # Tìm và click các nút expand danh mục (nếu có)
         try:
             expand_buttons = driver.find_elements(
                 By.CSS_SELECTOR, ".arrow-icon, [class*='arrow'], [class*='expand']"
             )
-            for btn in expand_buttons[:5]:  # Giảm từ 10 xuống 5
+            for btn in expand_buttons[:5]:  # Limit to 5 buttons
                 try:
                     driver.execute_script("arguments[0].scrollIntoView(true);", btn)
-                    time.sleep(0.2)  # Giảm từ 0.3 xuống 0.2
+                    time.sleep(0.15)  # Reduced from 0.2s to 0.15s
                     btn.click()
-                    time.sleep(0.3)  # Giảm từ 0.5 xuống 0.3
+                    time.sleep(0.2)  # Reduced from 0.3s to 0.2s
                     if verbose:
                         print("[Selenium] Đã click expand danh mục")
                 except Exception:
@@ -98,7 +98,7 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
 
         # Scroll thêm để đảm bảo load hết
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(1)  # Giảm từ 2 xuống 1
+        time.sleep(0.5)  # Reduced from 1s to 0.5s
 
         # Lấy HTML đầy đủ
         full_html = driver.page_source

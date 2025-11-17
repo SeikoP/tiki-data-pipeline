@@ -129,24 +129,24 @@ def crawl_product_detail_with_selenium(
 
             # Set timeout cho page load
             driver.set_page_load_timeout(timeout)
-            driver.implicitly_wait(10)  # Implicit wait cho elements
+            driver.implicitly_wait(3)  # Reduced from 10s to 3s for faster element detection
 
             if verbose:
                 print(f"[Selenium] Đang mở {url}... (attempt {attempt + 1}/{max_retries})")
 
             driver.get(url)
 
-            # Chờ trang load - giảm thời gian chờ
-            time.sleep(2)  # Giảm từ 3s xuống 2s
+            # Chờ trang load - optimized wait time
+            time.sleep(0.5)  # Reduced from 2s to 0.5s
 
             # Scroll để load các phần động - tối ưu
             if verbose:
                 print("[Selenium] Đang scroll để load nội dung...")
 
-            # Scroll nhanh hơn
+            # Optimized scrolling
             try:
                 driver.execute_script("window.scrollTo(0, 500);")
-                time.sleep(0.5)
+                time.sleep(0.3)  # Reduced from 0.5s to 0.3s
                 driver.execute_script("window.scrollTo(0, 1500);")
                 time.sleep(0.5)
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
