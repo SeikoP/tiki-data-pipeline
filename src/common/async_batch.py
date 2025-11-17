@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class AsyncBatchProcessor:
     """Process batches asynchronously with concurrency control"""
-    
+
     def __init__(
         self,
         batch_size: int = 100,
@@ -32,11 +32,11 @@ class AsyncBatchProcessor:
         self.batch_size = batch_size
         self.max_concurrent = max_concurrent
         self.show_progress = show_progress
-        
+
         self.semaphore = None
         self.processed = 0
         self.failed = 0
-    
+
     async def process_async(
         self,
         items: List[Any],
@@ -45,40 +45,37 @@ class AsyncBatchProcessor:
     ):
         """
         Process items asynchronously
-        
+
         Args:
             items: List of items to process
             async_processor: Async function to process each item
             total_count: Total count for progress
-            
+
         Returns:
             List of results
         """
         self.semaphore = asyncio.Semaphore(self.max_concurrent)
         total = total_count or len(items)
-        
-        tasks = [
-            self._process_with_semaphore(item, async_processor)
-            for item in items
-        ]
-        
+
+        tasks = [self._process_with_semaphore(item, async_processor) for item in items]
+
         results = []
         for coro in asyncio.as_completed(tasks):
             try:
                 result = await coro
                 results.append(result)
                 self.processed += 1
-                
+
                 if self.show_progress:
                     pct = (self.processed / total) * 100
                     print(f"⚡ Async progress: {self.processed}/{total} ({pct:.1f}%)")
-                    
+
             except Exception as e:
                 self.failed += 1
                 logger.warning(f"⚠️  Async task failed: {e}")
-        
+
         return results
-    
+
     async def _process_with_semaphore(self, item: Any, processor: Callable):
         """Process with semaphore for concurrency control"""
         async with self.semaphore:

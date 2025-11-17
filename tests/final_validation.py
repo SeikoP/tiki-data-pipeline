@@ -99,11 +99,10 @@ dependencies = [
 
 try:
     import subprocess
+
     for dep in dependencies:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "show", dep],
-            capture_output=True,
-            text=True
+            [sys.executable, "-m", "pip", "show", dep], capture_output=True, text=True
         )
         if result.returncode == 0:
             print(f"   ✅ {dep}")
@@ -142,43 +141,43 @@ print("-" * 70)
 
 try:
     from src.common.batch_processor import BatchProcessor
-    
+
     processor = BatchProcessor(batch_size=10, show_progress=False)
     test_items = list(range(50))
-    
+
     def mock_process(batch):
         return len(batch)
-    
+
     stats = processor.process(test_items, mock_process)
-    
-    if stats['total_processed'] == 50:
+
+    if stats["total_processed"] == 50:
         print("   ✅ BatchProcessor working")
     else:
         print(f"   ⚠️  BatchProcessor unexpected result: {stats}")
         warnings.append("BatchProcessor test failed")
-        
+
 except Exception as e:
     print(f"   ❌ BatchProcessor test failed: {e}")
     errors.append(f"BatchProcessor test: {e}")
 
 try:
     from src.common.cache_utils import cache_in_memory, get_cache_stats
-    
+
     @cache_in_memory(ttl=60)
     def test_func(x):
         return x * 2
-    
+
     result1 = test_func(5)
     result2 = test_func(5)
-    
+
     stats = get_cache_stats()
-    
-    if stats['hits'] > 0:
+
+    if stats["hits"] > 0:
         print("   ✅ Cache working")
     else:
         print("   ⚠️  Cache not working as expected")
         warnings.append("Cache test didn't show hits")
-        
+
 except Exception as e:
     print(f"   ❌ Cache test failed: {e}")
     errors.append(f"Cache test: {e}")
@@ -203,7 +202,7 @@ if len(errors) == 0 and len(warnings) == 0:
     print("      docker-compose -f docker-compose.yml -f docker-compose.performance.yml up -d")
     print("   4. Run benchmark: python tests/test_parallel_benchmark.py")
     print()
-    
+
 elif len(errors) == 0:
     print("⚠️  VALIDATION PASSED WITH WARNINGS")
     print()
@@ -213,7 +212,7 @@ elif len(errors) == 0:
     print()
     print("These warnings are non-critical. You can proceed.")
     print()
-    
+
 else:
     print("❌ VALIDATION FAILED")
     print()

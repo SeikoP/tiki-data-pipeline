@@ -12,11 +12,11 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Dict
+from typing import Any, Dict, List
 
-from .db_pool import get_db_pool, initialize_db_pool
 from ...common.batch_processor import BatchProcessor
-from ...common.monitoring import measure_time, PerformanceTimer
+from ...common.monitoring import PerformanceTimer, measure_time
+from .db_pool import get_db_pool, initialize_db_pool
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ def serialize_for_json(obj: Any) -> Any:
 class OptimizedDataLoader:
     """
     Optimized loader với connection pooling và batch processing
-    
+
     Features:
     - Database connection pooling
     - Efficient batch processing
@@ -73,7 +73,7 @@ class OptimizedDataLoader:
         self.enable_db = enable_db
         self.show_progress = show_progress
         self.continue_on_error = continue_on_error
-        
+
         self.stats = {
             "total_products": 0,
             "db_loaded": 0,
@@ -85,7 +85,7 @@ class OptimizedDataLoader:
             "errors": [],
             "processing_time": 0.0,
         }
-        
+
         # Initialize database pool if enabled
         if self.enable_db:
             try:
@@ -95,7 +95,7 @@ class OptimizedDataLoader:
             except Exception as e:
                 logger.error(f"❌ Failed to initialize DB pool: {e}")
                 self.enable_db = False
-        
+
         # Initialize batch processor
         self.batch_processor = BatchProcessor(
             batch_size=batch_size,
@@ -112,19 +112,19 @@ class OptimizedDataLoader:
     ) -> Dict[str, Any]:
         """
         Load products vào database với connection pooling
-        
+
         Args:
             products: Danh sách products đã transform
             upsert: True = INSERT ON CONFLICT UPDATE, False = chỉ INSERT
             validate_before_load: Validate trước khi load
             save_to_file: Đường dẫn file để lưu kết quả (optional)
-            
+
         Returns:
             Dictionary chứa thống kê: total, db_loaded, file_loaded, errors
         """
         with PerformanceTimer("load_products") as timer:
             self.stats["total_products"] = len(products)
-            
+
             if not products:
                 logger.warning("⚠️  Danh sách products rỗng")
                 return self.stats
@@ -144,7 +144,7 @@ class OptimizedDataLoader:
             # Update success count
             if self.stats["success_count"] == 0 and self.stats["file_loaded"] > 0:
                 self.stats["success_count"] = self.stats["file_loaded"]
-            
+
             self.stats["processing_time"] = timer.duration if timer.duration else 0.0
 
         return self.stats
@@ -152,7 +152,7 @@ class OptimizedDataLoader:
     def _validate_products(self, products: List[Dict]) -> List[Dict]:
         """Validate products và loại bỏ invalid ones"""
         valid_products = []
-        
+
         for product in products:
             # Kiểm tra required fields
             if not product.get("product_id") or not product.get("name"):
@@ -162,42 +162,40 @@ class OptimizedDataLoader:
                 )
                 continue
             valid_products.append(product)
-        
+
         if self.show_progress:
             failed = len(products) - len(valid_products)
             if failed > 0:
                 logger.warning(f"⚠️  Removed {failed} invalid products")
-        
+
         return valid_products
 
     def _load_to_database(self, products: List[Dict], upsert: bool):
         """Load products vào database với batch processing"""
         try:
             db_pool = get_db_pool()
-            
+
             def process_batch(batch: List[Dict]):
                 """Process một batch products"""
                 self._upsert_batch(batch, upsert, db_pool)
-            
+
             # Process với BatchProcessor
             batch_stats = self.batch_processor.process(
-                products,
-                process_batch,
-                total_count=len(products)
+                products, process_batch, total_count=len(products)
             )
-            
+
             # Update stats
             self.stats["db_loaded"] = batch_stats["total_processed"]
             self.stats["success_count"] = batch_stats["total_processed"]
             self.stats["failed_count"] += batch_stats["total_failed"]
-            
+
             if self.show_progress:
                 logger.info(f"✅ Database loading completed:")
                 logger.info(f"   - Processed: {batch_stats['total_processed']}")
                 logger.info(f"   - Failed: {batch_stats['total_failed']}")
                 logger.info(f"   - Rate: {batch_stats['avg_rate']:.1f} items/s")
                 logger.info(f"   - Time: {batch_stats['total_time']:.2f}s")
-                
+
         except Exception as e:
             error_msg = f"Database loading failed: {str(e)}"
             self.stats["errors"].append(error_msg)
@@ -221,7 +219,7 @@ class OptimizedDataLoader:
         # Serialize JSONB fields
         specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
         images = json.dumps(product.get("images", {}), ensure_ascii=False)
-        
+
         query = """
             INSERT INTO products (
                 product_id, category_url, name, url, price, original_price,
@@ -247,26 +245,29 @@ class OptimizedDataLoader:
                 description = EXCLUDED.description,
                 last_updated = EXCLUDED.last_updated
         """
-        
-        cursor.execute(query, (
-            product.get("product_id"),
-            product.get("category_url"),
-            product.get("name"),
-            product.get("url"),
-            product.get("price"),
-            product.get("original_price"),
-            product.get("discount_percent"),
-            product.get("rating_average"),
-            product.get("review_count"),
-            product.get("sales_count"),
-            product.get("brand"),
-            specs,
-            images,
-            product.get("description"),
-            product.get("crawled_at"),
-            datetime.now(),
-        ))
-        
+
+        cursor.execute(
+            query,
+            (
+                product.get("product_id"),
+                product.get("category_url"),
+                product.get("name"),
+                product.get("url"),
+                product.get("price"),
+                product.get("original_price"),
+                product.get("discount_percent"),
+                product.get("rating_average"),
+                product.get("review_count"),
+                product.get("sales_count"),
+                product.get("brand"),
+                specs,
+                images,
+                product.get("description"),
+                product.get("crawled_at"),
+                datetime.now(),
+            ),
+        )
+
         # Track INSERT vs UPDATE
         if cursor.rowcount > 0:
             # Không thể phân biệt INSERT/UPDATE từ ON CONFLICT
@@ -277,7 +278,7 @@ class OptimizedDataLoader:
         """Insert một product (không UPDATE)"""
         specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
         images = json.dumps(product.get("images", {}), ensure_ascii=False)
-        
+
         query = """
             INSERT INTO products (
                 product_id, category_url, name, url, price, original_price,
@@ -288,25 +289,28 @@ class OptimizedDataLoader:
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
         """
-        
-        cursor.execute(query, (
-            product.get("product_id"),
-            product.get("category_url"),
-            product.get("name"),
-            product.get("url"),
-            product.get("price"),
-            product.get("original_price"),
-            product.get("discount_percent"),
-            product.get("rating_average"),
-            product.get("review_count"),
-            product.get("sales_count"),
-            product.get("brand"),
-            specs,
-            images,
-            product.get("description"),
-            product.get("crawled_at"),
-            datetime.now(),
-        ))
+
+        cursor.execute(
+            query,
+            (
+                product.get("product_id"),
+                product.get("category_url"),
+                product.get("name"),
+                product.get("url"),
+                product.get("price"),
+                product.get("original_price"),
+                product.get("discount_percent"),
+                product.get("rating_average"),
+                product.get("review_count"),
+                product.get("sales_count"),
+                product.get("brand"),
+                specs,
+                images,
+                product.get("description"),
+                product.get("crawled_at"),
+                datetime.now(),
+            ),
+        )
 
     def _save_to_file(self, products: List[Dict], file_path: str):
         """Save products to JSON file"""
@@ -331,10 +335,10 @@ class OptimizedDataLoader:
                 json.dump(output_data, f, ensure_ascii=False, indent=2, cls=DateTimeEncoder)
 
             self.stats["file_loaded"] = len(products)
-            
+
             if self.show_progress:
                 logger.info(f"✅ Saved {len(products)} products to: {file_path}")
-                
+
         except Exception as e:
             error_msg = f"File saving failed: {str(e)}"
             self.stats["errors"].append(error_msg)
@@ -349,31 +353,31 @@ class OptimizedDataLoader:
     ) -> Dict[str, Any]:
         """
         Load products từ file JSON
-        
+
         Args:
             input_file: Đường dẫn file JSON input
             save_to_db: Load vào database
             save_to_file: Đường dẫn file output (optional)
             upsert: True = INSERT ON CONFLICT UPDATE
-            
+
         Returns:
             Stats dictionary
         """
         try:
             with open(input_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
+
             products = data.get("products", [])
-            
+
             if self.show_progress:
                 logger.info(f"📁 Loaded {len(products)} products from: {input_file}")
-            
+
             return self.load_products(
                 products,
                 upsert=upsert,
                 save_to_file=save_to_file,
             )
-            
+
         except Exception as e:
             error_msg = f"Failed to load from file: {str(e)}"
             self.stats["errors"].append(error_msg)

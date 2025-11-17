@@ -50,6 +50,12 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
     }
     chrome_options.add_experimental_option("prefs", prefs)
 
+    # Eager page load for faster loading
+    try:
+        chrome_options.page_load_strategy = "eager"
+    except Exception:
+        pass
+
     # Sử dụng webdriver-manager nếu có
     if HAS_WEBDRIVER_MANAGER:
         try:
@@ -114,6 +120,74 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
 
     finally:
         driver.quit()
+
+
+def crawl_with_driver(driver, url, save_html=False, verbose=True):
+    """Crawl trang bằng Selenium driver đã được cấp sẵn (driver reuse/pooling)
+
+    Args:
+        driver: Selenium WebDriver đã được tạo sẵn
+        url: URL cần crawl
+        save_html: Có lưu HTML vào file không
+        verbose: Có in log không
+
+    Returns:
+        str: HTML content hoặc None nếu lỗi
+    """
+    try:
+        if verbose:
+            print(f"[Selenium] Đang mở {url}... (reuse driver)")
+        driver.get(url)
+
+        # Optimized wait time
+        time.sleep(0.5)
+
+        # Scroll để load phần "Khám phá theo danh mục"
+        if verbose:
+            print("[Selenium] Đang scroll để load phần 'Khám phá theo danh mục'...")
+        driver.execute_script("window.scrollTo(0, 500);")
+        time.sleep(0.3)
+        driver.execute_script("window.scrollTo(0, 1000);")
+        time.sleep(0.3)
+
+        # Tìm và click các nút expand danh mục (nếu có)
+        try:
+            expand_buttons = driver.find_elements(
+                By.CSS_SELECTOR, ".arrow-icon, [class*='arrow'], [class*='expand']"
+            )
+            for btn in expand_buttons[:5]:
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView(true);", btn)
+                    time.sleep(0.15)
+                    btn.click()
+                    time.sleep(0.2)
+                    if verbose:
+                        print("[Selenium] Đã click expand danh mục")
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # Scroll thêm để đảm bảo load hết
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(0.5)
+
+        # Lấy HTML đầy đủ
+        full_html = driver.page_source
+
+        # Chỉ lưu HTML nếu được yêu cầu
+        if save_html:
+            with open("full_page.html", "w", encoding="utf-8") as f:
+                f.write(full_html)
+            if verbose:
+                print("[Selenium] ✓ Đã lưu HTML vào full_page.html")
+
+        return full_html
+
+    except Exception as e:
+        if verbose:
+            print(f"[Selenium] Lỗi khi crawl (reuse driver): {type(e).__name__}: {e}")
+        return None
 
 
 # ========== PARSE DỮ LIỆU ==========

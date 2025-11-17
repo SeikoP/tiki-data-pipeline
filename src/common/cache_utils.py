@@ -28,17 +28,17 @@ _cache_stats = {
 def get_cache_key(prefix: str, *args, **kwargs) -> str:
     """Generate cache key from function arguments"""
     key_parts = [prefix]
-    
+
     # Add args
     for arg in args:
         key_parts.append(str(arg))
-    
+
     # Add sorted kwargs
     for k in sorted(kwargs.keys()):
         key_parts.append(f"{k}={kwargs[k]}")
-    
+
     key_str = "|".join(key_parts)
-    
+
     # Hash for consistent length
     return hashlib.md5(key_str.encode()).hexdigest()
 
@@ -46,18 +46,19 @@ def get_cache_key(prefix: str, *args, **kwargs) -> str:
 def cache_in_memory(ttl: int = 300):
     """
     Decorator for in-memory caching
-    
+
     Args:
         ttl: Time to live in seconds (default 5 minutes)
     """
+
     def decorator(func: Callable) -> Callable:
         def wrapper(*args, **kwargs) -> Any:
             cache_key = get_cache_key(func.__name__, *args, **kwargs)
-            
+
             # Check cache
             if cache_key in _memory_cache:
                 cached_data, timestamp = _memory_cache[cache_key]
-                
+
                 # Check TTL
                 if time.time() - timestamp < ttl:
                     _cache_stats["hits"] += 1
@@ -65,20 +66,21 @@ def cache_in_memory(ttl: int = 300):
                 else:
                     # Expired
                     del _memory_cache[cache_key]
-            
+
             # Cache miss
             _cache_stats["misses"] += 1
-            
+
             # Execute function
             result = func(*args, **kwargs)
-            
+
             # Store in cache
             _memory_cache[cache_key] = (result, time.time())
             _cache_stats["memory_size"] = len(_memory_cache)
-            
+
             return result
-        
+
         return wrapper
+
     return decorator
 
 
@@ -86,7 +88,7 @@ def get_cache_stats() -> dict:
     """Get cache statistics"""
     total = _cache_stats["hits"] + _cache_stats["misses"]
     hit_rate = (_cache_stats["hits"] / total * 100) if total > 0 else 0
-    
+
     return {
         "hits": _cache_stats["hits"],
         "misses": _cache_stats["misses"],

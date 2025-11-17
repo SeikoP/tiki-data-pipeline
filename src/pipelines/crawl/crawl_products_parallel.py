@@ -6,13 +6,16 @@ Integrates ParallelCrawler with existing crawl_products_detail.py
 
 import json
 import logging
+
+# Import monitoring
+import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
 
 # Import existing crawler
 from .crawl_products_detail import (
-    crawl_product_detail_with_selenium,
     crawl_product_detail_with_driver,
+    crawl_product_detail_with_selenium,
     extract_product_detail,
 )
 
@@ -20,11 +23,9 @@ from .crawl_products_detail import (
 from .parallel_crawler import ParallelCrawler
 from .utils import SeleniumDriverPool
 
-# Import monitoring
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from common.monitoring import PerformanceTimer
 from common.cache_utils import cache_in_memory
+from common.monitoring import PerformanceTimer
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +33,13 @@ _driver_pool: SeleniumDriverPool | None = None
 
 
 @cache_in_memory(ttl=3600)  # Cache for 1 hour
-def crawl_single_product_cached(url: str) -> Dict[str, Any]:
+def crawl_single_product_cached(url: str) -> dict[str, Any]:
     """
     Crawl single product with caching
-    
+
     Args:
         url: Product URL
-        
+
     Returns:
         Product data dictionary
     """
@@ -70,34 +71,34 @@ def crawl_single_product_cached(url: str) -> Dict[str, Any]:
                 use_redis_cache=True,
                 use_rate_limiting=True,
             )
-        
+
         if not html_content:
             return None
-        
+
         # Extract data
         product_data = extract_product_detail(html_content, url, verbose=False)
         return product_data
-        
+
     except Exception as e:
         logger.error(f"Failed to crawl {url}: {e}")
         return None
 
 
 def crawl_products_parallel(
-    urls: List[str],
+    urls: list[str],
     max_workers: int = 5,
     rate_limit: float = 0.5,
     show_progress: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Crawl multiple products in parallel
-    
+
     Args:
         urls: List of product URLs
         max_workers: Number of concurrent workers
         rate_limit: Minimum seconds between requests per worker
         show_progress: Show progress logs
-        
+
     Returns:
         Dictionary with results and statistics
     """
@@ -122,10 +123,10 @@ def crawl_products_parallel(
             if _driver_pool is not None:
                 _driver_pool.cleanup()
                 _driver_pool = None
-        
+
         # Filter out None results
         valid_results = [r for r in result["results"] if r is not None]
-        
+
         return {
             "products": valid_results,
             "stats": {
@@ -134,7 +135,7 @@ def crawl_products_parallel(
                 "failed": len(urls) - len(valid_results),
                 "elapsed": result["stats"]["elapsed"],
                 "rate": result["stats"]["rate"],
-            }
+            },
         }
 
 
@@ -143,29 +144,29 @@ def crawl_products_from_file(
     output_file: str,
     max_workers: int = 5,
     rate_limit: float = 0.5,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Crawl products from input file and save to output file
-    
+
     Args:
         input_file: JSON file with product URLs
         output_file: Output JSON file
         max_workers: Number of concurrent workers
         rate_limit: Rate limit per worker
-        
+
     Returns:
         Statistics dictionary
     """
     # Load URLs from file
-    with open(input_file, 'r', encoding='utf-8') as f:
+    with open(input_file, encoding="utf-8") as f:
         data = json.load(f)
-    
+
     urls = data.get("urls", [])
-    
+
     if not urls:
         logger.warning("No URLs found in input file")
         return {"error": "No URLs found"}
-    
+
     # Crawl in parallel
     result = crawl_products_parallel(
         urls,
@@ -173,16 +174,16 @@ def crawl_products_from_file(
         rate_limit=rate_limit,
         show_progress=True,
     )
-    
+
     # Save results
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
+
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
-    
+
     logger.info(f"✅ Saved {len(result['products'])} products to {output_file}")
-    
+
     return result["stats"]
 
 

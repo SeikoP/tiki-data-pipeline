@@ -281,9 +281,9 @@ else:
     try:
         from crawl_products_detail import (
             crawl_product_detail_async,
+            crawl_product_detail_with_driver,
             crawl_product_detail_with_selenium,
             extract_product_detail,
-            crawl_product_detail_with_driver,
         )
     except ImportError as e:
         raise ImportError(
@@ -291,6 +291,40 @@ else:
             f"Path: {crawl_products_detail_path}\n"
             f"Lỗi gốc: {e}"
         ) from e
+
+# Import module crawl_categories_batch (for category batch processing)
+crawl_categories_batch_path = None
+for path in possible_paths:
+    test_path = os.path.join(path, "crawl_categories_batch.py")
+    if os.path.exists(test_path):
+        crawl_categories_batch_path = test_path
+        break
+
+if crawl_categories_batch_path and os.path.exists(crawl_categories_batch_path):
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "crawl_categories_batch", crawl_categories_batch_path
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Không thể load spec từ {crawl_categories_batch_path}")
+        crawl_categories_batch_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(crawl_categories_batch_module)
+
+        # Extract các functions cần thiết
+        crawl_category_batch = crawl_categories_batch_module.crawl_category_batch
+    except Exception as e:
+        # Nếu import lỗi, log và tạo fallback (sẽ sử dụng crawl_single_category)
+        import warnings
+
+        warnings.warn(f"Không thể import crawl_categories_batch module: {e}", stacklevel=2)
+
+        # Tạo dummy function để tránh NameError
+        crawl_category_batch = None
+else:
+    # Module chưa tồn tại, sẽ fallback về crawl_single_category
+    crawl_category_batch = None
 
 # Import resilience patterns
 # Import trực tiếp từng module con để tránh vấn đề relative imports
@@ -1306,8 +1340,30 @@ def merge_products(**context) -> dict[str, Any]:
             # Xử lý kết quả
             if isinstance(all_results, list):
                 # Nếu là list, xử lý từng phần tử
+                # Với batch processing, mỗi phần tử có thể là list of results (từ 1 batch)
                 for result in all_results:
-                    if result and isinstance(result, dict):
+                    # Check if result is a list (batch result) hoặc dict (single category result)
+                    if isinstance(result, list):
+                        # Batch result - flatten it
+                        for single_result in result:
+                            if single_result and isinstance(single_result, dict):
+                                if single_result.get("status") == "success":
+                                    stats["success_categories"] += 1
+                                    products = single_result.get("products", [])
+                                    all_products.extend(products)
+                                    stats["total_products"] += len(products)
+                                elif single_result.get("status") == "timeout":
+                                    stats["timeout_categories"] += 1
+                                    logger.warning(
+                                        f"⏱️  Category {single_result.get('category_name')} timeout"
+                                    )
+                                else:
+                                    stats["failed_categories"] += 1
+                                    logger.warning(
+                                        f"❌ Category {single_result.get('category_name')} failed: {single_result.get('error')}"
+                                    )
+                    elif result and isinstance(result, dict):
+                        # Single category result
                         if result.get("status") == "success":
                             stats["success_categories"] += 1
                             products = result.get("products", [])
@@ -2154,7 +2210,9 @@ def crawl_product_batch(
                     # Ưu tiên dùng driver pool nếu có
                     html = None
                     try:
-                        if 'crawl_product_detail_with_driver' in globals() and callable(crawl_product_detail_with_driver):
+                        if "crawl_product_detail_with_driver" in globals() and callable(
+                            crawl_product_detail_with_driver
+                        ):
                             drv = driver_pool.get_driver()
                             if drv is not None:
                                 try:
@@ -4768,21 +4826,133 @@ with DAG(**DAG_CONFIG) as dag:
             # Trả về list các dict để expand
             return [{"category": cat} for cat in categories]
 
+        def prepare_category_batch_kwargs(**context):
+            """
+            Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing
+
+            Chia categories thành batches để giảm số lượng Airflow tasks và tận dụng driver pooling
+            """
+            import logging
+
+            logger = logging.getLogger("airflow.task")
+
+            ti = context["ti"]
+
+            # Lấy categories từ XCom (same logic as prepare_crawl_kwargs)
+            categories = None
+
+            try:
+                categories = ti.xcom_pull(task_ids="load_and_prepare.load_categories")
+                logger.info(
+                    f"Lấy categories từ 'load_and_prepare.load_categories': {len(categories) if categories else 0} items"
+                )
+            except Exception as e:
+                logger.warning(f"Không lấy được từ 'load_and_prepare.load_categories': {e}")
+
+            if not categories:
+                try:
+                    categories = ti.xcom_pull(task_ids="load_categories")
+                    logger.info(
+                        f"Lấy categories từ 'load_categories': {len(categories) if categories else 0} items"
+                    )
+                except Exception as e:
+                    logger.warning(f"Không lấy được từ 'load_categories': {e}")
+
+            if not categories:
+                try:
+                    from airflow.models import TaskInstance
+
+                    dag_run = context["dag_run"]
+                    dag_obj = context.get("dag")
+                    if dag_obj:
+                        upstream_task = dag_obj.get_task("load_and_prepare.load_categories")
+                        upstream_ti = TaskInstance(task=upstream_task, run_id=dag_run.run_id)
+                        categories = upstream_ti.xcom_pull(key="return_value")
+                        logger.info(
+                            f"Lấy categories từ TaskInstance: {len(categories) if categories else 0} items"
+                        )
+                except Exception as e:
+                    logger.warning(f"Không lấy được từ TaskInstance: {e}")
+
+            if not categories:
+                logger.error("❌ Không thể lấy categories từ XCom!")
+                return []
+
+            if not isinstance(categories, list):
+                logger.error(f"❌ Categories không phải list: {type(categories)}")
+                return []
+
+            logger.info(f"✅ Đã lấy {len(categories)} categories")
+
+            # Batch Processing: Chia categories thành batches
+            batch_size = int(Variable.get("TIKI_CATEGORY_BATCH_SIZE", default_var="5"))
+            batches = []
+            for i in range(0, len(categories), batch_size):
+                batch = categories[i : i + batch_size]
+                batches.append(batch)
+
+            logger.info(
+                f"📦 Đã chia thành {len(batches)} batches (mỗi batch {batch_size} categories)"
+            )
+            logger.info(f"   - Batch đầu tiên: {len(batches[0]) if batches else 0} categories")
+            logger.info(f"   - Batch cuối cùng: {len(batches[-1]) if batches else 0} categories")
+
+            # Trả về list các dict để expand (mỗi dict là 1 batch)
+            op_kwargs_list = [
+                {"category_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
+            ]
+
+            logger.info(
+                f"🔢 Tạo {len(op_kwargs_list)} op_kwargs cho Dynamic Task Mapping (batches)"
+            )
+            if op_kwargs_list:
+                logger.info("📋 Sample batches (first 2):")
+                for _i, kwargs in enumerate(op_kwargs_list[:2]):
+                    batch = kwargs.get("category_batch", [])
+                    batch_idx = kwargs.get("batch_index", -1)
+                    category_names = [c.get("name", "Unknown") for c in batch[:3]]
+                    logger.info(
+                        f"  Batch {batch_idx}: {len(batch)} categories - {category_names}..."
+                    )
+
+            return op_kwargs_list
+
         task_prepare_crawl = PythonOperator(
             task_id="prepare_crawl_kwargs",
             python_callable=prepare_crawl_kwargs,
             execution_timeout=timedelta(minutes=1),
         )
 
+        # New task for batch processing (optional, fallback to single-category if batch module not available)
+        task_prepare_batch_kwargs = PythonOperator(
+            task_id="prepare_batch_kwargs",
+            python_callable=prepare_category_batch_kwargs,
+            execution_timeout=timedelta(minutes=1),
+        )
+
         # Dynamic Task Mapping với expand
         # Sử dụng expand với op_kwargs để tránh lỗi với PythonOperator constructor
-        task_crawl_category = PythonOperator.partial(
-            task_id="crawl_category",
-            python_callable=crawl_single_category,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút mỗi category
-            pool="default_pool",  # Có thể tạo pool riêng nếu cần
-            retries=1,  # Retry 1 lần (tổng 2 lần thử: 1 lần đầu + 1 retry)
-        ).expand(op_kwargs=task_prepare_crawl.output)
+        # Use batch processing if available, otherwise fallback to single-category
+        if crawl_category_batch is not None:
+            # Batch processing mode
+            task_crawl_category = PythonOperator.partial(
+                task_id="crawl_category",
+                python_callable=crawl_category_batch,
+                execution_timeout=timedelta(
+                    minutes=15
+                ),  # Timeout 15 phút mỗi batch (5 categories × 3 phút)
+                pool="default_pool",
+                retries=1,  # Retry 1 lần
+            ).expand(op_kwargs=task_prepare_batch_kwargs.output)
+        else:
+            # Fallback: single-category processing
+            task_crawl_category = PythonOperator.partial(
+                task_id="crawl_category",
+                python_callable=crawl_single_category,
+                execution_timeout=timedelta(minutes=10),  # Timeout 10 phút mỗi category
+                pool="default_pool",
+                retries=1,
+            ).expand(op_kwargs=task_prepare_crawl.output)
 
     # TaskGroup: Process và Save
     with TaskGroup("process_and_save") as process_group:

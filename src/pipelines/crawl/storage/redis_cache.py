@@ -32,25 +32,25 @@ _connection_pools = {}
 def get_redis_pool(redis_url: str, max_connections: int = 20) -> ConnectionPool:
     """
     Get or create a connection pool for the given Redis URL
-    
+
     Args:
         redis_url: Redis connection URL
         max_connections: Maximum number of connections in the pool
-    
+
     Returns:
         ConnectionPool instance
     """
     if redis_url not in _connection_pools:
         parsed = urlparse(redis_url)
         _connection_pools[redis_url] = ConnectionPool(
-            host=parsed.hostname or 'localhost',
+            host=parsed.hostname or "localhost",
             port=parsed.port or 6379,
-            db=int(parsed.path.lstrip('/')) if parsed.path else 0,
+            db=int(parsed.path.lstrip("/")) if parsed.path else 0,
             max_connections=max_connections,
             decode_responses=True,
             socket_connect_timeout=5,
             socket_timeout=5,
-            retry_on_timeout=True
+            retry_on_timeout=True,
         )
     return _connection_pools[redis_url]
 
