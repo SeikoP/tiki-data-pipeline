@@ -94,7 +94,7 @@
 #### 1. Clone Repository
 
 ```bash
-git clone https://github.com/your-username/tiki-data-pipeline.git
+git clone https://github.com/SeikoP/tiki-data-pipeline.git
 cd tiki-data-pipeline
 ```
 
@@ -117,13 +117,6 @@ nano .env  # hoặc sử dụng text editor yêu thích
 # - GROQ_API_KEY: API key từ https://console.groq.com/
 # - DISCORD_WEBHOOK_URL: Webhook URL từ Discord Server Settings
 
-# ⚠️ QUAN TRỌNG BẢO MẬT:
-# - File .env đã được gitignored - KHÔNG BAO GIỜ commit file này!
-# - Sử dụng mật khẩu mạnh (12+ ký tự, chữ hoa, số, ký tự đặc biệt)
-# - Không share credentials trong chat, email hay public repos
-# - Rotate passwords định kỳ
-# - Xem thêm: docs/SECURITY.md
-```
 
 #### 3. Khởi động Airflow Services
 
