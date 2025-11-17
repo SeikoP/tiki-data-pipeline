@@ -1412,7 +1412,7 @@ def merge_products(**context) -> dict[str, Any]:
 
             # Nếu không lấy được, thử lấy từng map_index
             if not all_results or (isinstance(all_results, (list, dict)) and len(all_results) == 0):
-                logger.info("Thử lấy từng map_index...")
+                # Try fetching individual map_index results
                 for map_index in range(len(categories)):
                     try:
                         result = ti.xcom_pull(
@@ -1553,7 +1553,7 @@ def save_products(**context) -> str:
         # Cách 1: Lấy từ task_id với TaskGroup prefix
         try:
             merge_result = ti.xcom_pull(task_ids="process_and_save.merge_products")
-            logger.info("Lấy merge_result từ 'process_and_save.merge_products'")
+            # Get merge result from upstream task
         except Exception as e:
             logger.warning(f"Không lấy được từ 'process_and_save.merge_products': {e}")
 
@@ -1561,7 +1561,7 @@ def save_products(**context) -> str:
         if not merge_result:
             try:
                 merge_result = ti.xcom_pull(task_ids="merge_products")
-                logger.info("Lấy merge_result từ 'merge_products'")
+                # Fallback to merge_products without prefix
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'merge_products': {e}")
 
@@ -1945,11 +1945,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         # Debug: Log một vài products đầu tiên
         if products_to_crawl:
-            logger.info("📋 Sample products (first 3):")
-            for i, p in enumerate(products_to_crawl[:3]):
-                logger.info(
-                    f"  {i+1}. Product ID: {p.get('product_id')}, URL: {p.get('url')[:80]}..."
-                )
+            sample_names = [p.get('product_id', 'N/A') for p in products_to_crawl[:3]]
+            logger.info(f"📋 Sample products: {', '.join(sample_names)}...")
         else:
             logger.warning("⚠️  Không có products nào cần crawl detail hôm nay!")
             logger.info("💡 Tất cả products đã được crawl hoặc có cache hợp lệ")
@@ -3063,7 +3060,7 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         # Lấy tất cả results bằng cách lấy từng map_index để tránh giới hạn XCom
         # CHỈ lấy từ map_index 0 đến actual_crawl_count - 1 (không phải len(products))
-        logger.info(f"Bắt đầu lấy detail results từ {actual_crawl_count} crawled products...")
+        # Fetch detail results from crawled products
 
         # Lấy theo batch để tối ưu
         batch_size = 100
@@ -4222,7 +4219,7 @@ def validate_data(**context) -> dict[str, Any]:
         if not output_file:
             try:
                 output_file = ti.xcom_pull(task_ids="save_products_with_detail")
-                logger.info(f"Lấy output_file từ 'save_products_with_detail': {output_file}")
+                logger.debug(f"Output from save_products_with_detail: {output_file}")
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'save_products_with_detail': {e}")
 
@@ -4240,7 +4237,7 @@ def validate_data(**context) -> dict[str, Any]:
         if not output_file:
             try:
                 output_file = ti.xcom_pull(task_ids="save_products")
-                logger.info(f"Lấy output_file từ 'save_products' (fallback): {output_file}")
+                logger.debug(f"Output from save_products (fallback): {output_file}")
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'save_products': {e}")
 
@@ -4568,41 +4565,32 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 
         # Performance Summary
         try:
-            from common.monitoring import PerformanceMetrics
-
-            # Lấy execution date để tính toán performance
             dag_run = context.get("dag_run")
-            if dag_run:
+            if dag_run and dag_run.start_date:
                 start_time = dag_run.start_date
                 end_time = datetime.now()
                 duration = (end_time - start_time).total_seconds()
+                total_products = result.get("with_detail", 0)  # Use crawled products count
+
+                # Calculate throughput
+                throughput = total_products / duration if duration > 0 else 0
+                avg_time = duration / total_products if total_products > 0 else 0
 
                 logger.info("=" * 70)
                 logger.info("⚡ PERFORMANCE SUMMARY")
+                logger.info(f"⏱️  Duration: {duration/60:.1f} min | Products: {total_products}")
+                if throughput > 0:
+                    logger.info(f"📈 Throughput: {throughput:.2f} products/s | Avg: {avg_time:.1f}s/product")
                 logger.info("=" * 70)
-                logger.info(f"🕐 Start time: {start_time.isoformat()}")
-                logger.info(f"🕐 End time: {end_time.isoformat()}")
-                logger.info(f"⏱️  Total duration: {duration:.2f}s ({duration/60:.2f} minutes)")
 
-                # Tính toán throughput
-                total_products = result.get("total_count", 0)
-                if total_products > 0 and duration > 0:
-                    throughput = total_products / duration
-                    logger.info(f"📈 Throughput: {throughput:.2f} products/second")
-                    logger.info(
-                        f"📈 Average time per product: {duration/total_products:.2f}s"
-                    )
-
-                logger.info("=" * 70)
                 result["performance"] = {
-                    "start_time": start_time.isoformat(),
-                    "end_time": end_time.isoformat(),
-                    "duration_seconds": duration,
                     "duration_minutes": round(duration / 60, 2),
-                    "throughput": round(throughput, 2) if total_products > 0 else 0,
+                    "total_products": total_products,
+                    "throughput": round(throughput, 2),
+                    "avg_time_per_product": round(avg_time, 2),
                 }
         except Exception as perf_error:
-            logger.warning(f"⚠️  Không thể tạo performance summary: {perf_error}")
+            logger.warning(f"⚠️  Performance summary error: {perf_error}")
 
         return result
 
@@ -5221,7 +5209,7 @@ with DAG(**DAG_CONFIG) as dag:
                     try:
                         products_to_crawl = ti.xcom_pull(task_ids=task_id)
                         if products_to_crawl:
-                            logger.info(f"✅ Lấy XCom từ upstream task: {task_id}")
+                            logger.debug(f"XCom from upstream: {task_id}")
                             break
                     except Exception as e:
                         logger.debug(f"   Không lấy được từ {task_id}: {e}")
@@ -5242,7 +5230,7 @@ with DAG(**DAG_CONFIG) as dag:
                     try:
                         # Thử với task_id không có prefix (fallback)
                         products_to_crawl = ti.xcom_pull(task_ids="prepare_products_for_detail")
-                        logger.info("✅ Lấy XCom từ task_id: prepare_products_for_detail")
+                        logger.debug("XCom from prepare_products_for_detail")
                     except Exception as e2:
                         logger.error(f"❌ Không thể lấy XCom với cả 2 cách: {e1}, {e2}")
 
@@ -5266,7 +5254,7 @@ with DAG(**DAG_CONFIG) as dag:
                 logger.error(f"   Value: {products_to_crawl}")
                 return []
 
-            logger.info(f"✅ Đã lấy {len(products_to_crawl)} products từ XCom")
+            logger.info(f"✅ Retrieved {len(products_to_crawl)} products for detail crawl")
 
             # Batch Processing: Chia products thành batches 10 products/batch
             batch_size = 15
@@ -5287,16 +5275,8 @@ with DAG(**DAG_CONFIG) as dag:
             ]
 
             logger.info(
-                f"🔢 Tạo {len(op_kwargs_list)} op_kwargs cho Dynamic Task Mapping (batches)"
+                f"🔢 Created {len(op_kwargs_list)} batches for Dynamic Task Mapping"
             )
-            if op_kwargs_list:
-                logger.info("📋 Sample batches (first 2):")
-                for _i, kwargs in enumerate(op_kwargs_list[:2]):
-                    batch = kwargs.get("product_batch", [])
-                    batch_idx = kwargs.get("batch_index", -1)
-                    logger.info(
-                        f"  Batch {batch_idx}: {len(batch)} products - IDs: {[p.get('product_id') for p in batch[:3]]}..."
-                    )
 
             return op_kwargs_list
 
