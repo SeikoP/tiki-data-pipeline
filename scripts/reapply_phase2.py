@@ -6,7 +6,6 @@ Phase 2 optimizations were lost after git restore.
 This script re-applies them based on documentation in OPTIMIZATIONS.md
 """
 
-import os
 import sys
 from pathlib import Path
 
