@@ -14,10 +14,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 # Đường dẫn files
-SCRIPT_DIR = Path(__file__).parent
-PROJECT_ROOT = SCRIPT_DIR.parent
-MAIN_DAG_PATH = PROJECT_ROOT / "airflow" / "dags" / "tiki_crawl_products_dag.py"
-TEST_DAG_PATH = PROJECT_ROOT / "airflow" / "dags" / "tiki_crawl_products_test_dag.py"
+SCRIPT_DIR = Path(__file__).parent  # airflow/dags/
+PROJECT_ROOT = SCRIPT_DIR.parent.parent  # project root
+MAIN_DAG_PATH = SCRIPT_DIR / "tiki_crawl_products_dag.py"  # Cùng thư mục
+TEST_DAG_PATH = SCRIPT_DIR / "tiki_crawl_products_test_dag.py"  # Cùng thư mục
 
 
 def replace_max_products(match: re.Match) -> str:

@@ -17,32 +17,32 @@ Dependencies được quản lý bằng >> operator giữa các tasks.
 """
 
 import json
-import os
-import re
-import shutil
-import sys
-import time
-import warnings
-from datetime import datetime, timedelta
-from pathlib import Path
-from threading import Lock
-from typing import Any
-
-from airflow import DAG
-from airflow.providers.standard.operators.python import PythonOperator
-
-# Asset/Dataset đã được xóa vì không cần thiết cho single DAG và gây lỗi với PythonOperator
-
-# Import Variable và TaskGroup với suppress warning
-try:
-    # Thử import từ airflow.sdk (Airflow 3.x)
-    from airflow.sdk import TaskGroup, Variable
-
-    _Variable = Variable  # Alias để dùng wrapper
-except ImportError:
-    # Fallback: dùng airflow.models và airflow.utils.task_group (Airflow 2.x)
     try:
-        from airflow.utils.task_group import TaskGroup
+        # Ensure src path in sys.path for package-style imports
+        import sys
+        from pathlib import Path
+        src_path = Path("/opt/airflow/src")
+        if src_path.exists() and str(src_path) not in sys.path:
+            sys.path.insert(0, str(src_path))
+
+        try:
+            from pipelines.crawl.storage.redis_cache import get_redis_cache  # type: ignore
+        except Exception as import_err:
+            logger.warning(f"⚠️  Import get_redis_cache failed: {import_err} -> trying dynamic import")
+            # Dynamic import fallback
+            import importlib.util
+            rc_path = src_path / "pipelines" / "crawl" / "storage" / "redis_cache.py"
+            get_redis_cache = None  # type: ignore
+            if rc_path.exists():
+                spec = importlib.util.spec_from_file_location("redis_cache_dyn", rc_path)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)  # type: ignore
+                    get_redis_cache = getattr(mod, "get_redis_cache", None)  # type: ignore
+            if not get_redis_cache:
+                raise RuntimeError("Không thể import get_redis_cache (dynamic import cũng thất bại)")
+
+        redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
     except ImportError:
         # Nếu không có TaskGroup, tạo dummy class
         class TaskGroup:
@@ -4644,23 +4644,44 @@ def health_check_monitoring(**context) -> dict[str, Any]:
 
         # 2. PostgreSQL Connection Pool Stats
         try:
-            from pipelines.crawl.storage.postgres_storage import PostgresStorage
+            # Fix import bằng importlib để tránh conflict với pipelines.crawl package
+            import importlib.util
+            import sys
+            from pathlib import Path
+            
+            # Add src/ to sys.path nếu chưa có
+            src_path = Path("/opt/airflow/src")
+            if src_path.exists() and str(src_path) not in sys.path:
+                sys.path.insert(0, str(src_path))
+            
+            # Import bằng importlib
+            postgres_storage_path = src_path / "pipelines" / "crawl" / "storage" / "postgres_storage.py"
+            if postgres_storage_path.exists():
+                spec = importlib.util.spec_from_file_location("postgres_storage_module", postgres_storage_path)
+                if spec and spec.loader:
+                    postgres_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(postgres_module)
+                    PostgresStorage = postgres_module.PostgresStorage
+                    
+                    # Khởi tạo PostgresStorage để lấy pool stats
+                    postgres = PostgresStorage()
+                    pool_stats = postgres.get_pool_stats()
+                    result["postgres_pool_stats"] = pool_stats
+                    logger.info("🐘 PostgreSQL Pool Stats:")
+                    logger.info(f"   - Min connections: {pool_stats.get('minconn', pool_stats.get('min_conn', 0))}")
+                    logger.info(f"   - Max connections: {pool_stats.get('maxconn', pool_stats.get('pool_size', 0))}")
+                    logger.info(f"   - Active connections: {pool_stats.get('active_connections', 0)}")
+                    logger.info(f"   - Total queries: {pool_stats.get('total_queries', 0)}")
 
-            # Khởi tạo PostgresStorage để lấy pool stats
-            postgres = PostgresStorage()
-            pool_stats = postgres.get_pool_stats()
-            result["postgres_pool_stats"] = pool_stats
-            logger.info("🐘 PostgreSQL Pool Stats:")
-            logger.info(f"   - Min connections: {pool_stats.get('minconn', 0)}")
-            logger.info(f"   - Max connections: {pool_stats.get('maxconn', 0)}")
-            logger.info(f"   - Current connections: {pool_stats.get('current_connections', 0)}")
-            logger.info(f"   - Available: {pool_stats.get('available_connections', 0)}")
-
-            # Close connection
-            try:
-                postgres.close()
-            except Exception:
-                pass
+                    # Close connection
+                    try:
+                        postgres.close()
+                    except Exception:
+                        pass
+                else:
+                    raise ImportError("Cannot load spec for postgres_storage")
+            else:
+                raise FileNotFoundError(f"postgres_storage.py not found at {postgres_storage_path}")
 
         except Exception as e:
             logger.warning(f"⚠️  Không thể lấy postgres pool stats: {e}")
@@ -4668,35 +4689,229 @@ def health_check_monitoring(**context) -> dict[str, Any]:
 
         # 3. Redis Stats
         try:
-            from pipelines.crawl.storage.redis_cache import get_redis_cache
+            # Fix import bằng importlib
+            import importlib.util
+            import sys
+            from pathlib import Path
+            
+            # Add src/ to sys.path nếu chưa có
+            src_path = Path("/opt/airflow/src")
+            if src_path.exists() and str(src_path) not in sys.path:
+                sys.path.insert(0, str(src_path))
+            
+            # Import bằng importlib
+            redis_cache_path = src_path / "pipelines" / "crawl" / "storage" / "redis_cache.py"
+            if redis_cache_path.exists():
+                spec = importlib.util.spec_from_file_location("redis_cache_module", redis_cache_path)
+                if spec and spec.loader:
+                    redis_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(redis_module)
+                    get_redis_cache = redis_module.get_redis_cache
 
-            redis_cache = get_redis_cache("redis://redis:6379/1")
-            if redis_cache:
-                redis_stats = redis_cache.get_stats()
-                result["redis_stats"] = redis_stats
-                logger.info("📦 Redis Stats:")
-                logger.info(f"   - Keys: {redis_stats.get('keys', 0)}")
-                logger.info(f"   - Memory: {redis_stats.get('used_memory_human', 'N/A')}")
-                logger.info(f"   - Hit rate: {redis_stats.get('hit_rate', 0):.1f}%")
-                logger.info(f"   - Evicted keys: {redis_stats.get('evicted_keys', 0)}")
+                    redis_cache = get_redis_cache("redis://redis:6379/1")
+                    if redis_cache:
+                        # Redis client info để lấy stats
+                        redis_info = redis_cache.client.info()
+                        
+                        # Tính hit rate từ keyspace_hits và keyspace_misses
+                        hits = int(redis_info.get("keyspace_hits", 0))
+                        misses = int(redis_info.get("keyspace_misses", 0))
+                        total = hits + misses
+                        hit_rate = (hits / total * 100) if total > 0 else 0
+                        
+                        # Count keys với prefix
+                        keys_count = redis_cache.client.dbsize()
+                        
+                        redis_stats = {
+                            "keys": keys_count,
+                            "used_memory_human": redis_info.get("used_memory_human", "N/A"),
+                            "hit_rate": hit_rate,
+                            "keyspace_hits": hits,
+                            "keyspace_misses": misses,
+                            "evicted_keys": int(redis_info.get("evicted_keys", 0)),
+                            "connected_clients": int(redis_info.get("connected_clients", 0)),
+                        }
+                        
+                        result["redis_stats"] = redis_stats
+                        logger.info("📦 Redis Stats:")
+                        logger.info(f"   - Keys: {redis_stats.get('keys', 0)}")
+                        logger.info(f"   - Memory: {redis_stats.get('used_memory_human', 'N/A')}")
+                        logger.info(f"   - Hit rate: {redis_stats.get('hit_rate', 0):.1f}%")
+                        logger.info(f"   - Evicted keys: {redis_stats.get('evicted_keys', 0)}")
+                        logger.info(f"   - Connected clients: {redis_stats.get('connected_clients', 0)}")
+                else:
+                    raise ImportError("Cannot load spec for redis_cache")
+            else:
+                raise FileNotFoundError(f"redis_cache.py not found at {redis_cache_path}")
+                
         except Exception as e:
             logger.warning(f"⚠️  Không thể lấy redis stats: {e}")
             result["redis_stats"] = {"error": str(e)}
 
         # 4. Graceful Degradation Stats
         try:
-            degradation_stats = tiki_degradation.get_all_stats()
-            result["degradation_stats"] = degradation_stats
+            # GracefulDegradation có các attributes: current_level, failure_count, success_count
+            degradation_state = {
+                "level": tiki_degradation.current_level,  # DegradationLevel enum
+                "failure_count": tiki_degradation.failure_count,
+                "success_count": tiki_degradation.success_count,
+                "failure_threshold": tiki_degradation.failure_threshold,
+                "recovery_threshold": tiki_degradation.recovery_threshold,
+            }
+            
+            # Tính success rate
+            total = degradation_state["failure_count"] + degradation_state["success_count"]
+            success_rate = (degradation_state["success_count"] / total * 100) if total > 0 else 100
+            degradation_state["success_rate"] = success_rate
+            
+            result["degradation_stats"] = {"tiki_service": degradation_state}
             logger.info("📊 Graceful Degradation Stats:")
-            for service, stats in degradation_stats.items():
-                logger.info(f"   - {service}:")
-                logger.info(f"     • State: {stats.get('state', 'unknown')}")
-                logger.info(f"     • Success rate: {stats.get('success_rate', 0):.1f}%")
+            logger.info(f"   - Level: {degradation_state['level']}")
+            logger.info(f"   - Success rate: {success_rate:.1f}%")
+            logger.info(f"   - Failures: {degradation_state['failure_count']}/{degradation_state['failure_threshold']}")
         except Exception as e:
             logger.warning(f"⚠️  Không thể lấy degradation stats: {e}")
             result["degradation_stats"] = {"error": str(e)}
 
         logger.info("✅ Health check hoàn tất")
+        
+        # 5. Gửi alert qua Discord nếu có vấn đề
+        try:
+            alerts = []
+            
+            # TEST: Thêm test alert để verify webhook hoạt động
+            # TODO: Remove this after testing
+            try:
+                # Default test mode FALSE in production; set variable to true only when debugging
+                test_mode = Variable.get("HEALTH_CHECK_TEST_ALERT", default_var="false").lower() == "true"
+                logger.info(f"🔍 Test mode check: HEALTH_CHECK_TEST_ALERT = {test_mode}")
+                if test_mode:
+                    alerts.append("🧪 **TEST ALERT** - Đây là test alert để verify Discord webhook hoạt động")
+                    logger.info("🧪 Test mode enabled - sẽ gửi test alert")
+            except Exception as e:
+                logger.warning(f"⚠️  Không check được test mode variable: {e}")
+            
+            # Check circuit breaker
+            cb_state = result["circuit_breaker_state"]
+            if cb_state.get("state") == "open":
+                alerts.append("🔴 **Circuit Breaker OPEN** - Service đang bị block do quá nhiều lỗi!")
+            elif cb_state.get("state") == "half_open":
+                alerts.append("🟡 **Circuit Breaker HALF-OPEN** - Đang thử khôi phục service...")
+            
+            # Check postgres pool
+            pg_stats = result["postgres_pool_stats"]
+            if not pg_stats.get("error"):
+                active = pg_stats.get("active_connections", 0)
+                max_conn = pg_stats.get("pool_size", pg_stats.get("maxconn", 100))
+                usage_percent = (active / max_conn * 100) if max_conn > 0 else 0
+                
+                if usage_percent > 90:
+                    alerts.append(f"🔴 **PostgreSQL Pool gần đầy**: {active}/{max_conn} ({usage_percent:.1f}%)")
+                elif usage_percent > 80:
+                    alerts.append(f"🟡 **PostgreSQL Pool cao**: {active}/{max_conn} ({usage_percent:.1f}%)")
+            
+            # Check redis hit rate
+            redis_stats = result["redis_stats"]
+            if not redis_stats.get("error"):
+                hit_rate = redis_stats.get("hit_rate", 0)
+                if hit_rate < 50 and redis_stats.get("keys", 0) > 100:
+                    alerts.append(f"🟡 **Redis hit rate thấp**: {hit_rate:.1f}% - Cache không hiệu quả")
+            
+            logger.info(f"📋 Total alerts to send: {len(alerts)}")
+            
+            # Gửi alert nếu có (hoặc trong test mode)
+            if alerts:
+                try:
+                    monitoring_webhook = os.getenv("DISCORD_MONITORING_WEBHOOK_URL")
+                    logger.info(f"🔍 Discord webhook configured: {bool(monitoring_webhook)}")
+                    
+                    if not monitoring_webhook:
+                        logger.warning("⚠️  DISCORD_MONITORING_WEBHOOK_URL chưa được set, skip gửi alert")
+                    else:
+                        logger.info("📨 Đang gửi alerts qua Discord...")
+                        
+                        # Fix import path
+                        import sys
+                        from pathlib import Path
+                        
+                        # Add src/ to sys.path nếu chưa có
+                        src_path = Path("/opt/airflow/src")
+                        if src_path.exists() and str(src_path) not in sys.path:
+                            sys.path.insert(0, str(src_path))
+                        
+                        # Import DiscordNotifier with fallback dynamic import to avoid path issues
+                        try:
+                            from common.discord_notifier import DiscordNotifier  # type: ignore
+                        except Exception as import_err:
+                            logger.warning(f"⚠️  Import direct thất bại: {import_err} -> thử dynamic import")
+                            import importlib.util
+                            dn_path = Path("/opt/airflow/src/common/discord_notifier.py")
+                            if dn_path.exists():
+                                spec = importlib.util.spec_from_file_location("discord_notifier_dyn", dn_path)
+                                if spec and spec.loader:
+                                    mod = importlib.util.module_from_spec(spec)
+                                    spec.loader.exec_module(mod)  # type: ignore
+                                    DiscordNotifier = getattr(mod, "DiscordNotifier", None)  # type: ignore
+                                else:
+                                    DiscordNotifier = None  # type: ignore
+                            else:
+                                DiscordNotifier = None  # type: ignore
+                        if not DiscordNotifier:
+                            raise RuntimeError("DiscordNotifier không khả dụng sau khi cố dynamic import")
+
+                        notifier = DiscordNotifier(monitoring_webhook)
+                        
+                        # Dedupe: build hash of alerts list
+                        import hashlib
+                        alerts_hash_source = "\n".join(sorted(alerts)) + result['timestamp'][:10]
+                        alerts_hash = hashlib.sha256(alerts_hash_source.encode('utf-8')).hexdigest()
+                        last_hash = None
+                        try:
+                            last_hash = Variable.get("HEALTH_CHECK_LAST_ALERT_HASH")
+                        except Exception:
+                            last_hash = None
+                        is_critical = any("🔴" in a for a in alerts)
+                        if alerts_hash == last_hash and not is_critical:
+                            logger.info("🛑 Dedupe: Alert hash unchanged and no critical alerts -> skip send")
+                        else:
+                            # Batch embeds if many alerts
+                            MAX_ALERTS_PER_EMBED = 10
+                            embed_chunks = []
+                            for i in range(0, len(alerts), MAX_ALERTS_PER_EMBED):
+                                chunk = alerts[i:i+MAX_ALERTS_PER_EMBED]
+                                description = "\n".join(f"• {a}" for a in chunk)
+                                embed_chunks.append({
+                                    "title": f"Segment {i//MAX_ALERTS_PER_EMBED + 1}",
+                                    "description": description,
+                                    "color": 0xFF0000 if any("🔴" in a for a in chunk) else (0xFFA500 if any("🟡" in a for a in chunk) else 0x3498DB),
+                                })
+
+                            # Summary embed
+                            summary_color = 0xFF0000 if any("🔴" in a for a in alerts) else (0xFFA500 if any("🟡" in a for a in alerts) else 0x2ECC71)
+                            summary_embed = {
+                                "title": "🏥 System Health Alert",
+                                "description": f"Tổng cộng {len(alerts)} alerts\nTimestamp: {result['timestamp']}",
+                                "color": summary_color,
+                            }
+                            embeds = [summary_embed] + embed_chunks
+
+                            notifier.send_alert(
+                                title="🏥 System Health Alert",
+                                message="Chi tiết xem các embeds.",
+                                color=summary_color,
+                                embeds=embeds,
+                            )
+                            logger.info(f"📨 Đã gửi {len(alerts)} alerts qua Discord monitoring webhook")
+                            try:
+                                Variable.set("HEALTH_CHECK_LAST_ALERT_HASH", alerts_hash)
+                            except Exception as ve:
+                                logger.warning(f"⚠️  Không set được HEALTH_CHECK_LAST_ALERT_HASH: {ve}")
+                        
+                except Exception as discord_error:
+                    logger.warning(f"⚠️  Không thể gửi Discord alert: {discord_error}")
+                    
+        except Exception as alert_error:
+            logger.warning(f"⚠️  Lỗi khi xử lý alerts: {alert_error}")
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi health check: {e}", exc_info=True)
@@ -4730,40 +4945,90 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
     }
 
     try:
-        from pipelines.crawl.storage.redis_cache import get_redis_cache
+        # Ensure src path in sys.path for package-style imports
+        import sys
+        from pathlib import Path
+        src_path = Path("/opt/airflow/src")
+        if src_path.exists() and str(src_path) not in sys.path:
+            sys.path.insert(0, str(src_path))
+
+        try:
+            from pipelines.crawl.storage.redis_cache import get_redis_cache  # type: ignore
+        except Exception as import_err:
+            logger.warning(f"⚠️  Import get_redis_cache failed: {import_err} -> trying dynamic import")
+            # Dynamic import fallback
+            import importlib.util
+            rc_path = src_path / "pipelines" / "crawl" / "storage" / "redis_cache.py"
+            get_redis_cache = None  # type: ignore
+            if rc_path.exists():
+                spec = importlib.util.spec_from_file_location("redis_cache_dyn", rc_path)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)  # type: ignore
+                    get_redis_cache = getattr(mod, "get_redis_cache", None)  # type: ignore
+            if not get_redis_cache:
+                raise RuntimeError("Không thể import get_redis_cache (dynamic import cũng thất bại)")
 
         # Kết nối Redis
-        redis_cache = get_redis_cache("redis://redis:6379/1")
+        redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
         if not redis_cache:
             logger.warning("⚠️  Không thể kết nối Redis, skip cleanup")
             result["status"] = "skipped"
             result["reason"] = "Redis not available"
             return result
 
-        # Lấy stats trước khi cleanup
+        # Lấy stats trước khi cleanup (dùng client.info())
         try:
-            stats_before = redis_cache.get_stats()
+            info_before = redis_cache.client.info()
+            db_key = f"db{redis_cache.client.connection_pool.connection_kwargs.get('db', 1)}"
+            keys_before = info_before.get(db_key, {}).get("keys", 0)
+            hits = info_before.get("keyspace_hits", 0)
+            misses = info_before.get("keyspace_misses", 0)
+            hit_rate = (hits / (hits + misses) * 100) if (hits + misses) > 0 else 0.0
+            stats_before = {
+                "keys": keys_before,
+                "used_memory_human": info_before.get("used_memory_human"),
+                "hit_rate": hit_rate,
+                "keyspace_hits": hits,
+                "keyspace_misses": misses,
+            }
             result["stats_before"] = stats_before
             logger.info("📊 Redis stats trước cleanup:")
-            logger.info(f"   - Keys: {stats_before.get('keys', 0)}")
+            logger.info(f"   - Keys: {keys_before}")
             logger.info(f"   - Memory used: {stats_before.get('used_memory_human', 'N/A')}")
-            logger.info(f"   - Hit rate: {stats_before.get('hit_rate', 0):.1f}%")
+            logger.info(f"   - Hit rate: {hit_rate:.1f}%")
         except Exception as e:
             logger.warning(f"⚠️  Không thể lấy stats trước cleanup: {e}")
 
         # Reset cache
         logger.info("🧹 Đang cleanup Redis cache...")
-        redis_cache.reset()
-        result["redis_reset"] = True
-        logger.info("✅ Đã reset Redis cache thành công")
+        try:
+            redis_cache.client.flushdb()
+            result["redis_reset"] = True
+            logger.info("✅ Đã flush DB Redis cache thành công")
+        except Exception as e:
+            logger.error(f"❌ Flush DB thất bại: {e}")
 
         # Lấy stats sau khi cleanup
         try:
-            time.sleep(1)  # Wait một chút để Redis update stats
-            stats_after = redis_cache.get_stats()
+            import time as _t
+            _t.sleep(1)
+            info_after = redis_cache.client.info()
+            db_key = f"db{redis_cache.client.connection_pool.connection_kwargs.get('db', 1)}"
+            keys_after = info_after.get(db_key, {}).get("keys", 0)
+            hits_a = info_after.get("keyspace_hits", 0)
+            misses_a = info_after.get("keyspace_misses", 0)
+            hit_rate_a = (hits_a / (hits_a + misses_a) * 100) if (hits_a + misses_a) > 0 else 0.0
+            stats_after = {
+                "keys": keys_after,
+                "used_memory_human": info_after.get("used_memory_human"),
+                "hit_rate": hit_rate_a,
+                "keyspace_hits": hits_a,
+                "keyspace_misses": misses_a,
+            }
             result["stats_after"] = stats_after
             logger.info("📊 Redis stats sau cleanup:")
-            logger.info(f"   - Keys: {stats_after.get('keys', 0)}")
+            logger.info(f"   - Keys: {keys_after}")
             logger.info(f"   - Memory used: {stats_after.get('used_memory_human', 'N/A')}")
         except Exception as e:
             logger.warning(f"⚠️  Không thể lấy stats sau cleanup: {e}")
@@ -4997,24 +5262,20 @@ with DAG(**DAG_CONFIG) as dag:
                 except Exception as e:
                     logger.warning(f"Không lấy được từ 'load_categories': {e}")
 
-            # Cách 3: Thử lấy từ upstream task (đơn giản hóa để tránh timeout)
+            # Cách 3: Thử lấy từ upstream task (Airflow 3.x compatible)
             if not categories:
                 try:
-                    # Lấy từ task trong cùng DAG run - đơn giản hóa
-                    from airflow.models import TaskInstance
-
+                    # Airflow 3.x: Dùng dag_run.get_task_instance() thay vì TaskInstance constructor
                     dag_run = context["dag_run"]
-                    # Lấy DAG từ context thay vì dùng biến global
-                    dag_obj = context.get("dag")
-                    if dag_obj:
-                        upstream_task = dag_obj.get_task("load_and_prepare.load_categories")
-                        upstream_ti = TaskInstance(task=upstream_task, run_id=dag_run.run_id)
+                    # Thử lấy từ task trong TaskGroup
+                    upstream_ti = dag_run.get_task_instance(task_id="load_and_prepare.load_categories")
+                    if upstream_ti:
                         categories = upstream_ti.xcom_pull(key="return_value")
                         logger.info(
-                            f"Lấy categories từ TaskInstance: {len(categories) if categories else 0} items"
+                            f"Lấy categories từ dag_run.get_task_instance(): {len(categories) if categories else 0} items"
                         )
                 except Exception as e:
-                    logger.warning(f"Không lấy được từ TaskInstance: {e}")
+                    logger.warning(f"Không lấy được từ dag_run.get_task_instance(): {e}")
 
             if not categories:
                 logger.error("❌ Không thể lấy categories từ XCom!")
@@ -5065,19 +5326,17 @@ with DAG(**DAG_CONFIG) as dag:
 
             if not categories:
                 try:
-                    from airflow.models import TaskInstance
-
+                    # Airflow 3.x: Dùng dag_run.get_task_instance() thay vì TaskInstance constructor
                     dag_run = context["dag_run"]
-                    dag_obj = context.get("dag")
-                    if dag_obj:
-                        upstream_task = dag_obj.get_task("load_and_prepare.load_categories")
-                        upstream_ti = TaskInstance(task=upstream_task, run_id=dag_run.run_id)
+                    # Thử lấy từ task trong TaskGroup
+                    upstream_ti = dag_run.get_task_instance(task_id="load_and_prepare.load_categories")
+                    if upstream_ti:
                         categories = upstream_ti.xcom_pull(key="return_value")
                         logger.info(
-                            f"Lấy categories từ TaskInstance: {len(categories) if categories else 0} items"
+                            f"Lấy categories từ dag_run.get_task_instance(): {len(categories) if categories else 0} items"
                         )
                 except Exception as e:
-                    logger.warning(f"Không lấy được từ TaskInstance: {e}")
+                    logger.warning(f"Không lấy được từ dag_run.get_task_instance(): {e}")
 
             if not categories:
                 logger.error("❌ Không thể lấy categories từ XCom!")
@@ -5122,24 +5381,16 @@ with DAG(**DAG_CONFIG) as dag:
 
             return op_kwargs_list
 
-        task_prepare_crawl = PythonOperator(
-            task_id="prepare_crawl_kwargs",
-            python_callable=prepare_crawl_kwargs,
-            execution_timeout=timedelta(minutes=1),
-        )
-
-        # New task for batch processing (optional, fallback to single-category if batch module not available)
-        task_prepare_batch_kwargs = PythonOperator(
-            task_id="prepare_batch_kwargs",
-            python_callable=prepare_category_batch_kwargs,
-            execution_timeout=timedelta(minutes=1),
-        )
-
-        # Dynamic Task Mapping với expand
-        # Sử dụng expand với op_kwargs để tránh lỗi với PythonOperator constructor
-        # Use batch processing if available, otherwise fallback to single-category
+        # Chỉ tạo task prepare phù hợp với mode đang dùng (batch hoặc single-category)
+        # Để tránh task bị skip vì chỉ 1 trong 2 task prepare được dùng
         if crawl_category_batch is not None:
-            # Batch processing mode
+            # Batch processing mode (PRODUCTION: Khuyến nghị dùng mode này)
+            task_prepare = PythonOperator(
+                task_id="prepare_batch_kwargs",
+                python_callable=prepare_category_batch_kwargs,
+                execution_timeout=timedelta(minutes=1),
+            )
+            
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_category_batch,
@@ -5148,16 +5399,22 @@ with DAG(**DAG_CONFIG) as dag:
                 ),  # Timeout 15 phút mỗi batch (5 categories × 3 phút)
                 pool="default_pool",
                 retries=1,  # Retry 1 lần
-            ).expand(op_kwargs=task_prepare_batch_kwargs.output)
+            ).expand(op_kwargs=task_prepare.output)
         else:
             # Fallback: single-category processing
+            task_prepare = PythonOperator(
+                task_id="prepare_crawl_kwargs",
+                python_callable=prepare_crawl_kwargs,
+                execution_timeout=timedelta(minutes=1),
+            )
+            
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_single_category,
                 execution_timeout=timedelta(minutes=10),  # Timeout 10 phút mỗi category
                 pool="default_pool",
                 retries=1,
-            ).expand(op_kwargs=task_prepare_crawl.output)
+            ).expand(op_kwargs=task_prepare.output)
 
     # TaskGroup: Process và Save
     with TaskGroup("process_and_save") as process_group:
@@ -5369,8 +5626,7 @@ with DAG(**DAG_CONFIG) as dag:
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
-    # TaskGroup: Health Check
-    with TaskGroup("health_check") as health_check_group:
+        # Health Check task (no TaskGroup to allow direct reference)
         task_health_check = PythonOperator(
             task_id="health_check_monitoring",
             python_callable=health_check_monitoring,
@@ -5379,8 +5635,7 @@ with DAG(**DAG_CONFIG) as dag:
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
-    # TaskGroup: Cleanup Cache
-    with TaskGroup("cleanup") as cleanup_group:
+        # Cleanup Cache task (no TaskGroup to allow direct reference)
         task_cleanup_cache = PythonOperator(
             task_id="cleanup_redis_cache",
             python_callable=cleanup_redis_cache,
@@ -5389,8 +5644,7 @@ with DAG(**DAG_CONFIG) as dag:
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
-    # TaskGroup: Backup Database
-    with TaskGroup("backup") as backup_group:
+        # Backup Database task (no TaskGroup to allow direct reference)
         task_backup_database = PythonOperator(
             task_id="backup_database",
             python_callable=backup_database,
@@ -5404,10 +5658,10 @@ with DAG(**DAG_CONFIG) as dag:
 
     # Dependencies giữa các TaskGroup
     # Load categories trước, sau đó prepare crawl kwargs
-    task_load_categories >> task_prepare_crawl
+    task_load_categories >> task_prepare
 
     # Prepare crawl kwargs -> crawl category (dynamic mapping)
-    task_prepare_crawl >> task_crawl_category
+    task_prepare >> task_crawl_category
 
     # Crawl category -> merge products (merge chạy khi tất cả crawl tasks done)
     task_crawl_category >> task_merge_products

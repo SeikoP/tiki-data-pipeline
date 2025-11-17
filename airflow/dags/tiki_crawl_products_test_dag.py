@@ -252,6 +252,10 @@ if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
         )
         extract_product_detail = crawl_products_detail_module.extract_product_detail
         crawl_product_detail_async = crawl_products_detail_module.crawl_product_detail_async
+        # Optional pooled-driver variant (present in optimized module)
+        crawl_product_detail_with_driver = getattr(
+            crawl_products_detail_module, "crawl_product_detail_with_driver", None
+        )
     except Exception as e:
         # Nếu import lỗi, log và tiếp tục (sẽ fail khi chạy task)
         import warnings
@@ -264,6 +268,9 @@ if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
         def crawl_product_detail_with_selenium(*args, **kwargs):
             raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
 
+        def crawl_product_detail_with_driver(*args, **kwargs):
+            raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
+
         extract_product_detail = crawl_product_detail_with_selenium
 
         async def crawl_product_detail_async(*args, **kwargs):
@@ -274,6 +281,7 @@ else:
     try:
         from crawl_products_detail import (
             crawl_product_detail_async,
+            crawl_product_detail_with_driver,
             crawl_product_detail_with_selenium,
             extract_product_detail,
         )
@@ -283,6 +291,40 @@ else:
             f"Path: {crawl_products_detail_path}\n"
             f"Lỗi gốc: {e}"
         ) from e
+
+# Import module crawl_categories_batch (for category batch processing)
+crawl_categories_batch_path = None
+for path in possible_paths:
+    test_path = os.path.join(path, "crawl_categories_batch.py")
+    if os.path.exists(test_path):
+        crawl_categories_batch_path = test_path
+        break
+
+if crawl_categories_batch_path and os.path.exists(crawl_categories_batch_path):
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "crawl_categories_batch", crawl_categories_batch_path
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Không thể load spec từ {crawl_categories_batch_path}")
+        crawl_categories_batch_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(crawl_categories_batch_module)
+
+        # Extract các functions cần thiết
+        crawl_category_batch = crawl_categories_batch_module.crawl_category_batch
+    except Exception as e:
+        # Nếu import lỗi, log và tạo fallback (sẽ sử dụng crawl_single_category)
+        import warnings
+
+        warnings.warn(f"Không thể import crawl_categories_batch module: {e}", stacklevel=2)
+
+        # Tạo dummy function để tránh NameError
+        crawl_category_batch = None
+else:
+    # Module chưa tồn tại, sẽ fallback về crawl_single_category
+    crawl_category_batch = None
 
 # Import resilience patterns
 # Import trực tiếp từng module con để tránh vấn đề relative imports
@@ -548,7 +590,7 @@ DAG_CONFIG = {
     "catchup": False,  # Không chạy lại các task đã bỏ lỡ
     "tags": dag_tags,
     "max_active_runs": 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
-    "max_active_tasks": 3,  # TEST MODE: Giảm xuống 3 tasks song song để test nhanh,  # Giảm xuống 10 tasks song song để tránh quá tải khi tạo Selenium driver
+    "max_active_tasks": 15,  # Giảm xuống 10 tasks song song để tránh quá tải khi tạo Selenium driver
 }
 
 # Thư mục dữ liệu
@@ -1017,23 +1059,18 @@ def load_categories(**context) -> list[dict[str, Any]]:
         # TEST MODE: Hardcode giới hạn 2 categories cho test
         max_categories = 2  # TEST MODE: Hardcode 2 categories cho test
         if max_categories > 0 and len(categories) > max_categories:
-            logger.info(
-                f"⚠️  TEST MODE: Giới hạn từ {len(categories)} xuống {max_categories} categories"
-            )
+            logger.info(f"⚠️  TEST MODE: Giới hạn từ {len(categories)} xuống {max_categories} categories")
             categories = categories[:max_categories]
             logger.info(f"✅ Đã giới hạn: {len(categories)} categories để crawl")
-
+        
         # Vẫn kiểm tra Variable nếu có (để override nếu cần)
         try:
             var_max_categories = int(Variable.get("TIKI_MAX_CATEGORIES", default_var="0"))
-            if var_max_categories > 0:
-                max_categories = var_max_categories
+            if max_categories > 0:
+                categories = categories[:max_categories]
+                logger.info(f"✓ Giới hạn: {max_categories} danh mục")
         except Exception:
             pass
-
-        if max_categories > 0:
-            categories = categories[:max_categories]
-            logger.info(f"✓ Giới hạn: {max_categories} danh mục")
 
         # Push categories lên XCom để các task khác dùng
         return categories
@@ -1311,8 +1348,30 @@ def merge_products(**context) -> dict[str, Any]:
             # Xử lý kết quả
             if isinstance(all_results, list):
                 # Nếu là list, xử lý từng phần tử
+                # Với batch processing, mỗi phần tử có thể là list of results (từ 1 batch)
                 for result in all_results:
-                    if result and isinstance(result, dict):
+                    # Check if result is a list (batch result) hoặc dict (single category result)
+                    if isinstance(result, list):
+                        # Batch result - flatten it
+                        for single_result in result:
+                            if single_result and isinstance(single_result, dict):
+                                if single_result.get("status") == "success":
+                                    stats["success_categories"] += 1
+                                    products = single_result.get("products", [])
+                                    all_products.extend(products)
+                                    stats["total_products"] += len(products)
+                                elif single_result.get("status") == "timeout":
+                                    stats["timeout_categories"] += 1
+                                    logger.warning(
+                                        f"⏱️  Category {single_result.get('category_name')} timeout"
+                                    )
+                                else:
+                                    stats["failed_categories"] += 1
+                                    logger.warning(
+                                        f"❌ Category {single_result.get('category_name')} failed: {single_result.get('error')}"
+                                    )
+                    elif result and isinstance(result, dict):
+                        # Single category result
                         if result.get("status") == "success":
                             stats["success_categories"] += 1
                             products = result.get("products", [])
@@ -1361,7 +1420,7 @@ def merge_products(**context) -> dict[str, Any]:
 
             # Nếu không lấy được, thử lấy từng map_index
             if not all_results or (isinstance(all_results, (list, dict)) and len(all_results) == 0):
-                logger.info("Thử lấy từng map_index...")
+                # Try fetching individual map_index results
                 for map_index in range(len(categories)):
                     try:
                         result = ti.xcom_pull(
@@ -1502,7 +1561,7 @@ def save_products(**context) -> str:
         # Cách 1: Lấy từ task_id với TaskGroup prefix
         try:
             merge_result = ti.xcom_pull(task_ids="process_and_save.merge_products")
-            logger.info("Lấy merge_result từ 'process_and_save.merge_products'")
+            # Get merge result from upstream task
         except Exception as e:
             logger.warning(f"Không lấy được từ 'process_and_save.merge_products': {e}")
 
@@ -1510,7 +1569,7 @@ def save_products(**context) -> str:
         if not merge_result:
             try:
                 merge_result = ti.xcom_pull(task_ids="merge_products")
-                logger.info("Lấy merge_result từ 'merge_products'")
+                # Fallback to merge_products without prefix
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'merge_products': {e}")
 
@@ -1640,7 +1699,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Lấy cấu hình cho multi-day crawling
         # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
-            Variable.get("TIKI_PRODUCTS_PER_DAY", default_var="120")
+            Variable.get("TIKI_PRODUCTS_PER_DAY", default_var="280")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = 10  # TEST MODE: Hardcode 10 products cho test  # 0 = không giới hạn  # 0 = không giới hạn
 
@@ -1669,7 +1728,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 db_user = Variable.get(
                     "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
                 )
-                # trufflehog:ignore - Test DAG fallback, production uses Airflow Variables
+                # trufflehog:ignore - Fallback for development, production uses Airflow Variables
                 db_password = Variable.get(
                     "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
                 )
@@ -1893,11 +1952,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         # Debug: Log một vài products đầu tiên
         if products_to_crawl:
-            logger.info("📋 Sample products (first 3):")
-            for i, p in enumerate(products_to_crawl[:3]):
-                logger.info(
-                    f"  {i+1}. Product ID: {p.get('product_id')}, URL: {p.get('url')[:80]}..."
-                )
+            sample_names = [p.get("product_id", "N/A") for p in products_to_crawl[:3]]
+            logger.info(f"📋 Sample products: {', '.join(sample_names)}...")
         else:
             logger.warning("⚠️  Không có products nào cần crawl detail hôm nay!")
             logger.info("💡 Tất cả products đã được crawl hoặc có cache hợp lệ")
@@ -1995,8 +2051,9 @@ def crawl_product_batch(
         if SeleniumDriverPool is None:
             raise ImportError("SeleniumDriverPool chưa được import từ utils module")
 
-        # Tạo driver pool cho batch
-        driver_pool = SeleniumDriverPool(pool_size=5, headless=True, timeout=60)
+        # Tạo driver pool cho batch (pool size configurable via Airflow Variable)
+        pool_size = int(Variable.get("TIKI_DETAIL_POOL_SIZE", default_var="5"))
+        driver_pool = SeleniumDriverPool(pool_size=pool_size, headless=True, timeout=90)
 
         # Tạo event loop trước
         try:
@@ -2154,15 +2211,40 @@ def crawl_product_batch(
                         detail = None
                 else:
                     # Fallback về Selenium nếu không có aiohttp
-                    # Sử dụng hàm đã được import ở đầu file
-                    html = crawl_product_detail_with_selenium(
-                        product_url,
-                        verbose=False,
-                        max_retries=2,  # TEST MODE: Giảm retry xuống 2,
-                        timeout=60,
-                        use_redis_cache=True,
-                        use_rate_limiting=True,
-                    )
+                    # Ưu tiên dùng driver pool nếu có
+                    html = None
+                    try:
+                        if "crawl_product_detail_with_driver" in globals() and callable(
+                            crawl_product_detail_with_driver
+                        ):
+                            drv = driver_pool.get_driver()
+                            if drv is not None:
+                                try:
+                                    html = crawl_product_detail_with_driver(
+                                        drv,
+                                        product_url,
+                                        save_html=False,
+                                        verbose=False,
+                                        timeout=60,
+                                        use_redis_cache=True,
+                                        use_rate_limiting=True,
+                                    )
+                                finally:
+                                    driver_pool.return_driver(drv)
+                    except Exception as pooled_err:
+                        logger.warning(f"⚠️  Lỗi khi dùng pooled driver: {pooled_err}")
+                        html = None
+
+                    # Fallback cuối cùng: tạo driver riêng qua hàm sẵn có
+                    if html is None:
+                        html = crawl_product_detail_with_selenium(
+                            product_url,
+                            verbose=False,
+                            max_retries=2,  # TEST MODE: Giảm retry xuống 2,
+                            timeout=60,
+                            use_redis_cache=True,
+                            use_rate_limiting=True,
+                        )
                     if html:
                         # Sử dụng hàm đã được import ở đầu file
                         detail = extract_product_detail(html, product_url, verbose=False)
@@ -2985,7 +3067,7 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         # Lấy tất cả results bằng cách lấy từng map_index để tránh giới hạn XCom
         # CHỈ lấy từ map_index 0 đến actual_crawl_count - 1 (không phải len(products))
-        logger.info(f"Bắt đầu lấy detail results từ {actual_crawl_count} crawled products...")
+        # Fetch detail results from crawled products
 
         # Lấy theo batch để tối ưu
         batch_size = 100
@@ -3596,14 +3678,14 @@ def transform_products(**context) -> dict[str, Any]:
         products = data.get("products", [])
         stats = data.get("stats", {})
         logger.info(f"📊 Tổng số products trong file: {len(products)}")
-
+        
         # TEST MODE: Giới hạn số lượng products để test
         max_products = 10  # TEST MODE: Hardcode 10 products cho test
         if max_products > 0 and len(products) > max_products:
             logger.info(f"⚠️  TEST MODE: Giới hạn từ {len(products)} xuống {max_products} products")
             products = products[:max_products]
             logger.info(f"✅ Đã giới hạn: {len(products)} products để transform")
-
+        
         # Log thông tin về crawl detail nếu có
         crawled_count = stats.get("crawled_count", 0)
         if crawled_count > 0:
@@ -3982,7 +4064,7 @@ def load_products(**context) -> dict[str, Any]:
             db_user = Variable.get(
                 "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
             )
-            # trufflehog:ignore - Test DAG fallback, production uses Airflow Variables
+            # trufflehog:ignore - Fallback for development, production uses Airflow Variables
             db_password = Variable.get(
                 "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
             )
@@ -4152,7 +4234,7 @@ def validate_data(**context) -> dict[str, Any]:
         if not output_file:
             try:
                 output_file = ti.xcom_pull(task_ids="save_products_with_detail")
-                logger.info(f"Lấy output_file từ 'save_products_with_detail': {output_file}")
+                logger.debug(f"Output from save_products_with_detail: {output_file}")
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'save_products_with_detail': {e}")
 
@@ -4170,7 +4252,7 @@ def validate_data(**context) -> dict[str, Any]:
         if not output_file:
             try:
                 output_file = ti.xcom_pull(task_ids="save_products")
-                logger.info(f"Lấy output_file từ 'save_products' (fallback): {output_file}")
+                logger.debug(f"Output from save_products (fallback): {output_file}")
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'save_products': {e}")
 
@@ -4496,12 +4578,218 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
         )
         logger.info("=" * 70)
 
+        # Performance Summary
+        try:
+            dag_run = context.get("dag_run")
+            if dag_run and dag_run.start_date:
+                start_time = dag_run.start_date
+                end_time = datetime.now()
+                duration = (end_time - start_time).total_seconds()
+                total_products = result.get("with_detail", 0)  # Use crawled products count
+
+                # Calculate throughput
+                throughput = total_products / duration if duration > 0 else 0
+                avg_time = duration / total_products if total_products > 0 else 0
+
+                logger.info("=" * 70)
+                logger.info("⚡ PERFORMANCE SUMMARY")
+                logger.info(f"⏱️  Duration: {duration/60:.1f} min | Products: {total_products}")
+                if throughput > 0:
+                    logger.info(
+                        f"📈 Throughput: {throughput:.2f} products/s | Avg: {avg_time:.1f}s/product"
+                    )
+                logger.info("=" * 70)
+
+                result["performance"] = {
+                    "duration_minutes": round(duration / 60, 2),
+                    "total_products": total_products,
+                    "throughput": round(throughput, 2),
+                    "avg_time_per_product": round(avg_time, 2),
+                }
+        except Exception as perf_error:
+            logger.warning(f"⚠️  Performance summary error: {perf_error}")
+
         return result
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi tổng hợp và gửi thông báo: {e}", exc_info=True)
         # Không fail task, chỉ log lỗi
         return result
+
+
+def health_check_monitoring(**context) -> dict[str, Any]:
+    """
+    Task: Health check and monitoring
+
+    Thu thập metrics từ CircuitBreaker, PostgreSQL connection pool và các services khác
+    để monitoring health của hệ thống.
+
+    Returns:
+        Dict: Health check results
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("🏥 TASK: Health Check & Monitoring")
+    logger.info("=" * 70)
+
+    result = {
+        "status": "success",
+        "circuit_breaker_state": {},
+        "postgres_pool_stats": {},
+        "redis_stats": {},
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    try:
+        # 1. Circuit Breaker State
+        try:
+            circuit_breaker_state = tiki_circuit_breaker.get_state()
+            result["circuit_breaker_state"] = circuit_breaker_state
+            logger.info("🔌 Circuit Breaker State:")
+            logger.info(f"   - State: {circuit_breaker_state.get('state', 'unknown')}")
+            logger.info(f"   - Failure count: {circuit_breaker_state.get('failure_count', 0)}")
+            logger.info(
+                f"   - Last failure: {circuit_breaker_state.get('last_failure_time', 'N/A')}"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy circuit breaker state: {e}")
+            result["circuit_breaker_state"] = {"error": str(e)}
+
+        # 2. PostgreSQL Connection Pool Stats
+        try:
+            from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
+            # Khởi tạo PostgresStorage để lấy pool stats
+            postgres = PostgresStorage()
+            pool_stats = postgres.get_pool_stats()
+            result["postgres_pool_stats"] = pool_stats
+            logger.info("🐘 PostgreSQL Pool Stats:")
+            logger.info(f"   - Min connections: {pool_stats.get('minconn', 0)}")
+            logger.info(f"   - Max connections: {pool_stats.get('maxconn', 0)}")
+            logger.info(f"   - Current connections: {pool_stats.get('current_connections', 0)}")
+            logger.info(f"   - Available: {pool_stats.get('available_connections', 0)}")
+
+            # Close connection
+            try:
+                postgres.close()
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy postgres pool stats: {e}")
+            result["postgres_pool_stats"] = {"error": str(e)}
+
+        # 3. Redis Stats
+        try:
+            from pipelines.crawl.storage.redis_cache import get_redis_cache
+
+            redis_cache = get_redis_cache("redis://redis:6379/1")
+            if redis_cache:
+                redis_stats = redis_cache.get_stats()
+                result["redis_stats"] = redis_stats
+                logger.info("📦 Redis Stats:")
+                logger.info(f"   - Keys: {redis_stats.get('keys', 0)}")
+                logger.info(f"   - Memory: {redis_stats.get('used_memory_human', 'N/A')}")
+                logger.info(f"   - Hit rate: {redis_stats.get('hit_rate', 0):.1f}%")
+                logger.info(f"   - Evicted keys: {redis_stats.get('evicted_keys', 0)}")
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy redis stats: {e}")
+            result["redis_stats"] = {"error": str(e)}
+
+        # 4. Graceful Degradation Stats
+        try:
+            degradation_stats = tiki_degradation.get_all_stats()
+            result["degradation_stats"] = degradation_stats
+            logger.info("📊 Graceful Degradation Stats:")
+            for service, stats in degradation_stats.items():
+                logger.info(f"   - {service}:")
+                logger.info(f"     • State: {stats.get('state', 'unknown')}")
+                logger.info(f"     • Success rate: {stats.get('success_rate', 0):.1f}%")
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy degradation stats: {e}")
+            result["degradation_stats"] = {"error": str(e)}
+
+        logger.info("✅ Health check hoàn tất")
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi health check: {e}", exc_info=True)
+        result["status"] = "failed"
+        result["error"] = str(e)
+
+    logger.info("=" * 70)
+    return result
+
+
+def cleanup_redis_cache(**context) -> dict[str, Any]:
+    """
+    Task: Cleanup Redis cache
+
+    Cleanup Redis cache để giải phóng bộ nhớ và đảm bảo cache không quá cũ.
+    Task này chạy với trigger_rule="all_done" để chạy ngay cả khi upstream tasks fail.
+
+    Returns:
+        Dict: Kết quả cleanup
+    """
+    logger = get_logger(context)
+    logger.info("=" * 70)
+    logger.info("🧹 TASK: Cleanup Redis Cache")
+    logger.info("=" * 70)
+
+    result = {
+        "status": "failed",
+        "redis_reset": False,
+        "stats_before": {},
+        "stats_after": {},
+    }
+
+    try:
+        from pipelines.crawl.storage.redis_cache import get_redis_cache
+
+        # Kết nối Redis
+        redis_cache = get_redis_cache("redis://redis:6379/1")
+        if not redis_cache:
+            logger.warning("⚠️  Không thể kết nối Redis, skip cleanup")
+            result["status"] = "skipped"
+            result["reason"] = "Redis not available"
+            return result
+
+        # Lấy stats trước khi cleanup
+        try:
+            stats_before = redis_cache.get_stats()
+            result["stats_before"] = stats_before
+            logger.info("📊 Redis stats trước cleanup:")
+            logger.info(f"   - Keys: {stats_before.get('keys', 0)}")
+            logger.info(f"   - Memory used: {stats_before.get('used_memory_human', 'N/A')}")
+            logger.info(f"   - Hit rate: {stats_before.get('hit_rate', 0):.1f}%")
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy stats trước cleanup: {e}")
+
+        # Reset cache
+        logger.info("🧹 Đang cleanup Redis cache...")
+        redis_cache.reset()
+        result["redis_reset"] = True
+        logger.info("✅ Đã reset Redis cache thành công")
+
+        # Lấy stats sau khi cleanup
+        try:
+            time.sleep(1)  # Wait một chút để Redis update stats
+            stats_after = redis_cache.get_stats()
+            result["stats_after"] = stats_after
+            logger.info("📊 Redis stats sau cleanup:")
+            logger.info(f"   - Keys: {stats_after.get('keys', 0)}")
+            logger.info(f"   - Memory used: {stats_after.get('used_memory_human', 'N/A')}")
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể lấy stats sau cleanup: {e}")
+
+        result["status"] = "success"
+        logger.info("✅ Cleanup Redis cache hoàn tất")
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi cleanup Redis cache: {e}", exc_info=True)
+        result["error"] = str(e)
+
+    logger.info("=" * 70)
+    return result
 
 
 def backup_database(**context) -> dict[str, Any]:
@@ -4673,9 +4961,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_extract_and_load_categories = PythonOperator(
             task_id="extract_and_load_categories_to_db",
             python_callable=extract_and_load_categories_to_db,
-            execution_timeout=timedelta(
-                minutes=5
-            ),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút
             pool="default_pool",
         )
 
@@ -4683,9 +4969,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_load_categories = PythonOperator(
             task_id="load_categories",
             python_callable=load_categories,
-            execution_timeout=timedelta(
-                minutes=5
-            ),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 5 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 5 phút
             pool="default_pool",
         )
 
@@ -4726,24 +5010,20 @@ with DAG(**DAG_CONFIG) as dag:
                 except Exception as e:
                     logger.warning(f"Không lấy được từ 'load_categories': {e}")
 
-            # Cách 3: Thử lấy từ upstream task (đơn giản hóa để tránh timeout)
+            # Cách 3: Thử lấy từ upstream task (Airflow 3.x compatible)
             if not categories:
                 try:
-                    # Lấy từ task trong cùng DAG run - đơn giản hóa
-                    from airflow.models import TaskInstance
-
+                    # Airflow 3.x: Dùng dag_run.get_task_instance() thay vì TaskInstance constructor
                     dag_run = context["dag_run"]
-                    # Lấy DAG từ context thay vì dùng biến global
-                    dag_obj = context.get("dag")
-                    if dag_obj:
-                        upstream_task = dag_obj.get_task("load_and_prepare.load_categories")
-                        upstream_ti = TaskInstance(task=upstream_task, run_id=dag_run.run_id)
+                    # Thử lấy từ task trong TaskGroup
+                    upstream_ti = dag_run.get_task_instance(task_id="load_and_prepare.load_categories")
+                    if upstream_ti:
                         categories = upstream_ti.xcom_pull(key="return_value")
                         logger.info(
-                            f"Lấy categories từ TaskInstance: {len(categories) if categories else 0} items"
+                            f"Lấy categories từ dag_run.get_task_instance(): {len(categories) if categories else 0} items"
                         )
                 except Exception as e:
-                    logger.warning(f"Không lấy được từ TaskInstance: {e}")
+                    logger.warning(f"Không lấy được từ dag_run.get_task_instance(): {e}")
 
             if not categories:
                 logger.error("❌ Không thể lấy categories từ XCom!")
@@ -4760,32 +5040,136 @@ with DAG(**DAG_CONFIG) as dag:
             # Trả về list các dict để expand
             return [{"category": cat} for cat in categories]
 
-        task_prepare_crawl = PythonOperator(
-            task_id="prepare_crawl_kwargs",
-            python_callable=prepare_crawl_kwargs,
-            execution_timeout=timedelta(minutes=1),  # TEST MODE: Giảm timeout xuống 1 phút,
-        )
+        def prepare_category_batch_kwargs(**context):
+            """
+            Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing
 
-        # Dynamic Task Mapping với expand
-        # Sử dụng expand với op_kwargs để tránh lỗi với PythonOperator constructor
-        task_crawl_category = PythonOperator.partial(
-            task_id="crawl_category",
-            python_callable=crawl_single_category,
-            execution_timeout=timedelta(
-                minutes=5
-            ),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút mỗi category
-            pool="default_pool",  # Có thể tạo pool riêng nếu cần
-            retries=1,  # Retry 1 lần (tổng 2 lần thử: 1 lần đầu + 1 retry)
-        ).expand(op_kwargs=task_prepare_crawl.output)
+            Chia categories thành batches để giảm số lượng Airflow tasks và tận dụng driver pooling
+            """
+            import logging
+
+            logger = logging.getLogger("airflow.task")
+
+            ti = context["ti"]
+
+            # Lấy categories từ XCom (same logic as prepare_crawl_kwargs)
+            categories = None
+
+            try:
+                categories = ti.xcom_pull(task_ids="load_and_prepare.load_categories")
+                logger.info(
+                    f"Lấy categories từ 'load_and_prepare.load_categories': {len(categories) if categories else 0} items"
+                )
+            except Exception as e:
+                logger.warning(f"Không lấy được từ 'load_and_prepare.load_categories': {e}")
+
+            if not categories:
+                try:
+                    categories = ti.xcom_pull(task_ids="load_categories")
+                    logger.info(
+                        f"Lấy categories từ 'load_categories': {len(categories) if categories else 0} items"
+                    )
+                except Exception as e:
+                    logger.warning(f"Không lấy được từ 'load_categories': {e}")
+
+            if not categories:
+                try:
+                    # Airflow 3.x: Dùng dag_run.get_task_instance() thay vì TaskInstance constructor
+                    dag_run = context["dag_run"]
+                    # Thử lấy từ task trong TaskGroup
+                    upstream_ti = dag_run.get_task_instance(task_id="load_and_prepare.load_categories")
+                    if upstream_ti:
+                        categories = upstream_ti.xcom_pull(key="return_value")
+                        logger.info(
+                            f"Lấy categories từ dag_run.get_task_instance(): {len(categories) if categories else 0} items"
+                        )
+                except Exception as e:
+                    logger.warning(f"Không lấy được từ dag_run.get_task_instance(): {e}")
+
+            if not categories:
+                logger.error("❌ Không thể lấy categories từ XCom!")
+                return []
+
+            if not isinstance(categories, list):
+                logger.error(f"❌ Categories không phải list: {type(categories)}")
+                return []
+
+            logger.info(f"✅ Đã lấy {len(categories)} categories")
+
+            # Batch Processing: Chia categories thành batches
+            batch_size = int(Variable.get("TIKI_CATEGORY_BATCH_SIZE", default_var="5"))
+            batches = []
+            for i in range(0, len(categories), batch_size):
+                batch = categories[i : i + batch_size]
+                batches.append(batch)
+
+            logger.info(
+                f"📦 Đã chia thành {len(batches)} batches (mỗi batch {batch_size} categories)"
+            )
+            logger.info(f"   - Batch đầu tiên: {len(batches[0]) if batches else 0} categories")
+            logger.info(f"   - Batch cuối cùng: {len(batches[-1]) if batches else 0} categories")
+
+            # Trả về list các dict để expand (mỗi dict là 1 batch)
+            op_kwargs_list = [
+                {"category_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
+            ]
+
+            logger.info(
+                f"🔢 Tạo {len(op_kwargs_list)} op_kwargs cho Dynamic Task Mapping (batches)"
+            )
+            if op_kwargs_list:
+                logger.info("📋 Sample batches (first 2):")
+                for _i, kwargs in enumerate(op_kwargs_list[:2]):
+                    batch = kwargs.get("category_batch", [])
+                    batch_idx = kwargs.get("batch_index", -1)
+                    category_names = [c.get("name", "Unknown") for c in batch[:3]]
+                    logger.info(
+                        f"  Batch {batch_idx}: {len(batch)} categories - {category_names}..."
+                    )
+
+            return op_kwargs_list
+
+        # Chỉ tạo task prepare phù hợp với mode đang dùng (batch hoặc single-category)
+        # Để tránh task bị skip vì chỉ 1 trong 2 task prepare được dùng
+        if crawl_category_batch is not None:
+            # Batch processing mode (PRODUCTION: Khuyến nghị dùng mode này)
+                task_prepare = PythonOperator(
+                task_id="prepare_batch_kwargs",
+                python_callable=prepare_category_batch_kwargs,
+                execution_timeout=timedelta(minutes=1),  # TEST MODE: Giảm timeout xuống 1 phút,
+            )
+            
+            task_crawl_category = PythonOperator.partial(
+                task_id="crawl_category",
+                python_callable=crawl_category_batch,
+                execution_timeout=timedelta(
+                    minutes=15
+                ),  # Timeout 15 phút mỗi batch (5 categories × 3 phút)
+                pool="default_pool",
+                retries=1,  # Retry 1 lần
+                ).expand(op_kwargs=task_prepare.output)
+        else:
+            # Fallback: single-category processing
+                task_prepare = PythonOperator(
+                task_id="prepare_crawl_kwargs",
+                python_callable=prepare_crawl_kwargs,
+                execution_timeout=timedelta(minutes=1),  # TEST MODE: Giảm timeout xuống 1 phút,
+            )
+            
+            task_crawl_category = PythonOperator.partial(
+                task_id="crawl_category",
+                python_callable=crawl_single_category,
+                execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút mỗi category
+                pool="default_pool",
+                retries=1,
+                ).expand(op_kwargs=task_prepare.output)
 
     # TaskGroup: Process và Save
     with TaskGroup("process_and_save") as process_group:
         task_merge_products = PythonOperator(
             task_id="merge_products",
             python_callable=merge_products,
-            execution_timeout=timedelta(
-                minutes=10
-            ),  # TEST MODE: Giảm timeout xuống 10 phút,  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=10),  # TEST MODE: Giảm timeout xuống 10 phút,  # Timeout 30 phút
             pool="default_pool",
             trigger_rule="all_done",  # QUAN TRỌNG: Chạy khi tất cả upstream tasks done (success hoặc failed)
         )
@@ -4793,9 +5177,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_save_products = PythonOperator(
             task_id="save_products",
             python_callable=save_products,
-            execution_timeout=timedelta(
-                minutes=5
-            ),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút
             pool="default_pool",
         )
 
@@ -4836,7 +5218,7 @@ with DAG(**DAG_CONFIG) as dag:
                     try:
                         products_to_crawl = ti.xcom_pull(task_ids=task_id)
                         if products_to_crawl:
-                            logger.info(f"✅ Lấy XCom từ upstream task: {task_id}")
+                            logger.debug(f"XCom from upstream: {task_id}")
                             break
                     except Exception as e:
                         logger.debug(f"   Không lấy được từ {task_id}: {e}")
@@ -4857,7 +5239,7 @@ with DAG(**DAG_CONFIG) as dag:
                     try:
                         # Thử với task_id không có prefix (fallback)
                         products_to_crawl = ti.xcom_pull(task_ids="prepare_products_for_detail")
-                        logger.info("✅ Lấy XCom từ task_id: prepare_products_for_detail")
+                        logger.debug("XCom from prepare_products_for_detail")
                     except Exception as e2:
                         logger.error(f"❌ Không thể lấy XCom với cả 2 cách: {e1}, {e2}")
 
@@ -4881,10 +5263,10 @@ with DAG(**DAG_CONFIG) as dag:
                 logger.error(f"   Value: {products_to_crawl}")
                 return []
 
-            logger.info(f"✅ Đã lấy {len(products_to_crawl)} products từ XCom")
+            logger.info(f"✅ Retrieved {len(products_to_crawl)} products for detail crawl")
 
             # Batch Processing: Chia products thành batches 10 products/batch
-            batch_size = 10
+            batch_size = 15
             batches = []
             for i in range(0, len(products_to_crawl), batch_size):
                 batch = products_to_crawl[i : i + batch_size]
@@ -4901,17 +5283,7 @@ with DAG(**DAG_CONFIG) as dag:
                 {"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
             ]
 
-            logger.info(
-                f"🔢 Tạo {len(op_kwargs_list)} op_kwargs cho Dynamic Task Mapping (batches)"
-            )
-            if op_kwargs_list:
-                logger.info("📋 Sample batches (first 2):")
-                for _i, kwargs in enumerate(op_kwargs_list[:2]):
-                    batch = kwargs.get("product_batch", [])
-                    batch_idx = kwargs.get("batch_index", -1)
-                    logger.info(
-                        f"  Batch {batch_idx}: {len(batch)} products - IDs: {[p.get('product_id') for p in batch[:3]]}..."
-                    )
+            logger.info(f"🔢 Created {len(op_kwargs_list)} batches for Dynamic Task Mapping")
 
             return op_kwargs_list
 
@@ -4942,9 +5314,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_merge_product_details = PythonOperator(
             task_id="merge_product_details",
             python_callable=merge_product_details,
-            execution_timeout=timedelta(
-                minutes=10
-            ),  # TEST MODE: Giảm timeout xuống 10 phút,  # Tăng timeout lên 60 phút cho nhiều products
+            execution_timeout=timedelta(minutes=10),  # TEST MODE: Giảm timeout xuống 10 phút,  # Tăng timeout lên 60 phút cho nhiều products
             pool="default_pool",
             trigger_rule="all_done",  # Chạy khi tất cả upstream tasks done
             # Tăng heartbeat interval để tránh timeout khi xử lý nhiều dữ liệu
@@ -4953,9 +5323,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_save_products_with_detail = PythonOperator(
             task_id="save_products_with_detail",
             python_callable=save_products_with_detail,
-            execution_timeout=timedelta(
-                minutes=5
-            ),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút
             pool="default_pool",
         )
 
@@ -4973,18 +5341,14 @@ with DAG(**DAG_CONFIG) as dag:
         task_transform_products = PythonOperator(
             task_id="transform_products",
             python_callable=transform_products,
-            execution_timeout=timedelta(
-                minutes=10
-            ),  # TEST MODE: Giảm timeout xuống 10 phút,  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=10),  # TEST MODE: Giảm timeout xuống 10 phút,  # Timeout 30 phút
             pool="default_pool",
         )
 
         task_load_products = PythonOperator(
             task_id="load_products",
             python_callable=load_products,
-            execution_timeout=timedelta(
-                minutes=10
-            ),  # TEST MODE: Giảm timeout xuống 10 phút,  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=10),  # TEST MODE: Giảm timeout xuống 10 phút,  # Timeout 30 phút
             pool="default_pool",
         )
 
@@ -4996,9 +5360,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_validate_data = PythonOperator(
             task_id="validate_data",
             python_callable=validate_data,
-            execution_timeout=timedelta(
-                minutes=5
-            ),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 5 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 5 phút
             pool="default_pool",
         )
 
@@ -5007,9 +5369,27 @@ with DAG(**DAG_CONFIG) as dag:
         task_aggregate_and_notify = PythonOperator(
             task_id="aggregate_and_notify",
             python_callable=aggregate_and_notify,
-            execution_timeout=timedelta(
-                minutes=5
-            ),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 10 phút
+            pool="default_pool",
+            trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
+        )
+
+    # TaskGroup: Health Check
+    with TaskGroup("health_check") as health_check_group:
+        task_health_check = PythonOperator(
+            task_id="health_check_monitoring",
+            python_callable=health_check_monitoring,
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 5 phút
+            pool="default_pool",
+            trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
+        )
+
+    # TaskGroup: Cleanup Cache
+    with TaskGroup("cleanup") as cleanup_group:
+        task_cleanup_cache = PythonOperator(
+            task_id="cleanup_redis_cache",
+            python_callable=cleanup_redis_cache,
+            execution_timeout=timedelta(minutes=5),  # TEST MODE: Giảm timeout xuống 5 phút,  # Timeout 5 phút
             pool="default_pool",
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
@@ -5019,9 +5399,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_backup_database = PythonOperator(
             task_id="backup_database",
             python_callable=backup_database,
-            execution_timeout=timedelta(
-                minutes=10
-            ),  # TEST MODE: Giảm timeout xuống 10 phút,  # Timeout 15 phút
+            execution_timeout=timedelta(minutes=10),  # TEST MODE: Giảm timeout xuống 10 phút,  # Timeout 15 phút
             pool="default_pool",
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
@@ -5031,10 +5409,10 @@ with DAG(**DAG_CONFIG) as dag:
 
     # Dependencies giữa các TaskGroup
     # Load categories trước, sau đó prepare crawl kwargs
-    task_load_categories >> task_prepare_crawl
+        task_load_categories >> task_prepare
 
     # Prepare crawl kwargs -> crawl category (dynamic mapping)
-    task_prepare_crawl >> task_crawl_category
+        task_prepare >> task_crawl_category
 
     # Crawl category -> merge products (merge chạy khi tất cả crawl tasks done)
     task_crawl_category >> task_merge_products
@@ -5045,12 +5423,14 @@ with DAG(**DAG_CONFIG) as dag:
     # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> validate -> aggregate and notify
     task_save_products >> task_prepare_detail
     # Dependencies trong detail group đã được định nghĩa ở dòng 1800
-    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> backup_database
+    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database
     (
         task_save_products_with_detail
         >> task_transform_products
         >> task_load_products
         >> task_validate_data
         >> task_aggregate_and_notify
+        >> task_health_check
+        >> task_cleanup_cache
         >> task_backup_database
     )
