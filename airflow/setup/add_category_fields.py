@@ -28,11 +28,12 @@ def run_migration():
     print("=" * 70)
     
     # Lấy database config từ environment variables
+    # trufflehog:ignore - Development defaults, production uses .env
     db_host = os.getenv("POSTGRES_HOST", "localhost")
     db_port = int(os.getenv("POSTGRES_PORT", "5432"))
     db_name = os.getenv("POSTGRES_DB", "crawl_data")
     db_user = os.getenv("POSTGRES_USER", "postgres")
-    db_password = os.getenv("POSTGRES_PASSWORD", "postgres")
+    db_password = os.getenv("POSTGRES_PASSWORD", "postgres")  # DEVELOPMENT ONLY
     
     # Thử đọc từ .env file nếu có
     env_file = project_root / ".env"

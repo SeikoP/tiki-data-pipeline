@@ -109,7 +109,7 @@ def _get_tqdm():
                             flush=True,
                         )
 
-            def set_postfix(self, postfix=None):  # noqa: ARG002
+            def set_postfix(self, _postfix=None):
                 pass
 
         return FakeTqdm
@@ -230,6 +230,11 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
         "profile.default_content_setting_values.notifications": 2,
     }
     chrome_options.add_experimental_option("prefs", prefs)
+    # Faster page load
+    try:
+        chrome_options.page_load_strategy = "eager"
+    except Exception:
+        pass
 
     # Ưu tiên dùng ChromeDriver có sẵn trong PATH (nhanh nhất)
     try:
@@ -261,13 +266,18 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
     try:
         driver.set_page_load_timeout(timeout)
         driver.get(url)
-        time.sleep(2)  # Chờ JavaScript load
+        time.sleep(0.5)  # Chờ JavaScript load (optimized)
 
-        # Scroll để load lazy images
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-        time.sleep(1)
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(1)
+        # Scroll để load lazy images (optimized)
+        try:
+            driver.execute_script("window.scrollTo(0, 500);")
+            time.sleep(0.3)
+            driver.execute_script("window.scrollTo(0, 1500);")
+            time.sleep(0.5)
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+        except Exception:
+            pass
 
         html = driver.page_source
 

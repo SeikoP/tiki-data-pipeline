@@ -13,10 +13,12 @@ except ImportError:
     sys.exit(1)
 
 # Lấy thông tin từ environment
+# SECURITY: Defaults are for testing only - production MUST use .env
+# trufflehog:ignore - Test file with safe defaults
 host = os.getenv("POSTGRES_HOST", "postgres")
 port = int(os.getenv("POSTGRES_PORT", "5432"))
 user = os.getenv("POSTGRES_USER", "airflow_user")
-password = os.getenv("POSTGRES_PASSWORD", "")
+password = os.getenv("POSTGRES_PASSWORD", "")  # Must be set in .env
 database = os.getenv("POSTGRES_DB", "airflow")
 
 print("Testing PostgreSQL connection...")

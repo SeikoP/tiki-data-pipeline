@@ -83,12 +83,27 @@ def get_selenium_options(headless: bool = True) -> Any | None:
         chrome_options.add_argument(
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
-        # Tắt images để tăng tốc (nếu không cần)
+        # Performance optimizations
         prefs = {
-            "profile.managed_default_content_settings.images": 2,  # Block images
+            "profile.managed_default_content_settings.images": 2,  # Block images for faster loading
             "profile.default_content_setting_values.notifications": 2,
+            "profile.default_content_setting_values.media_stream": 2,  # Block media streams
+            "disk-cache-size": 4096,  # Limit cache size
         }
         chrome_options.add_experimental_option("prefs", prefs)
+
+        # Faster page load: don't wait for all resources
+        try:
+            chrome_options.page_load_strategy = "eager"
+        except Exception:
+            # Older Selenium versions may not support the attribute
+            pass
+
+        # Additional performance flags
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-plugins")
+        chrome_options.add_argument("--disable-infobars")
+        chrome_options.add_argument("--disable-notifications")
         return chrome_options
     except ImportError:
         return None
@@ -281,7 +296,7 @@ class SeleniumDriverPool:
         """Context manager entry"""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
         """Context manager exit - cleanup pool"""
         self.cleanup()
 

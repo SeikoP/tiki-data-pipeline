@@ -1,12 +1,24 @@
 """
-Script Python để backup PostgreSQL database
-Backup vào thư mục backups/postgres với timestamp
+Script Python để backup PostgreSQL database.
+
+Tối ưu và sửa lỗi:
+- Fallback lấy biến môi trường (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_HOST, POSTGRES_PORT)
+    thay vì chỉ đọc từ .env (Airflow container thường không có file .env root).
+- Tự động chọn phương thức backup:
+        1. docker exec pg_dump (khi Docker daemon khả dụng và container Postgres đang chạy)
+        2. pg_dump kết nối network trực tiếp (-h postgres -p 5432) khi không dùng được docker.
+- Trả về exit code chính xác (0 thành công, 1 lỗi) để Airflow task nhận diện.
+- In ra thông tin lỗi đầy đủ để stderr được capture (tránh dòng lỗi trống).
+- Giữ định dạng file dump custom (-Fc) mặc định.
 """
 
+import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 # Đường dẫn project root
 SCRIPT_DIR = Path(__file__).parent
@@ -14,31 +26,49 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 BACKUP_DIR = PROJECT_ROOT / "backups" / "postgres"
 
 # Container name
-CONTAINER_NAME = "tiki-data-pipeline-postgres-1"
+CONTAINER_NAME = os.getenv("POSTGRES_CONTAINER_NAME", "tiki-data-pipeline-postgres-1")
 
 
-def get_env_value(key: str, default: str | None = None) -> str | None:
-    """Lấy giá trị từ .env file"""
+def get_env_value(key: str, default: Optional[str] = None) -> Optional[str]:
+    """Lấy giá trị từ environment hoặc fallback .env nếu tồn tại"""
+    val = os.getenv(key)
+    if val:
+        return val
     env_file = PROJECT_ROOT / ".env"
-    if not env_file.exists():
-        return default
-
-    with open(env_file, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith(f"{key}="):
-                return line.split("=", 1)[1].strip()
+    if env_file.exists():
+        try:
+            with open(env_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith(f"{key}="):
+                        return line.split("=", 1)[1].strip()
+        except Exception:
+            return default
     return default
 
 
+def docker_cli_available() -> bool:
+    """Kiểm tra xem docker CLI và socket có sẵn không"""
+    if shutil.which("docker") is None:
+        return False
+    # Nếu không có quyền truy cập socket /var/run/docker.sock thì không dùng được
+    sock_path = Path("/var/run/docker.sock")
+    if not sock_path.exists():
+        return False
+    return True
+
+
 def check_container_running() -> bool:
-    """Kiểm tra container có đang chạy không"""
+    """Kiểm tra container Postgres có đang chạy không (yêu cầu docker)"""
+    if not docker_cli_available():
+        return False
     try:
         result = subprocess.run(
             ["docker", "ps", "--filter", f"name={CONTAINER_NAME}", "--format", "{{.Names}}"],
             capture_output=True,
             text=True,
             check=False,
+            timeout=5,
         )
         return CONTAINER_NAME in result.stdout
     except Exception:
@@ -57,10 +87,12 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
     """
     # Lấy thông tin từ .env
     postgres_user = get_env_value("POSTGRES_USER", "airflow_user") or "airflow_user"
-    postgres_password = get_env_value("POSTGRES_PASSWORD", "")
+    postgres_password = get_env_value("POSTGRES_PASSWORD", "") or ""
+    postgres_host = get_env_value("POSTGRES_HOST", "postgres") or "postgres"
+    postgres_port = get_env_value("POSTGRES_PORT", "5432") or "5432"
 
     if not postgres_password:
-        print("❌ Không tìm thấy POSTGRES_PASSWORD trong .env")
+        print("❌ Không tìm thấy POSTGRES_PASSWORD trong environment hoặc .env")
         return False
 
     # Type narrowing: postgres_password is guaranteed to be str here
@@ -90,8 +122,10 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
     print(f"   Format: {format_type}")
     print(f"   File: {backup_file}")
 
-    try:
-        # Chạy pg_dump trong container
+    # Quyết định phương thức backup
+    use_docker = check_container_running()
+    if use_docker:
+        method = "docker-exec"
         cmd = [
             "docker",
             "exec",
@@ -104,10 +138,29 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
             format_flag,
             db_name,
         ]
+    else:
+        method = "network"
+        cmd = [
+            "pg_dump",
+            "-h",
+            postgres_host,
+            "-p",
+            str(postgres_port),
+            "-U",
+            postgres_user,
+            format_flag,
+            db_name,
+        ]
 
-        # Mở file để ghi
+    print(f"🔧 Phương thức backup: {method}")
+    if method == "network":
+        print(f"   Host: {postgres_host}:{postgres_port}")
+
+    try:
+        env = os.environ.copy()
+        env["PGPASSWORD"] = postgres_password
         with open(backup_file, "wb") as f:
-            result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=False)
+            result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=False, timeout=600, env=env)
 
         if result.returncode == 0:
             file_size = backup_file.stat().st_size
@@ -116,14 +169,22 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
             print(f"   Size: {size_mb:.2f} MB")
             return True
         else:
-            error_msg = result.stderr.decode("utf-8", errors="ignore")
-            print(f"❌ Lỗi khi backup {db_name}:")
-            print(f"   {error_msg}")
-            # Xóa file nếu backup lỗi
+            error_msg = result.stderr.decode("utf-8", errors="ignore") or "(Không có stderr)"
+            print(f"❌ Lỗi khi backup {db_name} (method={method}):")
+            print(error_msg)
             if backup_file.exists():
                 backup_file.unlink()
             return False
-
+    except FileNotFoundError as e:
+        print("❌ pg_dump không tìm thấy. Cần cài đặt postgresql-client trong container.")
+        if backup_file.exists():
+            backup_file.unlink()
+        return False
+    except subprocess.TimeoutExpired:
+        print("❌ Timeout khi chạy pg_dump")
+        if backup_file.exists():
+            backup_file.unlink()
+        return False
     except Exception as e:
         print(f"❌ Exception khi backup {db_name}: {e}")
         if backup_file.exists():
@@ -184,13 +245,11 @@ def main():
         list_backups()
         return
 
-    # Kiểm tra container
-    if not check_container_running():
-        print(f"❌ Container PostgreSQL không đang chạy: {CONTAINER_NAME}")
-        print("💡 Chạy: docker compose up -d postgres")
-        sys.exit(1)
-
-    print(f"✅ Container PostgreSQL đang chạy: {CONTAINER_NAME}")
+    # Thông tin môi trường
+    print(f"🔐 POSTGRES_USER: {get_env_value('POSTGRES_USER', 'airflow_user')}")
+    # Ẩn password length only
+    pwd = get_env_value('POSTGRES_PASSWORD', '') or ''
+    print(f"🔐 POSTGRES_PASSWORD: {'*' * len(pwd) if pwd else '(missing)'}")
     print()
 
     # Thực hiện backup
@@ -199,9 +258,11 @@ def main():
     if args.database == "all":
         print("🔄 Backup tất cả databases...")
         print()
-        success = backup_database("airflow", args.format) and success
+        # Backup airflow metadata (optional) - ignore failure
+        airflow_ok = backup_database("airflow", args.format)
         print()
-        success = backup_database("crawl_data", args.format) and success
+        data_ok = backup_database("crawl_data", args.format)
+        success = airflow_ok and data_ok
     else:
         success = backup_database(args.database, args.format)
 

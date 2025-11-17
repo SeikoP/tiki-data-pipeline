@@ -49,6 +49,10 @@ htmlcov/
 .env.*.local
 *.local
 
+# Additional .env files in subdirectories (CRITICAL SECURITY)
+src/common/.env
+**/common/.env
+
 # Data directories (ingest / processed outputs)
 # These can be large; tracked only if intentionally committed.
 data/raw/

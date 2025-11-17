@@ -102,10 +102,13 @@ stats = {
 
 
 def crawl_single_category(
-    url, parent_url, level, max_level, visited_urls, cache_dir="data/raw/cache"
+    url, parent_url, level, max_level, visited_urls, cache_dir="data/raw/cache", driver_pool=None
 ):
     """
     Crawl một danh mục đơn lẻ (thread-safe)
+
+    Args:
+        driver_pool: Optional SeleniumDriverPool for driver reuse
 
     Returns:
         tuple: (success: bool, categories: list, error: str)
@@ -133,8 +136,28 @@ def crawl_single_category(
                 pass
 
     try:
-        # Crawl với Selenium (không verbose để tránh spam log)
-        html_content = crawl_with_selenium(url, save_html=False, verbose=False)
+        # Crawl với Selenium (ưu tiên driver pool nếu có)
+        html_content = None
+        if driver_pool is not None:
+            driver = driver_pool.get_driver()
+            if driver is not None:
+                try:
+                    # Import crawl_with_driver nếu có
+                    try:
+                        from extract_category_link_selenium import crawl_with_driver
+
+                        html_content = crawl_with_driver(
+                            driver, url, save_html=False, verbose=False
+                        )
+                    except (ImportError, AttributeError):
+                        # Fallback: crawl_with_driver chưa có
+                        pass
+                finally:
+                    driver_pool.return_driver(driver)
+
+        # Fallback: tạo driver riêng nếu pool không có hoặc fail
+        if html_content is None:
+            html_content = crawl_with_selenium(url, save_html=False, verbose=False)
 
         # Parse danh mục con
         child_categories = parse_categories(html_content, parent_url=url, level=level + 1)
@@ -174,7 +197,9 @@ def crawl_single_category(
         return False, [], error_msg
 
 
-def crawl_level_parallel(urls_to_crawl, parent_urls, level, max_level, visited_urls, max_workers=3):
+def crawl_level_parallel(
+    urls_to_crawl, parent_urls, level, max_level, visited_urls, max_workers=3, driver_pool=None
+):
     """
     Crawl song song nhiều danh mục cùng level
 
@@ -185,6 +210,7 @@ def crawl_level_parallel(urls_to_crawl, parent_urls, level, max_level, visited_u
         max_level: Độ sâu tối đa
         visited_urls: Set các URL đã crawl
         max_workers: Số thread tối đa (giới hạn để tránh quá tải)
+        driver_pool: Optional SeleniumDriverPool for driver reuse
 
     Returns:
         dict: {url: (success, categories, error)}
@@ -208,7 +234,14 @@ def crawl_level_parallel(urls_to_crawl, parent_urls, level, max_level, visited_u
             future_to_url = {}
             for url, parent_url in tasks:
                 future = executor.submit(
-                    crawl_single_category, url, parent_url, level, max_level, visited_urls
+                    crawl_single_category,
+                    url,
+                    parent_url,
+                    level,
+                    max_level,
+                    visited_urls,
+                    "data/raw/cache",
+                    driver_pool,
                 )
                 future_to_url[future] = (url, parent_url)
 
@@ -262,55 +295,90 @@ def crawl_category_recursive_optimized(
     if all_categories is None:
         all_categories = []
 
-    # Queue các URL cần crawl theo level
-    # Format: {level: [(url, parent_url), ...]}
-    queue = defaultdict(list)
-    queue[0] = [(root_url, None)]
+    # Initialize driver pool for reuse
+    driver_pool = None
+    try:
+        # Try to import SeleniumDriverPool
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "crawl_utils",
+                os.path.join(os.path.dirname(__file__), "utils.py"),
+            )
+            if spec and spec.loader:
+                utils_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(utils_module)
+                SeleniumDriverPool = getattr(utils_module, "SeleniumDriverPool", None)
+                if SeleniumDriverPool:
+                    driver_pool = SeleniumDriverPool(
+                        pool_size=max_workers, headless=True, timeout=90
+                    )
+                    print(f"✅ Đã khởi tạo driver pool với {max_workers} drivers")
+        except Exception:
+            pass  # Fallback: không dùng pool
 
-    # Crawl từng level một
-    for current_level in range(max_level + 1):
-        if current_level not in queue or not queue[current_level]:
-            continue
+        # Queue các URL cần crawl theo level
+        # Format: {level: [(url, parent_url), ...]}
+        queue = defaultdict(list)
+        queue[0] = [(root_url, None)]
 
-        urls_to_crawl = [url for url, _ in queue[current_level]]
-        parent_urls = [parent for _, parent in queue[current_level]]
+        # Crawl từng level một
+        for current_level in range(max_level + 1):
+            if current_level not in queue or not queue[current_level]:
+                continue
 
-        # Lọc các URL chưa crawl
-        new_urls = []
-        new_parents = []
-        for url, parent in zip(urls_to_crawl, parent_urls, strict=False):
-            if url not in visited_urls:
-                new_urls.append(url)
-                new_parents.append(parent)
+            urls_to_crawl = [url for url, _ in queue[current_level]]
+            parent_urls = [parent for _, parent in queue[current_level]]
 
-        if not new_urls:
-            continue
+            # Lọc các URL chưa crawl
+            new_urls = []
+            new_parents = []
+            for url, parent in zip(urls_to_crawl, parent_urls, strict=False):
+                if url not in visited_urls:
+                    new_urls.append(url)
+                    new_parents.append(parent)
 
-        print(f"\n{'='*70}")
-        print(f"📊 Level {current_level}: Đang crawl {len(new_urls)} danh mục...")
-        print(f"{'='*70}")
+            if not new_urls:
+                continue
 
-        # Crawl song song
-        results = crawl_level_parallel(
-            new_urls, new_parents, current_level, max_level, visited_urls, max_workers=max_workers
-        )
+            print(f"\n{'='*70}")
+            print(f"📊 Level {current_level}: Đang crawl {len(new_urls)} danh mục...")
+            print(f"{'='*70}")
 
-        # Xử lý kết quả và chuẩn bị level tiếp theo
-        for url, (success, categories, error) in results.items():
-            if success:
-                # Thêm vào danh sách tổng
-                all_categories.extend(categories)
+            # Crawl song song
+            results = crawl_level_parallel(
+                new_urls,
+                new_parents,
+                current_level,
+                max_level,
+                visited_urls,
+                max_workers=max_workers,
+                driver_pool=driver_pool,
+            )
 
-                # Thêm các danh mục con vào queue level tiếp theo
-                if current_level < max_level:
-                    for cat in categories:
-                        child_url = cat["url"]
-                        if child_url not in visited_urls:
-                            queue[current_level + 1].append((child_url, url))
-            else:
-                print(f"  ❌ Lỗi crawl {url}: {error}")
+            # Xử lý kết quả và chuẩn bị level tiếp theo
+            for url, (success, categories, error) in results.items():
+                if success:
+                    # Thêm vào danh sách tổng
+                    all_categories.extend(categories)
 
-    return all_categories
+                    # Thêm các danh mục con vào queue level tiếp theo
+                    if current_level < max_level:
+                        for cat in categories:
+                            child_url = cat["url"]
+                            if child_url not in visited_urls:
+                                queue[current_level + 1].append((child_url, url))
+                else:
+                    print(f"  ❌ Lỗi crawl {url}: {error}")
+
+        return all_categories
+    finally:
+        # Cleanup driver pool
+        if driver_pool is not None:
+            try:
+                driver_pool.cleanup()
+                print("✅ Đã cleanup driver pool")
+            except Exception:
+                pass
 
 
 def print_stats():

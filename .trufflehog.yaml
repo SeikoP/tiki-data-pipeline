@@ -1,0 +1,13 @@
+# TruffleHog Configuration
+# https://github.com/trufflesecurity/trufflehog
+#
+# Note: TruffleHog's YAML config has limited support
+# Use command-line flags for advanced filtering
+#
+# Recommended scan command:
+# docker run --rm -v "${PWD}:/scan" \
+#   ghcr.io/trufflesecurity/trufflehog:latest \
+#   filesystem /scan --only-verified --no-update
+
+# Only report verified secrets (ignore unverified/false positives)
+only-verified: true

@@ -1669,6 +1669,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 db_user = Variable.get(
                     "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
                 )
+                # trufflehog:ignore - Test DAG fallback, production uses Airflow Variables
                 db_password = Variable.get(
                     "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
                 )
@@ -3981,6 +3982,7 @@ def load_products(**context) -> dict[str, Any]:
             db_user = Variable.get(
                 "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
             )
+            # trufflehog:ignore - Test DAG fallback, production uses Airflow Variables
             db_password = Variable.get(
                 "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
             )

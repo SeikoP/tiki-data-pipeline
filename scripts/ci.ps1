@@ -291,6 +291,26 @@ function Invoke-CIFast {
     }
 }
 
+function Invoke-CIQuick {
+    Write-Host "`n⚡ Running quick CI checks (no DAG validation)..." -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    
+    try {
+        Invoke-FormatCheck
+        Invoke-Lint
+        Invoke-PerfCheck
+        
+        Write-Host "`n========================================" -ForegroundColor Green
+        Write-Host "✅ Quick CI checks passed!" -ForegroundColor Green
+        Write-Host "========================================" -ForegroundColor Green
+    } catch {
+        Write-Host "`n========================================" -ForegroundColor Red
+        Write-Host "❌ Quick CI checks failed!" -ForegroundColor Red
+        Write-Host "========================================" -ForegroundColor Red
+        exit 1
+    }
+}
+
 # Main command router
 switch ($Command.ToLower()) {
     "help" { Show-Help }
@@ -319,6 +339,7 @@ switch ($Command.ToLower()) {
     "clean" { Invoke-Clean }
     "ci-local" { Invoke-CILocal }
     "ci-fast" { Invoke-CIFast }
+    "ci-quick" { Invoke-CIQuick }
     default {
         Write-Host "❌ Unknown command: $Command" -ForegroundColor Red
         Show-Help
