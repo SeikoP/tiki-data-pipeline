@@ -873,6 +873,14 @@ def extract_product_detail(html_content, url, verbose=True):
                 print(f"[Parse] Lỗi khi parse __NEXT_DATA__: {e}")
             pass
 
+    # Fix: Ensure category_path is never None, use empty list if not populated
+    if product_data.get("category_path") is None:
+        product_data["category_path"] = []
+    
+    # Ensure category_path is always a list
+    if not isinstance(product_data.get("category_path"), list):
+        product_data["category_path"] = [str(product_data["category_path"])]
+
     return product_data
 
 
@@ -962,6 +970,14 @@ async def crawl_product_detail_async(
 
             if verbose:
                 print(f"[Async] ✅ Crawl thành công: {product_data.get('name', 'Unknown')[:50]}...")
+
+            # Fix: Ensure category_path is never None, use empty list if not populated
+            if product_data.get("category_path") is None:
+                product_data["category_path"] = []
+            
+            # Ensure category_path is always a list
+            if not isinstance(product_data.get("category_path"), list):
+                product_data["category_path"] = [str(product_data["category_path"])]
 
             return product_data
 
