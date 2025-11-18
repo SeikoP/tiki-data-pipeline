@@ -909,8 +909,18 @@ async def crawl_product_detail_async(
     # Tạo session nếu chưa có
     create_session = session is None
     if create_session:
-        timeout = aiohttp.ClientTimeout(total=30)
+        import aiohttp
+        
+        # Tối ưu: TCPConnector với pool size lớn hơn
+        connector = aiohttp.TCPConnector(
+            limit=100,           # Total limit for concurrent connections
+            limit_per_host=10,   # Limit per host (Tiki)
+            ttl_dns_cache=300,   # DNS cache 5 minutes
+            ssl=False,           # Disable SSL verification cho tốc độ
+        )
+        timeout = aiohttp.ClientTimeout(total=20, connect=10)  # Tối ưu: giảm timeout
         session = aiohttp.ClientSession(
+            connector=connector,
             timeout=timeout,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

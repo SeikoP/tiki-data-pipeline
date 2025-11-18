@@ -1977,8 +1977,8 @@ def crawl_product_batch(
 
         # Sử dụng hàm đã được import ở đầu file
         # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file
-        pool_size = int(Variable.get("TIKI_DETAIL_POOL_SIZE", default="5"))
-        driver_pool = _SeleniumDriverPool(pool_size=pool_size, headless=True, timeout=90)
+        pool_size = int(Variable.get("TIKI_DETAIL_POOL_SIZE", default="15"))  # Tối ưu: tăng từ 5 -> 15
+        driver_pool = _SeleniumDriverPool(pool_size=pool_size, headless=True, timeout=60)  # Tối ưu: giảm timeout từ 90 -> 60s
 
         # Tạo event loop trước
         try:
@@ -2213,6 +2213,15 @@ def crawl_product_batch(
         # (Event loop đã được tạo ở trên)
         # Sử dụng asyncio.gather() để crawl parallel
         rate_limit_delay = float(Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="1.5"))
+        
+        # Tạo semaphore để limit concurrent tasks (tối ưu throughput)
+        max_concurrent = int(Variable.get("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="15"))
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def bounded_task(task_coro):
+            """Wrap task để respect semaphore limit"""
+            async with semaphore:
+                return await task_coro
 
         # Tạo tasks với rate limiting: stagger start times
         async def crawl_batch_parallel():
@@ -2225,10 +2234,17 @@ def crawl_product_batch(
                     import aiohttp
 
                     timeout = aiohttp.ClientTimeout(total=30)
+                    # Tạo connector với optimized pooling
+                    connector = aiohttp.TCPConnector(
+                        limit=50,  # Tổng connection limit
+                        limit_per_host=10,  # Connection limit per host
+                        ttl_dns_cache=300,  # Cache DNS query 5 phút
+                    )
                     # Tạo session trong async context (có event loop đang chạy)
                     # Đây là async function nên event loop đã có sẵn
                     session = aiohttp.ClientSession(
                         timeout=timeout,
+                        connector=connector,
                         headers={
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         },
@@ -2257,9 +2273,11 @@ def crawl_product_batch(
             for i, product in enumerate(product_batch):
                 delay = i * rate_limit_delay / len(product_batch)  # Phân tán delay
                 task = create_crawl_task(product, delay)
-                tasks.append(task)
+                # Wrap với bounded_task để respect semaphore
+                bounded = bounded_task(task)
+                tasks.append(bounded)
 
-            # Chạy tất cả tasks song song
+            # Chạy tất cả tasks song song (limited bởi semaphore)
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
             # Xử lý exceptions
@@ -5349,10 +5367,11 @@ with DAG(**DAG_CONFIG) as dag:
                 task_id="crawl_category",
                 python_callable=crawl_category_batch,
                 execution_timeout=timedelta(
-                    minutes=15
-                ),  # Timeout 15 phút mỗi batch (5 categories × 3 phút)
+                    minutes=12
+                ),  # Tối ưu: giảm từ 15 -> 12 phút
                 pool="default_pool",
                 retries=1,  # Retry 1 lần
+                retry_delay=timedelta(seconds=15),  # Tối ưu: thêm delay ngắn
             ).expand(op_kwargs=task_prepare.output)
         else:
             # Fallback: single-category processing
@@ -5471,8 +5490,8 @@ with DAG(**DAG_CONFIG) as dag:
 
             logger.info(f"✅ Retrieved {len(products_to_crawl)} products for detail crawl")
 
-            # Batch Processing: Chia products thành batches 10 products/batch
-            batch_size = 15
+            # Batch Processing: Chia products thành batches 12 products/batch (tối ưu: từ 15 -> 12 để parallel hơn)
+            batch_size = 12
             batches = []
             for i in range(0, len(products_to_crawl), batch_size):
                 batch = products_to_crawl[i : i + batch_size]
@@ -5510,17 +5529,17 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="crawl_product_detail",
             python_callable=crawl_product_batch,  # Dùng batch function thay vì single
             execution_timeout=timedelta(
-                minutes=20
-            ),  # Tăng timeout lên 20 phút cho batch (10 products × 2 phút)
+                minutes=15
+            ),  # Tối ưu: giảm từ 20 -> 15 phút (nhanh hơn)
             pool="default_pool",
-            retries=2,  # Giảm retry xuống 2 vì batch có thể retry individual products
-            retry_delay=timedelta(minutes=2),  # Delay 2 phút giữa các retry
+            retries=1,  # Tối ưu: giảm từ 2 -> 1 (nhanh hơn)
+            retry_delay=timedelta(seconds=30),  # Tối ưu: giảm từ 2 phút -> 30 giây
         ).expand(op_kwargs=task_prepare_detail_kwargs.output)
 
         task_merge_product_details = PythonOperator(
             task_id="merge_product_details",
             python_callable=merge_product_details,
-            execution_timeout=timedelta(minutes=60),  # Tăng timeout lên 60 phút cho nhiều products
+            execution_timeout=timedelta(minutes=30),  # Tối ưu: giảm từ 60 -> 30 phút
             pool="default_pool",
             trigger_rule="all_done",  # Chạy khi tất cả upstream tasks done
             # Tăng heartbeat interval để tránh timeout khi xử lý nhiều dữ liệu
