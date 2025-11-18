@@ -5,9 +5,10 @@ Tạo file docx chứa câu chuyện dữ liệu của dự án Tiki Data Pipeli
 
 import os
 import sys
+import argparse
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 try:
     import psycopg2
@@ -24,6 +25,18 @@ try:
 except ImportError:
     print("❌ Cần cài đặt python-docx: pip install python-docx")
     sys.exit(1)
+
+# Google Drive API (optional)
+try:
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    import pickle
+    GOOGLE_DRIVE_AVAILABLE = True
+except ImportError:
+    GOOGLE_DRIVE_AVAILABLE = False
 
 # Thêm src vào path để import modules
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -100,7 +113,10 @@ def analyze_database(conn) -> dict[str, Any]:
             SELECT 
                 (SELECT COUNT(*) FROM categories) as total_categories,
                 (SELECT COUNT(*) FROM products) as total_products,
-                (SELECT COUNT(DISTINCT category_url) FROM products WHERE category_url IS NOT NULL) as categories_with_products
+                (SELECT COUNT(DISTINCT category_url) FROM products WHERE category_url IS NOT NULL) as categories_with_products,
+                (SELECT COUNT(DISTINCT brand) FROM products WHERE brand IS NOT NULL) as total_brands,
+                (SELECT COUNT(CASE WHEN sales_count > 0 THEN 1 END) FROM products WHERE sales_count IS NOT NULL) as products_sold,
+                (SELECT COUNT(CASE WHEN sales_count > 1000 THEN 1 END) FROM products WHERE sales_count IS NOT NULL) as bestsellers
         """)
         stats["overview"] = dict(cur.fetchone())
         
@@ -274,7 +290,7 @@ def analyze_database(conn) -> dict[str, Any]:
         """)
         stats["price_sales_relationship"] = [dict(row) for row in cur.fetchall()]
         
-        # 11. Mối quan hệ giữa discount và sales
+        # 11. Mối quan hệ giữa discount và sales (loại bỏ truy vấn lặp)
         print("💰 Đang phân tích tác động của discount...")
         cur.execute("""
             SELECT 
@@ -331,6 +347,67 @@ def analyze_database(conn) -> dict[str, Any]:
             LIMIT 5
         """)
         stats["top_by_value"] = [dict(row) for row in cur.fetchall()]
+        
+        # 13. Phân tích sự phân bố sales
+        print("📈 Đang phân tích phân bố doanh số...")
+        cur.execute("""
+            SELECT 
+                COUNT(CASE WHEN sales_count = 0 THEN 1 END) as no_sales,
+                COUNT(CASE WHEN sales_count > 0 AND sales_count <= 100 THEN 1 END) as low_sales,
+                COUNT(CASE WHEN sales_count > 100 AND sales_count <= 500 THEN 1 END) as medium_sales,
+                COUNT(CASE WHEN sales_count > 500 AND sales_count <= 1000 THEN 1 END) as high_sales,
+                COUNT(CASE WHEN sales_count > 1000 THEN 1 END) as bestsellers,
+                MAX(sales_count) as max_sales,
+                PERCENTILE_CONT(0.5) WITHIN GROUP(ORDER BY sales_count) as median_sales,
+                AVG(sales_count) as avg_sales
+            FROM products
+            WHERE sales_count IS NOT NULL
+        """)
+        stats["sales_distribution"] = dict(cur.fetchone())
+        
+        # 14. Top 5 categories từ products
+        print("🏆 Đang lấy top categories theo doanh số...")
+        cur.execute("""
+            SELECT 
+                category_url,
+                COUNT(*) as product_count,
+                SUM(sales_count) as total_sales,
+                AVG(price) as avg_price,
+                AVG(rating_average) as avg_rating,
+                AVG(discount_percent) as avg_discount
+            FROM products
+            WHERE category_url IS NOT NULL
+            GROUP BY category_url
+            ORDER BY total_sales DESC
+            LIMIT 10
+        """)
+        stats["top_categories_by_sales"] = [dict(row) for row in cur.fetchall()]
+        
+        # 15. Phân tích official sellers
+        print("👑 Đang phân tích official sellers...")
+        cur.execute("""
+            SELECT 
+                COUNT(CASE WHEN seller_is_official = TRUE THEN 1 END) as official_products,
+                COUNT(CASE WHEN seller_is_official = FALSE THEN 1 END) as third_party_products,
+                AVG(CASE WHEN seller_is_official = TRUE THEN sales_count END) as avg_sales_official,
+                AVG(CASE WHEN seller_is_official = FALSE THEN sales_count END) as avg_sales_third_party,
+                AVG(CASE WHEN seller_is_official = TRUE THEN rating_average END) as avg_rating_official,
+                AVG(CASE WHEN seller_is_official = FALSE THEN rating_average END) as avg_rating_third_party
+            FROM products
+        """)
+        stats["official_analysis"] = dict(cur.fetchone())
+        
+        # 16. Phân tích stock
+        print("📦 Đang phân tích stock...")
+        cur.execute("""
+            SELECT 
+                COUNT(CASE WHEN stock_available = TRUE THEN 1 END) as in_stock,
+                COUNT(CASE WHEN stock_available = FALSE THEN 1 END) as out_of_stock,
+                AVG(CASE WHEN stock_available = TRUE THEN sales_count END) as avg_sales_in_stock,
+                AVG(CASE WHEN stock_available = FALSE THEN sales_count END) as avg_sales_out_of_stock
+            FROM products
+        """)
+        stats["stock_analysis"] = dict(cur.fetchone())
     
     return stats
 
@@ -345,6 +422,122 @@ def safe_format(value: Any, format_str: str = ",.0f") -> str:
         return str(value) if value else "N/A"
 
 
+def upload_to_google_drive(file_path: Path, folder_id: Optional[str] = None) -> Optional[str]:
+    """Upload file lên Google Drive
+    
+    Args:
+        file_path: Đường dẫn file cần upload
+        folder_id: ID của folder trên Google Drive (optional)
+    
+    Returns:
+        File ID nếu upload thành công, None nếu thất bại
+    """
+    if not GOOGLE_DRIVE_AVAILABLE:
+        print("\n❌ Google Drive API không khả dụng")
+        print("💡 Cài đặt: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client")
+        return None
+    
+    # Đường dẫn file credentials
+    credentials_file = PROJECT_ROOT /"docs"/ "credentials" / "google_drive_credentials.json"
+    token_file = PROJECT_ROOT / "docs" / "credentials" / "token.pickle"
+    
+    if not credentials_file.exists():
+        print(f"\n❌ Không tìm thấy credentials file: {credentials_file}")
+        print("💡 Tạo credentials tại: https://console.cloud.google.com/apis/credentials")
+        print("   - Tạo OAuth 2.0 Client ID (Desktop app)")
+        print("   - Download JSON và lưu vào credentials/google_drive_credentials.json")
+        return None
+    
+    creds = None
+    
+    # Load token nếu đã có
+    if token_file.exists():
+        with open(token_file, 'rb') as token:
+            creds = pickle.load(token)
+    
+    # Nếu không có credentials hợp lệ, yêu cầu login
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            print("🔄 Đang refresh token...")
+            creds.refresh(Request())
+        else:
+            print("🔐 Đang mở browser để xác thực Google Drive...")
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(credentials_file),
+                scopes=['https://www.googleapis.com/auth/drive.file']
+            )
+            creds = flow.run_local_server(port=0)
+        
+        # Lưu token
+        token_file.parent.mkdir(exist_ok=True)
+        with open(token_file, 'wb') as token:
+            pickle.dump(creds, token)
+        print("✅ Đã lưu token")
+    
+    try:
+        # Tạo service
+        service = build('drive', 'v3', credentials=creds)
+        
+        # Metadata file
+        file_metadata = {
+            'name': file_path.name,
+        }
+        
+        if folder_id:
+            file_metadata['parents'] = [folder_id]
+        
+        # Kiểm tra xem file đã tồn tại chưa
+        query = f"name='{file_path.name}'"
+        if folder_id:
+            query += f" and '{folder_id}' in parents"
+        query += " and trashed=false"
+        
+        results = service.files().list(
+            q=query,
+            spaces='drive',
+            fields='files(id, name)'
+        ).execute()
+        
+        existing_files = results.get('files', [])
+        
+        media = MediaFileUpload(str(file_path), mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        
+        if existing_files:
+            # Update file hiện tại
+            file_id = existing_files[0]['id']
+            print(f"\n🔄 Đang cập nhật file trên Google Drive...")
+            file = service.files().update(
+                fileId=file_id,
+                media_body=media
+            ).execute()
+            print(f"✅ Đã cập nhật file: {file.get('name')}")
+        else:
+            # Tạo file mới
+            print(f"\n📤 Đang upload file lên Google Drive...")
+            file = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, name, webViewLink'
+            ).execute()
+            print(f"✅ Đã upload file: {file.get('name')}")
+        
+        # Lấy link
+        file_id = file.get('id')
+        file_link = service.files().get(
+            fileId=file_id,
+            fields='webViewLink'
+        ).execute()
+        
+        print(f"🔗 Link: {file_link.get('webViewLink')}")
+        return file_id
+        
+    except Exception as e:
+        print(f"\n❌ Lỗi khi upload lên Google Drive: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def create_document(stats: dict[str, Any], output_path: Path):
     """Tạo file docx với câu chuyện dữ liệu"""
     doc = Document()
@@ -353,6 +546,41 @@ def create_document(stats: dict[str, Any], output_path: Path):
     def set_vietnamese_font(run):
         run.font.name = "Times New Roman"
         run._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
+    
+    # Helper: tạo tiêu đề mục dạng bullet (indent 0.25")
+    def add_section_title(text: str):
+        p = doc.add_paragraph(text, style="List Bullet")
+        p.paragraph_format.left_indent = Inches(0.25)
+        for run in p.runs:
+            set_vietnamese_font(run)
+            run.bold = True
+            run.font.size = Pt(12)
+        return p
+    
+    # Helper: định dạng đoạn nội dung thành sub-bullet (indent 0.5")
+    def format_as_subbullet(paragraph):
+        paragraph.style = doc.styles["List Bullet 2"]
+        paragraph.paragraph_format.left_indent = Inches(0.5)
+        for run in paragraph.runs:
+            set_vietnamese_font(run)
+            if run.font.size is None:
+                run.font.size = Pt(12)
+    
+    # Helper: tạo sub-bullet nhanh từ text
+    def add_subbullet_text(text: str, bold: bool = False):
+        p = doc.add_paragraph(style="List Bullet 2")
+        p.paragraph_format.left_indent = Inches(0.5)
+        run = p.add_run(text)
+        set_vietnamese_font(run)
+        run.font.size = Pt(12)
+        if bold:
+            run.bold = True
+        return p
+    
+    # Helper: spacer dòng trống có kiểm soát
+    def add_spacer(lines: int = 1):
+        for _ in range(lines):
+            doc.add_paragraph()
     
     # Title
     title = doc.add_heading("Câu Chuyện Dữ Liệu - Tiki Data Pipeline", 0)
@@ -363,7 +591,7 @@ def create_document(stats: dict[str, Any], output_path: Path):
         run.font.color.rgb = RGBColor(0, 51, 102)
     
     # Subtitle
-    subtitle = doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+    subtitle = doc.add_paragraph(f"Ngày cập nhật: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for run in subtitle.runs:
         set_vietnamese_font(run)
@@ -379,37 +607,23 @@ def create_document(stats: dict[str, Any], output_path: Path):
     doc.add_heading("Bối Cảnh: Thị Trường Thương Mại Điện Tử Việt Nam", 1)
     
     # Bối cảnh thị trường
-    context_market = doc.add_paragraph()
-    context_market.add_run("Thương mại điện tử Việt Nam đang phát triển mạnh mẽ, dự kiến đạt 49 tỷ USD vào năm 2025. ")
-    context_market.add_run("Tiki.vn là một trong những nền tảng thương mại điện tử hàng đầu, được thành lập từ năm 2010 với hàng triệu sản phẩm đa dạng. ")
-    context_market.add_run("Dữ liệu từ Tiki.vn phản ánh xu hướng mua sắm, hành vi tiêu dùng và cấu trúc thị trường, có giá trị nghiên cứu cao.")
-    
-    for run in context_market.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    add_subbullet_text(
+        "Thương mại điện tử Việt Nam đang phát triển mạnh mẽ, dự kiến đạt 49 tỷ USD vào năm 2025. Tiki.vn là một trong những nền tảng thương mại điện tử hàng đầu, được thành lập từ năm 2010 với hàng triệu sản phẩm đa dạng. Dữ liệu từ Tiki.vn phản ánh xu hướng mua sắm, hành vi tiêu dùng và cấu trúc thị trường, có giá trị nghiên cứu cao."
+    )
     
     doc.add_paragraph()  # Spacing
     
     # Ý nghĩa của dataset
-    context_meaning = doc.add_paragraph()
-    context_meaning.add_run("Dataset này không chỉ là danh sách sản phẩm, mà là cửa sổ để hiểu về thị trường thương mại điện tử Việt Nam. ")
-    context_meaning.add_run("Từ dataset có thể khám phá: xu hướng tiêu dùng, cấu trúc thị trường, hành vi mua sắm, sự cạnh tranh giữa các thương hiệu, và giá trị thị trường.")
-    
-    for run in context_meaning.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    add_subbullet_text(
+        "Dataset này không chỉ là danh sách sản phẩm, mà là cửa sổ để hiểu về thị trường thương mại điện tử Việt Nam. Từ dataset có thể khám phá: xu hướng tiêu dùng, cấu trúc thị trường, hành vi mua sắm, sự cạnh tranh giữa các thương hiệu, và giá trị thị trường."
+    )
     
     doc.add_paragraph()  # Spacing
     
     # Lý do chọn đề tài
     doc.add_heading("Lý Do Chọn Đề Tài", 1)
     
-    reason_intro = doc.add_paragraph()
-    reason_intro.add_run("Việc xây dựng dataset và phân tích dữ liệu từ Tiki.vn được lựa chọn dựa trên những lý do sau:")
-    
-    for run in reason_intro.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    add_subbullet_text("Việc xây dựng dataset và phân tích dữ liệu từ Tiki.vn được lựa chọn dựa trên những lý do sau:")
     
     reasons = [
         ("Tầm quan trọng của thương mại điện tử", 
@@ -432,54 +646,42 @@ def create_document(stats: dict[str, Any], output_path: Path):
     ]
     
     for idx, (title, content) in enumerate(reasons, 1):
-        reason_heading = doc.add_heading(f"{idx}. {title}", 2)
+        reason_heading = doc.add_paragraph(f"{idx}. {title}", style="List Bullet")
+        reason_heading.paragraph_format.left_indent = Inches(0.25)
         for run in reason_heading.runs:
             set_vietnamese_font(run)
+            run.bold = True
+            run.font.size = Pt(12)
         
-        reason_para = doc.add_paragraph(content)
+        reason_para = doc.add_paragraph(content, style="List Bullet 2")
+        reason_para.paragraph_format.left_indent = Inches(0.5)
         for run in reason_para.runs:
             set_vietnamese_font(run)
-            run.font.size = Pt(12)
+            run.font.size = Pt(11)
     
     doc.add_paragraph()  # Spacing
     
     # Lời mở đầu
     doc.add_heading("Lời Mở Đầu: Câu Chuyện Từ Dữ Liệu", 1)
-    intro = doc.add_paragraph()
-    intro.add_run("Đằng sau mỗi con số là một câu chuyện. ")
-    intro.add_run("Đằng sau mỗi sản phẩm là một lựa chọn của người tiêu dùng. ")
-    intro.add_run("Đằng sau mỗi danh mục là một xu hướng thị trường. ")
-    intro.add_run("Tài liệu này trình bày những câu chuyện được khám phá từ dữ liệu thu thập từ Tiki.vn, một trong những nền tảng thương mại điện tử hàng đầu Việt Nam.")
-    
-    for run in intro.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    add_subbullet_text(
+        "Đằng sau mỗi con số là một câu chuyện. Đằng sau mỗi sản phẩm là một lựa chọn của người tiêu dùng. Đằng sau mỗi danh mục là một xu hướng thị trường. Tài liệu này trình bày những câu chuyện được khám phá từ dữ liệu thu thập từ Tiki.vn, một trong những nền tảng thương mại điện tử hàng đầu Việt Nam."
+    )
     
     doc.add_paragraph()  # Spacing
     
     # Giới thiệu về dataset
     doc.add_heading("Về Dataset", 2)
-    dataset_intro = doc.add_paragraph()
-    dataset_intro.add_run("Dataset này chứa thông tin về hàng nghìn sản phẩm từ Tiki.vn, được thu thập và xử lý một cách có hệ thống. ")
-    dataset_intro.add_run("Mỗi sản phẩm trong dataset bao gồm thông tin chi tiết về: tên sản phẩm, giá cả, mô tả, đánh giá của người dùng, thông tin người bán, thương hiệu, số lượng đã bán, và nhiều chỉ số phân tích khác. ")
-    dataset_intro.add_run("Mỗi dòng dữ liệu không chỉ phản ánh thông tin về sản phẩm, mà còn cho thấy về thị trường, về hành vi mua sắm của người tiêu dùng, và về những xu hướng đang diễn ra.")
-    
-    for run in dataset_intro.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    add_subbullet_text(
+        "Dataset này chứa thông tin về hàng nghìn sản phẩm từ Tiki.vn, được thu thập và xử lý một cách có hệ thống. Mỗi sản phẩm trong dataset bao gồm thông tin chi tiết về: tên sản phẩm, giá cả, mô tả, đánh giá của người dùng, thông tin người bán, thương hiệu, số lượng đã bán, và nhiều chỉ số phân tích khác. Mỗi dòng dữ liệu không chỉ phản ánh thông tin về sản phẩm, mà còn cho thấy về thị trường, về hành vi mua sắm của người tiêu dùng, và về những xu hướng đang diễn ra."
+    )
     
     doc.add_paragraph()  # Spacing
     
     # Câu chuyện từ dữ liệu
     doc.add_heading("Những Câu Hỏi Nghiên Cứu", 2)
-    story_intro = doc.add_paragraph()
-    story_intro.add_run("Khi bắt đầu với dataset này, có nhiều câu hỏi nghiên cứu được đặt ra. ")
-    story_intro.add_run("Dữ liệu sẽ giúp trả lời những câu hỏi đó. ")
-    story_intro.add_run("Dưới đây là những vấn đề có thể khám phá từ dataset:")
-    
-    for run in story_intro.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    add_subbullet_text(
+        "Khi bắt đầu với dataset này, có nhiều câu hỏi nghiên cứu được đặt ra. Dữ liệu sẽ giúp trả lời những câu hỏi đó. Dưới đây là những vấn đề có thể khám phá từ dataset:"
+    )
     
     story_points = [
         "Thị trường Tiki có quy mô như thế nào? Có bao nhiêu sản phẩm và danh mục?",
@@ -491,94 +693,75 @@ def create_document(stats: dict[str, Any], output_path: Path):
     ]
     
     for point in story_points:
-        p = doc.add_paragraph(point, style="List Bullet")
+        p = doc.add_paragraph(point, style="List Bullet 2")
         for run in p.runs:
             set_vietnamese_font(run)
             run.font.size = Pt(12)
     
     doc.add_paragraph()  # Spacing
     
-    # 1. Tổng quan
-    doc.add_heading("1. Tổng Quan Dữ Liệu: Mẫu Nghiên Cứu", 1)
+    # 1. Tổng quan (bullet format)
+    add_section_title("1. Tổng Quan Dữ Liệu: Mẫu Nghiên Cứu")
     overview = stats["overview"]
     overview_text = doc.add_paragraph()
     overview_text.add_run("Sau quá trình thu thập và xử lý, dataset đã được xây dựng với quy mô đáng kể. ")
     overview_text.add_run(f"Dataset hiện tại bao gồm ")
     overview_text.add_run(f"{overview['total_products']:,}").bold = True
     overview_text.add_run(" sản phẩm từ ")
-    overview_text.add_run(f"{overview['total_categories']:,}").bold = True
-    overview_text.add_run(" danh mục khác nhau. ")
-    overview_text.add_run(f"Trong đó, có ")
     overview_text.add_run(f"{overview['categories_with_products']:,}").bold = True
-    overview_text.add_run(" danh mục thực sự có sản phẩm. ")
-    overview_text.add_run("Cần lưu ý rằng đây là một mẫu dữ liệu được thu thập, không phải toàn bộ sản phẩm trên Tiki.vn. ")
-    overview_text.add_run("Tuy nhiên, với quy mô này, dataset vẫn đủ lớn và đại diện để có thể nghiên cứu về các xu hướng và đặc điểm của thị trường thương mại điện tử Việt Nam.")
+    overview_text.add_run(" danh mục khác nhau, được cung cấp bởi ")
+    overview_text.add_run(f"{overview['total_brands']:,}").bold = True
+    overview_text.add_run(" thương hiệu. ")
     
-    for run in overview_text.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    # Tính toán tỷ lệ bestsellers
+    if overview['total_products'] > 0:
+        bestseller_ratio = (overview['bestsellers'] / overview['total_products']) * 100
+        overview_text.add_run(f"Thú vị là, có ")
+        overview_text.add_run(f"{bestseller_ratio:.1f}%").bold = True
+        overview_text.add_run(f" sản phẩm được xem là 'bestseller' (bán > 1000 cái).")
     
-    # Insights từ tổng quan
-    insight_para = doc.add_paragraph()
-    if overview["categories_with_products"] and overview["total_categories"]:
-        coverage_ratio = (overview["categories_with_products"] / overview["total_categories"]) * 100
-        insight_para.add_run(f"Một phát hiện thú vị: trong số ")
-        insight_para.add_run(f"{overview['total_categories']:,}").bold = True
-        insight_para.add_run(" danh mục được thu thập, có ")
-        insight_para.add_run(f"{overview['categories_with_products']:,}").bold = True
-        insight_para.add_run(f" danh mục ({coverage_ratio:.1f}%) thực sự có sản phẩm. ")
-        insight_para.add_run("Điều này cho thấy một số danh mục có thể là danh mục cha (chỉ để phân loại) hoặc danh mục trống, phản ánh cách Tiki tổ chức cấu trúc sản phẩm.")
-    
-    for run in insight_para.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    format_as_subbullet(overview_text)
+    add_spacer()
     
     doc.add_paragraph()  # Spacing
     
-    # 2. Phân tích Categories
-    doc.add_heading("2. Câu Chuyện Về Danh Mục: Cấu Trúc Thị Trường", 1)
-    cat_stats = stats["categories"]
+    # 2. Categories
+    add_section_title("2. Câu Chuyện Về Danh Mục: Cấu Trúc Thị Trường")
     cat_text = doc.add_paragraph()
     cat_text.add_run("Danh mục sản phẩm phản ánh cách tổ chức và phân loại thị trường. ")
-    cat_text.add_run("Tiki.vn tổ chức sản phẩm theo cấu trúc phân cấp đa tầng với ")
-    cat_text.add_run(f"{cat_stats['distinct_levels']}").bold = True
-    cat_text.add_run(" cấp độ khác nhau, từ cấp ")
-    cat_text.add_run(f"{cat_stats['min_level']}").bold = True
-    cat_text.add_run(" đến cấp ")
-    cat_text.add_run(f"{cat_stats['max_level']}").bold = True
-    cat_text.add_run(". ")
-    if cat_stats["avg_products_per_category"]:
-        cat_text.add_run(f"Trung bình mỗi danh mục có ")
-        cat_text.add_run(f"{safe_format(cat_stats.get('avg_products_per_category'), '.0f')}").bold = True
-        cat_text.add_run(" sản phẩm.")
     
-    for run in cat_text.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    if overview.get("categories_with_products"):
+        cat_text.add_run(f"Dữ liệu cho thấy sản phẩm được phân bố vào ")
+        cat_text.add_run(f"{overview['categories_with_products']:,}").bold = True
+        cat_text.add_run(" danh mục khác nhau. ")
     
-    # Insights về danh mục
-    if stats["top_categories"]:
+    cat_text.add_run("Mỗi danh mục đại diện cho một phân khúc thị trường với những đặc điểm riêng về giá cả, thương hiệu, và hành vi mua sắm của người tiêu dùng.")
+    
+    format_as_subbullet(cat_text)
+    
+    # Insights về danh mục từ top_categories_by_sales
+    if stats.get("top_categories_by_sales"):
         top_cat_insight = doc.add_paragraph()
-        top_cat = stats["top_categories"][0] if stats["top_categories"] else None
+        top_cat = stats["top_categories_by_sales"][0] if stats["top_categories_by_sales"] else None
         if top_cat:
-            top_cat_insight.add_run("Danh mục có nhiều sản phẩm nhất là ")
-            top_cat_insight.add_run(f'"{top_cat["name"]}"').bold = True
-            top_cat_insight.add_run(f" với ")
-            top_cat_insight.add_run(f"{top_cat['product_count']:,}").bold = True
-            top_cat_insight.add_run(" sản phẩm. ")
+            top_cat_insight.add_run("Danh mục có doanh số cao nhất là: ")
+            top_cat_insight.add_run(f"{top_cat['product_count']:,} sản phẩm").bold = True
             if top_cat.get("avg_price"):
-                top_cat_insight.add_run(f"Giá trung bình trong danh mục này là ")
+                top_cat_insight.add_run(f" với giá trung bình ")
                 top_cat_insight.add_run(f"{safe_format(top_cat.get('avg_price'), ',.0f')} VND").bold = True
-                top_cat_insight.add_run(", cho thấy phân khúc giá của danh mục này.")
             
-            for run in top_cat_insight.runs:
-                set_vietnamese_font(run)
-                run.font.size = Pt(12)
+            if top_cat.get("total_sales") and top_cat.get("product_count"):
+                avg_sales_per_product = top_cat["total_sales"] / top_cat["product_count"]
+                top_cat_insight.add_run(f". Trung bình mỗi sản phẩm bán được ")
+                top_cat_insight.add_run(f"{avg_sales_per_product:.0f} cái").bold = True
+            top_cat_insight.add_run(".")
+            format_as_subbullet(top_cat_insight)
+        add_spacer()
     
     doc.add_paragraph()  # Spacing
     
-    # 3. Phân tích Products
-    doc.add_heading("3. Câu Chuyện Về Sản Phẩm: Thị Trường Trong Lòng Bàn Tay", 1)
+    # 3. Products
+    add_section_title("3. Câu Chuyện Về Sản Phẩm: Thị Trường Trong Lòng Bàn Tay")
     prod_stats = stats["products"]
     prod_text = doc.add_paragraph()
     prod_text.add_run("Mỗi sản phẩm trong dataset phản ánh một lựa chọn của người tiêu dùng dựa trên nhu cầu, giá cả, và đánh giá. ")
@@ -589,9 +772,7 @@ def create_document(stats: dict[str, Any], output_path: Path):
     prod_text.add_run(" người bán. ")
     prod_text.add_run("Điều này cho thấy thị trường rất đa dạng và cạnh tranh, tạo ra nhiều lựa chọn cho người tiêu dùng.")
     
-    for run in prod_text.runs:
-        set_vietnamese_font(run)
-        run.font.size = Pt(12)
+    format_as_subbullet(prod_text)
     
     # Câu chuyện về giá cả
     if prod_stats.get("avg_price") is not None:
@@ -612,9 +793,7 @@ def create_document(stats: dict[str, Any], output_path: Path):
             price_story.add_run(f"{safe_format(prod_stats.get('avg_price'), ',.0f')} VND").bold = True
             price_story.add_run(", cho thấy mức giá phổ biến trên thị trường.")
         
-        for run in price_story.runs:
-            set_vietnamese_font(run)
-            run.font.size = Pt(12)
+        format_as_subbullet(price_story)
     
     # Câu chuyện về sản phẩm bán chạy
     if stats["top_products"]:
@@ -628,24 +807,19 @@ def create_document(stats: dict[str, Any], output_path: Path):
                 top_prod_story.add_run(f"{safe_format(top_prod.get('sales_count'), ',')}").bold = True
                 top_prod_story.add_run(" sản phẩm. ")
             top_prod_story.add_run("Điều này cho thấy sản phẩm này đáp ứng được nhu cầu và sở thích của đông đảo người tiêu dùng.")
-            
-            for run in top_prod_story.runs:
-                set_vietnamese_font(run)
-                run.font.size = Pt(12)
+            format_as_subbullet(top_prod_story)
+        add_spacer()
     
     doc.add_paragraph()  # Spacing
     
-    # 4. Phân tích Brands
+    # 4. Brands
     if stats["top_brands"]:
-        doc.add_heading("4. Câu Chuyện Về Thương Hiệu: Ai Đang Dẫn Đầu?", 1)
+        add_section_title("4. Câu Chuyện Về Thương Hiệu: Ai Đang Dẫn Đầu?")
         brand_text = doc.add_paragraph()
         brand_text.add_run("Thương hiệu đóng vai trò quan trọng trong quyết định mua sắm của người tiêu dùng. ")
         brand_text.add_run("Thương hiệu không chỉ là tên gọi, mà còn là lời hứa về chất lượng và giá trị. ")
         brand_text.add_run("Trên Tiki, có rất nhiều thương hiệu cạnh tranh với nhau để thu hút người mua, tạo nên một thị trường đa dạng và sôi động.")
-        
-        for run in brand_text.runs:
-            set_vietnamese_font(run)
-            run.font.size = Pt(12)
+        format_as_subbullet(brand_text)
         
         # Câu chuyện về thương hiệu hàng đầu
         top_brand = stats["top_brands"][0] if stats["top_brands"] else None
@@ -657,16 +831,14 @@ def create_document(stats: dict[str, Any], output_path: Path):
             brand_story.add_run(f"{top_brand['product_count']:,}").bold = True
             brand_story.add_run(" sản phẩm. ")
             brand_story.add_run("Điều này cho thấy thương hiệu này đã xây dựng được một danh mục sản phẩm đa dạng và có vị thế mạnh trên thị trường.")
-            
-            for run in brand_story.runs:
-                set_vietnamese_font(run)
-                run.font.size = Pt(12)
+            format_as_subbullet(brand_story)
+        add_spacer()
     
     doc.add_paragraph()  # Spacing
     
-    # 5. Câu chuyện về giá trị thị trường
+    # 5. Market value
     if stats.get("computed_fields"):
-        doc.add_heading("5. Câu Chuyện Về Giá Trị Thị Trường", 1)
+        add_section_title("5. Câu Chuyện Về Giá Trị Thị Trường")
         computed = stats["computed_fields"]
         
         # Estimated Revenue - câu chuyện về quy mô
@@ -678,23 +850,18 @@ def create_document(stats: dict[str, Any], output_path: Path):
             revenue_story.add_run(". ")
             revenue_story.add_run("Con số này phản ánh quy mô và tiềm năng của thị trường thương mại điện tử Việt Nam.")
             
-            for run in revenue_story.runs:
-                set_vietnamese_font(run)
-                run.font.size = Pt(12)
+            format_as_subbullet(revenue_story)
         
         doc.add_paragraph()  # Spacing
     
-    # 6. Câu chuyện về mối quan hệ giá và doanh số
+    # 6. Price-sales relationship
     if stats.get("price_sales_relationship"):
-        doc.add_heading("6. Câu Chuyện: Giá Nào Bán Chạy Nhất?", 1)
+        add_section_title("6. Câu Chuyện: Giá Nào Bán Chạy Nhất?")
         relationship_story = doc.add_paragraph()
         relationship_story.add_run("Một câu hỏi nghiên cứu quan trọng: Ở mức giá nào thì sản phẩm bán chạy nhất? ")
         relationship_story.add_run("Đây là câu hỏi mà nhiều người bán và doanh nghiệp quan tâm. ")
         relationship_story.add_run("Dữ liệu có thể giúp trả lời câu hỏi này:")
-        
-        for run in relationship_story.runs:
-            set_vietnamese_font(run)
-            run.font.size = Pt(12)
+        format_as_subbullet(relationship_story)
         
         # Tìm khoảng giá có doanh số cao nhất
         max_sales_range = max(stats["price_sales_relationship"], key=lambda x: x.get("avg_sales", 0) or 0)
@@ -706,49 +873,159 @@ def create_document(stats: dict[str, Any], output_path: Path):
             insight_story.add_run("Điều này cho thấy đây là 'vùng giá vàng' - mức giá mà người tiêu dùng cảm thấy hợp lý và sẵn sàng mua nhất. ")
             insight_story.add_run("Đây là insight quý giá cho các doanh nghiệp khi định giá sản phẩm.")
             
-            for run in insight_story.runs:
-                set_vietnamese_font(run)
-                run.font.size = Pt(12)
+            format_as_subbullet(insight_story)
         
         doc.add_paragraph()  # Spacing
     
-    # 7. Câu chuyện về khuyến mãi
-    if stats.get("discount_impact"):
-        doc.add_heading("7. Câu Chuyện: Giảm Giá Có Thực Sự Giúp Bán Được Nhiều Hơn?", 1)
-        discount_story = doc.add_paragraph()
-        discount_story.add_run("Các chương trình giảm giá và khuyến mãi là công cụ marketing phổ biến trên Tiki. ")
-        discount_story.add_run("Một câu hỏi nghiên cứu: Liệu giảm giá có thực sự ảnh hưởng đến doanh số không? ")
-        discount_story.add_run("Dữ liệu có thể cung cấp câu trả lời:")
+    # 7. Sales distribution
+    if stats.get("sales_distribution"):
+        add_section_title("7. Câu Chuyện: Ai Là Những Sản Phẩm Bán Chạy?")
+        sales_dist = stats["sales_distribution"]
         
-        for run in discount_story.runs:
-            set_vietnamese_font(run)
-            run.font.size = Pt(12)
+        sales_story = doc.add_paragraph()
+        sales_story.add_run("Không phải tất cả sản phẩm đều bán được như nhau. ")
+        sales_story.add_run("Trên thị trường, chỉ có một tỉ lệ nhỏ sản phẩm được người tiêu dùng ưa chuộng. ")
         
-        # So sánh sản phẩm có và không có discount
-        no_discount = next((r for r in stats["discount_impact"] if "Không giảm giá" in r["discount_range"]), None)
-        with_discount = next((r for r in stats["discount_impact"] if "Không giảm giá" not in r["discount_range"]), None)
+        # Tính toán phân bố
+        total_products = (sales_dist.get("no_sales") or 0) + (sales_dist.get("low_sales") or 0) + \
+                        (sales_dist.get("medium_sales") or 0) + (sales_dist.get("high_sales") or 0) + \
+                        (sales_dist.get("bestsellers") or 0)
         
-        if no_discount and with_discount:
-            comparison_story = doc.add_paragraph()
-            no_discount_sales = no_discount.get("avg_sales") or 0
-            with_discount_sales = with_discount.get("avg_sales") or 0
+        if total_products > 0:
+            no_sales_pct = ((sales_dist.get("no_sales") or 0) / total_products) * 100
+            bestseller_pct = ((sales_dist.get("bestsellers") or 0) / total_products) * 100
             
-            if with_discount_sales > no_discount_sales:
-                diff = ((with_discount_sales - no_discount_sales) / no_discount_sales) * 100 if no_discount_sales > 0 else 0
-                comparison_story.add_run("Dữ liệu cho thấy sản phẩm có giảm giá thường bán được nhiều hơn. ")
-                comparison_story.add_run("Điều này chứng minh rằng khuyến mãi là một công cụ marketing hiệu quả để thu hút người mua và tăng doanh số.")
+            sales_story.add_run(f"Dữ liệu cho thấy: ")
+            sales_story.add_run(f"{no_sales_pct:.1f}%").bold = True
+            sales_story.add_run(f" sản phẩm chưa bán được (có thể là sản phẩm mới hoặc chất lượng chưa tốt), ")
+            sales_story.add_run(f"trong khi ")
+            sales_story.add_run(f"{bestseller_pct:.1f}%").bold = True
+            sales_story.add_run(f" là 'bestsellers' bán hơn 1000 cái. ")
+            sales_story.add_run("Sự chênh lệch này cho thấy hành vi mua sắm rất tập trung vào một số sản phẩm 'sao' nhất định.")
+        
+        format_as_subbullet(sales_story)
+        
+        # Median vs Average insight
+        if sales_dist.get("avg_sales") and sales_dist.get("median_sales"):
+            median_insight = doc.add_paragraph()
+            median_insight.add_run("Một phát hiện thú vị khác: ")
+            median_insight.add_run(f"doanh số trung vị (median) là {safe_format(sales_dist.get('median_sales'), '.0f')} cái, ").bold = True
+            median_insight.add_run(f"nhưng doanh số trung bình (average) là {safe_format(sales_dist.get('avg_sales'), '.0f')} cái. ")
+            median_insight.add_run("Điều này cho thấy có một số sản phẩm bestseller 'kéo' doanh số trung bình lên rất cao. ")
+            median_insight.add_run("Nói cách khác, thị trường có phân hóa lớn - có những sản phẩm bán cực chạy, nhưng nhiều sản phẩm khác bán không tốt.")
+            format_as_subbullet(median_insight)
+        add_spacer()
+    
+    doc.add_paragraph()  # Spacing
+    
+    # 8. Official vs third-party
+    if stats.get("official_analysis"):
+        add_section_title("8. Câu Chuyện: Official Store vs Third-party Sellers")
+        official = stats["official_analysis"]
+        
+        official_story = doc.add_paragraph()
+        official_story.add_run("Trên Tiki, có hai loại người bán: Official Store (cửa hàng chính thức) và Third-party Sellers (nhà bán lẻ độc lập). ")
+        official_story.add_run("Câu hỏi đặt ra là: Cửa hàng chính thức có thực sự bán tốt hơn không? ")
+        
+        if official.get("official_products") and official.get("third_party_products"):
+            total_products = official["official_products"] + official["third_party_products"]
+            official_pct = (official["official_products"] / total_products) * 100
+            third_party_pct = (official["third_party_products"] / total_products) * 100
+            
+            official_story.add_run(f"Dataset cho thấy: ")
+            official_story.add_run(f"{official_pct:.1f}%").bold = True
+            official_story.add_run(f" sản phẩm từ Official Store, ")
+            official_story.add_run(f"{third_party_pct:.1f}%").bold = True
+            official_story.add_run(f" từ Third-party.")
+        
+        format_as_subbullet(official_story)
+        
+        # So sánh hiệu suất
+        if official.get("avg_sales_official") and official.get("avg_sales_third_party"):
+            comparison = doc.add_paragraph()
+            official_sales = official.get("avg_sales_official") or 0
+            third_party_sales = official.get("avg_sales_third_party") or 0
+            official_rating = official.get("avg_rating_official") or 0
+            third_party_rating = official.get("avg_rating_third_party") or 0
+            
+            if official_sales > third_party_sales:
+                diff = ((official_sales - third_party_sales) / third_party_sales) * 100 if third_party_sales > 0 else 0
+                comparison.add_run(f"Thú vị là: Official Store bán tốt hơn trung bình ")
+                comparison.add_run(f"{diff:.1f}%").bold = True
+                comparison.add_run(f" so với Third-party. ")
             else:
-                comparison_story.add_run("Thú vị là, một số sản phẩm không giảm giá vẫn bán rất chạy. ")
-                comparison_story.add_run("Điều này có thể do chất lượng sản phẩm tốt, thương hiệu mạnh, hoặc đáp ứng đúng nhu cầu của người mua.")
+                diff = ((third_party_sales - official_sales) / official_sales) * 100 if official_sales > 0 else 0
+                comparison.add_run(f"Điều bất ngờ là: Third-party Sellers bán tốt hơn Official Store trung bình ")
+                comparison.add_run(f"{diff:.1f}%").bold = True
+                comparison.add_run(f". ")
             
-            for run in comparison_story.runs:
-                set_vietnamese_font(run)
-                run.font.size = Pt(12)
+            comparison.add_run("Điều này có thể do Third-party thường có giá cạnh tranh hơn hoặc người tiêu dùng tin tưởng vào các review từ người dùng thực.")
+            
+            format_as_subbullet(comparison)
         
-        doc.add_paragraph()  # Spacing
+        # So sánh rating
+        if official.get("avg_rating_official") and official.get("avg_rating_third_party"):
+            rating_para = doc.add_paragraph()
+            official_rating = official.get("avg_rating_official") or 0
+            third_party_rating = official.get("avg_rating_third_party") or 0
+            
+            rating_para.add_run("Về chất lượng (dựa trên rating): ")
+            rating_para.add_run(f"Official Store có rating {safe_format(official_rating, '.2f')}/5, ").bold = True
+            rating_para.add_run(f"Third-party có {safe_format(third_party_rating, '.2f')}/5. ")
+            
+            if official_rating > third_party_rating:
+                rating_para.add_run("Official Store có ưu thế về chất lượng nhận thức từ người tiêu dùng.")
+            else:
+                rating_para.add_run("Người tiêu dùng đánh giá Third-party cao hơn, cho thấy sự cạnh tranh lành mạnh.")
+            format_as_subbullet(rating_para)
+        add_spacer()
     
-    # 8. Kết luận
-    doc.add_heading("8. Kết Luận: Những Câu Chuyện Đã Kể", 1)
+    doc.add_paragraph()  # Spacing
+    
+    # 9. Stock
+    if stats.get("stock_analysis"):
+        add_section_title("9. Câu Chuyện: Tính Sẵn Lòng Bán Hàng")
+        stock = stats["stock_analysis"]
+        
+        stock_story = doc.add_paragraph()
+        stock_story.add_run("Một yếu tố quan trọng để người tiêu dùng mua được sản phẩm: hàng phải còn trong kho. ")
+        
+        if stock.get("in_stock") and stock.get("out_of_stock"):
+            total_stock = stock["in_stock"] + stock["out_of_stock"]
+            in_stock_pct = (stock["in_stock"] / total_stock) * 100
+            out_stock_pct = (stock["out_of_stock"] / total_stock) * 100
+            
+            stock_story.add_run(f"Dataset cho thấy: ")
+            stock_story.add_run(f"{in_stock_pct:.1f}%").bold = True
+            stock_story.add_run(f" sản phẩm còn trong kho, ")
+            stock_story.add_run(f"{out_stock_pct:.1f}%").bold = True
+            stock_story.add_run(f" sản phẩm hết hàng. ")
+        
+        format_as_subbullet(stock_story)
+        
+        # So sánh doanh số
+        if stock.get("avg_sales_in_stock") and stock.get("avg_sales_out_of_stock"):
+            stock_impact = doc.add_paragraph()
+            in_stock_sales = stock.get("avg_sales_in_stock") or 0
+            out_stock_sales = stock.get("avg_sales_out_of_stock") or 0
+            
+            stock_impact.add_run("Sản phẩm có trong kho bán được trung bình ")
+            stock_impact.add_run(f"{safe_format(in_stock_sales, '.0f')} cái, ").bold = True
+            stock_impact.add_run("trong khi sản phẩm hết hàng chỉ bán được ")
+            stock_impact.add_run(f"{safe_format(out_stock_sales, '.0f')} cái. ").bold = True
+            
+            if in_stock_sales > 0 and out_stock_sales > 0:
+                diff_ratio = in_stock_sales / out_stock_sales
+                stock_impact.add_run(f"Sản phẩm có trong kho bán gấp ")
+                stock_impact.add_run(f"{diff_ratio:.1f}x").bold = True
+                stock_impact.add_run(" so với hết hàng! Điều này cho thấy sự sẵn sàng của người bán rất quan trọng đến doanh số.")
+            format_as_subbullet(stock_impact)
+        add_spacer()
+    
+    doc.add_paragraph()  # Spacing
+    
+    # 10. Kết luận (retain numbering style from user request but bullet formatting)
+    add_section_title("10. Kết Luận: Những Câu Chuyện Đã Kể")
     
     # Tổng hợp câu chuyện
     conclusion = doc.add_paragraph()
@@ -787,16 +1064,27 @@ def create_document(stats: dict[str, Any], output_path: Path):
     if prod_stats.get("avg_rating"):
         learnings.append(f"Người tiêu dùng khá hài lòng với sản phẩm trên thị trường, với điểm đánh giá trung bình {safe_format(prod_stats.get('avg_rating'), '.2f')}/5.0.")
     
-    if stats.get("price_sales_relationship"):
-        max_sales_range = max(stats["price_sales_relationship"], key=lambda x: x.get("avg_sales", 0) or 0)
-        if max_sales_range.get("price_range"):
-            learnings.append(f"Có một 'vùng giá vàng' - khoảng giá '{max_sales_range['price_range']}' nơi sản phẩm bán chạy nhất.")
+    if stats.get("sales_distribution") and stats["sales_distribution"].get("bestsellers"):
+        bestseller_count = stats["sales_distribution"]["bestsellers"]
+        learnings.append(f"Hiệu ứng '80/20' xuất hiện rõ: chỉ {bestseller_count} sản phẩm ({(bestseller_count/overview.get('total_products', 1)*100):.1f}%) là bestsellers, nhưng họ chiếm lượng bán đáng kể.")
     
-    if cat_stats.get("distinct_levels"):
-        learnings.append(f"Cấu trúc danh mục được tổ chức rất chặt chẽ với {cat_stats['distinct_levels']} cấp độ, giúp người mua dễ dàng tìm kiếm.")
+    if stats.get("official_analysis"):
+        official = stats["official_analysis"]
+        if official.get("official_products"):
+            official_pct = (official["official_products"] / (official["official_products"] + official.get("third_party_products", 1))) * 100
+            learnings.append(f"Sự cân bằng giữa Official Store ({official_pct:.1f}%) và Third-party Sellers tạo ra một thị trường đa dạng và cạnh tranh.")
+    
+    if stats.get("stock_analysis"):
+        stock = stats["stock_analysis"]
+        if stock.get("in_stock"):
+            in_stock_pct = (stock["in_stock"] / (stock["in_stock"] + stock.get("out_of_stock", 1))) * 100
+            learnings.append(f"Tính sẵn lòng: {in_stock_pct:.1f}% sản phẩm còn trong kho. Sản phẩm có trong kho bán rất tốt hơn hết hàng.")
+    
+    learnings.append(f"Phân hóa giữa bestsellers và sản phẩm thường - không phải tất cả sản phẩm đều bán chạy, thị trường có phân tầng rõ ràng.")
+    learnings.append("Người tiêu dùng online không chỉ quan tâm giá, mà còn chất lượng (rating), thương hiệu, và tính sẵn sàng của người bán.")
     
     for learning in learnings:
-        p = doc.add_paragraph(learning, style="List Bullet")
+        p = doc.add_paragraph(learning, style="List Bullet 2")
         for run in p.runs:
             set_vietnamese_font(run)
             run.font.size = Pt(12)
@@ -821,7 +1109,7 @@ def create_document(stats: dict[str, Any], output_path: Path):
     ]
     
     for app in applications:
-        p = doc.add_paragraph(app, style="List Bullet")
+        p = doc.add_paragraph(app, style="List Bullet 2")
         for run in p.runs:
             set_vietnamese_font(run)
             run.font.size = Pt(12)
@@ -861,6 +1149,23 @@ def main():
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
     
+    # Parse arguments
+    parser = argparse.ArgumentParser(
+        description='Xây dựng câu chuyện dữ liệu từ database và tạo file DOCX'
+    )
+    parser.add_argument(
+        '--upload',
+        action='store_true',
+        help='Tự động upload file lên Google Drive sau khi build'
+    )
+    parser.add_argument(
+        '--folder-id',
+        type=str,
+        help='ID của folder trên Google Drive để upload file vào',
+        default=None
+    )
+    args = parser.parse_args()
+    
     print("=" * 70)
     print("📖 XÂY DỰNG CÂU CHUYỆN DỮ LIỆU - TIKI DATA PIPELINE")
     print("=" * 70)
@@ -895,6 +1200,13 @@ def main():
         print(f"\n📄 File đã được tạo tại: {output_path}")
         if output_path.exists():
             print(f"   Kích thước: {output_path.stat().st_size / 1024:.2f} KB")
+        
+        # Upload lên Google Drive nếu được yêu cầu
+        if args.upload:
+            print("\n" + "=" * 70)
+            print("📤 UPLOAD LÊN GOOGLE DRIVE")
+            print("=" * 70)
+            upload_to_google_drive(output_path, args.folder_id)
         
     except Exception as e:
         print(f"\n❌ Lỗi: {e}")
