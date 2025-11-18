@@ -88,157 +88,7 @@ except Exception as e:
 
 
 # Wrapper function để suppress deprecation warning khi gọi Variable.get()
-def get_variable(key, default_var=None):
-    """Wrapper cho Variable.get() để suppress deprecation warning"""
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", category=DeprecationWarning, module="airflow.models.variable"
-        )
-        return _Variable.get(key, default=default_var)
-
-
-# Alias Variable để code cũ vẫn hoạt động, nhưng dùng wrapper
-class VariableWrapper:
-    """Wrapper cho Variable để suppress warnings"""
-
-    @staticmethod
-    def get(key, default_var=None):
-        return get_variable(key, default_var)
-
-    @staticmethod
-    def set(key, value):
-        return _Variable.set(key, value)
-
-
-Variable = VariableWrapper
-
-# Thêm đường dẫn src vào sys.path
-# Lấy đường dẫn tuyệt đối của DAG file
-dag_file_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Thử nhiều đường dẫn có thể
-# Trong Docker, src được mount vào /opt/airflow/src
-possible_paths = [
-    # Từ /opt/airflow (Docker default - ưu tiên)
-    "/opt/airflow/src/pipelines/crawl",
-    # Từ airflow/dags/ lên 2 cấp đến root (local development)
-    os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "crawl")),
-    # Từ airflow/dags/ lên 1 cấp (nếu airflow/ là root)
-    os.path.abspath(os.path.join(dag_file_dir, "..", "src", "pipelines", "crawl")),
-    # Từ workspace root (nếu mount vào /workspace)
-    "/workspace/src/pipelines/crawl",
-    # Từ current working directory
-    os.path.join(os.getcwd(), "src", "pipelines", "crawl"),
-]
-
-# Tìm đường dẫn hợp lệ
-crawl_module_path = None
-crawl_products_path = None
-
-for path in possible_paths:
-    test_path = os.path.join(path, "crawl_products.py")
-    if os.path.exists(test_path):
-        crawl_module_path = path
-        crawl_products_path = test_path
-        break
-
-if not crawl_module_path:
-    # Nếu không tìm thấy, thử đường dẫn tương đối từ DAG file
-    relative_path = os.path.abspath(
-        os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "crawl")
-    )
-    test_path = os.path.join(relative_path, "crawl_products.py")
-    if os.path.exists(test_path):
-        crawl_module_path = relative_path
-        crawl_products_path = test_path
-
-# Import module utils TRƯỚC (cần thiết cho crawl_products và crawl_products_detail)
-# Khởi tạo SeleniumDriverPool = None để tránh NameError
-SeleniumDriverPool = None
-
-utils_path = None
-if crawl_module_path:
-    utils_path = os.path.join(crawl_module_path, "utils.py")
-    if not os.path.exists(utils_path):
-        utils_path = None
-
-if not utils_path:
-    # Thử tìm trong các possible paths
-    for path in possible_paths:
-        test_path = os.path.join(path, "utils.py")
-        if os.path.exists(test_path):
-            utils_path = test_path
-            break
-
-if utils_path and os.path.exists(utils_path):
-    try:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
-        if spec and spec.loader:
-            utils_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(utils_module)
-            # Lưu vào sys.modules để các module khác có thể import
-            sys.modules["crawl_utils"] = utils_module
-            # Tạo fake package structure để relative import hoạt động
-            if "pipelines.crawl.utils" not in sys.modules:
-                sys.modules["pipelines"] = type(sys)("pipelines")
-                sys.modules["pipelines.crawl"] = type(sys)("pipelines.crawl")
-                sys.modules["pipelines.crawl.utils"] = utils_module
-            # Extract SeleniumDriverPool để sử dụng trực tiếp
-            SeleniumDriverPool = getattr(utils_module, "SeleniumDriverPool", None)
-    except Exception as e:
-        # Nếu import lỗi, log và tiếp tục (sẽ fail khi chạy task)
-        import warnings
-
-        warnings.warn(f"Không thể import utils module: {e}", stacklevel=2)
-        SeleniumDriverPool = None
-
-# Import module crawl_products
-if crawl_products_path and os.path.exists(crawl_products_path):
-    try:
-        # Sử dụng importlib để import trực tiếp từ file (cách đáng tin cậy nhất)
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("crawl_products", crawl_products_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Không thể load spec từ {crawl_products_path}")
-        crawl_products_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(crawl_products_module)
-
-        # Extract các functions cần thiết
-        crawl_category_products = crawl_products_module.crawl_category_products
-        get_page_with_requests = crawl_products_module.get_page_with_requests
-        parse_products_from_html = crawl_products_module.parse_products_from_html
-        get_total_pages = crawl_products_module.get_total_pages
-    except Exception as e:
-        # Nếu import lỗi, log và tiếp tục (sẽ fail khi chạy task)
-        import warnings
-
-        warnings.warn(f"Không thể import crawl_products module: {e}", stacklevel=2)
-
-        # Tạo dummy functions để tránh NameError
-        error_msg = str(e)
-
-        def crawl_category_products(*args, **kwargs):
-            raise ImportError(f"Module crawl_products chưa được import: {error_msg}")
-
-        get_page_with_requests = crawl_category_products
-        parse_products_from_html = crawl_category_products
-        get_total_pages = crawl_category_products
-else:
-    # Fallback: thử import thông thường nếu đã thêm vào sys.path
-    if crawl_module_path and crawl_module_path not in sys.path:
-        sys.path.insert(0, crawl_module_path)
-
-    try:
-        from crawl_products import crawl_category_products
-    except ImportError as e:
-        # Debug: kiểm tra xem thư mục có tồn tại không
-        debug_info = {
-            "dag_file_dir": dag_file_dir,
-            "cwd": os.getcwd(),
-            "possible_paths": possible_paths,
+# (Removed) extract_and_load_categories_to_db: categories no longer loaded into DB; rely on file only.
             "crawl_module_path": crawl_module_path,
             "crawl_products_path": crawl_products_path,
             "sys_path": sys.path[:5],  # Chỉ lấy 5 đầu tiên
@@ -5238,24 +5088,14 @@ with DAG(**DAG_CONFIG) as dag:
 
     # TaskGroup: Load và Prepare
     with TaskGroup("load_and_prepare") as load_group:
-        # Task 0: Extract và load categories vào database (chạy đầu tiên)
-        task_extract_and_load_categories = PythonOperator(
-            task_id="extract_and_load_categories_to_db",
-            python_callable=extract_and_load_categories_to_db,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
-            pool="default_pool",
-        )
-
-        # Task 1: Load danh sách categories từ file để crawl
+        # (ĐÃ BỎ) extract_and_load_categories_to_db để giảm thời gian pipeline.
+        # Task: Load danh sách categories từ file để crawl
         task_load_categories = PythonOperator(
             task_id="load_categories",
             python_callable=load_categories,
             execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
             pool="default_pool",
         )
-
-        # Đảm bảo extract_and_load_categories chạy trước load_categories
-        task_extract_and_load_categories >> task_load_categories
 
     # TaskGroup: Crawl Categories (Dynamic Task Mapping)
     with TaskGroup("crawl_categories") as crawl_group:
@@ -5617,6 +5457,116 @@ with DAG(**DAG_CONFIG) as dag:
             >> task_save_products_with_detail
         )
 
+    # TaskGroup: Enrich Category Path (thêm category_path cho products thiếu, dựa vào categories table)
+    with TaskGroup("enrich_category_path") as enrich_group:
+
+        def enrich_category_path_task(**context):
+            """Bổ sung category_path cho products có category_id nhưng chưa có breadcrumb.
+            Chạy sau khi đã có file products_with_detail.json.
+            """
+            logger = get_logger(context)
+            logger.info("=" * 70)
+            logger.info("🧩 TASK: Enrich Category Path")
+            logger.info("=" * 70)
+
+            ti = context["ti"]
+
+            # Lấy file sản phẩm chi tiết
+            output_file = None
+            try:
+                output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
+            except Exception:
+                pass
+            if not output_file:
+                output_file = str(OUTPUT_FILE_WITH_DETAIL)
+
+            if not os.path.exists(output_file):
+                raise FileNotFoundError(f"Không tìm thấy file detail: {output_file}")
+
+            logger.info(f"📂 Đang đọc file detail: {output_file}")
+            with open(output_file, encoding="utf-8") as f:
+                data = json.load(f)
+            products = data.get("products", [])
+            logger.info(f"📊 Số products trước enrich: {len(products)}")
+
+            # Kết nối DB để lấy categories (lazy import psycopg2)
+            try:
+                import psycopg2
+                conn = psycopg2.connect(
+                    host=os.getenv("POSTGRES_HOST", "localhost"),
+                    port=int(os.getenv("POSTGRES_PORT", "5432")),
+                    database=os.getenv("POSTGRES_DB", "crawl_data"),
+                    user=os.getenv("POSTGRES_USER", "postgres"),
+                    password=os.getenv("POSTGRES_PASSWORD", "postgres"),
+                )
+                cur = conn.cursor()
+                cur.execute("SELECT category_id, name, parent_id FROM categories")
+                categories = {}
+                for cid, name, parent_id in cur.fetchall():
+                    categories[cid] = {"name": name, "parent_id": parent_id}
+                cur.close(); conn.close()
+                logger.info(f"✅ Loaded {len(categories)} categories từ DB")
+            except Exception as e:
+                logger.warning(f"⚠️ Không thể load categories từ DB: {e}; enrich sẽ SKIP")
+                categories = {}
+
+            # Fallback: đọc từ file nếu DB không có hoặc rỗng
+            if not categories:
+                try:
+                    if CATEGORIES_FILE.exists():
+                        logger.info(f"📖 Fallback đọc categories từ file: {CATEGORIES_FILE}")
+                        with open(CATEGORIES_FILE, encoding="utf-8") as cf:
+                            raw_categories = json.load(cf)
+                        # Chấp nhận cả key 'category_id' hoặc 'id'
+                        for cat in raw_categories:
+                            cid = cat.get("category_id") or cat.get("id")
+                            name = cat.get("name")
+                            parent_id = cat.get("parent_id") or None
+                            if cid and name:
+                                categories[cid] = {"name": name, "parent_id": parent_id}
+                        logger.info(f"✅ Fallback loaded {len(categories)} categories từ file")
+                    else:
+                        logger.info("ℹ️ Không tìm thấy categories file để fallback")
+                except Exception as fe:
+                    logger.warning(f"⚠️ Fallback đọc file categories thất bại: {fe}")
+
+            def build_path(cat_id: str) -> list[str]:
+                path = []
+                current = cat_id
+                depth = 0
+                while current and depth < 12 and current in categories:
+                    path.insert(0, categories[current]["name"])
+                    current = categories[current]["parent_id"]
+                    depth += 1
+                return path
+
+            enriched = 0
+            for p in products:
+                if p.get("category_id") and not p.get("category_path") and categories:
+                    path = build_path(p["category_id"])
+                    if path:
+                        p["category_path"] = path
+                        enriched += 1
+
+            if enriched > 0:
+                logger.info(f"✅ Enriched category_path cho {enriched} products")
+            else:
+                logger.info("ℹ️ Không enrich được product nào (có thể đã đầy đủ hoặc thiếu categories)")
+
+            # Ghi lại file (in-place update)
+            data["products"] = products
+            atomic_write_file(output_file, data, **context)
+            logger.info(f"💾 Đã cập nhật file với category_path enrich: {output_file}")
+
+            return {"file": output_file, "enriched_count": enriched}
+
+        task_enrich_category_path = PythonOperator(
+            task_id="enrich_products_category_path",
+            python_callable=enrich_category_path_task,
+            execution_timeout=timedelta(minutes=10),
+            pool="default_pool",
+        )
+
     # TaskGroup: Transform and Load
     with TaskGroup("transform_and_load") as transform_load_group:
         task_transform_products = PythonOperator(
@@ -5704,6 +5654,7 @@ with DAG(**DAG_CONFIG) as dag:
     # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database
     (
         task_save_products_with_detail
+        >> task_enrich_category_path
         >> task_transform_products
         >> task_load_products
         >> task_validate_data
