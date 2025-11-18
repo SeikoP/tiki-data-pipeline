@@ -38,6 +38,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-pos
         url TEXT NOT NULL,
         image_url TEXT,
         category_url TEXT,
+        category_id VARCHAR(255),
+        category_path JSONB,
         sales_count INTEGER,
         price DECIMAL(12, 2),
         original_price DECIMAL(12, 2),
@@ -72,6 +74,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-pos
     
     CREATE INDEX idx_products_product_id ON products(product_id);
     CREATE INDEX idx_products_category_url ON products(category_url);
+    CREATE INDEX idx_products_category_id ON products(category_id);
+    CREATE INDEX idx_products_category_path ON products USING GIN (category_path);
     CREATE INDEX idx_products_sales_count ON products(sales_count);
     CREATE INDEX idx_products_crawled_at ON products(crawled_at);
     

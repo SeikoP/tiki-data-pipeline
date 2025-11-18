@@ -27,7 +27,7 @@ import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Optional, Dict
 
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
@@ -88,22 +88,21 @@ except Exception as e:
 
 
 # Wrapper function để suppress deprecation warning khi gọi Variable.get()
-# (Removed) extract_and_load_categories_to_db: categories no longer loaded into DB; rely on file only.
-            "crawl_module_path": crawl_module_path,
-            "crawl_products_path": crawl_products_path,
-            "sys_path": sys.path[:5],  # Chỉ lấy 5 đầu tiên
-        }
+def get_variable(key: str, default: Any = None) -> Any:
+    try:
+        return _Variable.get(key, default=default)
+    except Exception:
+        return default
 
-        # Kiểm tra xem /opt/airflow/src có tồn tại không
-        if os.path.exists("/opt/airflow/src"):
-            try:
-                debug_info["opt_airflow_src_contents"] = os.listdir("/opt/airflow/src")
-            except Exception:
-                pass
+# Đường dẫn cơ sở của file DAG
+dag_file_dir = os.path.dirname(__file__)
 
-        raise ImportError(
-            f"Không tìm thấy module crawl_products.\n" f"Debug info: {debug_info}\n" f"Lỗi gốc: {e}"
-        ) from e
+# Các đường dẫn có thể chứa module crawl
+possible_paths = [
+    os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "crawl")),
+    os.path.abspath(os.path.join(dag_file_dir, "..", "src", "pipelines", "crawl")),
+    "/opt/airflow/src/pipelines/crawl",
+]
 
 # Import module crawl_products_detail
 crawl_products_detail_path = None
@@ -154,6 +153,9 @@ if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
 
         async def crawl_product_detail_async(*args, **kwargs):
             raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
+        
+        # Fallback SeleniumDriverPool
+        SeleniumDriverPool = None
 
 else:
     # Fallback: thử import thông thường
@@ -164,12 +166,41 @@ else:
             crawl_product_detail_with_selenium,
             extract_product_detail,
         )
+        SeleniumDriverPool = None  # Không có trong crawl_products_detail, sẽ import từ utils
     except ImportError as e:
         raise ImportError(
             f"Không tìm thấy module crawl_products_detail.\n"
             f"Path: {crawl_products_detail_path}\n"
             f"Lỗi gốc: {e}"
         ) from e
+
+# Import SeleniumDriverPool từ utils ở module level
+try:
+    # utils là file (.py), không phải package, nên import trực tiếp
+    import sys
+    import importlib.util
+    src_path = Path("/opt/airflow/src")
+    if src_path.exists() and str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+    
+    # Thử import từ pipelines.crawl.utils
+    try:
+        from pipelines.crawl.utils import SeleniumDriverPool
+    except Exception as e1:
+        # Fallback: direct import từ file
+        utils_path = src_path / "pipelines" / "crawl" / "utils.py"
+        if utils_path.exists():
+            spec = importlib.util.spec_from_file_location("crawl_utils", str(utils_path))
+            if spec and spec.loader:
+                crawl_utils_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(crawl_utils_module)
+                SeleniumDriverPool = getattr(crawl_utils_module, "SeleniumDriverPool", None)
+            else:
+                SeleniumDriverPool = None
+        else:
+            SeleniumDriverPool = None
+except Exception:
+    SeleniumDriverPool = None  # Fallback, sẽ import lại trong task nếu cần
 
 # Import module crawl_categories_batch (for category batch processing)
 crawl_categories_batch_path = None
@@ -435,7 +466,7 @@ DEFAULT_ARGS = {
 # Đọc schedule mode từ Airflow Variable (mặc định: 'manual' để test)
 # Có thể set Variable 'TIKI_DAG_SCHEDULE_MODE' = 'scheduled' để chạy tự động
 try:
-    schedule_mode = Variable.get("TIKI_DAG_SCHEDULE_MODE", default_var="manual")
+    schedule_mode = Variable.get("TIKI_DAG_SCHEDULE_MODE", default="manual")
 except Exception:
     schedule_mode = "manual"  # Mặc định là manual để test
 
@@ -514,8 +545,8 @@ write_lock = Lock()
 # Khởi tạo resilience patterns
 # Circuit breaker cho Tiki API
 tiki_circuit_breaker = CircuitBreaker(
-    failure_threshold=int(Variable.get("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default_var="5")),
-    recovery_timeout=int(Variable.get("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default_var="60")),
+    failure_threshold=int(Variable.get("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default="5")),
+    recovery_timeout=int(Variable.get("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default="60")),
     expected_exception=Exception,
     name="tiki_api",
 )
@@ -523,7 +554,7 @@ tiki_circuit_breaker = CircuitBreaker(
 # Dead Letter Queue
 try:
     # Thử dùng Redis nếu có
-    redis_url = Variable.get("REDIS_URL", default_var="redis://redis:6379/3")
+    redis_url = Variable.get("REDIS_URL", default="redis://redis:6379/3")
     tiki_dlq = get_dlq(storage_type="redis", redis_url=redis_url)
 except Exception:
     # Fallback về file-based
@@ -538,8 +569,8 @@ except Exception:
 service_health = get_service_health()
 tiki_degradation = service_health.register_service(
     name="tiki",
-    failure_threshold=int(Variable.get("TIKI_DEGRADATION_FAILURE_THRESHOLD", default_var="3")),
-    recovery_threshold=int(Variable.get("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default_var="5")),
+    failure_threshold=int(Variable.get("TIKI_DEGRADATION_FAILURE_THRESHOLD", default="3")),
+    recovery_threshold=int(Variable.get("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default="5")),
 )
 
 # Import modules cho AI summarization và Discord notification
@@ -925,8 +956,8 @@ def load_categories(**context) -> list[dict[str, Any]]:
         # Lọc danh mục nếu cần (ví dụ: chỉ lấy level 2-4)
         # Có thể cấu hình qua Airflow Variable
         try:
-            min_level = int(Variable.get("TIKI_MIN_CATEGORY_LEVEL", default_var="2"))
-            max_level = int(Variable.get("TIKI_MAX_CATEGORY_LEVEL", default_var="4"))
+            min_level = int(Variable.get("TIKI_MIN_CATEGORY_LEVEL", default="2"))
+            max_level = int(Variable.get("TIKI_MAX_CATEGORY_LEVEL", default="4"))
             categories = [
                 cat for cat in categories if min_level <= cat.get("level", 0) <= max_level
             ]
@@ -936,7 +967,7 @@ def load_categories(**context) -> list[dict[str, Any]]:
 
         # Giới hạn số danh mục nếu cần (để test)
         try:
-            max_categories = int(Variable.get("TIKI_MAX_CATEGORIES", default_var="0"))
+            max_categories = int(Variable.get("TIKI_MAX_CATEGORIES", default="0"))
             if max_categories > 0:
                 categories = categories[:max_categories]
                 logger.info(f"✓ Giới hạn: {max_categories} danh mục")
@@ -1024,12 +1055,12 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
 
         # Lấy cấu hình từ Airflow Variables
         max_pages = int(
-            Variable.get("TIKI_MAX_PAGES_PER_CATEGORY", default_var="20")
+            Variable.get("TIKI_MAX_PAGES_PER_CATEGORY", default="20")
         )  # Mặc định 20 trang để tránh timeout
-        use_selenium = Variable.get("TIKI_USE_SELENIUM", default_var="false").lower() == "true"
-        timeout = int(Variable.get("TIKI_CRAWL_TIMEOUT", default_var="300"))  # 5 phút mặc định
+        use_selenium = Variable.get("TIKI_USE_SELENIUM", default="false").lower() == "true"
+        timeout = int(Variable.get("TIKI_CRAWL_TIMEOUT", default="300"))  # 5 phút mặc định
         rate_limit_delay = float(
-            Variable.get("TIKI_RATE_LIMIT_DELAY", default_var="1.0")
+            Variable.get("TIKI_RATE_LIMIT_DELAY", default="1.0")
         )  # Delay 1s giữa các request
 
         # Rate limiting: delay trước khi crawl
@@ -1453,7 +1484,7 @@ def save_products(**context) -> str:
         logger.info(f"Đang lưu {len(products)} sản phẩm...")
 
         # Batch processing cho dữ liệu lớn
-        batch_size = int(Variable.get("TIKI_SAVE_BATCH_SIZE", default_var="10000"))
+        batch_size = int(Variable.get("TIKI_SAVE_BATCH_SIZE", default="10000"))
 
         if len(products) > batch_size:
             logger.info(f"Chia nhỏ thành batches (mỗi batch {batch_size} sản phẩm)...")
@@ -1570,10 +1601,10 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Lấy cấu hình cho multi-day crawling
         # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
-            Variable.get("TIKI_PRODUCTS_PER_DAY", default_var="280")
+            Variable.get("TIKI_PRODUCTS_PER_DAY", default="280")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
-            Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default_var="0")
+            Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
         )  # 0 = không giới hạn
 
         logger.info(
@@ -1590,20 +1621,20 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             else:
                 # Lấy database config
                 db_host = Variable.get(
-                    "POSTGRES_HOST", default_var=os.getenv("POSTGRES_HOST", "postgres")
+                    "POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres")
                 )
                 db_port = int(
-                    Variable.get("POSTGRES_PORT", default_var=os.getenv("POSTGRES_PORT", "5432"))
+                    Variable.get("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432"))
                 )
                 db_name = Variable.get(
-                    "POSTGRES_DB", default_var=os.getenv("POSTGRES_DB", "crawl_data")
+                    "POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data")
                 )
                 db_user = Variable.get(
-                    "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
+                    "POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres")
                 )
                 # trufflehog:ignore - Fallback for development, production uses Airflow Variables
                 db_password = Variable.get(
-                    "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
+                    "POSTGRES_PASSWORD", default=os.getenv("POSTGRES_PASSWORD", "postgres")
                 )
 
                 storage = PostgresStorage(
@@ -1918,15 +1949,36 @@ def crawl_product_batch(
 
     try:
         import asyncio
+        
+        # Import SeleniumDriverPool từ utils nếu chưa có (cho task scope)
+        global SeleniumDriverPool
+        _SeleniumDriverPool = SeleniumDriverPool
+        if _SeleniumDriverPool is None:
+            # Fallback: thử import từ utils trực tiếp nếu không thành công
+            try:
+                _fix_sys_path_for_pipelines_import(logger)
+                # utils là file (.py), không phải package
+                import importlib.util
+                src_path = Path("/opt/airflow/src")
+                utils_path = src_path / "pipelines" / "crawl" / "utils.py"
+                if utils_path.exists():
+                    spec = importlib.util.spec_from_file_location("crawl_utils_fallback", str(utils_path))
+                    if spec and spec.loader:
+                        crawl_utils = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(crawl_utils)
+                        _SeleniumDriverPool = getattr(crawl_utils, "SeleniumDriverPool", None)
+                if _SeleniumDriverPool:
+                    logger.info("✅ Imported SeleniumDriverPool from utils.py file")
+                else:
+                    raise ImportError("Không tìm thấy SeleniumDriverPool trong utils.py")
+            except Exception as e:
+                logger.error(f"⚠️  Không thể import SeleniumDriverPool từ pipelines: {e}")
+                raise ImportError("SeleniumDriverPool chưa được import từ utils module")
 
         # Sử dụng hàm đã được import ở đầu file
         # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file
-        if SeleniumDriverPool is None:
-            raise ImportError("SeleniumDriverPool chưa được import từ utils module")
-
-        # Tạo driver pool cho batch (pool size configurable via Airflow Variable)
-        pool_size = int(Variable.get("TIKI_DETAIL_POOL_SIZE", default_var="5"))
-        driver_pool = SeleniumDriverPool(pool_size=pool_size, headless=True, timeout=90)
+        pool_size = int(Variable.get("TIKI_DETAIL_POOL_SIZE", default="5"))
+        driver_pool = _SeleniumDriverPool(pool_size=pool_size, headless=True, timeout=90)
 
         # Tạo event loop trước
         try:
@@ -2160,7 +2212,7 @@ def crawl_product_batch(
         # Crawl tất cả products trong batch song song với async
         # (Event loop đã được tạo ở trên)
         # Sử dụng asyncio.gather() để crawl parallel
-        rate_limit_delay = float(Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default_var="1.5"))
+        rate_limit_delay = float(Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="1.5"))
 
         # Tạo tasks với rate limiting: stagger start times
         async def crawl_batch_parallel():
@@ -2350,7 +2402,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
 
     # Kiểm tra cache trước - ưu tiên Redis, fallback về file
     # Kiểm tra xem có force refresh không (từ Airflow Variable)
-    force_refresh = Variable.get("TIKI_FORCE_REFRESH_CACHE", default_var="false").lower() == "true"
+    force_refresh = Variable.get("TIKI_FORCE_REFRESH_CACHE", default="false").lower() == "true"
 
     if force_refresh:
         logger.info(f"🔄 FORCE REFRESH MODE: Bỏ qua cache cho product {product_id}")
@@ -2442,10 +2494,10 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
 
         # Lấy cấu hình
         rate_limit_delay = float(
-            Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default_var="1.5")
+            Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="1.5")
         )  # Delay 1.5s cho detail (tối ưu từ 2.0s)
         timeout = int(
-            Variable.get("TIKI_DETAIL_CRAWL_TIMEOUT", default_var="180")
+            Variable.get("TIKI_DETAIL_CRAWL_TIMEOUT", default="180")
         )  # 3 phút mỗi product (tăng từ 120s để tránh timeout)
 
         # Rate limiting
@@ -3619,7 +3671,7 @@ def transform_products(**context) -> dict[str, Any]:
                 # Fallback: định nghĩa hàm đơn giản
                 import re
 
-                def extract_category_id_from_url(url: str) -> str | None:
+                def extract_category_id_from_url(url: str) -> Optional[str]:
                     if not url:
                         return None
                     match = re.search(r"/c(\d+)", url)
@@ -3631,7 +3683,7 @@ def transform_products(**context) -> dict[str, Any]:
             logger.warning(f"⚠️  Không thể import extract_category_id_from_url: {e}")
             import re
 
-            def extract_category_id_from_url(url: str) -> str | None:
+            def extract_category_id_from_url(url: str) -> Optional[str]:
                 if not url:
                     return None
                 match = re.search(r"/c(\d+)", url)
@@ -3639,10 +3691,34 @@ def transform_products(**context) -> dict[str, Any]:
                     return f"c{match.group(1)}"
                 return None
 
-        # Bước 3: Bổ sung category_url, category_id và đảm bảo category_path cho products
+        # Bước 3: Bổ sung category_url, category_id và ENRICH category_path cho products
         updated_count = 0
         category_id_added = 0
         category_path_count = 0
+        category_path_enriched = 0
+
+        # Bước 3a: Build category_path lookup từ categories file
+        category_path_lookup: Dict[str, list] = {}  # category_id -> category_path
+        
+        if CATEGORIES_FILE.exists():
+            try:
+                logger.info(f"📖 Đang load categories từ: {CATEGORIES_FILE}")
+                with open(CATEGORIES_FILE, encoding="utf-8") as cf:
+                    raw_categories = json.load(cf)
+                
+                for cat in raw_categories:
+                    cat_id = cat.get("category_id")
+                    cat_path = cat.get("category_path")
+                    
+                    # Chỉ thêm vào lookup nếu có category_id và category_path
+                    if cat_id and cat_path:
+                        category_path_lookup[cat_id] = cat_path
+                
+                logger.info(f"✅ Loaded {len(category_path_lookup)} category_path từ file")
+            except Exception as e:
+                logger.warning(f"⚠️ Lỗi đọc categories file: {e}")
+        else:
+            logger.warning(f"⚠️ Categories file không tồn tại: {CATEGORIES_FILE}")
 
         for product in products:
             product_id = product.get("product_id")
@@ -3660,7 +3736,14 @@ def transform_products(**context) -> dict[str, Any]:
                     product["category_id"] = category_id
                     category_id_added += 1
 
-            # Đảm bảo category_path được giữ lại (đã có từ cache, không cần xử lý)
+            # Enrich category_path từ lookup map (nếu chưa có)
+            if product.get("category_id") and not product.get("category_path"):
+                cat_id = product["category_id"]
+                if cat_id in category_path_lookup:
+                    product["category_path"] = category_path_lookup[cat_id]
+                    category_path_enriched += 1
+            
+            # Đảm bảo category_path được giữ lại
             if product.get("category_path"):
                 category_path_count += 1
 
@@ -3668,8 +3751,10 @@ def transform_products(**context) -> dict[str, Any]:
             logger.info(f"✅ Đã bổ sung category_url cho {updated_count} products")
         if category_id_added > 0:
             logger.info(f"✅ Đã bổ sung category_id cho {category_id_added} products")
+        if category_path_enriched > 0:
+            logger.info(f"✅ Đã enrich category_path cho {category_path_enriched} products")
         if category_path_count > 0:
-            logger.info(f"✅ Có {category_path_count} products có category_path (breadcrumb)")
+            logger.info(f"✅ Tổng products có category_path: {category_path_count}/{len(products)}")
 
         # Import DataTransformer
         try:
@@ -3919,20 +4004,20 @@ def load_products(**context) -> dict[str, Any]:
             # Lấy database config từ Airflow Variables hoặc environment variables
             # Ưu tiên: Airflow Variables > Environment Variables > Default
             db_host = Variable.get(
-                "POSTGRES_HOST", default_var=os.getenv("POSTGRES_HOST", "postgres")
+                "POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres")
             )
             db_port = int(
-                Variable.get("POSTGRES_PORT", default_var=os.getenv("POSTGRES_PORT", "5432"))
+                Variable.get("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432"))
             )
             db_name = Variable.get(
-                "POSTGRES_DB", default_var=os.getenv("POSTGRES_DB", "crawl_data")
+                "POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data")
             )
             db_user = Variable.get(
-                "POSTGRES_USER", default_var=os.getenv("POSTGRES_USER", "postgres")
+                "POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres")
             )
             # trufflehog:ignore - Fallback for development, production uses Airflow Variables
             db_password = Variable.get(
-                "POSTGRES_PASSWORD", default_var=os.getenv("POSTGRES_PASSWORD", "postgres")
+                "POSTGRES_PASSWORD", default=os.getenv("POSTGRES_PASSWORD", "postgres")
             )
 
             # Load vào database
@@ -4662,7 +4747,7 @@ def health_check_monitoring(**context) -> dict[str, Any]:
             # TODO: Remove this after testing
             try:
                 # Default test mode FALSE in production; set variable to true only when debugging
-                test_mode = Variable.get("HEALTH_CHECK_TEST_ALERT", default_var="false").lower() == "true"
+                test_mode = Variable.get("HEALTH_CHECK_TEST_ALERT", default="false").lower() == "true"
                 logger.info(f"🔍 Test mode check: HEALTH_CHECK_TEST_ALERT = {test_mode}")
                 if test_mode:
                     alerts.append("🧪 **TEST ALERT** - Đây là test alert để verify Discord webhook hoạt động")
@@ -5218,7 +5303,7 @@ with DAG(**DAG_CONFIG) as dag:
             logger.info(f"✅ Đã lấy {len(categories)} categories")
 
             # Batch Processing: Chia categories thành batches
-            batch_size = int(Variable.get("TIKI_CATEGORY_BATCH_SIZE", default_var="5"))
+            batch_size = int(Variable.get("TIKI_CATEGORY_BATCH_SIZE", default="5"))
             batches = []
             for i in range(0, len(categories), batch_size):
                 batch = categories[i : i + batch_size]
@@ -5457,12 +5542,18 @@ with DAG(**DAG_CONFIG) as dag:
             >> task_save_products_with_detail
         )
 
-    # TaskGroup: Enrich Category Path (thêm category_path cho products thiếu, dựa vào categories table)
+    # TaskGroup: Enrich Category Path (thêm category_path cho products thiếu, dựa vào categories file)
     with TaskGroup("enrich_category_path") as enrich_group:
 
         def enrich_category_path_task(**context):
             """Bổ sung category_path cho products có category_id nhưng chưa có breadcrumb.
-            Chạy sau khi đã có file products_with_detail.json.
+            
+            Luồng:
+            1. Đọc file sản phẩm chi tiết (products_with_detail.json)
+            2. Đọc categories từ file (categories_recursive_optimized.json) - đã có category_id và category_path
+            3. Xây dựng lookup map: category_id -> category_path
+            4. Với mỗi product: nếu có category_id nhưng chưa có category_path, tìm từ lookup map
+            5. Ghi lại file
             """
             logger = get_logger(context)
             logger.info("=" * 70)
@@ -5471,7 +5562,7 @@ with DAG(**DAG_CONFIG) as dag:
 
             ti = context["ti"]
 
-            # Lấy file sản phẩm chi tiết
+            # Bước 1: Lấy file sản phẩm chi tiết
             output_file = None
             try:
                 output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
@@ -5488,77 +5579,62 @@ with DAG(**DAG_CONFIG) as dag:
                 data = json.load(f)
             products = data.get("products", [])
             logger.info(f"📊 Số products trước enrich: {len(products)}")
-
-            # Kết nối DB để lấy categories (lazy import psycopg2)
-            try:
-                import psycopg2
-                conn = psycopg2.connect(
-                    host=os.getenv("POSTGRES_HOST", "localhost"),
-                    port=int(os.getenv("POSTGRES_PORT", "5432")),
-                    database=os.getenv("POSTGRES_DB", "crawl_data"),
-                    user=os.getenv("POSTGRES_USER", "postgres"),
-                    password=os.getenv("POSTGRES_PASSWORD", "postgres"),
-                )
-                cur = conn.cursor()
-                cur.execute("SELECT category_id, name, parent_id FROM categories")
-                categories = {}
-                for cid, name, parent_id in cur.fetchall():
-                    categories[cid] = {"name": name, "parent_id": parent_id}
-                cur.close(); conn.close()
-                logger.info(f"✅ Loaded {len(categories)} categories từ DB")
-            except Exception as e:
-                logger.warning(f"⚠️ Không thể load categories từ DB: {e}; enrich sẽ SKIP")
-                categories = {}
-
-            # Fallback: đọc từ file nếu DB không có hoặc rỗng
-            if not categories:
+            
+            # Bước 2: Đọc categories từ file
+            category_path_lookup: Dict[str, list] = {}  # category_id -> category_path
+            
+            if CATEGORIES_FILE.exists():
                 try:
-                    if CATEGORIES_FILE.exists():
-                        logger.info(f"📖 Fallback đọc categories từ file: {CATEGORIES_FILE}")
-                        with open(CATEGORIES_FILE, encoding="utf-8") as cf:
-                            raw_categories = json.load(cf)
-                        # Chấp nhận cả key 'category_id' hoặc 'id'
-                        for cat in raw_categories:
-                            cid = cat.get("category_id") or cat.get("id")
-                            name = cat.get("name")
-                            parent_id = cat.get("parent_id") or None
-                            if cid and name:
-                                categories[cid] = {"name": name, "parent_id": parent_id}
-                        logger.info(f"✅ Fallback loaded {len(categories)} categories từ file")
-                    else:
-                        logger.info("ℹ️ Không tìm thấy categories file để fallback")
+                    logger.info(f"📖 Đọc categories từ file: {CATEGORIES_FILE}")
+                    with open(CATEGORIES_FILE, encoding="utf-8") as cf:
+                        raw_categories = json.load(cf)
+                    
+                    for cat in raw_categories:
+                        cat_id = cat.get("category_id")
+                        cat_path = cat.get("category_path")
+                        
+                        # Chỉ thêm vào lookup nếu có category_id và category_path
+                        if cat_id and cat_path:
+                            category_path_lookup[cat_id] = cat_path
+                    
+                    logger.info(f"✅ Loaded {len(category_path_lookup)} category_path từ file")
                 except Exception as fe:
-                    logger.warning(f"⚠️ Fallback đọc file categories thất bại: {fe}")
+                    logger.warning(f"⚠️ Lỗi đọc file categories: {fe}")
+            else:
+                logger.warning(f"⚠️ File categories không tồn tại: {CATEGORIES_FILE}")
 
-            def build_path(cat_id: str) -> list[str]:
-                path = []
-                current = cat_id
-                depth = 0
-                while current and depth < 12 and current in categories:
-                    path.insert(0, categories[current]["name"])
-                    current = categories[current]["parent_id"]
-                    depth += 1
-                return path
-
+            # Bước 3: Enrich category_path cho products
             enriched = 0
+            without_category_id = 0
             for p in products:
-                if p.get("category_id") and not p.get("category_path") and categories:
-                    path = build_path(p["category_id"])
-                    if path:
-                        p["category_path"] = path
+                # Nếu product có category_id nhưng chưa có category_path
+                if p.get("category_id") and not p.get("category_path"):
+                    cat_id = p["category_id"]
+                    
+                    # Tìm category_path từ lookup map
+                    if cat_id in category_path_lookup:
+                        p["category_path"] = category_path_lookup[cat_id]
                         enriched += 1
-
+                    else:
+                        # Log: category_id không tìm thấy trong file categories
+                        without_category_id += 1
+            
+            # Bước 4: Report
             if enriched > 0:
                 logger.info(f"✅ Enriched category_path cho {enriched} products")
-            else:
-                logger.info("ℹ️ Không enrich được product nào (có thể đã đầy đủ hoặc thiếu categories)")
+            if without_category_id > 0:
+                logger.warning(f"⚠️ {without_category_id} products có category_id nhưng không tìm thấy trong categories")
+            
+            # Check: Số products có category_path
+            products_with_path = sum(1 for p in products if p.get("category_path"))
+            logger.info(f"📊 Tổng products có category_path: {products_with_path}/{len(products)}")
 
-            # Ghi lại file (in-place update)
+            # Bước 5: Ghi lại file (in-place update)
             data["products"] = products
             atomic_write_file(output_file, data, **context)
             logger.info(f"💾 Đã cập nhật file với category_path enrich: {output_file}")
 
-            return {"file": output_file, "enriched_count": enriched}
+            return {"file": output_file, "enriched_count": enriched, "products_with_path": products_with_path}
 
         task_enrich_category_path = PythonOperator(
             task_id="enrich_products_category_path",
