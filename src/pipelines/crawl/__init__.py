@@ -2,6 +2,24 @@
 Crawl pipeline package
 """
 
+# Export utilities modules from utils.py file
+# Note: There's both utils.py file and utils/ package, so we need to import directly from file
+try:
+    import importlib.util
+    from pathlib import Path
+    
+    utils_file_path = Path(__file__).parent / "utils.py"
+    if utils_file_path.exists():
+        spec = importlib.util.spec_from_file_location("_crawl_utils_file", str(utils_file_path))
+        if spec and spec.loader:
+            _utils_file = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_utils_file)
+            SeleniumDriverPool = getattr(_utils_file, "SeleniumDriverPool", None)  # noqa: F401
+    _UTILS_AVAILABLE = True
+except ImportError:
+    _UTILS_AVAILABLE = False
+    SeleniumDriverPool = None
+
 # Export error handling modules từ resilience
 try:
     from .resilience import (  # noqa: F401
@@ -35,6 +53,11 @@ except ImportError:
     _ERROR_HANDLING_AVAILABLE = False
 
 __all__ = []
+
+if _UTILS_AVAILABLE:
+    __all__.extend([
+        "SeleniumDriverPool",
+    ])
 
 if _ERROR_HANDLING_AVAILABLE:
     __all__.extend(

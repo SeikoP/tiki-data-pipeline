@@ -219,18 +219,21 @@ class OptimizedDataLoader:
         # Serialize JSONB fields
         specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
         images = json.dumps(product.get("images", {}), ensure_ascii=False)
+        category_path = json.dumps(product.get("category_path", []), ensure_ascii=False)
 
         query = """
             INSERT INTO products (
-                product_id, category_url, name, url, price, original_price,
+                product_id, category_url, category_id, category_path, name, url, price, original_price,
                 discount_percent, rating_average, review_count, sales_count,
                 brand, specifications, images, description,
-                crawled_at, last_updated
+                crawled_at, updated_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (product_id) DO UPDATE SET
                 category_url = EXCLUDED.category_url,
+                category_id = EXCLUDED.category_id,
+                category_path = EXCLUDED.category_path,
                 name = EXCLUDED.name,
                 url = EXCLUDED.url,
                 price = EXCLUDED.price,
@@ -243,7 +246,7 @@ class OptimizedDataLoader:
                 specifications = EXCLUDED.specifications,
                 images = EXCLUDED.images,
                 description = EXCLUDED.description,
-                last_updated = EXCLUDED.last_updated
+                updated_at = EXCLUDED.updated_at
         """
 
         cursor.execute(
@@ -251,6 +254,8 @@ class OptimizedDataLoader:
             (
                 product.get("product_id"),
                 product.get("category_url"),
+                product.get("category_id"),
+                category_path,
                 product.get("name"),
                 product.get("url"),
                 product.get("price"),
@@ -278,15 +283,16 @@ class OptimizedDataLoader:
         """Insert một product (không UPDATE)"""
         specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
         images = json.dumps(product.get("images", {}), ensure_ascii=False)
+        category_path = json.dumps(product.get("category_path", []), ensure_ascii=False)
 
         query = """
             INSERT INTO products (
-                product_id, category_url, name, url, price, original_price,
+                product_id, category_url, category_id, category_path, name, url, price, original_price,
                 discount_percent, rating_average, review_count, sales_count,
                 brand, specifications, images, description,
-                crawled_at, last_updated
+                crawled_at, updated_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
         """
 
@@ -295,6 +301,8 @@ class OptimizedDataLoader:
             (
                 product.get("product_id"),
                 product.get("category_url"),
+                product.get("category_id"),
+                category_path,
                 product.get("name"),
                 product.get("url"),
                 product.get("price"),

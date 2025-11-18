@@ -14,10 +14,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 # Đường dẫn files
-SCRIPT_DIR = Path(__file__).parent
-PROJECT_ROOT = SCRIPT_DIR.parent
-MAIN_DAG_PATH = PROJECT_ROOT / "airflow" / "dags" / "tiki_crawl_products_dag.py"
-TEST_DAG_PATH = PROJECT_ROOT / "airflow" / "dags" / "tiki_crawl_products_test_dag.py"
+SCRIPT_DIR = Path(__file__).parent  # airflow/dags/
+PROJECT_ROOT = SCRIPT_DIR.parent.parent  # project root
+MAIN_DAG_PATH = SCRIPT_DIR / "tiki_crawl_products_dag.py"  # Cùng thư mục
+TEST_DAG_PATH = SCRIPT_DIR / "tiki_crawl_products_test_dag.py"  # Cùng thư mục
 
 
 def replace_max_products(match: re.Match) -> str:
@@ -90,7 +90,7 @@ TEST_REPLACEMENTS: list[tuple[str, str | Callable, str]] = [
     # Thêm giới hạn max_categories trong load_categories (TEST MODE)
     (
         r"(# Giới hạn số danh mục nếu cần \(để test\))\s*\n\s*try:\s*\n\s*max_categories\s*=\s*int\(\s*Variable\.get\([^)]+\)\s*\)",
-        r'\1\n        # TEST MODE: Hardcode giới hạn 2 categories cho test\n        max_categories = 2  # TEST MODE: Hardcode 2 categories cho test\n        if max_categories > 0 and len(categories) > max_categories:\n            logger.info(f"⚠️  TEST MODE: Giới hạn từ {len(categories)} xuống {max_categories} categories")\n            categories = categories[:max_categories]\n            logger.info(f"✅ Đã giới hạn: {len(categories)} categories để crawl")\n        \n        # Vẫn kiểm tra Variable nếu có (để override nếu cần)\n        try:\n            var_max_categories = int(Variable.get("TIKI_MAX_CATEGORIES", default_var="0"))',
+        r'\1\n        # TEST MODE: Hardcode giới hạn 2 categories cho test\n        max_categories = 2  # TEST MODE: Hardcode 2 categories cho test\n        if max_categories > 0 and len(categories) > max_categories:\n            logger.info(f"⚠️  TEST MODE: Giới hạn từ {len(categories)} xuống {max_categories} categories")\n            categories = categories[:max_categories]\n            logger.info(f"✅ Đã giới hạn: {len(categories)} categories để crawl")\n        \n        # Vẫn kiểm tra Variable nếu có (để override nếu cần)\n        try:\n            var_max_categories = int(Variable.get("TIKI_MAX_CATEGORIES", default="0"))',
         "Thêm giới hạn max_categories trong load_categories",
     ),
     # max_pages

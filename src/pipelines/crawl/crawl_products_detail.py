@@ -873,6 +873,14 @@ def extract_product_detail(html_content, url, verbose=True):
                 print(f"[Parse] Lỗi khi parse __NEXT_DATA__: {e}")
             pass
 
+    # Fix: Ensure category_path is never None, use empty list if not populated
+    if product_data.get("category_path") is None:
+        product_data["category_path"] = []
+    
+    # Ensure category_path is always a list
+    if not isinstance(product_data.get("category_path"), list):
+        product_data["category_path"] = [str(product_data["category_path"])]
+
     return product_data
 
 
@@ -909,8 +917,18 @@ async def crawl_product_detail_async(
     # Tạo session nếu chưa có
     create_session = session is None
     if create_session:
-        timeout = aiohttp.ClientTimeout(total=30)
+        import aiohttp
+        
+        # Tối ưu: TCPConnector với pool size lớn hơn
+        connector = aiohttp.TCPConnector(
+            limit=100,           # Total limit for concurrent connections
+            limit_per_host=10,   # Limit per host (Tiki)
+            ttl_dns_cache=300,   # DNS cache 5 minutes
+            ssl=False,           # Disable SSL verification cho tốc độ
+        )
+        timeout = aiohttp.ClientTimeout(total=20, connect=10)  # Tối ưu: giảm timeout
         session = aiohttp.ClientSession(
+            connector=connector,
             timeout=timeout,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -952,6 +970,14 @@ async def crawl_product_detail_async(
 
             if verbose:
                 print(f"[Async] ✅ Crawl thành công: {product_data.get('name', 'Unknown')[:50]}...")
+
+            # Fix: Ensure category_path is never None, use empty list if not populated
+            if product_data.get("category_path") is None:
+                product_data["category_path"] = []
+            
+            # Ensure category_path is always a list
+            if not isinstance(product_data.get("category_path"), list):
+                product_data["category_path"] = [str(product_data["category_path"])]
 
             return product_data
 
