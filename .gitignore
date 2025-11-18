@@ -49,7 +49,7 @@ htmlcov/
 .env.*.local
 *.local
 
-scrips/docs/
+scripts/docs/
 
 # Additional .env files in subdirectories (CRITICAL SECURITY)
 src/common/.env
