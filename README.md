@@ -1,4 +1,4 @@
-# Tiki Data Pipeline - Dự Án Tốt Nghiệp
+# Tiki Data Pipeline
 
 ## 1. Giới Thiệu Dự Án
 
