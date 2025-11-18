@@ -17,32 +17,31 @@ Dependencies được quản lý bằng >> operator giữa các tasks.
 """
 
 import json
+import logging
+import os
+import re
+import shutil
+import sys
+import time
+import warnings
+from datetime import datetime, timedelta
+from pathlib import Path
+from threading import Lock
+from typing import Any
+
+from airflow import DAG
+from airflow.providers.standard.operators.python import PythonOperator
+
+# Import Variable và TaskGroup với suppress warning
+try:
+    # Thử import từ airflow.sdk (Airflow 3.x)
+    from airflow.sdk import TaskGroup, Variable
+
+    _Variable = Variable  # Alias để dùng wrapper
+except ImportError:
+    # Fallback: dùng airflow.models và airflow.utils.task_group (Airflow 2.x)
     try:
-        # Ensure src path in sys.path for package-style imports
-        import sys
-        from pathlib import Path
-        src_path = Path("/opt/airflow/src")
-        if src_path.exists() and str(src_path) not in sys.path:
-            sys.path.insert(0, str(src_path))
-
-        try:
-            from pipelines.crawl.storage.redis_cache import get_redis_cache  # type: ignore
-        except Exception as import_err:
-            logger.warning(f"⚠️  Import get_redis_cache failed: {import_err} -> trying dynamic import")
-            # Dynamic import fallback
-            import importlib.util
-            rc_path = src_path / "pipelines" / "crawl" / "storage" / "redis_cache.py"
-            get_redis_cache = None  # type: ignore
-            if rc_path.exists():
-                spec = importlib.util.spec_from_file_location("redis_cache_dyn", rc_path)
-                if spec and spec.loader:
-                    mod = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(mod)  # type: ignore
-                    get_redis_cache = getattr(mod, "get_redis_cache", None)  # type: ignore
-            if not get_redis_cache:
-                raise RuntimeError("Không thể import get_redis_cache (dynamic import cũng thất bại)")
-
-        redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
+        from airflow.utils.task_group import TaskGroup
     except ImportError:
         # Nếu không có TaskGroup, tạo dummy class
         class TaskGroup:
@@ -56,6 +55,36 @@ import json
                 pass
 
     from airflow.models import Variable as _Variable
+
+# Try to import redis_cache for caching
+redis_cache = None
+try:
+    # Ensure src path in sys.path for package-style imports
+    from pathlib import Path
+    src_path = Path("/opt/airflow/src")
+    if src_path.exists() and str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+
+    try:
+        from pipelines.crawl.storage.redis_cache import get_redis_cache  # type: ignore
+        redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
+    except Exception as import_err:
+        warnings.warn(f"⚠️  Import get_redis_cache failed: {import_err} -> trying dynamic import")
+        # Dynamic import fallback
+        import importlib.util
+        rc_path = src_path / "pipelines" / "crawl" / "storage" / "redis_cache.py"
+        get_redis_cache = None  # type: ignore
+        if rc_path.exists():
+            spec = importlib.util.spec_from_file_location("redis_cache_dyn", rc_path)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)  # type: ignore
+                get_redis_cache = getattr(mod, "get_redis_cache", None)  # type: ignore
+            if get_redis_cache:
+                redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
+except Exception as e:
+    warnings.warn(f"Redis cache initialization failed: {e}")
+    redis_cache = None
 
 
 # Wrapper function để suppress deprecation warning khi gọi Variable.get()

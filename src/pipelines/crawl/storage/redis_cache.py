@@ -12,8 +12,14 @@ Các tính năng:
 import hashlib
 import json
 import time
-from typing import Any
-from urllib.parse import urlparse
+from typing import Any, Iterable
+from urllib.parse import (
+    urlparse,
+    urlsplit,
+    urlunsplit,
+    parse_qsl,
+    urlencode,
+)
 
 try:
     import redis
@@ -73,6 +79,62 @@ class RedisCache:
         self.default_ttl = default_ttl
         self.prefix = "tiki:crawl:"
 
+    def _canonicalize_url(self, url: str, drop_params: Iterable[str] | None = None) -> str:
+        """Chuẩn hóa URL để tối đa hóa cache hit rate.
+
+        - Lowercase scheme/host
+        - Force https cho tiki.vn
+        - Remove URL fragment (#...)
+        - Sort query params for deterministic order
+        - Drop tracking params (utm_*, ref, referrer, src, spm) and any in drop_params
+        """
+        try:
+            drop = set(drop_params or [])
+            default_drops = {
+                "utm_source",
+                "utm_medium",
+                "utm_campaign",
+                "utm_term",
+                "utm_content",
+                "ref",
+                "referrer",
+                "src",
+                "spm",
+            }
+            drop |= default_drops
+
+            parts = urlsplit(url)
+            scheme = (parts.scheme or "https").lower()
+            netloc = (parts.netloc or "").lower()
+
+            # Force https for tiki.vn
+            if netloc.endswith("tiki.vn"):
+                scheme = "https"
+
+            # Normalize path (remove trailing slashes except root)
+            path = parts.path or "/"
+            if len(path) > 1 and path.endswith("/"):
+                path = path.rstrip("/")
+
+            # Normalize and filter query params
+            query_items = []
+            for k, v in parse_qsl(parts.query, keep_blank_values=False):
+                if k in drop or k.startswith("utm_"):
+                    continue
+                # Skip empty values
+                if v is None or v == "":
+                    continue
+                query_items.append((k, v))
+
+            # Sort for deterministic ordering
+            query_items.sort(key=lambda kv: (kv[0], kv[1]))
+            query = urlencode(query_items, doseq=True)
+
+            return urlunsplit((scheme, netloc, path, query, ""))
+        except Exception:
+            # Nếu có lỗi, trả về URL gốc để không chặn luồng
+            return url
+
     def _make_key(self, key: str) -> str:
         """Tạo key với prefix"""
         return f"{self.prefix}{key}"
@@ -111,37 +173,55 @@ class RedisCache:
         except Exception:
             return False
 
-    def get_cache_key(self, url: str, cache_type: str = "html") -> str:
-        """Tạo cache key từ URL"""
+    def _new_key_for_url(self, url: str, cache_type: str = "html", drop_params: Iterable[str] | None = None) -> str:
+        canonical = self._canonicalize_url(url, drop_params=drop_params)
+        url_hash = hashlib.md5(canonical.encode()).hexdigest()
+        return f"{cache_type}:{url_hash}"
+
+    def _legacy_key_for_url(self, url: str, cache_type: str = "html") -> str:
+        # Legacy behavior: hash nguyên URL không chuẩn hóa
         url_hash = hashlib.md5(url.encode()).hexdigest()
         return f"{cache_type}:{url_hash}"
 
+    def get_cache_key(self, url: str, cache_type: str = "html") -> str:
+        """Giữ API cũ: trả về key mới (đã canonicalize)."""
+        return self._new_key_for_url(url, cache_type)
+
     def cache_html(self, url: str, html: str, ttl: int | None = None) -> bool:
         """Cache HTML content"""
-        key = self.get_cache_key(url, "html")
+        key = self._new_key_for_url(url, "html")
         return self.set(key, {"url": url, "html": html, "cached_at": time.time()}, ttl)
 
     def get_cached_html(self, url: str) -> str | None:
         """Lấy cached HTML"""
-        key = self.get_cache_key(url, "html")
-        cached = self.get(key)
-        if cached:
-            return cached.get("html")
+        # Thử key mới (canonical) trước, sau đó fallback legacy key để không mất cache cũ
+        for key in (
+            self._new_key_for_url(url, "html"),
+            self._legacy_key_for_url(url, "html"),
+        ):
+            cached = self.get(key)
+            if cached:
+                return cached.get("html")
         return None
 
     def cache_products(self, category_url: str, products: list, ttl: int | None = None) -> bool:
         """Cache products từ category"""
-        key = self.get_cache_key(category_url, "products")
+        # Với category, bỏ tham số trang để gom cache theo danh mục
+        key = self._new_key_for_url(category_url, "products", drop_params={"page"})
         return self.set(
             key, {"category_url": category_url, "products": products, "cached_at": time.time()}, ttl
         )
 
     def get_cached_products(self, category_url: str) -> list | None:
         """Lấy cached products"""
-        key = self.get_cache_key(category_url, "products")
-        cached = self.get(key)
-        if cached:
-            return cached.get("products")
+        # Thử key mới (bỏ page) trước, sau đó legacy key
+        for key in (
+            self._new_key_for_url(category_url, "products", drop_params={"page"}),
+            self._legacy_key_for_url(category_url, "products"),
+        ):
+            cached = self.get(key)
+            if cached:
+                return cached.get("products")
         return None
 
     def cache_product_detail(self, product_id: str, detail: dict, ttl: int | None = None) -> bool:
