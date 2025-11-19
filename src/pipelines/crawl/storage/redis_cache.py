@@ -12,13 +12,14 @@ Các tính năng:
 import hashlib
 import json
 import time
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 from urllib.parse import (
+    parse_qsl,
+    urlencode,
     urlparse,
     urlsplit,
     urlunsplit,
-    parse_qsl,
-    urlencode,
 )
 
 try:
@@ -173,7 +174,9 @@ class RedisCache:
         except Exception:
             return False
 
-    def _new_key_for_url(self, url: str, cache_type: str = "html", drop_params: Iterable[str] | None = None) -> str:
+    def _new_key_for_url(
+        self, url: str, cache_type: str = "html", drop_params: Iterable[str] | None = None
+    ) -> str:
         canonical = self._canonicalize_url(url, drop_params=drop_params)
         url_hash = hashlib.md5(canonical.encode()).hexdigest()
         return f"{cache_type}:{url_hash}"

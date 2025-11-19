@@ -7,7 +7,7 @@ Crawl pipeline package
 try:
     import importlib.util
     from pathlib import Path
-    
+
     utils_file_path = Path(__file__).parent / "utils.py"
     if utils_file_path.exists():
         spec = importlib.util.spec_from_file_location("_crawl_utils_file", str(utils_file_path))
@@ -55,9 +55,11 @@ except ImportError:
 __all__ = []
 
 if _UTILS_AVAILABLE:
-    __all__.extend([
-        "SeleniumDriverPool",
-    ])
+    __all__.extend(
+        [
+            "SeleniumDriverPool",
+        ]
+    )
 
 if _ERROR_HANDLING_AVAILABLE:
     __all__.extend(

@@ -116,8 +116,8 @@ class DataAggregator:
         """Phân tích chi tiết các sản phẩm"""
         prices = []
         ratings = []
-        categories = {}
-        sellers = {}
+        categories: dict[str, int] = {}
+        sellers: dict[str, int] = {}
         discounts = []
 
         for product in products:

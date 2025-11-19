@@ -876,7 +876,7 @@ def extract_product_detail(html_content, url, verbose=True):
     # Fix: Ensure category_path is never None, use empty list if not populated
     if product_data.get("category_path") is None:
         product_data["category_path"] = []
-    
+
     # Ensure category_path is always a list
     if not isinstance(product_data.get("category_path"), list):
         product_data["category_path"] = [str(product_data["category_path"])]
@@ -918,13 +918,13 @@ async def crawl_product_detail_async(
     create_session = session is None
     if create_session:
         import aiohttp
-        
+
         # Tối ưu: TCPConnector với pool size lớn hơn
         connector = aiohttp.TCPConnector(
-            limit=100,           # Total limit for concurrent connections
-            limit_per_host=10,   # Limit per host (Tiki)
-            ttl_dns_cache=300,   # DNS cache 5 minutes
-            ssl=False,           # Disable SSL verification cho tốc độ
+            limit=100,  # Total limit for concurrent connections
+            limit_per_host=10,  # Limit per host (Tiki)
+            ttl_dns_cache=300,  # DNS cache 5 minutes
+            ssl=False,  # Disable SSL verification cho tốc độ
         )
         timeout = aiohttp.ClientTimeout(total=20, connect=10)  # Tối ưu: giảm timeout
         session = aiohttp.ClientSession(
@@ -974,7 +974,7 @@ async def crawl_product_detail_async(
             # Fix: Ensure category_path is never None, use empty list if not populated
             if product_data.get("category_path") is None:
                 product_data["category_path"] = []
-            
+
             # Ensure category_path is always a list
             if not isinstance(product_data.get("category_path"), list):
                 product_data["category_path"] = [str(product_data["category_path"])]

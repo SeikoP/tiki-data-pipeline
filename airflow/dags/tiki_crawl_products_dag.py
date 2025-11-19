@@ -27,7 +27,7 @@ import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Any, Optional, Dict
+from typing import Any
 
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
@@ -61,17 +61,22 @@ redis_cache = None
 try:
     # Ensure src path in sys.path for package-style imports
     from pathlib import Path
+
     src_path = Path("/opt/airflow/src")
     if src_path.exists() and str(src_path) not in sys.path:
         sys.path.insert(0, str(src_path))
 
     try:
         from pipelines.crawl.storage.redis_cache import get_redis_cache  # type: ignore
+
         redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
     except Exception as import_err:
-        warnings.warn(f"⚠️  Import get_redis_cache failed: {import_err} -> trying dynamic import")
+        warnings.warn(
+            f"⚠️  Import get_redis_cache failed: {import_err} -> trying dynamic import", stacklevel=2
+        )
         # Dynamic import fallback
         import importlib.util
+
         rc_path = src_path / "pipelines" / "crawl" / "storage" / "redis_cache.py"
         get_redis_cache = None  # type: ignore
         if rc_path.exists():
@@ -83,7 +88,7 @@ try:
             if get_redis_cache:
                 redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
 except Exception as e:
-    warnings.warn(f"Redis cache initialization failed: {e}")
+    warnings.warn(f"Redis cache initialization failed: {e}", stacklevel=2)
     redis_cache = None
 
 
@@ -93,6 +98,7 @@ def get_variable(key: str, default: Any = None) -> Any:
         return _Variable.get(key, default=default)
     except Exception:
         return default
+
 
 # Đường dẫn cơ sở của file DAG
 dag_file_dir = os.path.dirname(__file__)
@@ -153,7 +159,7 @@ if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
 
         async def crawl_product_detail_async(*args, **kwargs):
             raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
-        
+
         # Fallback SeleniumDriverPool
         SeleniumDriverPool = None
 
@@ -166,6 +172,7 @@ else:
             crawl_product_detail_with_selenium,
             extract_product_detail,
         )
+
         SeleniumDriverPool = None  # Không có trong crawl_products_detail, sẽ import từ utils
     except ImportError as e:
         raise ImportError(
@@ -174,19 +181,28 @@ else:
             f"Lỗi gốc: {e}"
         ) from e
 
+    # Import crawl_category_products từ crawl_products
+    try:
+        from crawl_products import crawl_category_products
+    except ImportError as e:
+        raise ImportError(
+            f"Không tìm thấy hàm crawl_category_products trong crawl_products.\n" f"Lỗi gốc: {e}"
+        ) from e
+
 # Import SeleniumDriverPool từ utils ở module level
 try:
     # utils là file (.py), không phải package, nên import trực tiếp
-    import sys
     import importlib.util
+    import sys
+
     src_path = Path("/opt/airflow/src")
     if src_path.exists() and str(src_path) not in sys.path:
         sys.path.insert(0, str(src_path))
-    
+
     # Thử import từ pipelines.crawl.utils
     try:
         from pipelines.crawl.utils import SeleniumDriverPool
-    except Exception as e1:
+    except Exception:
         # Fallback: direct import từ file
         utils_path = src_path / "pipelines" / "crawl" / "utils.py"
         if utils_path.exists():
@@ -724,7 +740,6 @@ def _fix_sys_path_for_pipelines_import(logger=None):
     Xóa các đường dẫn con như /opt/airflow/src/pipelines khỏi sys.path,
     xóa các fake modules khỏi sys.modules, và chỉ giữ lại /opt/airflow/src.
     """
-    import logging
 
     if logger is None:
         logger = logging.getLogger("airflow.task")
@@ -1949,7 +1964,7 @@ def crawl_product_batch(
 
     try:
         import asyncio
-        
+
         # Import SeleniumDriverPool từ utils nếu chưa có (cho task scope)
         global SeleniumDriverPool
         _SeleniumDriverPool = SeleniumDriverPool
@@ -1959,10 +1974,13 @@ def crawl_product_batch(
                 _fix_sys_path_for_pipelines_import(logger)
                 # utils là file (.py), không phải package
                 import importlib.util
+
                 src_path = Path("/opt/airflow/src")
                 utils_path = src_path / "pipelines" / "crawl" / "utils.py"
                 if utils_path.exists():
-                    spec = importlib.util.spec_from_file_location("crawl_utils_fallback", str(utils_path))
+                    spec = importlib.util.spec_from_file_location(
+                        "crawl_utils_fallback", str(utils_path)
+                    )
                     if spec and spec.loader:
                         crawl_utils = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(crawl_utils)
@@ -1973,12 +1991,16 @@ def crawl_product_batch(
                     raise ImportError("Không tìm thấy SeleniumDriverPool trong utils.py")
             except Exception as e:
                 logger.error(f"⚠️  Không thể import SeleniumDriverPool từ pipelines: {e}")
-                raise ImportError("SeleniumDriverPool chưa được import từ utils module")
+                raise ImportError("SeleniumDriverPool chưa được import từ utils module") from e
 
         # Sử dụng hàm đã được import ở đầu file
         # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file
-        pool_size = int(Variable.get("TIKI_DETAIL_POOL_SIZE", default="15"))  # Tối ưu: tăng từ 5 -> 15
-        driver_pool = _SeleniumDriverPool(pool_size=pool_size, headless=True, timeout=60)  # Tối ưu: giảm timeout từ 90 -> 60s
+        pool_size = int(
+            Variable.get("TIKI_DETAIL_POOL_SIZE", default="15")
+        )  # Tối ưu: tăng từ 5 -> 15
+        driver_pool = _SeleniumDriverPool(
+            pool_size=pool_size, headless=True, timeout=60
+        )  # Tối ưu: giảm timeout từ 90 -> 60s
 
         # Tạo event loop trước
         try:
@@ -2213,7 +2235,7 @@ def crawl_product_batch(
         # (Event loop đã được tạo ở trên)
         # Sử dụng asyncio.gather() để crawl parallel
         rate_limit_delay = float(Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="1.5"))
-        
+
         # Tạo semaphore để limit concurrent tasks (tối ưu throughput)
         max_concurrent = int(Variable.get("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="15"))
         semaphore = asyncio.Semaphore(max_concurrent)
@@ -3689,7 +3711,7 @@ def transform_products(**context) -> dict[str, Any]:
                 # Fallback: định nghĩa hàm đơn giản
                 import re
 
-                def extract_category_id_from_url(url: str) -> Optional[str]:
+                def extract_category_id_from_url(url: str) -> str | None:
                     if not url:
                         return None
                     match = re.search(r"/c(\d+)", url)
@@ -3701,7 +3723,7 @@ def transform_products(**context) -> dict[str, Any]:
             logger.warning(f"⚠️  Không thể import extract_category_id_from_url: {e}")
             import re
 
-            def extract_category_id_from_url(url: str) -> Optional[str]:
+            def extract_category_id_from_url(url: str) -> str | None:
                 if not url:
                     return None
                 match = re.search(r"/c(\d+)", url)
@@ -3716,22 +3738,22 @@ def transform_products(**context) -> dict[str, Any]:
         category_path_enriched = 0
 
         # Bước 3a: Build category_path lookup từ categories file
-        category_path_lookup: Dict[str, list] = {}  # category_id -> category_path
-        
+        category_path_lookup: dict[str, list] = {}  # category_id -> category_path
+
         if CATEGORIES_FILE.exists():
             try:
                 logger.info(f"📖 Đang load categories từ: {CATEGORIES_FILE}")
                 with open(CATEGORIES_FILE, encoding="utf-8") as cf:
                     raw_categories = json.load(cf)
-                
+
                 for cat in raw_categories:
                     cat_id = cat.get("category_id")
                     cat_path = cat.get("category_path")
-                    
+
                     # Chỉ thêm vào lookup nếu có category_id và category_path
                     if cat_id and cat_path:
                         category_path_lookup[cat_id] = cat_path
-                
+
                 logger.info(f"✅ Loaded {len(category_path_lookup)} category_path từ file")
             except Exception as e:
                 logger.warning(f"⚠️ Lỗi đọc categories file: {e}")
@@ -3760,7 +3782,7 @@ def transform_products(**context) -> dict[str, Any]:
                 if cat_id in category_path_lookup:
                     product["category_path"] = category_path_lookup[cat_id]
                     category_path_enriched += 1
-            
+
             # Đảm bảo category_path được giữ lại
             if product.get("category_path"):
                 category_path_count += 1
@@ -4021,18 +4043,10 @@ def load_products(**context) -> dict[str, Any]:
 
             # Lấy database config từ Airflow Variables hoặc environment variables
             # Ưu tiên: Airflow Variables > Environment Variables > Default
-            db_host = Variable.get(
-                "POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres")
-            )
-            db_port = int(
-                Variable.get("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432"))
-            )
-            db_name = Variable.get(
-                "POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data")
-            )
-            db_user = Variable.get(
-                "POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres")
-            )
+            db_host = Variable.get("POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres"))
+            db_port = int(Variable.get("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432")))
+            db_name = Variable.get("POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data"))
+            db_user = Variable.get("POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres"))
             # trufflehog:ignore - Fallback for development, production uses Airflow Variables
             db_password = Variable.get(
                 "POSTGRES_PASSWORD", default=os.getenv("POSTGRES_PASSWORD", "postgres")
@@ -4630,29 +4644,39 @@ def health_check_monitoring(**context) -> dict[str, Any]:
             import importlib.util
             import sys
             from pathlib import Path
-            
+
             # Add src/ to sys.path nếu chưa có
             src_path = Path("/opt/airflow/src")
             if src_path.exists() and str(src_path) not in sys.path:
                 sys.path.insert(0, str(src_path))
-            
+
             # Import bằng importlib
-            postgres_storage_path = src_path / "pipelines" / "crawl" / "storage" / "postgres_storage.py"
+            postgres_storage_path = (
+                src_path / "pipelines" / "crawl" / "storage" / "postgres_storage.py"
+            )
             if postgres_storage_path.exists():
-                spec = importlib.util.spec_from_file_location("postgres_storage_module", postgres_storage_path)
+                spec = importlib.util.spec_from_file_location(
+                    "postgres_storage_module", postgres_storage_path
+                )
                 if spec and spec.loader:
                     postgres_module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(postgres_module)
                     PostgresStorage = postgres_module.PostgresStorage
-                    
+
                     # Khởi tạo PostgresStorage để lấy pool stats
                     postgres = PostgresStorage()
                     pool_stats = postgres.get_pool_stats()
                     result["postgres_pool_stats"] = pool_stats
                     logger.info("🐘 PostgreSQL Pool Stats:")
-                    logger.info(f"   - Min connections: {pool_stats.get('minconn', pool_stats.get('min_conn', 0))}")
-                    logger.info(f"   - Max connections: {pool_stats.get('maxconn', pool_stats.get('pool_size', 0))}")
-                    logger.info(f"   - Active connections: {pool_stats.get('active_connections', 0)}")
+                    logger.info(
+                        f"   - Min connections: {pool_stats.get('minconn', pool_stats.get('min_conn', 0))}"
+                    )
+                    logger.info(
+                        f"   - Max connections: {pool_stats.get('maxconn', pool_stats.get('pool_size', 0))}"
+                    )
+                    logger.info(
+                        f"   - Active connections: {pool_stats.get('active_connections', 0)}"
+                    )
                     logger.info(f"   - Total queries: {pool_stats.get('total_queries', 0)}")
 
                     # Close connection
@@ -4675,16 +4699,18 @@ def health_check_monitoring(**context) -> dict[str, Any]:
             import importlib.util
             import sys
             from pathlib import Path
-            
+
             # Add src/ to sys.path nếu chưa có
             src_path = Path("/opt/airflow/src")
             if src_path.exists() and str(src_path) not in sys.path:
                 sys.path.insert(0, str(src_path))
-            
+
             # Import bằng importlib
             redis_cache_path = src_path / "pipelines" / "crawl" / "storage" / "redis_cache.py"
             if redis_cache_path.exists():
-                spec = importlib.util.spec_from_file_location("redis_cache_module", redis_cache_path)
+                spec = importlib.util.spec_from_file_location(
+                    "redis_cache_module", redis_cache_path
+                )
                 if spec and spec.loader:
                     redis_module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(redis_module)
@@ -4694,16 +4720,16 @@ def health_check_monitoring(**context) -> dict[str, Any]:
                     if redis_cache:
                         # Redis client info để lấy stats
                         redis_info = redis_cache.client.info()
-                        
+
                         # Tính hit rate từ keyspace_hits và keyspace_misses
                         hits = int(redis_info.get("keyspace_hits", 0))
                         misses = int(redis_info.get("keyspace_misses", 0))
                         total = hits + misses
                         hit_rate = (hits / total * 100) if total > 0 else 0
-                        
+
                         # Count keys với prefix
                         keys_count = redis_cache.client.dbsize()
-                        
+
                         redis_stats = {
                             "keys": keys_count,
                             "used_memory_human": redis_info.get("used_memory_human", "N/A"),
@@ -4713,19 +4739,21 @@ def health_check_monitoring(**context) -> dict[str, Any]:
                             "evicted_keys": int(redis_info.get("evicted_keys", 0)),
                             "connected_clients": int(redis_info.get("connected_clients", 0)),
                         }
-                        
+
                         result["redis_stats"] = redis_stats
                         logger.info("📦 Redis Stats:")
                         logger.info(f"   - Keys: {redis_stats.get('keys', 0)}")
                         logger.info(f"   - Memory: {redis_stats.get('used_memory_human', 'N/A')}")
                         logger.info(f"   - Hit rate: {redis_stats.get('hit_rate', 0):.1f}%")
                         logger.info(f"   - Evicted keys: {redis_stats.get('evicted_keys', 0)}")
-                        logger.info(f"   - Connected clients: {redis_stats.get('connected_clients', 0)}")
+                        logger.info(
+                            f"   - Connected clients: {redis_stats.get('connected_clients', 0)}"
+                        )
                 else:
                     raise ImportError("Cannot load spec for redis_cache")
             else:
                 raise FileNotFoundError(f"redis_cache.py not found at {redis_cache_path}")
-                
+
         except Exception as e:
             logger.warning(f"⚠️  Không thể lấy redis stats: {e}")
             result["redis_stats"] = {"error": str(e)}
@@ -4740,96 +4768,117 @@ def health_check_monitoring(**context) -> dict[str, Any]:
                 "failure_threshold": tiki_degradation.failure_threshold,
                 "recovery_threshold": tiki_degradation.recovery_threshold,
             }
-            
+
             # Tính success rate
             total = degradation_state["failure_count"] + degradation_state["success_count"]
             success_rate = (degradation_state["success_count"] / total * 100) if total > 0 else 100
             degradation_state["success_rate"] = success_rate
-            
+
             result["degradation_stats"] = {"tiki_service": degradation_state}
             logger.info("📊 Graceful Degradation Stats:")
             logger.info(f"   - Level: {degradation_state['level']}")
             logger.info(f"   - Success rate: {success_rate:.1f}%")
-            logger.info(f"   - Failures: {degradation_state['failure_count']}/{degradation_state['failure_threshold']}")
+            logger.info(
+                f"   - Failures: {degradation_state['failure_count']}/{degradation_state['failure_threshold']}"
+            )
         except Exception as e:
             logger.warning(f"⚠️  Không thể lấy degradation stats: {e}")
             result["degradation_stats"] = {"error": str(e)}
 
         logger.info("✅ Health check hoàn tất")
-        
+
         # 5. Gửi alert qua Discord nếu có vấn đề
         try:
             alerts = []
-            
+
             # TEST: Thêm test alert để verify webhook hoạt động
             # TODO: Remove this after testing
             try:
                 # Default test mode FALSE in production; set variable to true only when debugging
-                test_mode = Variable.get("HEALTH_CHECK_TEST_ALERT", default="false").lower() == "true"
+                test_mode = (
+                    Variable.get("HEALTH_CHECK_TEST_ALERT", default="false").lower() == "true"
+                )
                 logger.info(f"🔍 Test mode check: HEALTH_CHECK_TEST_ALERT = {test_mode}")
                 if test_mode:
-                    alerts.append("🧪 **TEST ALERT** - Đây là test alert để verify Discord webhook hoạt động")
+                    alerts.append(
+                        "🧪 **TEST ALERT** - Đây là test alert để verify Discord webhook hoạt động"
+                    )
                     logger.info("🧪 Test mode enabled - sẽ gửi test alert")
             except Exception as e:
                 logger.warning(f"⚠️  Không check được test mode variable: {e}")
-            
+
             # Check circuit breaker
             cb_state = result["circuit_breaker_state"]
             if cb_state.get("state") == "open":
-                alerts.append("🔴 **Circuit Breaker OPEN** - Service đang bị block do quá nhiều lỗi!")
+                alerts.append(
+                    "🔴 **Circuit Breaker OPEN** - Service đang bị block do quá nhiều lỗi!"
+                )
             elif cb_state.get("state") == "half_open":
                 alerts.append("🟡 **Circuit Breaker HALF-OPEN** - Đang thử khôi phục service...")
-            
+
             # Check postgres pool
             pg_stats = result["postgres_pool_stats"]
             if not pg_stats.get("error"):
                 active = pg_stats.get("active_connections", 0)
                 max_conn = pg_stats.get("pool_size", pg_stats.get("maxconn", 100))
                 usage_percent = (active / max_conn * 100) if max_conn > 0 else 0
-                
+
                 if usage_percent > 90:
-                    alerts.append(f"🔴 **PostgreSQL Pool gần đầy**: {active}/{max_conn} ({usage_percent:.1f}%)")
+                    alerts.append(
+                        f"🔴 **PostgreSQL Pool gần đầy**: {active}/{max_conn} ({usage_percent:.1f}%)"
+                    )
                 elif usage_percent > 80:
-                    alerts.append(f"🟡 **PostgreSQL Pool cao**: {active}/{max_conn} ({usage_percent:.1f}%)")
-            
+                    alerts.append(
+                        f"🟡 **PostgreSQL Pool cao**: {active}/{max_conn} ({usage_percent:.1f}%)"
+                    )
+
             # Check redis hit rate
             redis_stats = result["redis_stats"]
             if not redis_stats.get("error"):
                 hit_rate = redis_stats.get("hit_rate", 0)
                 if hit_rate < 50 and redis_stats.get("keys", 0) > 100:
-                    alerts.append(f"🟡 **Redis hit rate thấp**: {hit_rate:.1f}% - Cache không hiệu quả")
-            
+                    alerts.append(
+                        f"🟡 **Redis hit rate thấp**: {hit_rate:.1f}% - Cache không hiệu quả"
+                    )
+
             logger.info(f"📋 Total alerts to send: {len(alerts)}")
-            
+
             # Gửi alert nếu có (hoặc trong test mode)
             if alerts:
                 try:
                     monitoring_webhook = os.getenv("DISCORD_MONITORING_WEBHOOK_URL")
                     logger.info(f"🔍 Discord webhook configured: {bool(monitoring_webhook)}")
-                    
+
                     if not monitoring_webhook:
-                        logger.warning("⚠️  DISCORD_MONITORING_WEBHOOK_URL chưa được set, skip gửi alert")
+                        logger.warning(
+                            "⚠️  DISCORD_MONITORING_WEBHOOK_URL chưa được set, skip gửi alert"
+                        )
                     else:
                         logger.info("📨 Đang gửi alerts qua Discord...")
-                        
+
                         # Fix import path
                         import sys
                         from pathlib import Path
-                        
+
                         # Add src/ to sys.path nếu chưa có
                         src_path = Path("/opt/airflow/src")
                         if src_path.exists() and str(src_path) not in sys.path:
                             sys.path.insert(0, str(src_path))
-                        
+
                         # Import DiscordNotifier with fallback dynamic import to avoid path issues
                         try:
                             from common.discord_notifier import DiscordNotifier  # type: ignore
                         except Exception as import_err:
-                            logger.warning(f"⚠️  Import direct thất bại: {import_err} -> thử dynamic import")
+                            logger.warning(
+                                f"⚠️  Import direct thất bại: {import_err} -> thử dynamic import"
+                            )
                             import importlib.util
+
                             dn_path = Path("/opt/airflow/src/common/discord_notifier.py")
                             if dn_path.exists():
-                                spec = importlib.util.spec_from_file_location("discord_notifier_dyn", dn_path)
+                                spec = importlib.util.spec_from_file_location(
+                                    "discord_notifier_dyn", dn_path
+                                )
                                 if spec and spec.loader:
                                     mod = importlib.util.module_from_spec(spec)
                                     spec.loader.exec_module(mod)  # type: ignore
@@ -4839,14 +4888,17 @@ def health_check_monitoring(**context) -> dict[str, Any]:
                             else:
                                 DiscordNotifier = None  # type: ignore
                         if not DiscordNotifier:
-                            raise RuntimeError("DiscordNotifier không khả dụng sau khi cố dynamic import")
+                            raise RuntimeError(
+                                "DiscordNotifier không khả dụng sau khi cố dynamic import"
+                            )
 
                         notifier = DiscordNotifier(monitoring_webhook)
-                        
+
                         # Dedupe: build hash of alerts list
                         import hashlib
-                        alerts_hash_source = "\n".join(sorted(alerts)) + result['timestamp'][:10]
-                        alerts_hash = hashlib.sha256(alerts_hash_source.encode('utf-8')).hexdigest()
+
+                        alerts_hash_source = "\n".join(sorted(alerts)) + result["timestamp"][:10]
+                        alerts_hash = hashlib.sha256(alerts_hash_source.encode("utf-8")).hexdigest()
                         last_hash = None
                         try:
                             last_hash = Variable.get("HEALTH_CHECK_LAST_ALERT_HASH")
@@ -4854,22 +4906,38 @@ def health_check_monitoring(**context) -> dict[str, Any]:
                             last_hash = None
                         is_critical = any("🔴" in a for a in alerts)
                         if alerts_hash == last_hash and not is_critical:
-                            logger.info("🛑 Dedupe: Alert hash unchanged and no critical alerts -> skip send")
+                            logger.info(
+                                "🛑 Dedupe: Alert hash unchanged and no critical alerts -> skip send"
+                            )
                         else:
                             # Batch embeds if many alerts
                             MAX_ALERTS_PER_EMBED = 10
                             embed_chunks = []
                             for i in range(0, len(alerts), MAX_ALERTS_PER_EMBED):
-                                chunk = alerts[i:i+MAX_ALERTS_PER_EMBED]
+                                chunk = alerts[i : i + MAX_ALERTS_PER_EMBED]
                                 description = "\n".join(f"• {a}" for a in chunk)
-                                embed_chunks.append({
-                                    "title": f"Segment {i//MAX_ALERTS_PER_EMBED + 1}",
-                                    "description": description,
-                                    "color": 0xFF0000 if any("🔴" in a for a in chunk) else (0xFFA500 if any("🟡" in a for a in chunk) else 0x3498DB),
-                                })
+                                embed_chunks.append(
+                                    {
+                                        "title": f"Segment {i//MAX_ALERTS_PER_EMBED + 1}",
+                                        "description": description,
+                                        "color": (
+                                            0xFF0000
+                                            if any("🔴" in a for a in chunk)
+                                            else (
+                                                0xFFA500
+                                                if any("🟡" in a for a in chunk)
+                                                else 0x3498DB
+                                            )
+                                        ),
+                                    }
+                                )
 
                             # Summary embed
-                            summary_color = 0xFF0000 if any("🔴" in a for a in alerts) else (0xFFA500 if any("🟡" in a for a in alerts) else 0x2ECC71)
+                            summary_color = (
+                                0xFF0000
+                                if any("🔴" in a for a in alerts)
+                                else (0xFFA500 if any("🟡" in a for a in alerts) else 0x2ECC71)
+                            )
                             summary_embed = {
                                 "title": "🏥 System Health Alert",
                                 "description": f"Tổng cộng {len(alerts)} alerts\nTimestamp: {result['timestamp']}",
@@ -4883,15 +4951,19 @@ def health_check_monitoring(**context) -> dict[str, Any]:
                                 color=summary_color,
                                 embeds=embeds,
                             )
-                            logger.info(f"📨 Đã gửi {len(alerts)} alerts qua Discord monitoring webhook")
+                            logger.info(
+                                f"📨 Đã gửi {len(alerts)} alerts qua Discord monitoring webhook"
+                            )
                             try:
                                 Variable.set("HEALTH_CHECK_LAST_ALERT_HASH", alerts_hash)
                             except Exception as ve:
-                                logger.warning(f"⚠️  Không set được HEALTH_CHECK_LAST_ALERT_HASH: {ve}")
-                        
+                                logger.warning(
+                                    f"⚠️  Không set được HEALTH_CHECK_LAST_ALERT_HASH: {ve}"
+                                )
+
                 except Exception as discord_error:
                     logger.warning(f"⚠️  Không thể gửi Discord alert: {discord_error}")
-                    
+
         except Exception as alert_error:
             logger.warning(f"⚠️  Lỗi khi xử lý alerts: {alert_error}")
 
@@ -4930,6 +5002,7 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
         # Ensure src path in sys.path for package-style imports
         import sys
         from pathlib import Path
+
         src_path = Path("/opt/airflow/src")
         if src_path.exists() and str(src_path) not in sys.path:
             sys.path.insert(0, str(src_path))
@@ -4937,9 +5010,12 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
         try:
             from pipelines.crawl.storage.redis_cache import get_redis_cache  # type: ignore
         except Exception as import_err:
-            logger.warning(f"⚠️  Import get_redis_cache failed: {import_err} -> trying dynamic import")
+            logger.warning(
+                f"⚠️  Import get_redis_cache failed: {import_err} -> trying dynamic import"
+            )
             # Dynamic import fallback
             import importlib.util
+
             rc_path = src_path / "pipelines" / "crawl" / "storage" / "redis_cache.py"
             get_redis_cache = None  # type: ignore
             if rc_path.exists():
@@ -4949,7 +5025,9 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
                     spec.loader.exec_module(mod)  # type: ignore
                     get_redis_cache = getattr(mod, "get_redis_cache", None)  # type: ignore
             if not get_redis_cache:
-                raise RuntimeError("Không thể import get_redis_cache (dynamic import cũng thất bại)")
+                raise RuntimeError(
+                    "Không thể import get_redis_cache (dynamic import cũng thất bại)"
+                ) from import_err
 
         # Kết nối Redis
         redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
@@ -4994,6 +5072,7 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
         # Lấy stats sau khi cleanup
         try:
             import time as _t
+
             _t.sleep(1)
             info_after = redis_cache.client.info()
             db_key = f"db{redis_cache.client.connection_pool.connection_kwargs.get('db', 1)}"
@@ -5240,7 +5319,9 @@ with DAG(**DAG_CONFIG) as dag:
                     # Airflow 3.x: Dùng dag_run.get_task_instance() thay vì TaskInstance constructor
                     dag_run = context["dag_run"]
                     # Thử lấy từ task trong TaskGroup
-                    upstream_ti = dag_run.get_task_instance(task_id="load_and_prepare.load_categories")
+                    upstream_ti = dag_run.get_task_instance(
+                        task_id="load_and_prepare.load_categories"
+                    )
                     if upstream_ti:
                         categories = upstream_ti.xcom_pull(key="return_value")
                         logger.info(
@@ -5301,7 +5382,9 @@ with DAG(**DAG_CONFIG) as dag:
                     # Airflow 3.x: Dùng dag_run.get_task_instance() thay vì TaskInstance constructor
                     dag_run = context["dag_run"]
                     # Thử lấy từ task trong TaskGroup
-                    upstream_ti = dag_run.get_task_instance(task_id="load_and_prepare.load_categories")
+                    upstream_ti = dag_run.get_task_instance(
+                        task_id="load_and_prepare.load_categories"
+                    )
                     if upstream_ti:
                         categories = upstream_ti.xcom_pull(key="return_value")
                         logger.info(
@@ -5362,13 +5445,11 @@ with DAG(**DAG_CONFIG) as dag:
                 python_callable=prepare_category_batch_kwargs,
                 execution_timeout=timedelta(minutes=1),
             )
-            
+
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_category_batch,
-                execution_timeout=timedelta(
-                    minutes=12
-                ),  # Tối ưu: giảm từ 15 -> 12 phút
+                execution_timeout=timedelta(minutes=12),  # Tối ưu: giảm từ 15 -> 12 phút
                 pool="default_pool",
                 retries=1,  # Retry 1 lần
                 retry_delay=timedelta(seconds=15),  # Tối ưu: thêm delay ngắn
@@ -5380,7 +5461,7 @@ with DAG(**DAG_CONFIG) as dag:
                 python_callable=prepare_crawl_kwargs,
                 execution_timeout=timedelta(minutes=1),
             )
-            
+
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_single_category,
@@ -5528,9 +5609,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_crawl_product_detail = PythonOperator.partial(
             task_id="crawl_product_detail",
             python_callable=crawl_product_batch,  # Dùng batch function thay vì single
-            execution_timeout=timedelta(
-                minutes=15
-            ),  # Tối ưu: giảm từ 20 -> 15 phút (nhanh hơn)
+            execution_timeout=timedelta(minutes=15),  # Tối ưu: giảm từ 20 -> 15 phút (nhanh hơn)
             pool="default_pool",
             retries=1,  # Tối ưu: giảm từ 2 -> 1 (nhanh hơn)
             retry_delay=timedelta(seconds=30),  # Tối ưu: giảm từ 2 phút -> 30 giây
@@ -5566,7 +5645,7 @@ with DAG(**DAG_CONFIG) as dag:
 
         def enrich_category_path_task(**context):
             """Bổ sung category_path cho products có category_id nhưng chưa có breadcrumb.
-            
+
             Luồng:
             1. Đọc file sản phẩm chi tiết (products_with_detail.json)
             2. Đọc categories từ file (categories_recursive_optimized.json) - đã có category_id và category_path
@@ -5584,7 +5663,9 @@ with DAG(**DAG_CONFIG) as dag:
             # Bước 1: Lấy file sản phẩm chi tiết
             output_file = None
             try:
-                output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
+                output_file = ti.xcom_pull(
+                    task_ids="crawl_product_details.save_products_with_detail"
+                )
             except Exception:
                 pass
             if not output_file:
@@ -5598,24 +5679,24 @@ with DAG(**DAG_CONFIG) as dag:
                 data = json.load(f)
             products = data.get("products", [])
             logger.info(f"📊 Số products trước enrich: {len(products)}")
-            
+
             # Bước 2: Đọc categories từ file
-            category_path_lookup: Dict[str, list] = {}  # category_id -> category_path
-            
+            category_path_lookup: dict[str, list] = {}  # category_id -> category_path
+
             if CATEGORIES_FILE.exists():
                 try:
                     logger.info(f"📖 Đọc categories từ file: {CATEGORIES_FILE}")
                     with open(CATEGORIES_FILE, encoding="utf-8") as cf:
                         raw_categories = json.load(cf)
-                    
+
                     for cat in raw_categories:
                         cat_id = cat.get("category_id")
                         cat_path = cat.get("category_path")
-                        
+
                         # Chỉ thêm vào lookup nếu có category_id và category_path
                         if cat_id and cat_path:
                             category_path_lookup[cat_id] = cat_path
-                    
+
                     logger.info(f"✅ Loaded {len(category_path_lookup)} category_path từ file")
                 except Exception as fe:
                     logger.warning(f"⚠️ Lỗi đọc file categories: {fe}")
@@ -5629,7 +5710,7 @@ with DAG(**DAG_CONFIG) as dag:
                 # Nếu product có category_id nhưng chưa có category_path
                 if p.get("category_id") and not p.get("category_path"):
                     cat_id = p["category_id"]
-                    
+
                     # Tìm category_path từ lookup map
                     if cat_id in category_path_lookup:
                         p["category_path"] = category_path_lookup[cat_id]
@@ -5637,13 +5718,15 @@ with DAG(**DAG_CONFIG) as dag:
                     else:
                         # Log: category_id không tìm thấy trong file categories
                         without_category_id += 1
-            
+
             # Bước 4: Report
             if enriched > 0:
                 logger.info(f"✅ Enriched category_path cho {enriched} products")
             if without_category_id > 0:
-                logger.warning(f"⚠️ {without_category_id} products có category_id nhưng không tìm thấy trong categories")
-            
+                logger.warning(
+                    f"⚠️ {without_category_id} products có category_id nhưng không tìm thấy trong categories"
+                )
+
             # Check: Số products có category_path
             products_with_path = sum(1 for p in products if p.get("category_path"))
             logger.info(f"📊 Tổng products có category_path: {products_with_path}/{len(products)}")
@@ -5653,7 +5736,11 @@ with DAG(**DAG_CONFIG) as dag:
             atomic_write_file(output_file, data, **context)
             logger.info(f"💾 Đã cập nhật file với category_path enrich: {output_file}")
 
-            return {"file": output_file, "enriched_count": enriched, "products_with_path": products_with_path}
+            return {
+                "file": output_file,
+                "enriched_count": enriched,
+                "products_with_path": products_with_path,
+            }
 
         task_enrich_category_path = PythonOperator(
             task_id="enrich_products_category_path",

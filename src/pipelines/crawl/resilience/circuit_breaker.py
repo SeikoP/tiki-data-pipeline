@@ -32,7 +32,7 @@ class CircuitBreaker:
         self,
         failure_threshold: int = 5,
         recovery_timeout: int = 60,
-        expected_exception: type = Exception,
+        expected_exception: type[Exception] = Exception,
         name: str = "default",
     ):
         """

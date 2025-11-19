@@ -315,7 +315,7 @@ class PostgresStorage:
         updated_count = 0
 
         # Lấy danh sách product_id đã có trong DB (để phân biệt INSERT vs UPDATE)
-        existing_product_ids = set()
+        existing_product_ids: set[str] = set()
         if upsert:
             try:
                 with self.get_connection() as conn:
