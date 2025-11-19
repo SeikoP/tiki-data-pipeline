@@ -1619,7 +1619,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             Variable.get("TIKI_PRODUCTS_PER_DAY", default="280")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
-            Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default=str(products_per_day))
+            Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
         )  # 0 = không giới hạn
 
         logger.info(
