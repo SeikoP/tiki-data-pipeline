@@ -5404,7 +5404,7 @@ with DAG(**DAG_CONFIG) as dag:
             logger.info(f"✅ Đã lấy {len(categories)} categories")
 
             # Batch Processing: Chia categories thành batches
-            batch_size = int(Variable.get("TIKI_CATEGORY_BATCH_SIZE", default="5"))
+            batch_size = int(Variable.get("TIKI_CATEGORY_BATCH_SIZE", default="10"))
             batches = []
             for i in range(0, len(categories), batch_size):
                 batch = categories[i : i + batch_size]
