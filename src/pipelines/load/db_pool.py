@@ -14,7 +14,6 @@ from contextlib import contextmanager
 from typing import Any
 
 try:
-    import psycopg2  # noqa: F401
     from psycopg2 import pool
 
     PSYCOPG2_AVAILABLE = True
