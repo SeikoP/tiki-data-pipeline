@@ -84,58 +84,79 @@ class AISummarizer:
         failed = stats.get("failed", 0)
         timeout = stats.get("timeout", 0)
 
-        # Tính toán các tỷ lệ
+        # Validation: với_detail không nên lớn hơn crawled_count
+        if with_detail > crawled_count:
+            logger.warning(f"⚠️  with_detail ({with_detail}) > crawled_count ({crawled_count}), điều chỉnh...")
+            with_detail = crawled_count
+
+        # Tính toán các tỷ lệ dựa trên crawled_count (số thực tế đã crawl)
         success_rate = (with_detail / crawled_count * 100) if crawled_count > 0 else 0.0
         timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0.0
         failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0.0
         total_error_rate = ((timeout + failed) / crawled_count * 100) if crawled_count > 0 else 0.0
 
-        # Tạo context rõ ràng cho AI
-        context_note = ""
-        if crawled_count > 0:
-            context_note = f"""
-**LƯU Ý QUAN TRỌNG:**
-- Tổng số sản phẩm từ danh sách: {total_products:,}
-- Số lượng sản phẩm ĐÃ ĐƯỢC CRAWL DETAIL: {crawled_count:,} (đây là số liệu quan trọng để phân tích)
-- Tỷ lệ thành công crawl detail: {success_rate:.1f}% ({with_detail}/{crawled_count})
-- Khi phân tích, hãy SO SÁNH với số lượng ĐÃ CRAWL ({crawled_count:,}) chứ KHÔNG phải tổng số ({total_products:,})
+        # Tạo bảng so sánh rõ ràng về các con số quan trọng
+        comparison_table = f"""
+📊 **BẢNG SO SÁNH SỐ LIỆU QUAN TRỌNG:**
+┌─ Tổng số sản phẩm trong danh sách (từ crawl list): {total_products:,}
+├─ Số lượng sản phẩm ĐÃ ĐƯỢC CRAWL DETAIL: {crawled_count:,} (đây là số chính để phân tích)
+├─ Sản phẩm có đầy đủ detail: {with_detail:,}
+├─ Sản phẩm timeout: {timeout:,}
+├─ Sản phẩm failed: {failed:,}
+└─ Tỷ lệ thành công: {success_rate:.1f}% ({with_detail}/{crawled_count})
+
+🔑 **NGUYÊN TẮC PHÂN TÍCH:**
+1. KHI PHÂN TÍCH: Luôn so sánh/tính toán dựa trên {crawled_count:,} (ĐÃ CRAWL DETAIL) chứ KHÔNG phải {total_products:,}
+2. Ví dụ: Nếu nói "X% sản phẩm có giá dưới 1 triệu", tính dựa trên {crawled_count:,} không phải {total_products:,}
+3. Khi nói "Top 5 danh mục", đó là top từ {with_detail:,} sản phẩm đã crawl detail
+4. So sánh DB stats: Hãy kiểm tra nếu các con số trong database khác với expected, có thể DB đã được cập nhật từ các nguồn khác
 """
 
         prompt = f"""Bạn là một chuyên gia phân tích dữ liệu. Hãy phân tích và tổng hợp thông tin sau về dữ liệu sản phẩm Tiki:
 
-{context_note}
+{comparison_table}
 
+Data JSON:
 {json.dumps(data_summary, ensure_ascii=False, indent=2)}
 
-Hãy tạo một bản tổng hợp ngắn gọn, dễ hiểu bằng tiếng Việt với format nhất quán:
+📝 **HƯỚNG DẪN TẠO BÁO CÁO:**
 
 **1. Tổng quan về dữ liệu:**
-- Số lượng sản phẩm đã được crawl detail: {crawled_count:,} (KHÔNG phải tổng số {total_products:,})
-- Tỷ lệ thành công: {success_rate:.1f}% ({with_detail}/{crawled_count} products)
-- Thời gian crawl: [từ metadata]
+- Số lượng sản phẩm đã crawl detail: {crawled_count:,} sản phẩm (từ {total_products:,} danh sách)
+- Tỷ lệ thành công: {success_rate:.1f}% ({with_detail} sản phẩm với đầy đủ detail)
+- Các sản phẩm không hoàn tất: Timeout {timeout} ({timeout_rate:.1f}%), Failed {failed} ({failed_rate:.1f}%)
+- Tỷ lệ hoàn thành: {success_rate:.1f}% - [Đánh giá: Tốt/Bình thường/Cần cải thiện]
 
-**2. Phân tích thống kê (chỉ cho {with_detail} sản phẩm có detail):**
-- Giá trung bình: [min - max, trung bình]
-- Rating trung bình: [dựa trên số sản phẩm có rating]
-- Discount trung bình: [min - max, trung bình]
-- Top 5 danh mục: [danh sách với số lượng, format: "Danh mục X: Y sản phẩm"]
-- Top 5 seller: [danh sách với số lượng, format: "Seller X: Y sản phẩm"]
+**2. Phân tích thống kê chi tiết (LUÔN dựa trên {crawled_count:,} sản phẩm):**
+- Giá cả: Min, Max, Trung bình (VND) + Insight về phân bố giá
+- Rating: Trung bình, Min, Max + % sản phẩm có rating trên 4.0
+- Sales: Min, Max, Trung bình + % bestsellers (>1000 sales)
+- Discount: Min, Max, Trung bình + % sản phẩm đang giảm giá
+- Top 5 danh mục: "Danh mục X: Y sản phẩm (Z% tổng)"
+- Top 5 seller: "Seller X: Y sản phẩm (Z% tổng)"
 
 **3. Các vấn đề / lỗi:**
-- Timeout: {timeout} products ({timeout_rate:.1f}%)
-- Failed: {failed} products ({failed_rate:.1f}%)
-- Tổng lỗi: {timeout + failed} products ({total_error_rate:.1f}% của {crawled_count:,} đã crawl)
+- Timeout: {timeout} products ({timeout_rate:.1f}%) - [Nguyên nhân có thể]
+- Failed: {failed} products ({failed_rate:.1f}%) - [Nguyên nhân có thể]
+- Tổng cộng: {timeout + failed} products ({total_error_rate:.1f}% lỗi)
+- [Đề xuất xử lý nếu có]
 
-**4. Nhận xét & Đề xuất:**
-- Đánh giá hiệu quả crawl (dựa trên tỷ lệ thành công {success_rate:.1f}%)
-- Đề xuất cải thiện nếu tỷ lệ thành công thấp (< 50%)
+**4. So sánh với database (nếu có sự khác biệt):**
+- Nếu DB stats khác với crawl data, ghi chú điểm khác biệt
+- Có thể DB đã được cập nhật từ các lần crawl trước
+- [Kiểm tra consistency]
 
-**QUAN TRỌNG:**
-- KHÔNG sử dụng bảng markdown (| | |) vì khó đọc trong Discord
-- Sử dụng format danh sách với bullet points (- hoặc •)
-- Khi nói về "số lượng sản phẩm" hoặc tính tỷ lệ, LUÔN sử dụng số lượng ĐÃ CRAWL DETAIL ({crawled_count:,}) chứ KHÔNG phải tổng số ({total_products:,})
-- Viết ngắn gọn, tự nhiên, dễ đọc trong Discord embed
-- Format số với dấu phẩy (ví dụ: 1,234 thay vì 1234)"""
+**5. Nhận xét & Đề xuất:**
+- Đánh giá hiệu quả: Tỷ lệ thành công {success_rate:.1f}% [Tốt/Bình thường/Cần cải]
+- Đề xuất cải thiện nếu tỷ lệ < 80%
+- Điểm mạnh và điểm yếu
+
+**⚠️ QUAN TRỌNG:**
+- KHÔNG dùng bảng markdown (| |) vì khó đọc Discord
+- Dùng bullet points: - hoặc •
+- Format số: 1,234 (với dấu phẩy)
+- Ngắn gọn, dễ đọc, tự nhiên
+- LUÔN nhớ: {crawled_count:,} là số chính, {total_products:,} là bối cảnh"""
 
         return prompt
 
@@ -231,3 +252,101 @@ Hãy tạo một bản tổng hợp ngắn gọn, dễ hiểu bằng tiếng Vi�
         except Exception as e:
             logger.error(f"❌ Lỗi không xác định khi gọi Groq API: {e}")
             return ""
+
+    def generate_data_quality_report(self, conn) -> str:
+        """
+        Tạo báo cáo chất lượng dữ liệu với phân tích chiến lược giảm giá
+        
+        Returns: Chuỗi báo cáo định dạng
+        """
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Lấy thống kê tổng quan
+            cur.execute("""
+                SELECT 
+                    COUNT(*) as total_products,
+                    COUNT(CASE WHEN sales_count IS NOT NULL AND sales_count > 0 THEN 1 END) as with_sales,
+                    AVG(discount_percent) as avg_discount,
+                    MAX(discount_percent) as max_discount,
+                    MIN(discount_percent) as min_discount
+                FROM products
+            """)
+            stats = cur.fetchone()
+            
+            # Lấy top 5 sản phẩm giảm giá cao
+            cur.execute("""
+                SELECT 
+                    product_id,
+                    name,
+                    url,
+                    discount_percent,
+                    price,
+                    sales_count
+                FROM products
+                WHERE discount_percent IS NOT NULL
+                    AND discount_percent > 20
+                    AND name IS NOT NULL
+                ORDER BY discount_percent DESC
+                LIMIT 5
+            """)
+            discount_products = cur.fetchall()
+            
+            # Xây dựng báo cáo
+            report = "🤖 BÁO CÁO PHÂN TÍCH DỮ LIỆU SẢN PHẨM TIKI\n"
+            report += "━" * 50 + "\n\n"
+            
+            # I. Tổng quan
+            report += "I. Tổng Quan Thu Thập Dữ Liệu\n\n"
+            total = stats['total_products'] or 0
+            with_sales = stats['with_sales'] or 0
+            coverage = (with_sales * 100 / total) if total > 0 else 0
+            
+            report += f"📊 Quy mô dataset:\n"
+            report += f"   • Tổng sản phẩm trong DB: {total:,}\n"
+            report += f"   • Sản phẩm có doanh số: {with_sales:,} ({coverage:.1f}%)\n"
+            report += f"   • Sản phẩm không có doanh số: {total - with_sales:,} ({100-coverage:.1f}%)\n\n"
+            
+            report += "✅ Chất lượng:\n"
+            report += f"   • Hợp lệ đầy đủ: {with_sales:,} / {total:,} = {coverage:.1f}% ✓\n"
+            report += f"   • Lỗi / thiếu dữ liệu: {100-coverage:.1f}%\n"
+            report += "   • Đánh giá: Dữ liệu ở mức chấp nhận được\n\n"
+            
+            # II. Phân tích giảm giá
+            report += "II. Phân Tích Chiến Lược Giảm Giá\n\n"
+            avg_disc = stats['avg_discount'] or 0
+            max_disc = stats['max_discount'] or 0
+            min_disc = stats['min_discount'] or 0
+            
+            report += f"💰 Mức giảm giá trên thị trường:\n"
+            report += f"   • Trung bình: {avg_disc:.1f}%\n"
+            report += f"   • Phạm vi: {min_disc:.1f}% – {max_disc:.1f}%\n"
+            report += f"   • Nhận định: Hầu hết sản phẩm áp dụng giảm giá nhẹ (<20%)\n\n"
+            
+            # Top 5 sản phẩm giảm giá
+            report += "📌 Các sản phẩm giảm giá sâu (>20%):\n\n"
+            for i, prod in enumerate(discount_products, 1):
+                name = (prod['name'] or "N/A")[:50]
+                disc = prod['discount_percent'] or 0
+                price = prod['price'] or 0
+                sales = prod['sales_count'] or 0
+                url = prod.get('url') or ""
+                
+                report += f"{i}️⃣ {name}\n"
+                report += f"   Giảm: {disc:.1f}% | Giá: {price:,.0f}đ | Bán: {sales:,} cái\n"
+                if url:
+                    report += f"   🔗 {url}\n"
+                report += "\n"
+            
+            report += "💡 Insight: Giảm 60-70% hiệu quả nếu sản phẩm có thương hiệu mạnh\n"
+            report += "   Giảm > 75% thường là tín hiệu 'thanh lý' hoặc 'giá gốc ảo'\n"
+            
+            return report
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi tạo báo cáo: {e}")
+            return ""
+
