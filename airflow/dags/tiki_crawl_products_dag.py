@@ -1756,17 +1756,17 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             # Kiểm tra cache với Redis (thay vì file cache)
             cache_hit = False
             cache_miss_reason = None
-            
+
             if redis_cache:
                 # Chuẩn hóa URL trước khi check cache (CRITICAL)
                 canonical_url = redis_cache._canonicalize_url(product_url)
                 product_id_for_cache = product_id
-                
+
                 # Thử lấy từ Redis cache với flexible validation
                 cached_detail, is_valid = redis_cache.get_product_detail_with_validation(
                     product_id_for_cache
                 )
-                
+
                 if is_valid:
                     cache_hits += 1
                     cache_hit = True
@@ -1779,7 +1779,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     cache_miss_reason = "INVALID_CACHE"
             else:
                 cache_miss_reason = "REDIS_UNAVAILABLE"
-            
+
             # Nếu chưa có valid cache, thêm vào danh sách crawl
             if not cache_hit:
                 products_to_crawl.append(
@@ -1816,14 +1816,14 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         logger.info("=" * 70)
         logger.info(f"📦 Tổng products đầu vào: {len(products)}")
         logger.info(f"✅ Products cần crawl hôm nay: {len(products_to_crawl)}")
-        
+
         # Cache hit rate analytics
         total_checked = cache_hits + db_hits + (already_crawled - db_hits - cache_hits)
         if total_checked > 0:
             cache_hit_rate = (cache_hits / total_checked) * 100
         else:
             cache_hit_rate = 0.0
-        
+
         logger.info(f"🔥 Cache hits (Redis - có data hợp lệ): {cache_hits}")
         logger.info(f"💾 DB hits (đã có trong DB): {db_hits}")
         logger.info(f"✓ Đã crawl trước đó (từ progress): {already_crawled - db_hits - cache_hits}")
@@ -2734,7 +2734,9 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
                 # IMPORTANT: Sử dụng product_id (không phụ thuộc vào URL) để cache
                 # Điều này đảm bảo rằng cùng 1 product từ category khác nhau sẽ hit cache
                 redis_cache.cache_product_detail(product_id, detail, ttl=604800)  # 7 ngày
-                logger.info(f"[Redis Cache] ✅ Đã cache detail cho product {product_id} (TTL: 7 days)")
+                logger.info(
+                    f"[Redis Cache] ✅ Đã cache detail cho product {product_id} (TTL: 7 days)"
+                )
             except Exception as e:
                 logger.warning(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
 
