@@ -281,14 +281,17 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
 
         html = driver.page_source
 
-        # Cache HTML vào Redis sau khi crawl thành công
+        # Cache HTML vào Redis sau khi crawl thành công (với canonical URL)
         if use_redis_cache and html:
             try:
                 from pipelines.crawl.storage.redis_cache import get_redis_cache
+                from pipelines.crawl.config import REDIS_CACHE_TTL_HTML
 
                 redis_cache = get_redis_cache("redis://redis:6379/1")
                 if redis_cache:
-                    redis_cache.cache_html(url, html, ttl=86400)  # Cache 24 giờ
+                    # CRITICAL: Chuẩn hóa URL trước khi cache để maximize hit rate
+                    canonical_url = redis_cache._canonicalize_url(url)
+                    redis_cache.cache_html(canonical_url, html, ttl=REDIS_CACHE_TTL_HTML)  # 7 days
             except Exception:
                 pass  # Ignore cache errors
 
@@ -354,14 +357,17 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
             response.encoding = "utf-8"
             html = response.text
 
-            # Cache HTML vào Redis sau khi crawl thành công
+            # Cache HTML vào Redis sau khi crawl thành công (với canonical URL)
             if use_redis_cache and html:
                 try:
                     from pipelines.crawl.storage.redis_cache import get_redis_cache
+                    from pipelines.crawl.config import REDIS_CACHE_TTL_HTML
 
                     redis_cache = get_redis_cache("redis://redis:6379/1")
                     if redis_cache:
-                        redis_cache.cache_html(url, html, ttl=86400)  # Cache 24 giờ
+                        # CRITICAL: Chuẩn hóa URL trước khi cache để maximize hit rate
+                        canonical_url = redis_cache._canonicalize_url(url)
+                        redis_cache.cache_html(canonical_url, html, ttl=REDIS_CACHE_TTL_HTML)  # 7 days
                 except Exception:
                     pass  # Ignore cache errors
 

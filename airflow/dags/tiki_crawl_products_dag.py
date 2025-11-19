@@ -1753,30 +1753,35 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 skipped_count += 1
                 continue
 
-            # Kiểm tra cache
-            cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
-            has_valid_cache = False
-            if cache_file.exists():
-                try:
-                    with open(cache_file, encoding="utf-8") as f:
-                        cached_detail = json.load(f)
-                        # Kiểm tra cache có đầy đủ không: cần có price và sales_count
-                        has_price = cached_detail.get("price", {}).get("current_price")
-                        has_sales_count = cached_detail.get("sales_count") is not None
-
-                        # Nếu đã có detail đầy đủ (có price và sales_count), đánh dấu đã crawl
-                        if has_price and has_sales_count:
-                            cache_hits += 1
-                            progress["crawled_product_ids"].add(product_id)
-                            already_crawled += 1
-                            has_valid_cache = True
-                            skipped_count += 1
-                        # Nếu cache thiếu sales_count, vẫn cần crawl lại
-                except Exception:
-                    pass
-
-            # Nếu chưa có cache hợp lệ, thêm vào danh sách crawl
-            if not has_valid_cache:
+            # Kiểm tra cache với Redis (thay vì file cache)
+            cache_hit = False
+            cache_miss_reason = None
+            
+            if redis_cache:
+                # Chuẩn hóa URL trước khi check cache (CRITICAL)
+                canonical_url = redis_cache._canonicalize_url(product_url)
+                product_id_for_cache = product_id
+                
+                # Thử lấy từ Redis cache với flexible validation
+                cached_detail, is_valid = redis_cache.get_product_detail_with_validation(
+                    product_id_for_cache
+                )
+                
+                if is_valid:
+                    cache_hits += 1
+                    cache_hit = True
+                    progress["crawled_product_ids"].add(product_id)
+                    already_crawled += 1
+                    skipped_count += 1
+                elif cached_detail is None:
+                    cache_miss_reason = "NO_CACHE"
+                else:
+                    cache_miss_reason = "INVALID_CACHE"
+            else:
+                cache_miss_reason = "REDIS_UNAVAILABLE"
+            
+            # Nếu chưa có valid cache, thêm vào danh sách crawl
+            if not cache_hit:
                 products_to_crawl.append(
                     {
                         "product_id": product_id,
@@ -1811,12 +1816,22 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         logger.info("=" * 70)
         logger.info(f"📦 Tổng products đầu vào: {len(products)}")
         logger.info(f"✅ Products cần crawl hôm nay: {len(products_to_crawl)}")
-        logger.info(f"📦 Cache hits (có cache hợp lệ): {cache_hits}")
-        logger.info(f"💾 DB hits (đã có trong DB với detail đầy đủ): {db_hits}")
+        
+        # Cache hit rate analytics
+        total_checked = cache_hits + db_hits + (already_crawled - db_hits - cache_hits)
+        if total_checked > 0:
+            cache_hit_rate = (cache_hits / total_checked) * 100
+        else:
+            cache_hit_rate = 0.0
+        
+        logger.info(f"🔥 Cache hits (Redis - có data hợp lệ): {cache_hits}")
+        logger.info(f"💾 DB hits (đã có trong DB): {db_hits}")
         logger.info(f"✓ Đã crawl trước đó (từ progress): {already_crawled - db_hits - cache_hits}")
-        logger.info(f"📈 Tổng đã crawl: {progress['total_crawled'] + already_crawled}")
+        logger.info(f"📈 Tổng đã kiểm tra: {total_checked}")
+        logger.info(f"📊 **CACHE HIT RATE: {cache_hit_rate:.1f}%** ← TARGET: 60-80%")
+        logger.info(f"📈 Tổng đã crawl toàn bộ: {progress['total_crawled'] + already_crawled}")
         logger.info(
-            f"📉 Còn lại: {len(products) - (progress['total_crawled'] + already_crawled + len(products_to_crawl))}"
+            f"📉 Còn lại chưa crawl: {len(products) - (progress['total_crawled'] + already_crawled + len(products_to_crawl))}"
         )
         logger.info("=" * 70)
 
@@ -2713,11 +2728,13 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         result["elapsed_time"] = elapsed
 
         # Lưu vào cache - ưu tiên Redis, fallback về file
-        # Redis cache (nhanh, distributed)
+        # Redis cache (nhanh, distributed) - CRITICAL: Chuẩn hóa URL trước khi cache
         if redis_cache:
             try:
+                # IMPORTANT: Sử dụng product_id (không phụ thuộc vào URL) để cache
+                # Điều này đảm bảo rằng cùng 1 product từ category khác nhau sẽ hit cache
                 redis_cache.cache_product_detail(product_id, detail, ttl=604800)  # 7 ngày
-                logger.info(f"[Redis Cache] ✅ Đã cache detail cho product {product_id}")
+                logger.info(f"[Redis Cache] ✅ Đã cache detail cho product {product_id} (TTL: 7 days)")
             except Exception as e:
                 logger.warning(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
 
