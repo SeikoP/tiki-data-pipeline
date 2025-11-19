@@ -68,7 +68,7 @@ def run_optimized_pipeline(
         from pipelines.crawl.crawl_products_parallel import crawl_products_parallel
 
         # Get product URLs from categories first
-        product_urls = []
+        product_urls: list[str] = []
         for _cat_url in category_urls:
             # TODO: Extract product URLs from category
             # For now, assume we have them

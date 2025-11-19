@@ -229,7 +229,8 @@ class DataTransformer:
             "image_url": product.get("image_url"),
             "category_url": product.get("category_url"),
             "category_id": product.get("category_id"),  # Extract từ category_url nếu chưa có
-            "category_path": product.get("category_path") or [],  # Default [] nếu không có breadcrumb
+            "category_path": product.get("category_path")
+            or [],  # Default [] nếu không có breadcrumb
             "sales_count": product.get("sales_count"),
         }
 

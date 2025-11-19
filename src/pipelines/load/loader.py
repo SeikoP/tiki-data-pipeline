@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 # Import PostgresStorage với TYPE_CHECKING để tránh mypy errors
 if TYPE_CHECKING:
-    from ...crawl.storage.postgres_storage import PostgresStorage as PostgresStorageType
+    pass  # PostgresStorageType không cần thiết
 else:
-    PostgresStorageType = None  # type: ignore[misc, assignment]
+    pass  # type: ignore[misc, assignment]
 
 PostgresStorageClass: type[Any] | None = None
 

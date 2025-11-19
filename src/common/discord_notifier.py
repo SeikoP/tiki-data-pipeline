@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import logging
+import os
 import time
-import urllib.request
 import urllib.error
-from typing import Any, Dict, List, Optional
+import urllib.request
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ MAX_RETRIES = 3
 RETRY_SLEEP = 1.0
 
 
-def _post_json(url: str, payload: Dict[str, Any]) -> tuple[int, str]:
+def _post_json(url: str, payload: dict[str, Any]) -> tuple[int, str]:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -44,7 +44,7 @@ class DiscordNotifier:
     transformed into an embed to match existing DAG usage.
     """
 
-    def __init__(self, webhook_url: Optional[str] = None) -> None:
+    def __init__(self, webhook_url: str | None = None) -> None:
         if webhook_url is None:
             webhook_url = os.getenv("DISCORD_MONITORING_WEBHOOK_URL") or os.getenv(
                 "DISCORD_WEBHOOK_URL"
@@ -53,12 +53,12 @@ class DiscordNotifier:
 
     def send_alert(
         self,
-        content: Optional[str] = None,
+        content: str | None = None,
         *,
-        title: Optional[str] = None,
-        message: Optional[str] = None,
-        color: Optional[int] = None,
-        embeds: Optional[List[Dict[str, Any]]] = None,
+        title: str | None = None,
+        message: str | None = None,
+        color: int | None = None,
+        embeds: list[dict[str, Any]] | None = None,
         username: str = "Tiki Monitor",
     ) -> bool:
         """Send an alert to Discord.
@@ -88,7 +88,7 @@ class DiscordNotifier:
         if content is None:
             content = "(no content)"
 
-        payload: Dict[str, Any] = {"content": content, "username": username}
+        payload: dict[str, Any] = {"content": content, "username": username}
         if embeds:
             payload["embeds"] = embeds
 
@@ -112,7 +112,7 @@ class DiscordNotifier:
         return False
 
     @staticmethod
-    def build_embed(title: str, description: str, color: int = 0x3498DB) -> Dict[str, Any]:
+    def build_embed(title: str, description: str, color: int = 0x3498DB) -> dict[str, Any]:
         return {
             "title": title,
             "description": description,
