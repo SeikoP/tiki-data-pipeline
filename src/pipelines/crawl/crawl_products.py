@@ -284,8 +284,8 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
         # Cache HTML vào Redis sau khi crawl thành công (với canonical URL)
         if use_redis_cache and html:
             try:
-                from pipelines.crawl.storage.redis_cache import get_redis_cache
                 from pipelines.crawl.config import REDIS_CACHE_TTL_HTML
+                from pipelines.crawl.storage.redis_cache import get_redis_cache
 
                 redis_cache = get_redis_cache("redis://redis:6379/1")
                 if redis_cache:
@@ -360,14 +360,16 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
             # Cache HTML vào Redis sau khi crawl thành công (với canonical URL)
             if use_redis_cache and html:
                 try:
-                    from pipelines.crawl.storage.redis_cache import get_redis_cache
                     from pipelines.crawl.config import REDIS_CACHE_TTL_HTML
+                    from pipelines.crawl.storage.redis_cache import get_redis_cache
 
                     redis_cache = get_redis_cache("redis://redis:6379/1")
                     if redis_cache:
                         # CRITICAL: Chuẩn hóa URL trước khi cache để maximize hit rate
                         canonical_url = redis_cache._canonicalize_url(url)
-                        redis_cache.cache_html(canonical_url, html, ttl=REDIS_CACHE_TTL_HTML)  # 7 days
+                        redis_cache.cache_html(
+                            canonical_url, html, ttl=REDIS_CACHE_TTL_HTML
+                        )  # 7 days
                 except Exception:
                     pass  # Ignore cache errors
 

@@ -245,21 +245,21 @@ class RedisCache:
     def validate_product_detail(self, detail: dict | None, min_fields: list | None = None) -> bool:
         """
         Kiểm tra product detail có hợp lệ không (flexible validation).
-        
+
         Args:
             detail: Product detail dict để validate
             min_fields: List các fields cần ít nhất một cái (default: ["price", "sales_count", "name"])
-        
+
         Returns:
             True nếu valid (có ít nhất một field từ min_fields), False nếu None hoặc không đủ
         """
         if detail is None:
             return False
-        
+
         # Default validation fields
         if min_fields is None:
             min_fields = ["price", "sales_count", "name"]
-        
+
         # Check nếu có ít nhất 1 trong các field yêu cầu
         for field in min_fields:
             if field == "price":
@@ -276,7 +276,7 @@ class RedisCache:
                 # Generic field check
                 if detail.get(field):
                     return True
-        
+
         return False
 
     def get_product_detail_with_validation(
@@ -284,7 +284,7 @@ class RedisCache:
     ) -> tuple[dict | None, bool]:
         """
         Lấy product detail từ cache với validation.
-        
+
         Returns:
             Tuple[detail_dict or None, is_valid_bool]
         """
