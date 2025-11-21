@@ -248,12 +248,18 @@ class RedisCache:
 
         Args:
             detail: Product detail dict để validate
-            min_fields: List các fields cần ít nhất một cái (default: ["price", "sales_count", "name"])
+            min_fields: List các fields cần ít nhất một cái (default: ["price", "sales_count", "name", "brand"])
 
         Returns:
-            True nếu valid (có ít nhất một field từ min_fields), False nếu None hoặc không đủ
+            True nếu valid (có ít nhất một field từ min_fields VÀ có brand), False nếu None hoặc không đủ
         """
         if detail is None:
+            return False
+
+        # CRITICAL: Bắt buộc phải có brand
+        # Brand thiếu thường dẫn đến nhiều trường khác cũng thiếu
+        brand = detail.get("brand")
+        if not brand or (isinstance(brand, str) and not brand.strip()):
             return False
 
         # Default validation fields

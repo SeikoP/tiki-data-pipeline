@@ -1669,11 +1669,12 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     logger.info(
                         f"🔍 Đang kiểm tra {len(product_ids_to_check)} products trong database..."
                     )
-                    logger.info("   (chỉ skip products có price và sales_count - detail đầy đủ)")
+                    logger.info("   (chỉ skip products có price, sales_count VÀ brand - detail đầy đủ)")
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
                             # Chia nhỏ query nếu có quá nhiều product_ids
-                            # Chỉ lấy products có price và sales_count (detail đầy đủ)
+                            # Chỉ lấy products có price, sales_count VÀ brand (detail đầy đủ)
+                            # Products không có brand sẽ được crawl lại
                             for i in range(0, len(product_ids_to_check), 1000):
                                 batch_ids = product_ids_to_check[i : i + 1000]
                                 placeholders = ",".join(["%s"] * len(batch_ids))
@@ -1684,6 +1685,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                                     WHERE product_id IN ({placeholders})
                                       AND price IS NOT NULL
                                       AND sales_count IS NOT NULL
+                                      AND brand IS NOT NULL
+                                      AND brand != ''
                                     """,
                                     batch_ids,
                                 )
@@ -1692,7 +1695,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     logger.info(
                         f"✅ Tìm thấy {len(existing_product_ids_in_db)} products đã có detail đầy đủ trong database"
                     )
-                    logger.info("   (có price và sales_count - sẽ skip crawl lại)")
+                    logger.info("   (có price, sales_count VÀ brand - sẽ skip crawl lại)")
+                    logger.info("   💡 Products không có brand sẽ được crawl lại để lấy đầy đủ thông tin")
                     storage.close()
         except Exception as e:
             logger.warning(f"⚠️  Không thể kiểm tra database: {e}")
@@ -3381,6 +3385,7 @@ def merge_product_details(**context) -> dict[str, Any]:
         products_without_detail = 0
         products_cached = 0
         products_failed = 0
+        products_no_brand = 0  # Đếm số products bị loại bỏ vì brand null
 
         for product in products:
             product_id = product.get("product_id")
@@ -3460,6 +3465,19 @@ def merge_product_details(**context) -> dict[str, Any]:
                     product_with_detail["detail_crawled_at"] = detail_result.get("crawled_at")
                     product_with_detail["detail_status"] = status
 
+                    # CRITICAL: Lọc bỏ products có brand null/empty
+                    # Brand thiếu thường dẫn đến nhiều trường khác cũng thiếu
+                    # Những products này sẽ được crawl lại trong lần chạy tiếp theo
+                    brand = product_with_detail.get("brand")
+                    if not brand or (isinstance(brand, str) and not brand.strip()):
+                        logger.warning(
+                            f"⚠️  Product {product_id} ({product_with_detail.get('name', 'Unknown')[:50]}) "
+                            f"có brand null/empty, sẽ bỏ qua để crawl lại lần sau"
+                        )
+                        products_no_brand += 1
+                        products_failed += 1
+                        continue
+
                     products_with_detail.append(product_with_detail)
                 elif status == "cached":
                     # Không lưu products từ cache (chỉ lưu products đã crawl mới)
@@ -3506,20 +3524,37 @@ def merge_product_details(**context) -> dict[str, Any]:
         )
         logger.info(f"📦 Products từ cache (đã bỏ qua): {products_cached}")
         logger.info(f"❌ Products bị fail (đã bỏ qua): {products_failed}")
+        logger.info(f"🚫 Products không có brand (đã bỏ qua để crawl lại): {products_no_brand}")
         logger.info(f"🚫 Products không có detail (đã bỏ qua): {products_without_detail}")
         logger.info("=" * 70)
+
+        # Cảnh báo nếu có nhiều products không có brand (>10% total products)
+        if products_no_brand > 0 and stats["total_products"] > 0:
+            no_brand_rate = (products_no_brand / stats["total_products"]) * 100
+            if no_brand_rate > 10:
+                logger.warning("=" * 70)
+                logger.warning(f"⚠️  CẢNH BÁO: Có {products_no_brand} products ({no_brand_rate:.1f}%) không có brand!")
+                logger.warning("   Những products này sẽ được crawl lại trong lần chạy tiếp theo.")
+                logger.warning("   Nguyên nhân có thể:")
+                logger.warning("   - Trang detail không load đầy đủ (network issue, timeout)")
+                logger.warning("   - HTML structure thay đổi (cần update selector)")
+                logger.warning("   - Rate limit quá cao (cần giảm TIKI_DETAIL_RATE_LIMIT_DELAY)")
+                logger.warning("=" * 70)
+            elif no_brand_rate > 0:
+                logger.info(f"💡 Có {products_no_brand} products ({no_brand_rate:.1f}%) không có brand, sẽ crawl lại lần sau")
 
         # Cập nhật stats để phản ánh số lượng products thực tế được lưu
         stats["products_saved"] = len(products_with_detail)
         stats["products_skipped"] = products_without_detail
         stats["products_cached_skipped"] = products_cached
         stats["products_failed_skipped"] = products_failed
+        stats["products_no_brand_skipped"] = products_no_brand
 
         result = {
             "products": products_with_detail,
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
-            "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_without_detail} không có detail)",
+            "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' và brand không null (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_no_brand} không có brand, {products_without_detail} không có detail)",
         }
 
         return result
@@ -4091,8 +4126,10 @@ def load_products(**context) -> dict[str, Any]:
                 # Khởi tạo biến để lưu số lượng products
                 count_before = None
                 count_after = None
+                deleted_no_brand_count = 0
 
-                # Kiểm tra số lượng products trong DB trước khi load
+                # CRITICAL: Xóa products có brand null từ database trước khi load
+                # Products có brand null thường thiếu nhiều trường khác và sẽ được crawl lại
                 try:
                     PostgresStorage = _import_postgres_storage()
                     if PostgresStorage is None:
@@ -4104,14 +4141,41 @@ def load_products(**context) -> dict[str, Any]:
                         user=db_user,
                         password=db_password,
                     )
+                    
+                    logger.info("=" * 70)
+                    logger.info("🗑️  XÓA PRODUCTS CÓ BRAND NULL KHỎI DATABASE")
+                    logger.info("=" * 70)
+                    
+                    with storage.get_connection() as conn:
+                        with conn.cursor() as cur:
+                            # Đếm số lượng trước khi xóa
+                            cur.execute("SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = '';")
+                            count_to_delete = cur.fetchone()[0]
+                            
+                            if count_to_delete > 0:
+                                logger.info(f"🔍 Tìm thấy {count_to_delete} products có brand null/empty")
+                                
+                                # Xóa products có brand null hoặc empty
+                                cur.execute("DELETE FROM products WHERE brand IS NULL OR brand = '';")
+                                deleted_no_brand_count = cur.rowcount
+                                conn.commit()
+                                
+                                logger.info(f"✅ Đã xóa {deleted_no_brand_count} products có brand null/empty")
+                                logger.info("💡 Những products này sẽ được crawl lại trong lần chạy tiếp theo")
+                            else:
+                                logger.info("✓ Không có products nào có brand null/empty cần xóa")
+                    
+                    logger.info("=" * 70)
+                    
+                    # Kiểm tra số lượng products trong DB sau khi xóa
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
                             cur.execute("SELECT COUNT(*) FROM products;")
                             count_before = cur.fetchone()[0]
                     storage.close()
-                    logger.info(f"📊 Số products trong DB trước khi load: {count_before}")
+                    logger.info(f"📊 Số products trong DB sau khi xóa: {count_before}")
                 except Exception as e:
-                    logger.warning(f"⚠️  Không thể kiểm tra số lượng products trong DB: {e}")
+                    logger.warning(f"⚠️  Không thể xóa/kiểm tra products trong DB: {e}")
                     count_before = None
 
                 load_stats = loader.load_products(
@@ -4156,6 +4220,8 @@ def load_products(**context) -> dict[str, Any]:
                 logger.info("=" * 70)
                 logger.info("📊 LOAD RESULTS")
                 logger.info("=" * 70)
+                if deleted_no_brand_count > 0:
+                    logger.info(f"🗑️  Deleted (brand null): {deleted_no_brand_count} products")
                 logger.info(f"✅ DB loaded: {load_stats['db_loaded']} products")
                 if load_stats.get("inserted_count") is not None:
                     logger.info(
