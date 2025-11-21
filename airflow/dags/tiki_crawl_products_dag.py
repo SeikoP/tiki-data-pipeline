@@ -5766,8 +5766,8 @@ with DAG(**DAG_CONFIG) as dag:
 
             logger.info(f"✅ Retrieved {len(products_to_crawl)} products for detail crawl")
 
-            # Batch Processing: Chia products thành batches 12 products/batch (tối ưu: từ 15 -> 12 để parallel hơn)
-            batch_size = 12
+            # Batch Processing: Chia products thành batches 15 products/batch (tối ưu: từ 15 -> 12 để parallel hơn)
+            batch_size = 15
             batches = []
             for i in range(0, len(products_to_crawl), batch_size):
                 batch = products_to_crawl[i : i + batch_size]
