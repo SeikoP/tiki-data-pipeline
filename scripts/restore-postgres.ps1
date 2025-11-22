@@ -60,8 +60,17 @@ if ($confirm -ne "yes") {
 Write-Host ""
 Write-Host "🔄 Đang restore database..." -ForegroundColor Yellow
 
-# Copy file vào container
-$containerBackupPath = "/tmp/restore_backup.dump"
+# Xác định file format
+$fileExtension = [System.IO.Path]::GetExtension($BackupFile)
+Write-Host "📄 File format: $fileExtension" -ForegroundColor Cyan
+
+# Copy file vào container với extension phù hợp
+if ($fileExtension -eq ".sql") {
+    $containerBackupPath = "/tmp/restore_backup.sql"
+} else {
+    $containerBackupPath = "/tmp/restore_backup.dump"
+}
+
 docker cp $BackupFile "${containerName}:${containerBackupPath}"
 
 if ($LASTEXITCODE -ne 0) {
@@ -69,20 +78,95 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Restore database
+# Restore database theo format
 Write-Host "📦 Đang restore từ backup file..." -ForegroundColor Yellow
-docker exec -e PGPASSWORD=$postgresPassword $containerName \
-    pg_restore -U $postgresUser -d $Database -c -v "$containerBackupPath"
 
-if ($LASTEXITCODE -eq 0) {
+if ($fileExtension -eq ".sql") {
+    # SQL format - dùng psql
+    Write-Host "💡 Sử dụng psql để restore SQL file..." -ForegroundColor Cyan
+    docker exec -e PGPASSWORD=$postgresPassword $containerName `
+        psql -U $postgresUser -d $Database -f "$containerBackupPath"
+} else {
+    # Custom/Dump format - dùng pg_restore
+    Write-Host "💡 Sử dụng pg_restore để restore dump file..." -ForegroundColor Cyan
+    
+    # Thử restore với nhiều options khác nhau
+    Write-Host "🔧 Thử method 1: pg_restore với --clean --if-exists" -ForegroundColor Cyan
+    docker exec -e PGPASSWORD=$postgresPassword $containerName `
+        pg_restore -U $postgresUser -d $Database --clean --if-exists --no-owner --no-acl --verbose "$containerBackupPath" 2>&1 | Out-String -Stream | ForEach-Object {
+        if ($_ -match "error|ERROR") {
+            Write-Host "   ❌ $_" -ForegroundColor Red
+        } elseif ($_ -match "warning|WARNING") {
+            Write-Host "   ⚠️  $_" -ForegroundColor Yellow
+        } else {
+            Write-Host "   $_" -ForegroundColor Gray
+        }
+    }
+    
+    $restoreResult = $LASTEXITCODE
+    
+    # Nếu failed, thử không dùng --clean
+    if ($restoreResult -ne 0) {
+        Write-Host ""
+        Write-Host "🔧 Thử method 2: pg_restore không dùng --clean" -ForegroundColor Cyan
+        docker exec -e PGPASSWORD=$postgresPassword $containerName `
+            pg_restore -U $postgresUser -d $Database --no-owner --no-acl --verbose "$containerBackupPath" 2>&1 | Out-String -Stream | ForEach-Object {
+            if ($_ -match "error|ERROR") {
+                Write-Host "   ❌ $_" -ForegroundColor Red
+            } elseif ($_ -match "warning|WARNING") {
+                Write-Host "   ⚠️  $_" -ForegroundColor Yellow
+            } else {
+                Write-Host "   $_" -ForegroundColor Gray
+            }
+        }
+        
+        $restoreResult = $LASTEXITCODE
+    }
+    
+    # Nếu vẫn failed, thử với -Fc format explicit
+    if ($restoreResult -ne 0) {
+        Write-Host ""
+        Write-Host "🔧 Thử method 3: pg_restore với -Fc format" -ForegroundColor Cyan
+        docker exec -e PGPASSWORD=$postgresPassword $containerName `
+            pg_restore -U $postgresUser -d $Database -Fc --no-owner --no-acl --verbose "$containerBackupPath" 2>&1 | Out-String -Stream | ForEach-Object {
+            if ($_ -match "error|ERROR") {
+                Write-Host "   ❌ $_" -ForegroundColor Red
+            } elseif ($_ -match "warning|WARNING") {
+                Write-Host "   ⚠️  $_" -ForegroundColor Yellow
+            } else {
+                Write-Host "   $_" -ForegroundColor Gray
+            }
+        }
+        
+        $restoreResult = $LASTEXITCODE
+    }
+}
+
+# Kiểm tra kết quả
+Write-Host ""
+if ($restoreResult -eq 0) {
     Write-Host "✅ Đã restore thành công!" -ForegroundColor Green
 } else {
-    Write-Host "❌ Lỗi khi restore database" -ForegroundColor Red
-    exit 1
+    Write-Host "⚠️  Restore có lỗi - kiểm tra logs ở trên" -ForegroundColor Yellow
 }
 
 # Xóa file tạm trong container
-docker exec $containerName rm -f "$containerBackupPath"
+docker exec $containerName rm -f "$containerBackupPath" 2>$null | Out-Null
+
+# Kiểm tra số lượng dữ liệu sau restore
+Write-Host ""
+Write-Host "📊 Kiểm tra dữ liệu sau restore..." -ForegroundColor Cyan
+$productCount = docker exec $containerName psql -U $postgresUser -d $Database -t -c "SELECT COUNT(*) FROM products;" 2>$null
+$categoryCount = docker exec $containerName psql -U $postgresUser -d $Database -t -c "SELECT COUNT(*) FROM categories;" 2>$null
+
+if ($productCount) {
+    $productCount = [int]$productCount.Trim()
+    Write-Host "   Products: $productCount" -ForegroundColor Green
+}
+if ($categoryCount) {
+    $categoryCount = [int]$categoryCount.Trim()
+    Write-Host "   Categories: $categoryCount" -ForegroundColor Green
+}
 
 Write-Host ""
 Write-Host "✅ Hoàn tất restore!" -ForegroundColor Green

@@ -3,10 +3,11 @@
 
 param(
     [string]$Database = "all",  # "all", "airflow", "crawl_data"
-    [string]$Format = "custom"  # "custom", "sql", "tar"
+    [string]$Format = "sql"     # "sql" (recommended), "custom", "tar"
 )
 
 Write-Host "🗄️  PostgreSQL Backup Script" -ForegroundColor Cyan
+Write-Host "💡 Format: $Format (sql = plain text, dễ restore & tương thích)" -ForegroundColor Yellow
 Write-Host ""
 
 # Kiểm tra container có đang chạy không
@@ -59,7 +60,8 @@ function Backup-Database {
     if ($BackupFormat -eq "custom") {
         $backupFile += ".dump"
         $env:PGPASSWORD = $postgresPassword
-        docker exec -e PGPASSWORD=$postgresPassword $containerName pg_dump -U $postgresUser -Fc $DbName > $backupFile
+        docker exec -e PGPASSWORD=$postgresPassword $containerName `
+            pg_dump -U $postgresUser -Fc --no-owner --no-acl $DbName > $backupFile
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✅ Đã backup: $backupFile" -ForegroundColor Green
         } else {
@@ -67,15 +69,17 @@ function Backup-Database {
         }
     } elseif ($BackupFormat -eq "sql") {
         $backupFile += ".sql"
-        docker exec -e PGPASSWORD=$postgresPassword $containerName pg_dump -U $postgresUser -Fp $DbName > $backupFile
+        docker exec -e PGPASSWORD=$postgresPassword $containerName `
+            pg_dump -U $postgresUser --format=plain --no-owner --no-acl $DbName > $backupFile
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "✅ Đã backup: $backupFile" -ForegroundColor Green
+            Write-Host "✅ Đã backup: $backupFile (SQL plain text)" -ForegroundColor Green
         } else {
             Write-Host "❌ Lỗi khi backup $DbName" -ForegroundColor Red
         }
     } elseif ($BackupFormat -eq "tar") {
         $backupFile += ".tar"
-        docker exec -e PGPASSWORD=$postgresPassword $containerName pg_dump -U $postgresUser -Ft $DbName > $backupFile
+        docker exec -e PGPASSWORD=$postgresPassword $containerName `
+            pg_dump -U $postgresUser -Ft --no-owner --no-acl $DbName > $backupFile
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✅ Đã backup: $backupFile" -ForegroundColor Green
         } else {
@@ -86,8 +90,7 @@ function Backup-Database {
 
 # Thực hiện backup
 if ($Database -eq "all") {
-    Write-Host "🔄 Backup tất cả databases..." -ForegroundColor Cyan
-    Backup-Database -DbName "airflow" -BackupFormat $Format
+    Write-Host "🔄 Backup database crawl_data..." -ForegroundColor Cyan
     Backup-Database -DbName "crawl_data" -BackupFormat $Format
 } else {
     Backup-Database -DbName $Database -BackupFormat $Format

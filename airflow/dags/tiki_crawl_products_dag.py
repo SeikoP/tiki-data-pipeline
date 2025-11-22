@@ -5187,7 +5187,7 @@ def backup_database(**context) -> dict[str, Any]:
                 backup_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = backup_dir / f"crawl_data_{timestamp}.dump"
+            backup_file = backup_dir / f"crawl_data_{timestamp}.sql"  # Đổi .dump -> .sql
 
             # Lấy thông tin từ environment variables
             postgres_user = os.getenv("POSTGRES_USER", "airflow_user")
@@ -5200,7 +5200,7 @@ def backup_database(**context) -> dict[str, Any]:
             logger.info("📦 Đang backup database: crawl_data...")
             logger.info(f"   File: {backup_file}")
 
-            # Chạy pg_dump trong container
+            # Chạy pg_dump trong container - dùng plain SQL format
             cmd = [
                 "docker",
                 "exec",
@@ -5210,7 +5210,9 @@ def backup_database(**context) -> dict[str, Any]:
                 "pg_dump",
                 "-U",
                 postgres_user,
-                "-Fc",  # Custom format
+                "--format=plain",  # Plain SQL format - dễ restore, tương thích
+                "--no-owner",      # Không dump owner info
+                "--no-acl",        # Không dump access privileges
                 "crawl_data",
             ]
 
