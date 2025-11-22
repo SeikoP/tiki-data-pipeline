@@ -1,5 +1,36 @@
-# Script convert .dump file sang .sql và restore
-# Workaround cho lỗi "unsupported version (1.16) in file header"
+<#
+.SYNOPSIS
+    Convert PostgreSQL dump file (.dump) to SQL format and restore to database
+    Workaround cho lỗi "unsupported version (1.16) in file header"
+
+.DESCRIPTION
+    Script này giúp:
+    1. Convert file dump (.dump) sang format SQL
+    2. Restore SQL file vào PostgreSQL database
+    3. Kiểm tra kết quả restore
+
+.PARAMETER BackupFile
+    Đường dẫn tới file backup (.dump hoặc .sql)
+    Ví dụ: "backups/postgres/backup_20251123.dump"
+
+.PARAMETER Database
+    Tên database để restore dữ liệu
+    Ví dụ: "crawl_data"
+
+.EXAMPLE
+    # Restore từ file dump
+    .\restore-postgres-advanced.ps1 -BackupFile "backups/postgres/backup_20251123.dump" -Database "crawl_data"
+
+.EXAMPLE
+    # Restore từ file SQL
+    .\restore-postgres-advanced.ps1 -BackupFile "backups/postgres/backup_20251123.sql" -Database "crawl_data"
+
+.NOTES
+    Yêu cầu:
+    - Docker Container: tiki-data-pipeline-postgres-1 phải đang chạy
+    - File .env phải chứa POSTGRES_USER và POSTGRES_PASSWORD
+    - PostgreSQL tools (pg_restore, psql) sẽ được chạy trong container
+#>
 
 param(
     [Parameter(Mandatory=$true)]
