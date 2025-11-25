@@ -1687,6 +1687,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                                       AND sales_count IS NOT NULL
                                       AND brand IS NOT NULL
                                       AND brand != ''
+                                      AND seller_name IS NOT NULL
+                                      AND seller_name != ''
                                     """,
                                     batch_ids,
                                 )
@@ -3465,14 +3467,17 @@ def merge_product_details(**context) -> dict[str, Any]:
                     product_with_detail["detail_crawled_at"] = detail_result.get("crawled_at")
                     product_with_detail["detail_status"] = status
 
-                    # CRITICAL: Lọc bỏ products có brand null/empty
-                    # Brand thiếu thường dẫn đến nhiều trường khác cũng thiếu
+                    # CRITICAL: Lọc bỏ products có brand hoặc seller null/empty
+                    # Brand/Seller thiếu thường dẫn đến nhiều trường khác cũng thiếu
                     # Những products này sẽ được crawl lại trong lần chạy tiếp theo
                     brand = product_with_detail.get("brand")
-                    if not brand or (isinstance(brand, str) and not brand.strip()):
+                    seller = product_with_detail.get("seller_name")
+                    
+                    if not brand or (isinstance(brand, str) and not brand.strip()) or \
+                       not seller or (isinstance(seller, str) and not seller.strip()):
                         logger.warning(
                             f"⚠️  Product {product_id} ({product_with_detail.get('name', 'Unknown')[:50]}) "
-                            f"có brand null/empty, sẽ bỏ qua để crawl lại lần sau"
+                            f"có brand/seller null/empty, sẽ bỏ qua để crawl lại lần sau"
                         )
                         products_no_brand += 1
                         products_failed += 1
@@ -3554,7 +3559,7 @@ def merge_product_details(**context) -> dict[str, Any]:
             "products": products_with_detail,
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
-            "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' và brand không null (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_no_brand} không có brand, {products_without_detail} không có detail)",
+            "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' và brand/seller không null (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_no_brand} không có brand, {products_without_detail} không có detail)",
         }
 
         return result
@@ -4128,8 +4133,8 @@ def load_products(**context) -> dict[str, Any]:
                 count_after = None
                 deleted_no_brand_count = 0
 
-                # CRITICAL: Xóa products có brand null từ database trước khi load
-                # Products có brand null thường thiếu nhiều trường khác và sẽ được crawl lại
+                # CRITICAL: Xóa products có brand hoặc seller null từ database trước khi load
+                # Products có brand/seller null thường thiếu nhiều trường khác và sẽ được crawl lại
                 try:
                     PostgresStorage = _import_postgres_storage()
                     if PostgresStorage is None:
@@ -4143,27 +4148,27 @@ def load_products(**context) -> dict[str, Any]:
                     )
                     
                     logger.info("=" * 70)
-                    logger.info("🗑️  XÓA PRODUCTS CÓ BRAND NULL KHỎI DATABASE")
+                    logger.info("🗑️  XÓA PRODUCTS CÓ BRAND HOẶC SELLER NULL KHỎI DATABASE")
                     logger.info("=" * 70)
                     
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
                             # Đếm số lượng trước khi xóa
-                            cur.execute("SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = '';")
+                            cur.execute("SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';")
                             count_to_delete = cur.fetchone()[0]
                             
                             if count_to_delete > 0:
-                                logger.info(f"🔍 Tìm thấy {count_to_delete} products có brand null/empty")
+                                logger.info(f"🔍 Tìm thấy {count_to_delete} products có brand/seller null/empty")
                                 
-                                # Xóa products có brand null hoặc empty
-                                cur.execute("DELETE FROM products WHERE brand IS NULL OR brand = '';")
+                                # Xóa products có brand hoặc seller null/empty
+                                cur.execute("DELETE FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';")
                                 deleted_no_brand_count = cur.rowcount
                                 conn.commit()
                                 
-                                logger.info(f"✅ Đã xóa {deleted_no_brand_count} products có brand null/empty")
+                                logger.info(f"✅ Đã xóa {deleted_no_brand_count} products có brand/seller null/empty")
                                 logger.info("💡 Những products này sẽ được crawl lại trong lần chạy tiếp theo")
                             else:
-                                logger.info("✓ Không có products nào có brand null/empty cần xóa")
+                                logger.info("✓ Không có products nào có brand/seller null/empty cần xóa")
                     
                     logger.info("=" * 70)
                     
