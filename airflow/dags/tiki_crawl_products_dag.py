@@ -2020,8 +2020,8 @@ def crawl_product_batch(
             Variable.get("TIKI_DETAIL_POOL_SIZE", default="15")
         )  # Tối ưu: tăng từ 5 -> 15
         driver_pool = _SeleniumDriverPool(
-            pool_size=pool_size, headless=True, timeout=60
-        )  # Tối ưu: giảm timeout từ 90 -> 60s
+            pool_size=pool_size, headless=True, timeout=120
+        )  # Tối ưu: tăng từ 60 -> 120s để trang load đầy đủ
 
         # Tạo event loop trước
         try:
@@ -2193,7 +2193,7 @@ def crawl_product_batch(
                                         product_url,
                                         save_html=False,
                                         verbose=False,
-                                        timeout=60,
+                                        timeout=120,  # Tăng từ 60 -> 120s (2 phút) để trang load đầy đủ
                                         use_redis_cache=True,
                                         use_rate_limiting=True,
                                     )
@@ -2209,7 +2209,7 @@ def crawl_product_batch(
                             product_url,
                             verbose=False,
                             max_retries=2,
-                            timeout=60,
+                            timeout=120,  # Tăng từ 60 -> 120s (2 phút) để trang load đầy đủ
                             use_redis_cache=True,
                             use_rate_limiting=True,
                         )
@@ -2579,7 +2579,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
                     save_html=False,
                     verbose=False,  # Không verbose trong Airflow
                     max_retries=3,  # Retry 3 lần (tăng từ 2)
-                    timeout=60,  # Timeout 60s (tăng từ 25s để đủ thời gian cho Selenium)
+                    timeout=120,  # Tăng từ 60 -> 120s (2 phút) để đủ thời gian cho trang load đầy đủ
                     use_redis_cache=True,  # Sử dụng Redis cache
                     use_rate_limiting=True,  # Sử dụng rate limiting
                 )
@@ -5544,7 +5544,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="load_categories",
             python_callable=load_categories,
             execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
-            pool="default_pool",
+            pool="crawl_pool",
         )
 
     # TaskGroup: Crawl Categories (Dynamic Task Mapping)
@@ -5718,7 +5718,7 @@ with DAG(**DAG_CONFIG) as dag:
                 task_id="crawl_category",
                 python_callable=crawl_category_batch,
                 execution_timeout=timedelta(minutes=12),  # Tối ưu: giảm từ 15 -> 12 phút
-                pool="default_pool",
+                pool="crawl_pool",
                 retries=1,  # Retry 1 lần
                 retry_delay=timedelta(seconds=15),  # Tối ưu: thêm delay ngắn
             ).expand(op_kwargs=task_prepare.output)
@@ -5734,7 +5734,7 @@ with DAG(**DAG_CONFIG) as dag:
                 task_id="crawl_category",
                 python_callable=crawl_single_category,
                 execution_timeout=timedelta(minutes=10),  # Timeout 10 phút mỗi category
-                pool="default_pool",
+                pool="crawl_pool",
                 retries=1,
             ).expand(op_kwargs=task_prepare.output)
 
@@ -5744,7 +5744,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="merge_products",
             python_callable=merge_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
-            pool="default_pool",
+            pool="crawl_pool",
             trigger_rule="all_done",  # QUAN TRỌNG: Chạy khi tất cả upstream tasks done (success hoặc failed)
         )
 
@@ -5752,7 +5752,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="save_products",
             python_callable=save_products,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
-            pool="default_pool",
+            pool="crawl_pool",
         )
 
     # TaskGroup: Crawl Product Details (Dynamic Task Mapping)
@@ -5878,7 +5878,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="crawl_product_detail",
             python_callable=crawl_product_batch,  # Dùng batch function thay vì single
             execution_timeout=timedelta(minutes=15),  # Tối ưu: giảm từ 20 -> 15 phút (nhanh hơn)
-            pool="default_pool",
+            pool="crawl_pool",
             retries=1,  # Tối ưu: giảm từ 2 -> 1 (nhanh hơn)
             retry_delay=timedelta(seconds=30),  # Tối ưu: giảm từ 2 phút -> 30 giây
         ).expand(op_kwargs=task_prepare_detail_kwargs.output)
@@ -5887,7 +5887,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="merge_product_details",
             python_callable=merge_product_details,
             execution_timeout=timedelta(minutes=30),  # Tối ưu: giảm từ 60 -> 30 phút
-            pool="default_pool",
+            pool="crawl_pool",
             trigger_rule="all_done",  # Chạy khi tất cả upstream tasks done
             # Tăng heartbeat interval để tránh timeout khi xử lý nhiều dữ liệu
         )
@@ -5896,7 +5896,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="save_products_with_detail",
             python_callable=save_products_with_detail,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
-            pool="default_pool",
+            pool="crawl_pool",
         )
 
         # Dependencies trong detail group
@@ -6014,7 +6014,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="enrich_products_category_path",
             python_callable=enrich_category_path_task,
             execution_timeout=timedelta(minutes=10),
-            pool="default_pool",
+            pool="crawl_pool",
         )
 
     # TaskGroup: Transform and Load
@@ -6023,14 +6023,14 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="transform_products",
             python_callable=transform_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
-            pool="default_pool",
+            pool="crawl_pool",
         )
 
         task_load_products = PythonOperator(
             task_id="load_products",
             python_callable=load_products,
             execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
-            pool="default_pool",
+            pool="crawl_pool",
         )
 
         # Dependencies trong transform_load group
@@ -6042,7 +6042,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="validate_data",
             python_callable=validate_data,
             execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
-            pool="default_pool",
+            pool="crawl_pool",
         )
 
     # TaskGroup: Aggregate and Notify
@@ -6051,7 +6051,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="aggregate_and_notify",
             python_callable=aggregate_and_notify,
             execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
-            pool="default_pool",
+            pool="crawl_pool",
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
@@ -6060,7 +6060,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="health_check_monitoring",
             python_callable=health_check_monitoring,
             execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
-            pool="default_pool",
+            pool="crawl_pool",
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
@@ -6069,7 +6069,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="cleanup_redis_cache",
             python_callable=cleanup_redis_cache,
             execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
-            pool="default_pool",
+            pool="crawl_pool",
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
@@ -6078,7 +6078,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="backup_database",
             python_callable=backup_database,
             execution_timeout=timedelta(minutes=15),  # Timeout 15 phút
-            pool="default_pool",
+            pool="crawl_pool",
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
@@ -6108,7 +6108,7 @@ with DAG(**DAG_CONFIG) as dag:
         task_id="send_quality_report_discord",
         python_callable=send_quality_report_discord,
         execution_timeout=timedelta(minutes=5),
-        pool="default_pool",
+        pool="crawl_pool",
         trigger_rule="all_done",  # Chạy bất kể task trước có lỗi không
     )
     
