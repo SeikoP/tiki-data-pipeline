@@ -175,16 +175,21 @@ def crawl_product_detail_with_selenium(
                 if verbose:
                     print(f"[Selenium] ✓ Đã lưu HTML vào {html_file}")
 
-            # Cache HTML vào Redis sau khi crawl thành công
+            # Cache HTML vào Redis sau khi crawl thành công (với canonical URL)
             if use_redis_cache and full_html:
                 try:
+                    from pipelines.crawl.config import REDIS_CACHE_TTL_HTML
                     from pipelines.crawl.storage.redis_cache import get_redis_cache
 
                     redis_cache = get_redis_cache("redis://redis:6379/1")
                     if redis_cache:
-                        redis_cache.cache_html(url, full_html, ttl=86400)  # Cache 24 giờ
+                        # CRITICAL: Chuẩn hóa URL trước khi cache để maximize hit rate
+                        canonical_url = redis_cache._canonicalize_url(url)
+                        redis_cache.cache_html(canonical_url, full_html, ttl=REDIS_CACHE_TTL_HTML)
                         if verbose:
-                            print(f"[Redis Cache] ✅ Đã cache HTML cho {url[:60]}...")
+                            print(
+                                f"[Redis Cache] ✅ Đã cache HTML với TTL={REDIS_CACHE_TTL_HTML}s (7 days) cho {url[:60]}..."
+                            )
                 except Exception:
                     pass  # Ignore cache errors
 

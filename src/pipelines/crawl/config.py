@@ -28,3 +28,18 @@ HTTP_CONNECTOR_LIMIT_PER_HOST = 10  # Per-host limit
 HTTP_TIMEOUT_TOTAL = 20  # Seconds (từ 30)
 HTTP_TIMEOUT_CONNECT = 10  # Seconds
 HTTP_DNS_CACHE_TTL = 300  # Seconds (5 phút)
+
+# Redis Cache TTL configuration - CRITICAL FOR CACHE HIT RATE
+REDIS_CACHE_TTL_PRODUCT_DETAIL = 604800  # 7 days (604800 seconds) - long TTL để maximize hits
+REDIS_CACHE_TTL_PRODUCT_LIST = (
+    43200  # 12 hours (43200 seconds) - product lists change less frequently
+)
+REDIS_CACHE_TTL_HTML = 604800  # 7 days (604800 seconds) - HTML pages stable for 1 week
+
+# Cache validation configuration
+CACHE_MIN_FIELDS_FOR_VALIDITY = [
+    "price",
+    "sales_count",
+    "name",
+]  # Product needs at least one of these
+CACHE_ACCEPT_PARTIAL_DATA = True  # Chấp nhận partial cache (không cần tất cả fields)

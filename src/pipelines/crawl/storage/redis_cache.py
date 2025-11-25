@@ -242,6 +242,62 @@ class RedisCache:
             return cached.get("detail")
         return None
 
+    def validate_product_detail(self, detail: dict | None, min_fields: list | None = None) -> bool:
+        """
+        Kiểm tra product detail có hợp lệ không (flexible validation).
+
+        Args:
+            detail: Product detail dict để validate
+            min_fields: List các fields cần ít nhất một cái (default: ["price", "sales_count", "name", "brand"])
+
+        Returns:
+            True nếu valid (có ít nhất một field từ min_fields VÀ có brand), False nếu None hoặc không đủ
+        """
+        if detail is None:
+            return False
+
+        # CRITICAL: Bắt buộc phải có brand
+        # Brand thiếu thường dẫn đến nhiều trường khác cũng thiếu
+        brand = detail.get("brand")
+        if not brand or (isinstance(brand, str) and not brand.strip()):
+            return False
+
+        # Default validation fields
+        if min_fields is None:
+            min_fields = ["price", "sales_count", "name"]
+
+        # Check nếu có ít nhất 1 trong các field yêu cầu
+        for field in min_fields:
+            if field == "price":
+                # Check nested: detail.price.current_price
+                if detail.get("price", {}).get("current_price"):
+                    return True
+            elif field == "sales_count":
+                if detail.get("sales_count") is not None:
+                    return True
+            elif field == "name":
+                if detail.get("name"):
+                    return True
+            else:
+                # Generic field check
+                if detail.get(field):
+                    return True
+
+        return False
+
+    def get_product_detail_with_validation(
+        self, product_id: str, min_fields: list | None = None
+    ) -> tuple[dict | None, bool]:
+        """
+        Lấy product detail từ cache với validation.
+
+        Returns:
+            Tuple[detail_dict or None, is_valid_bool]
+        """
+        detail = self.get_cached_product_detail(product_id)
+        is_valid = self.validate_product_detail(detail, min_fields)
+        return detail, is_valid
+
 
 class RedisRateLimiter:
     """Distributed rate limiter sử dụng Redis"""

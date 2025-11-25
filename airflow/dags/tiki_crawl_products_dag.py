@@ -1669,11 +1669,12 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     logger.info(
                         f"🔍 Đang kiểm tra {len(product_ids_to_check)} products trong database..."
                     )
-                    logger.info("   (chỉ skip products có price và sales_count - detail đầy đủ)")
+                    logger.info("   (chỉ skip products có price, sales_count VÀ brand - detail đầy đủ)")
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
                             # Chia nhỏ query nếu có quá nhiều product_ids
-                            # Chỉ lấy products có price và sales_count (detail đầy đủ)
+                            # Chỉ lấy products có price, sales_count VÀ brand (detail đầy đủ)
+                            # Products không có brand sẽ được crawl lại
                             for i in range(0, len(product_ids_to_check), 1000):
                                 batch_ids = product_ids_to_check[i : i + 1000]
                                 placeholders = ",".join(["%s"] * len(batch_ids))
@@ -1684,6 +1685,10 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                                     WHERE product_id IN ({placeholders})
                                       AND price IS NOT NULL
                                       AND sales_count IS NOT NULL
+                                      AND brand IS NOT NULL
+                                      AND brand != ''
+                                      AND seller_name IS NOT NULL
+                                      AND seller_name != ''
                                     """,
                                     batch_ids,
                                 )
@@ -1692,7 +1697,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     logger.info(
                         f"✅ Tìm thấy {len(existing_product_ids_in_db)} products đã có detail đầy đủ trong database"
                     )
-                    logger.info("   (có price và sales_count - sẽ skip crawl lại)")
+                    logger.info("   (có price, sales_count VÀ brand - sẽ skip crawl lại)")
+                    logger.info("   💡 Products không có brand sẽ được crawl lại để lấy đầy đủ thông tin")
                     storage.close()
         except Exception as e:
             logger.warning(f"⚠️  Không thể kiểm tra database: {e}")
@@ -1753,30 +1759,35 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 skipped_count += 1
                 continue
 
-            # Kiểm tra cache
-            cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
-            has_valid_cache = False
-            if cache_file.exists():
-                try:
-                    with open(cache_file, encoding="utf-8") as f:
-                        cached_detail = json.load(f)
-                        # Kiểm tra cache có đầy đủ không: cần có price và sales_count
-                        has_price = cached_detail.get("price", {}).get("current_price")
-                        has_sales_count = cached_detail.get("sales_count") is not None
+            # Kiểm tra cache với Redis (thay vì file cache)
+            cache_hit = False
+            cache_miss_reason = None
 
-                        # Nếu đã có detail đầy đủ (có price và sales_count), đánh dấu đã crawl
-                        if has_price and has_sales_count:
-                            cache_hits += 1
-                            progress["crawled_product_ids"].add(product_id)
-                            already_crawled += 1
-                            has_valid_cache = True
-                            skipped_count += 1
-                        # Nếu cache thiếu sales_count, vẫn cần crawl lại
-                except Exception:
-                    pass
+            if redis_cache:
+                # Chuẩn hóa URL trước khi check cache (CRITICAL)
+                canonical_url = redis_cache._canonicalize_url(product_url)
+                product_id_for_cache = product_id
 
-            # Nếu chưa có cache hợp lệ, thêm vào danh sách crawl
-            if not has_valid_cache:
+                # Thử lấy từ Redis cache với flexible validation
+                cached_detail, is_valid = redis_cache.get_product_detail_with_validation(
+                    product_id_for_cache
+                )
+
+                if is_valid:
+                    cache_hits += 1
+                    cache_hit = True
+                    progress["crawled_product_ids"].add(product_id)
+                    already_crawled += 1
+                    skipped_count += 1
+                elif cached_detail is None:
+                    cache_miss_reason = "NO_CACHE"
+                else:
+                    cache_miss_reason = "INVALID_CACHE"
+            else:
+                cache_miss_reason = "REDIS_UNAVAILABLE"
+
+            # Nếu chưa có valid cache, thêm vào danh sách crawl
+            if not cache_hit:
                 products_to_crawl.append(
                     {
                         "product_id": product_id,
@@ -1811,12 +1822,22 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         logger.info("=" * 70)
         logger.info(f"📦 Tổng products đầu vào: {len(products)}")
         logger.info(f"✅ Products cần crawl hôm nay: {len(products_to_crawl)}")
-        logger.info(f"📦 Cache hits (có cache hợp lệ): {cache_hits}")
-        logger.info(f"💾 DB hits (đã có trong DB với detail đầy đủ): {db_hits}")
+
+        # Cache hit rate analytics
+        total_checked = cache_hits + db_hits + (already_crawled - db_hits - cache_hits)
+        if total_checked > 0:
+            cache_hit_rate = (cache_hits / total_checked) * 100
+        else:
+            cache_hit_rate = 0.0
+
+        logger.info(f"🔥 Cache hits (Redis - có data hợp lệ): {cache_hits}")
+        logger.info(f"💾 DB hits (đã có trong DB): {db_hits}")
         logger.info(f"✓ Đã crawl trước đó (từ progress): {already_crawled - db_hits - cache_hits}")
-        logger.info(f"📈 Tổng đã crawl: {progress['total_crawled'] + already_crawled}")
+        logger.info(f"📈 Tổng đã kiểm tra: {total_checked}")
+        logger.info(f"📊 **CACHE HIT RATE: {cache_hit_rate:.1f}%** ← TARGET: 60-80%")
+        logger.info(f"📈 Tổng đã crawl toàn bộ: {progress['total_crawled'] + already_crawled}")
         logger.info(
-            f"📉 Còn lại: {len(products) - (progress['total_crawled'] + already_crawled + len(products_to_crawl))}"
+            f"📉 Còn lại chưa crawl: {len(products) - (progress['total_crawled'] + already_crawled + len(products_to_crawl))}"
         )
         logger.info("=" * 70)
 
@@ -2713,11 +2734,15 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         result["elapsed_time"] = elapsed
 
         # Lưu vào cache - ưu tiên Redis, fallback về file
-        # Redis cache (nhanh, distributed)
+        # Redis cache (nhanh, distributed) - CRITICAL: Chuẩn hóa URL trước khi cache
         if redis_cache:
             try:
+                # IMPORTANT: Sử dụng product_id (không phụ thuộc vào URL) để cache
+                # Điều này đảm bảo rằng cùng 1 product từ category khác nhau sẽ hit cache
                 redis_cache.cache_product_detail(product_id, detail, ttl=604800)  # 7 ngày
-                logger.info(f"[Redis Cache] ✅ Đã cache detail cho product {product_id}")
+                logger.info(
+                    f"[Redis Cache] ✅ Đã cache detail cho product {product_id} (TTL: 7 days)"
+                )
             except Exception as e:
                 logger.warning(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
 
@@ -3362,6 +3387,7 @@ def merge_product_details(**context) -> dict[str, Any]:
         products_without_detail = 0
         products_cached = 0
         products_failed = 0
+        products_no_brand = 0  # Đếm số products bị loại bỏ vì brand null
 
         for product in products:
             product_id = product.get("product_id")
@@ -3441,6 +3467,22 @@ def merge_product_details(**context) -> dict[str, Any]:
                     product_with_detail["detail_crawled_at"] = detail_result.get("crawled_at")
                     product_with_detail["detail_status"] = status
 
+                    # CRITICAL: Lọc bỏ products có brand hoặc seller null/empty
+                    # Brand/Seller thiếu thường dẫn đến nhiều trường khác cũng thiếu
+                    # Những products này sẽ được crawl lại trong lần chạy tiếp theo
+                    brand = product_with_detail.get("brand")
+                    seller = product_with_detail.get("seller_name")
+                    
+                    if not brand or (isinstance(brand, str) and not brand.strip()) or \
+                       not seller or (isinstance(seller, str) and not seller.strip()):
+                        logger.warning(
+                            f"⚠️  Product {product_id} ({product_with_detail.get('name', 'Unknown')[:50]}) "
+                            f"có brand/seller null/empty, sẽ bỏ qua để crawl lại lần sau"
+                        )
+                        products_no_brand += 1
+                        products_failed += 1
+                        continue
+
                     products_with_detail.append(product_with_detail)
                 elif status == "cached":
                     # Không lưu products từ cache (chỉ lưu products đã crawl mới)
@@ -3487,20 +3529,37 @@ def merge_product_details(**context) -> dict[str, Any]:
         )
         logger.info(f"📦 Products từ cache (đã bỏ qua): {products_cached}")
         logger.info(f"❌ Products bị fail (đã bỏ qua): {products_failed}")
+        logger.info(f"🚫 Products không có brand (đã bỏ qua để crawl lại): {products_no_brand}")
         logger.info(f"🚫 Products không có detail (đã bỏ qua): {products_without_detail}")
         logger.info("=" * 70)
+
+        # Cảnh báo nếu có nhiều products không có brand (>10% total products)
+        if products_no_brand > 0 and stats["total_products"] > 0:
+            no_brand_rate = (products_no_brand / stats["total_products"]) * 100
+            if no_brand_rate > 10:
+                logger.warning("=" * 70)
+                logger.warning(f"⚠️  CẢNH BÁO: Có {products_no_brand} products ({no_brand_rate:.1f}%) không có brand!")
+                logger.warning("   Những products này sẽ được crawl lại trong lần chạy tiếp theo.")
+                logger.warning("   Nguyên nhân có thể:")
+                logger.warning("   - Trang detail không load đầy đủ (network issue, timeout)")
+                logger.warning("   - HTML structure thay đổi (cần update selector)")
+                logger.warning("   - Rate limit quá cao (cần giảm TIKI_DETAIL_RATE_LIMIT_DELAY)")
+                logger.warning("=" * 70)
+            elif no_brand_rate > 0:
+                logger.info(f"💡 Có {products_no_brand} products ({no_brand_rate:.1f}%) không có brand, sẽ crawl lại lần sau")
 
         # Cập nhật stats để phản ánh số lượng products thực tế được lưu
         stats["products_saved"] = len(products_with_detail)
         stats["products_skipped"] = products_without_detail
         stats["products_cached_skipped"] = products_cached
         stats["products_failed_skipped"] = products_failed
+        stats["products_no_brand_skipped"] = products_no_brand
 
         result = {
             "products": products_with_detail,
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
-            "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_without_detail} không có detail)",
+            "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' và brand/seller không null (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_no_brand} không có brand, {products_without_detail} không có detail)",
         }
 
         return result
@@ -4072,8 +4131,10 @@ def load_products(**context) -> dict[str, Any]:
                 # Khởi tạo biến để lưu số lượng products
                 count_before = None
                 count_after = None
+                deleted_no_brand_count = 0
 
-                # Kiểm tra số lượng products trong DB trước khi load
+                # CRITICAL: Xóa products có brand hoặc seller null từ database trước khi load
+                # Products có brand/seller null thường thiếu nhiều trường khác và sẽ được crawl lại
                 try:
                     PostgresStorage = _import_postgres_storage()
                     if PostgresStorage is None:
@@ -4085,14 +4146,41 @@ def load_products(**context) -> dict[str, Any]:
                         user=db_user,
                         password=db_password,
                     )
+                    
+                    logger.info("=" * 70)
+                    logger.info("🗑️  XÓA PRODUCTS CÓ BRAND HOẶC SELLER NULL KHỎI DATABASE")
+                    logger.info("=" * 70)
+                    
+                    with storage.get_connection() as conn:
+                        with conn.cursor() as cur:
+                            # Đếm số lượng trước khi xóa
+                            cur.execute("SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';")
+                            count_to_delete = cur.fetchone()[0]
+                            
+                            if count_to_delete > 0:
+                                logger.info(f"🔍 Tìm thấy {count_to_delete} products có brand/seller null/empty")
+                                
+                                # Xóa products có brand hoặc seller null/empty
+                                cur.execute("DELETE FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';")
+                                deleted_no_brand_count = cur.rowcount
+                                conn.commit()
+                                
+                                logger.info(f"✅ Đã xóa {deleted_no_brand_count} products có brand/seller null/empty")
+                                logger.info("💡 Những products này sẽ được crawl lại trong lần chạy tiếp theo")
+                            else:
+                                logger.info("✓ Không có products nào có brand/seller null/empty cần xóa")
+                    
+                    logger.info("=" * 70)
+                    
+                    # Kiểm tra số lượng products trong DB sau khi xóa
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
                             cur.execute("SELECT COUNT(*) FROM products;")
                             count_before = cur.fetchone()[0]
                     storage.close()
-                    logger.info(f"📊 Số products trong DB trước khi load: {count_before}")
+                    logger.info(f"📊 Số products trong DB sau khi xóa: {count_before}")
                 except Exception as e:
-                    logger.warning(f"⚠️  Không thể kiểm tra số lượng products trong DB: {e}")
+                    logger.warning(f"⚠️  Không thể xóa/kiểm tra products trong DB: {e}")
                     count_before = None
 
                 load_stats = loader.load_products(
@@ -4137,6 +4225,8 @@ def load_products(**context) -> dict[str, Any]:
                 logger.info("=" * 70)
                 logger.info("📊 LOAD RESULTS")
                 logger.info("=" * 70)
+                if deleted_no_brand_count > 0:
+                    logger.info(f"🗑️  Deleted (brand null): {deleted_no_brand_count} products")
                 logger.info(f"✅ DB loaded: {load_stats['db_loaded']} products")
                 if load_stats.get("inserted_count") is not None:
                     logger.info(
@@ -4415,137 +4505,77 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
             except Exception as e:
                 logger.error(f"❌ Lỗi khi tổng hợp với AI: {e}", exc_info=True)
 
-        # 3. Gửi thông báo qua Discord
+        # 3. Gửi thông báo qua Discord (rút gọn nội dung nhưng giữ lại lỗi chi tiết)
         if DiscordNotifier is None:
-            logger.warning("⚠️  DiscordNotifier module chưa được import, bỏ qua gửi thông báo")
+            logger.warning("DiscordNotifier module chưa được import, bỏ qua gửi thông báo")
         else:
             try:
                 notifier = DiscordNotifier()
 
-                # Chuẩn bị nội dung
-                if result.get("ai_summary"):
-                    # Gửi với AI summary
-                    stats = result.get("summary", {}).get("statistics", {})
-
-                    success = notifier.send_summary(
-                        ai_summary=result["ai_summary"],
-                        stats=stats,
-                    )
-                    if success:
-                        result["discord_notification_success"] = True
-                        logger.info("✅ Đã gửi thông báo qua Discord (với AI summary)")
-                    else:
-                        logger.warning("⚠️  Không thể gửi thông báo qua Discord")
-                elif result.get("summary"):
-                    # Gửi với summary thông thường (không có AI) - sử dụng fields thay vì text
-                    stats = result.get("summary", {}).get("statistics", {})
+                if result.get("summary"):
+                    # Lấy stats
+                    stats = result["summary"].get("statistics", {})
                     total_products = stats.get("total_products", 0)
                     crawled_count = stats.get("crawled_count", 0)
                     with_detail = stats.get("with_detail", 0)
                     failed = stats.get("failed", 0)
                     timeout = stats.get("timeout", 0)
                     products_saved = stats.get("products_saved", 0)
-                    crawled_at = (
-                        result.get("summary", {}).get("metadata", {}).get("crawled_at", "N/A")
-                    )
+                    crawled_at = result["summary"].get("metadata", {}).get("crawled_at", "N/A")
 
-                    # Tính tỷ lệ thành công để chọn màu
+                    # Tính màu theo success rate
                     if crawled_count > 0:
                         success_rate = (with_detail / crawled_count) * 100
-                        if success_rate >= 80:
-                            color = 0x00FF00  # Xanh lá
-                        elif success_rate >= 50:
-                            color = 0xFFA500  # Cam
-                        else:
-                            color = 0xFF0000  # Đỏ
+                        color = 0x00B894 if success_rate >= 80 else (0xF39C12 if success_rate >= 50 else 0xE74C3C)
                     else:
-                        color = 0x808080  # Xám
                         success_rate = 0
+                        color = 0x95A5A6
 
-                    # Tạo fields cho Discord embed
+                    # Fields với error analysis đầy đủ
                     fields = []
+                    fields.append({"name": "Total", "value": f"{total_products:,}", "inline": True})
+                    fields.append({"name": "Crawled", "value": f"{crawled_count:,}", "inline": True})
+                    fields.append({"name": "Success", "value": f"{with_detail:,} ({success_rate:.1f}%)", "inline": True})
+                    
+                    # Thêm error analysis chi tiết
+                    if failed > 0 or timeout > 0:
+                        total_errors = failed + timeout
+                        error_rate = (total_errors / crawled_count * 100) if crawled_count > 0 else 0
+                        err_info = f"**Total Errors: {total_errors}** ({error_rate:.1f}%)\n"
+                        if failed > 0:
+                            failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0
+                            err_info += f"• Failed: {failed} ({failed_rate:.1f}%)\n"
+                        if timeout > 0:
+                            timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0
+                            err_info += f"• Timeout: {timeout} ({timeout_rate:.1f}%)"
+                        fields.append({"name": "Error Analysis", "value": err_info.strip(), "inline": False})
+                    
+                    if products_saved:
+                        fields.append({"name": "Saved to DB", "value": f"{products_saved:,}", "inline": True})
 
-                    # Row 1: Tổng quan
-                    if total_products > 0:
-                        fields.append(
-                            {
-                                "name": "📦 Tổng sản phẩm",
-                                "value": f"**{total_products:,}**",
-                                "inline": True,
-                            }
-                        )
-
+                    # Nội dung rõ ràng
+                    content = "Tổng hợp dữ liệu crawl Tiki.vn\n"
                     if crawled_count > 0:
-                        fields.append(
-                            {
-                                "name": "🔄 Đã crawl detail",
-                                "value": f"**{crawled_count:,}**",
-                                "inline": True,
-                            }
-                        )
-
-                    if products_saved > 0:
-                        fields.append(
-                            {
-                                "name": "💾 Đã lưu",
-                                "value": f"**{products_saved:,}**",
-                                "inline": True,
-                            }
-                        )
-
-                    # Row 2: Kết quả crawl
-                    if crawled_count > 0:
-                        fields.append(
-                            {
-                                "name": "✅ Thành công",
-                                "value": f"**{with_detail:,}** ({success_rate:.1f}%)",
-                                "inline": True,
-                            }
-                        )
-
-                    if timeout > 0:
-                        timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0
-                        fields.append(
-                            {
-                                "name": "⏱️ Timeout",
-                                "value": f"**{timeout:,}** ({timeout_rate:.1f}%)",
-                                "inline": True,
-                            }
-                        )
-
-                    if failed > 0:
-                        failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0
-                        fields.append(
-                            {
-                                "name": "❌ Thất bại",
-                                "value": f"**{failed:,}** ({failed_rate:.1f}%)",
-                                "inline": True,
-                            }
-                        )
-
-                    # Tạo content ngắn gọn
-                    content = "📊 **Tổng hợp dữ liệu crawl từ Tiki.vn**\n\n"
-                    if crawled_count > 0:
-                        content += f"Tỷ lệ thành công: **{success_rate:.1f}%** ({with_detail}/{crawled_count} products)"
+                        content += f"```\nThành công: {success_rate:.1f}% ({with_detail}/{crawled_count})\n```"
                     else:
-                        content += "Chưa có products nào được crawl detail."
+                        content += "Chưa có sản phẩm được crawl detail."
 
                     success = notifier.send_message(
                         content=content,
-                        title="📊 Tổng hợp dữ liệu Tiki",
+                        title="Tổng hợp dữ liệu Tiki",
                         color=color,
-                        fields=fields if fields else None,
+                        fields=fields,
                         footer=f"Crawl lúc: {crawled_at}",
                     )
                     if success:
                         result["discord_notification_success"] = True
-                        logger.info("✅ Đã gửi thông báo qua Discord (không có AI)")
+                        logger.info("Đã gửi thông báo Discord")
                     else:
-                        logger.warning("⚠️  Không thể gửi thông báo qua Discord")
+                        logger.warning("Không thể gửi thông báo qua Discord")
                 else:
-                    logger.warning("⚠️  Không có dữ liệu để gửi thông báo")
+                    logger.warning("Không có dữ liệu để gửi thông báo")
             except Exception as e:
-                logger.error(f"❌ Lỗi khi gửi thông báo Discord: {e}", exc_info=True)
+                logger.error(f"Lỗi khi gửi thông báo Discord: {e}", exc_info=True)
 
         logger.info("=" * 70)
         logger.info("📊 KẾT QUẢ TỔNG HỢP VÀ THÔNG BÁO")
@@ -5162,7 +5192,7 @@ def backup_database(**context) -> dict[str, Any]:
                 backup_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = backup_dir / f"crawl_data_{timestamp}.dump"
+            backup_file = backup_dir / f"crawl_data_{timestamp}.sql"  # Đổi .dump -> .sql
 
             # Lấy thông tin từ environment variables
             postgres_user = os.getenv("POSTGRES_USER", "airflow_user")
@@ -5175,7 +5205,7 @@ def backup_database(**context) -> dict[str, Any]:
             logger.info("📦 Đang backup database: crawl_data...")
             logger.info(f"   File: {backup_file}")
 
-            # Chạy pg_dump trong container
+            # Chạy pg_dump trong container - dùng plain SQL format
             cmd = [
                 "docker",
                 "exec",
@@ -5185,7 +5215,9 @@ def backup_database(**context) -> dict[str, Any]:
                 "pg_dump",
                 "-U",
                 postgres_user,
-                "-Fc",  # Custom format
+                "--format=plain",  # Plain SQL format - dễ restore, tương thích
+                "--no-owner",      # Không dump owner info
+                "--no-acl",        # Không dump access privileges
                 "crawl_data",
             ]
 
@@ -5262,6 +5294,242 @@ def backup_database(**context) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"❌ Lỗi trong backup_database task: {e}", exc_info=True)
         # Không fail task, chỉ log lỗi
+        return {"status": "failed", "error": str(e)}
+
+
+def send_quality_report_discord():
+    """
+    Gửi báo cáo chất lượng dữ liệu lên Discord (không trùng tiêu đề, hạn chế icon).
+    """
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    # Ensure logger is defined for this task context
+    logger = logging.getLogger("airflow.task")
+    logger.info("Bắt đầu gửi báo cáo chất lượng lên Discord...")
+
+    # Helper: làm sạch nội dung (bỏ emoji, bỏ tiêu đề trùng, giữ định dạng markdown)
+    def _clean_report_text(text: str) -> str:
+        # Bỏ dòng tiêu đề đầu tiên nếu có
+        lines = text.splitlines()
+        cleaned_lines = []
+        for idx, line in enumerate(lines):
+            if idx == 0 and ("BÁO CÁO" in line or "Báo cáo" in line):
+                continue
+            # Bỏ dòng phân cách dạng toàn ký tự ━
+            if set(line.strip()) <= {"━", "—", "-", "_"} and len(line.strip()) >= 5:
+                continue
+            cleaned_lines.append(line)
+
+        text = "\n".join(cleaned_lines).strip()
+
+        # Loại bỏ emoji phổ biến (giữ tiếng Việt)
+        emoji_pattern = (
+            "[\U0001F600-\U0001F64F]"  # emoticons
+            "|[\U0001F300-\U0001F5FF]"  # symbols & pictographs
+            "|[\U0001F680-\U0001F6FF]"  # transport & map
+            "|[\U0001F1E0-\U0001F1FF]"  # flags
+            "|[\u2600-\u26FF]"          # misc symbols
+            "|[\u2700-\u27BF]"          # dingbats
+        )
+        try:
+            text = re.sub(emoji_pattern, "", text)
+        except re.error:
+            # Nếu môi trường không hỗ trợ UCS-4, bỏ qua bước này
+            pass
+
+        # Thay thế một số icon còn lại bằng highlight chữ
+        replacements = {
+            "📊": "",
+            "✅": "",
+            "⚠️": "",
+            "💰": "",
+            "📌": "",
+            "💡": "",
+            "🔗": "",
+        }
+        for k, v in replacements.items():
+            text = text.replace(k, v)
+
+        return text.strip()
+
+    try:
+        # Import modules từ src
+        sys.path.insert(0, "/opt/airflow/src")
+        from common.ai.summarizer import AISummarizer
+        from common.notifications.discord import DiscordNotifier
+
+        # Kết nối DB
+        db_config = {
+            "host": os.getenv("POSTGRES_HOST", "postgres"),
+            "database": "crawl_data",
+            "user": os.getenv("POSTGRES_USER", "postgres"),
+            "password": os.getenv("POSTGRES_PASSWORD", "postgres"),
+        }
+        conn = psycopg2.connect(**db_config)
+
+        # Tạo báo cáo
+        summarizer = AISummarizer()
+        report = summarizer.generate_data_quality_report(conn)
+        conn.close()
+
+        # Làm sạch nội dung để tránh trùng tiêu đề và bớt icon
+        cleaned_report = _clean_report_text(report)
+
+        # Gửi Discord
+        notifier = DiscordNotifier()
+
+        # Lấy top 5 sản phẩm giảm giá để tạo fields riêng (kèm link)
+        conn = psycopg2.connect(**db_config)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT 
+                name,
+                url,
+                discount_percent,
+                price,
+                sales_count
+            FROM products
+            WHERE discount_percent IS NOT NULL
+                AND discount_percent > 20
+                AND name IS NOT NULL
+            ORDER BY discount_percent DESC
+            LIMIT 5
+            """
+        )
+        discount_products = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        # Lấy snapshot số liệu chi tiết
+        conn = psycopg2.connect(**db_config)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT 
+                COUNT(*) AS total_products,
+                COUNT(CASE WHEN sales_count IS NOT NULL AND sales_count > 0 THEN 1 END) AS with_sales,
+                COUNT(CASE WHEN discount_percent > 0 THEN 1 END) AS with_discount,
+                AVG(discount_percent) AS avg_discount,
+                MAX(discount_percent) AS max_discount,
+                MIN(price) AS min_price,
+                MAX(price) AS max_price,
+                AVG(price) AS avg_price,
+                SUM(CAST(sales_count AS BIGINT)) AS total_sales
+            FROM products
+            """
+        )
+        snap = cur.fetchone() or {}
+        cur.close()
+        conn.close()
+
+        total = snap.get("total_products") or 0
+        with_sales = snap.get("with_sales") or 0
+        with_discount = snap.get("with_discount") or 0
+        coverage = (with_sales * 100 / total) if total > 0 else 0.0
+        avg_disc = snap.get("avg_discount") or 0.0
+        max_disc = snap.get("max_discount") or 0.0
+        min_price = snap.get("min_price") or 0
+        max_price = snap.get("max_price") or 0
+        avg_price = snap.get("avg_price") or 0
+        total_sales = snap.get("total_sales") or 0
+
+        # Mô tả chi tiết với code block
+        description = (
+            "**Dataset Quality Report**\n"
+            + "```\n"
+            + f"Total Products: {total:,}\n"
+            + f"With Sales: {with_sales:,} ({coverage:.1f}%)\n"
+            + f"On Discount: {with_discount:,} ({(with_discount*100/total if total>0 else 0):.1f}%)\n"
+            + f"Total Sales: {total_sales:,} units\n"
+            + f"Avg Discount: {avg_disc:.1f}% (Max: {max_disc:.1f}%)\n"
+            + f"Price Range: {min_price:,.0f}đ - {max_price:,.0f}đ (Avg: {avg_price:,.0f}đ)\n"
+            + "```"
+        )
+
+        # Tạo fields cho layout rộng
+        fields = []
+
+        # Row 1: Status
+        fields.append({"name": "Status", "value": "✅ Success", "inline": True})
+        fields.append({"name": "Time", "value": datetime.now().strftime("%H:%M:%S"), "inline": True})
+        fields.append({"name": "DB", "value": "crawl_data", "inline": True})
+
+        # Row 2: Coverage metrics
+        fields.append({"name": "Coverage", "value": f"{coverage:.1f}% with sales", "inline": True})
+        fields.append({"name": "Discounts", "value": f"{(with_discount*100/total if total>0 else 0):.1f}% on sale", "inline": True})
+        fields.append({"name": "Total Sales", "value": f"{total_sales:,} units", "inline": True})
+
+        # Separator
+        fields.append({"name": "═══════ TOP DEEP DISCOUNTS (>20%) ═══════", "value": "​", "inline": False})
+
+        # Thêm top 5 sản phẩm giảm giá theo 2 cột để rộng ngang
+        if discount_products:
+            for i in range(0, len(discount_products), 2):
+                # Column 1
+                p1 = discount_products[i]
+                name1 = (p1["name"] or "N/A")[:30]
+                disc1 = p1["discount_percent"] or 0
+                price1 = p1["price"] or 0
+                sales1 = p1.get("sales_count") or 0
+                url1 = p1.get("url") or ""
+
+                info1 = f"**#{i+1}. {name1}**\n"
+                info1 += f"Discount: {disc1:.0f}% | Price: {price1:,.0f}đ\n"
+                info1 += f"Sales: {sales1:,} units"
+                if url1:
+                    info1 += f"\n[→ View on Tiki]({url1})"
+
+                if i + 1 < len(discount_products):
+                    # Column 2
+                    p2 = discount_products[i + 1]
+                    name2 = (p2["name"] or "N/A")[:30]
+                    disc2 = p2["discount_percent"] or 0
+                    price2 = p2["price"] or 0
+                    sales2 = p2.get("sales_count") or 0
+                    url2 = p2.get("url") or ""
+
+                    info2 = f"**#{i+2}. {name2}**\n"
+                    info2 += f"Discount: {disc2:.0f}% | Price: {price2:,.0f}đ\n"
+                    info2 += f"Sales: {sales2:,} units"
+                    if url2:
+                        info2 += f"\n[→ View on Tiki]({url2})"
+
+                    fields.append({"name": "Product", "value": info1, "inline": True})
+                    fields.append({"name": "Product", "value": info2, "inline": True})
+                else:
+                    fields.append({"name": "Product", "value": info1, "inline": False})
+        else:
+            fields.append({"name": "Notice", "value": "No products with >20% discount found", "inline": False})
+
+        success = notifier.send_message(
+            content=description,
+            title="📊 Tiki Data Quality Report",
+            color=0x3498DB,
+            fields=fields,
+            footer="Tiki Pipeline - Airflow DAG | Data Quality Analysis",
+        )
+        
+        if success:
+            logger.info("Đã gửi báo cáo lên Discord thành công!")
+            return {
+                "status": "success",
+                "message": "Discord report sent successfully"
+            }
+        else:
+            logger.warning("⚠️ Lỗi gửi Discord nhưng pipeline hoàn tất")
+            return {
+                "status": "warning",
+                "message": "Failed to send Discord report"
+            }
+            
+    except ImportError as e:
+        logger.warning(f"⚠️ Import error: {e} - Discord report skipped")
+        return {"status": "skipped", "reason": "Import error"}
+    except Exception as e:
+        logger.warning(f"⚠️ Lỗi gửi báo cáo Discord: {e}")
+        # Không fail task, chỉ log warning
         return {"status": "failed", "error": str(e)}
 
 
@@ -5571,8 +5839,8 @@ with DAG(**DAG_CONFIG) as dag:
 
             logger.info(f"✅ Retrieved {len(products_to_crawl)} products for detail crawl")
 
-            # Batch Processing: Chia products thành batches 12 products/batch (tối ưu: từ 15 -> 12 để parallel hơn)
-            batch_size = 12
+            # Batch Processing: Chia products thành batches 15 products/batch (tối ưu: từ 15 -> 12 để parallel hơn)
+            batch_size = 15
             batches = []
             for i in range(0, len(products_to_crawl), batch_size):
                 batch = products_to_crawl[i : i + batch_size]
@@ -5833,7 +6101,17 @@ with DAG(**DAG_CONFIG) as dag:
     # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> validate -> aggregate and notify
     task_save_products >> task_prepare_detail
     # Dependencies trong detail group đã được định nghĩa ở dòng 1800
-    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database
+    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database -> discord_report
+    
+    # Create Discord report task
+    task_send_discord_report = PythonOperator(
+        task_id="send_quality_report_discord",
+        python_callable=send_quality_report_discord,
+        execution_timeout=timedelta(minutes=5),
+        pool="default_pool",
+        trigger_rule="all_done",  # Chạy bất kể task trước có lỗi không
+    )
+    
     (
         task_save_products_with_detail
         >> task_enrich_category_path
@@ -5844,4 +6122,5 @@ with DAG(**DAG_CONFIG) as dag:
         >> task_health_check
         >> task_cleanup_cache
         >> task_backup_database
+        >> task_send_discord_report  # Discord report là task cuối cùng
     )

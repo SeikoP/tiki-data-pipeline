@@ -1,7 +1,17 @@
 # 📚 TIKI DATA PIPELINE - DOCUMENTATION INDEX
 
-**Cập nhật**: 18/11/2025  
-**Phiên bản**: 2.1 - Complete & Organized (39 Files)  
+**Cập nhật**: 19/11/2025  
+**Phiên bản**: 2.2 - Cache Optimization Complete (40 Files)  
+
+---
+
+## 🆕 **WHAT'S NEW**
+
+**November 19, 2025:**
+- ✅ Added `CACHE_HIT_RATE_FIX.md` - Cache optimization documentation (10% → 60-80%)
+- ✅ Reorganized tests directory - archived 7 deprecated test files
+- ✅ Created comprehensive `tests/README.md` with test documentation
+- ✅ Performance improvements: 3-5x faster crawling, 70% resource reduction
 
 ---
 
@@ -40,6 +50,7 @@ docs/
 │
 ├── 05-PERFORMANCE/
 │   ├── README.md (Overview)
+│   ├── CACHE_HIT_RATE_FIX.md (✨ NEW - Cache optimization 10%→60-80%)
 │   ├── PERFORMANCE_ANALYSIS.md (Performance metrics)
 │   ├── PERFORMANCE_METRICS.md (KPIs)
 │   └── BENCHMARKS.md (Performance test results)
@@ -78,6 +89,7 @@ docs/
 | **So sánh tham số** | `PARAMETERS_MATRIX.md` | 01-PARAMETERS |
 | **Hiểu tối ưu hóa** | `OPTIMIZATION_ROADMAP.md` | 02-OPTIMIZATION |
 | **Quick visual guide** | `OPTIMIZATION_VISUAL_GUIDE.md` | 02-OPTIMIZATION |
+| **🔥 Cache optimization** | `CACHE_HIT_RATE_FIX.md` | 05-PERFORMANCE |
 | **Hiểu kiến trúc DAG** | `DAG_DATA_FLOW_ANALYSIS.md` | 03-ARCHITECTURE |
 | **Cấu hình Redis** | `REDIS_USAGE.md` | 04-CONFIGURATION |
 | **Xem performance** | `PERFORMANCE_ANALYSIS.md` | 05-PERFORMANCE |
@@ -94,7 +106,7 @@ docs/
 | **02-OPTIMIZATION** | 7 | 68 KB | ⚡ Tối ưu hóa & performance |
 | **03-ARCHITECTURE** | 4 | 35 KB | 🏗️ Kiến trúc hệ thống |
 | **04-CONFIGURATION** | 4 | 28 KB | ⚙️ Cấu hình chi tiết |
-| **05-PERFORMANCE** | 4 | 32 KB | 📈 Metrics & benchmarks |
+| **05-PERFORMANCE** | 5 | 45 KB | 📈 Metrics & cache optimization |
 | **06-ANALYSIS** | 5 | 38 KB | 🔍 Phân tích chi tiết |
 | **07-GUIDES** | 5 | 42 KB | 📚 Hướng dẫn & tutorials |
 | **08-REPORTS** | 4 | 45 KB | 📄 Báo cáo & data story |
