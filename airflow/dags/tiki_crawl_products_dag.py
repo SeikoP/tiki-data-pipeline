@@ -3467,17 +3467,18 @@ def merge_product_details(**context) -> dict[str, Any]:
                     product_with_detail["detail_crawled_at"] = detail_result.get("crawled_at")
                     product_with_detail["detail_status"] = status
 
-                    # CRITICAL: Lọc bỏ products có brand hoặc seller null/empty
-                    # Brand/Seller thiếu thường dẫn đến nhiều trường khác cũng thiếu
+                    # CRITICAL: Lọc bỏ products có brand null/empty
+                    # Brand thiếu thường dẫn đến nhiều trường khác cũng thiếu
+                    # Seller có thể là "Unknown" - vẫn lưu lại
                     # Những products này sẽ được crawl lại trong lần chạy tiếp theo
                     brand = product_with_detail.get("brand")
                     seller = product_with_detail.get("seller_name")
                     
-                    if not brand or (isinstance(brand, str) and not brand.strip()) or \
-                       not seller or (isinstance(seller, str) and not seller.strip()):
+                    # Only skip if BRAND is missing/empty (seller can be "Unknown")
+                    if not brand or (isinstance(brand, str) and not brand.strip()):
                         logger.warning(
                             f"⚠️  Product {product_id} ({product_with_detail.get('name', 'Unknown')[:50]}) "
-                            f"có brand/seller null/empty, sẽ bỏ qua để crawl lại lần sau"
+                            f"có brand null/empty, sẽ bỏ qua để crawl lại lần sau"
                         )
                         products_no_brand += 1
                         products_failed += 1
