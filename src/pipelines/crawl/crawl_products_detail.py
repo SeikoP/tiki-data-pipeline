@@ -137,7 +137,7 @@ def crawl_product_detail_with_selenium(
             driver.get(url)
 
             # Chờ trang load - optimized wait time
-            time.sleep(0.5)  # Reduced from 2s to 0.5s
+            time.sleep(1)  # Tăng từ 0.5s lên 1s để trang load thêm content
 
             # Scroll để load các phần động - tối ưu
             if verbose:
@@ -146,11 +146,11 @@ def crawl_product_detail_with_selenium(
             # Optimized scrolling
             try:
                 driver.execute_script("window.scrollTo(0, 500);")
-                time.sleep(0.3)  # Reduced from 0.5s to 0.3s
+                time.sleep(0.5)  # Chờ 0.5s để load content
                 driver.execute_script("window.scrollTo(0, 1500);")
                 time.sleep(0.5)
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(1)  # Giảm từ 2s xuống 1s
+                time.sleep(2)  # Tăng từ 1s lên 2s để chắc chắn load đầy đủ dữ liệu
             except Exception as scroll_error:
                 if verbose:
                     print(f"[Selenium] Warning: Lỗi khi scroll: {scroll_error}")
@@ -314,13 +314,13 @@ def crawl_product_detail_with_driver(
 
         # Optimized scrolling
         try:
-            time.sleep(0.5)
+            time.sleep(1)  # Tăng từ 0.5s lên 1s để trang load thêm content
             driver.execute_script("window.scrollTo(0, 500);")
-            time.sleep(0.3)
+            time.sleep(0.5)  # Chờ 0.5s để load content
             driver.execute_script("window.scrollTo(0, 1500);")
             time.sleep(0.5)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1)
+            time.sleep(2)  # Tăng từ 1s lên 2s để chắc chắn load đầy đủ dữ liệu
         except Exception as scroll_error:
             if verbose:
                 print(f"[Selenium] Warning: Lỗi khi scroll: {scroll_error}")
