@@ -126,6 +126,9 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
     use_docker = check_container_running()
     if use_docker:
         method = "docker-exec"
+        # Dùng -f flag để pg_dump ghi file trực tiếp trong container
+        # (tránh binary corruption khi stdout redirect qua docker exec)
+        container_backup_file = f"/tmp/{backup_file.name}"
         cmd = [
             "docker",
             "exec",
@@ -136,6 +139,8 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
             "-U",
             postgres_user,
             format_flag,
+            "-f",
+            container_backup_file,
             db_name,
         ]
     else:
@@ -149,6 +154,8 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
             "-U",
             postgres_user,
             format_flag,
+            "-f",
+            str(backup_file),
             db_name,
         ]
 
@@ -159,8 +166,24 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
     try:
         env = os.environ.copy()
         env["PGPASSWORD"] = postgres_password
-        with open(backup_file, "wb") as f:
-            result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=False, timeout=600, env=env)
+        result = subprocess.run(cmd, capture_output=True, check=False, timeout=600, env=env)
+        
+        # Nếu dùng docker, copy file từ container ra host
+        if use_docker and result.returncode == 0:
+            docker_copy_cmd = [
+                "docker",
+                "cp",
+                f"{CONTAINER_NAME}:{container_backup_file}",
+                str(backup_file)
+            ]
+            copy_result = subprocess.run(docker_copy_cmd, capture_output=True, check=False, timeout=60)
+            if copy_result.returncode != 0:
+                error_msg = copy_result.stderr.decode("utf-8", errors="ignore")
+                print(f"❌ Lỗi khi copy file từ container:")
+                print(error_msg)
+                if backup_file.exists():
+                    backup_file.unlink()
+                return False
 
         if result.returncode == 0:
             file_size = backup_file.stat().st_size

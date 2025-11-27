@@ -59,28 +59,38 @@ function Backup-Database {
     
     if ($BackupFormat -eq "custom") {
         $backupFile += ".dump"
+        $containerBackupFile = "/tmp/$(Split-Path $backupFile -Leaf)"
         $env:PGPASSWORD = $postgresPassword
+        # Dùng -f để pg_dump ghi trực tiếp file trong container (tránh binary corruption khi redirect)
         docker exec -e PGPASSWORD=$postgresPassword $containerName `
-            pg_dump -U $postgresUser -Fc --no-owner --no-acl $DbName > $backupFile
+            pg_dump -U $postgresUser -Fc --no-owner --no-acl -f "$containerBackupFile" $DbName
         if ($LASTEXITCODE -eq 0) {
+            # Copy file từ container ra host
+            docker cp "$($containerName):$containerBackupFile" $backupFile
             Write-Host "✅ Đã backup: $backupFile" -ForegroundColor Green
         } else {
             Write-Host "❌ Lỗi khi backup $DbName" -ForegroundColor Red
         }
     } elseif ($BackupFormat -eq "sql") {
         $backupFile += ".sql"
+        $containerBackupFile = "/tmp/$(Split-Path $backupFile -Leaf)"
         docker exec -e PGPASSWORD=$postgresPassword $containerName `
-            pg_dump -U $postgresUser --format=plain --no-owner --no-acl $DbName > $backupFile
+            pg_dump -U $postgresUser --format=plain --no-owner --no-acl -f "$containerBackupFile" $DbName
         if ($LASTEXITCODE -eq 0) {
+            # Copy file từ container ra host
+            docker cp "$($containerName):$containerBackupFile" $backupFile
             Write-Host "✅ Đã backup: $backupFile (SQL plain text)" -ForegroundColor Green
         } else {
             Write-Host "❌ Lỗi khi backup $DbName" -ForegroundColor Red
         }
     } elseif ($BackupFormat -eq "tar") {
         $backupFile += ".tar"
+        $containerBackupFile = "/tmp/$(Split-Path $backupFile -Leaf)"
         docker exec -e PGPASSWORD=$postgresPassword $containerName `
-            pg_dump -U $postgresUser -Ft --no-owner --no-acl $DbName > $backupFile
+            pg_dump -U $postgresUser -Ft --no-owner --no-acl -f "$containerBackupFile" $DbName
         if ($LASTEXITCODE -eq 0) {
+            # Copy file từ container ra host
+            docker cp "$($containerName):$containerBackupFile" $backupFile
             Write-Host "✅ Đã backup: $backupFile" -ForegroundColor Green
         } else {
             Write-Host "❌ Lỗi khi backup $DbName" -ForegroundColor Red
