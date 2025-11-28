@@ -65,6 +65,87 @@ python demos/demo_step3_load.py
 python demos/demo_e2e_full.py
 ```
 
+### 5. `demo_crawl_detail_async.py` ⭐ NEW
+**Mục đích**: So sánh crawl product detail: Selenium vs AsyncHTTP (không dùng Selenium)
+
+**Chức năng**:
+- Crawl chi tiết sản phẩm bằng **AsyncHTTP** (fast, lightweight)
+- Crawl chi tiết sản phẩm bằng **Selenium** (complete, JavaScript support)
+- So sánh tốc độ, độ chính xác dữ liệu
+- Tính toán performance metrics (speedup factor)
+- Hiển thị detailed comparison results
+
+**Ưu điểm AsyncHTTP**:
+- ⚡ **Nhanh 5-10x** so với Selenium
+- 💻 **Ít tài nguyên**: CPU, memory thấp hơn
+- 🔄 **Dễ scale**: Crawl 100+ sản phẩm song song
+- ✓ Lấy được 80-90% thông tin cần thiết
+
+**Nhược điểm AsyncHTTP**:
+- Không load JavaScript → thiếu một số dynamic content
+- Sales_count có thể không đầy đủ
+- Comments/reviews không lấy được (load qua AJAX)
+
+**Cách chạy**:
+```bash
+python demos/demo_crawl_detail_async.py
+```
+
+**Output**:
+```
+data/test_output/demo_crawl_detail_comparison.json
+```
+
+### 6. `demo_crawl_detail_comparison.py` ⭐ NEW
+**Mục đích**: Detailed benchmark - phân tích chi tiết Selenium vs AsyncHTTP
+
+**Chức năng**:
+- Benchmark chuyên sâu với nhiều metrics
+- Đo lường data completeness score (0-100)
+- So sánh success rate, avg time, data quality
+- ASCII performance charts
+- Smart recommendations dựa vào kết quả
+
+**Metrics được đo lường**:
+- ⏱️ Performance: total time, avg time, min/max time
+- 📊 Data quality: completeness score (name, price, rating, images, specs)
+- ✅ Success rate: crawl thành công % bao nhiêu
+- 🎯 Data matching: so sánh dữ liệu giữa 2 cách crawl
+
+**Recommendations**:
+- ✓ "Use AsyncHTTP for bulk crawling (10-100+ products) - much faster and lighter"
+- ✓ "Use Selenium for complete data - captures JavaScript-rendered content"
+- ✓ "Use Hybrid approach - AsyncHTTP first, Selenium fallback for missing data"
+
+**Cách chạy**:
+```bash
+python demos/demo_crawl_detail_comparison.py
+```
+
+**Output**:
+```
+data/test_output/demo_crawl_comparison_detailed.json
+
+📊 BENCHMARK REPORT
+====================================
+🌐 SELENIUM
+  success_count ...................... 3
+  failure_count ...................... 0
+  avg_time ........................... 45.32s
+  avg_data_quality ................... 92.5/100
+
+📡 ASYNC HTTP
+  success_count ...................... 3
+  failure_count ...................... 0
+  avg_time ........................... 5.21s
+  avg_data_quality ................... 85.0/100
+
+💡 RECOMMENDATIONS
+  best_for_speed ..................... AsyncHTTP
+  speedup_factor ..................... 8.7x
+  recommendation ..................... Use AsyncHTTP for bulk crawling...
+```
+
 ## 🚀 Quick Start
 
 ### Chạy từng bước (khuyến nghị cho người mới)
@@ -83,6 +164,23 @@ python demos/demo_step3_load.py
 ```bash
 python demos/demo_e2e_full.py
 ```
+
+### ⚡ Chạy benchmark crawl detail (NEW)
+**So sánh tốc độ & chất lượng dữ liệu: Selenium vs AsyncHTTP**
+
+```bash
+# Comparison cơ bản
+python demos/demo_crawl_detail_async.py
+
+# Benchmark chi tiết với recommendations
+python demos/demo_crawl_detail_comparison.py
+```
+
+**Khi nào nên chạy?**
+- Muốn kiểm tra xem nên dùng Selenium hay AsyncHTTP
+- Cần hiểu sự khác biệt về performance & data quality
+- Muốn optimize crawling speed cho project
+- Đang thực hiện code review/performance optimization
 
 ## 📁 Cấu trúc files output
 

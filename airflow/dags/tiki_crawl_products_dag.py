@@ -5260,10 +5260,10 @@ def backup_database(**context) -> dict[str, Any]:
                     backup_file.unlink()
                 return {"status": "failed", "error": str(e)}
         else:
-            # Sử dụng script backup
+            # Sử dụng script backup (dùng format sql để tránh vấn đề version dump)
             logger.info(f"📦 Đang backup database bằng script: {script_path}")
 
-            cmd = ["python", str(script_path), "--database", "crawl_data", "--format", "custom"]
+            cmd = ["python", str(script_path), "--database", "crawl_data", "--format", "sql"]
 
             try:
                 result = subprocess.run(
