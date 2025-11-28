@@ -34,7 +34,7 @@ jobs:
 
       - name: Run Vulture (find dead code)
         run: |
-          vulture src/ airflow/dags/ --min-confidence 80 || true
+          vulture src/ airflow/dags/ --min-confidence 80
 
       - name: Run Bandit security check
         run: |
