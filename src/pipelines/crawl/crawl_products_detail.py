@@ -554,20 +554,25 @@ def extract_product_detail(html_content, url, verbose=True, parent_category=None
             break
 
     # 8. Extract category path (only from breadcrumb LINKS, not product name text)
-    # Note: Tiki breadcrumbs may include product name at the end, but we only want category links
+    # IMPORTANT: Tiki breadcrumbs may include product name at the end, so we limit to first 3-4 levels
     breadcrumb_selectors = [
         '[data-view-id="pdp_breadcrumb"] a',
         ".breadcrumb a",
         '[class*="breadcrumb"] a',
     ]
+    MAX_CATEGORY_LEVELS = 4  # Tiki categories should have max 3-4 levels
     for selector in breadcrumb_selectors:
         breadcrumbs = soup.select(selector)
         if breadcrumbs:
-            for breadcrumb in breadcrumbs:
+            for i, breadcrumb in enumerate(breadcrumbs):
+                # Skip if we already have max levels (to avoid product name at end)
+                if len(product_data["category_path"]) >= MAX_CATEGORY_LEVELS:
+                    break
+                
                 text = breadcrumb.get_text(strip=True)
-                # Only add if it has an href (actual category link, not product name)
-                # Product name won't have href, only category links will
                 href = breadcrumb.get("href", "").strip()
+                
+                # Only add if it has an href AND not a homepage link
                 if text and href and text not in ["Trang chủ", "Home"]:
                     product_data["category_path"].append(text)
             break
@@ -897,13 +902,30 @@ def extract_product_detail(html_content, url, verbose=True, parent_category=None
     if not isinstance(product_data.get("category_path"), list):
         product_data["category_path"] = [str(product_data["category_path"])]
 
+    # Enforce max category levels (safety check against product names)
+    # Real Tiki categories should have 3-4 levels, anything more is likely product name
+    MAX_CATEGORY_LEVELS = 4
+    if len(product_data["category_path"]) > MAX_CATEGORY_LEVELS:
+        product_data["category_path"] = product_data["category_path"][:MAX_CATEGORY_LEVELS]
+    
     # Remove product name from category_path if it was mistakenly added
     # (sometimes breadcrumbs or API data include product name at the end)
     product_name = product_data.get("name", "").strip()
-    if product_name and product_name in product_data["category_path"]:
-        product_data["category_path"] = [
-            c for c in product_data["category_path"] if c != product_name
-        ]
+    if product_name and product_data["category_path"]:
+        # Check both exact match and prefix match (product name may be truncated in category_path)
+        filtered_path = []
+        for cat in product_data["category_path"]:
+            # Skip if category text is suspiciously long (>80 chars = likely product name)
+            # OR if it starts with the product name
+            if len(cat) > 80 or (product_name and cat.upper().startswith(product_name[:30].upper())):
+                continue
+            filtered_path.append(cat)
+        
+        # If we filtered out the last item and product_name was in path exactly, use filtered version
+        if product_name in product_data["category_path"]:
+            filtered_path = [c for c in product_data["category_path"] if c != product_name]
+        
+        product_data["category_path"] = filtered_path
 
     # Prepend parent_category to category_path if provided
     if parent_category and isinstance(parent_category, str) and parent_category.strip():
@@ -1010,12 +1032,29 @@ async def crawl_product_detail_async(
             if not isinstance(product_data.get("category_path"), list):
                 product_data["category_path"] = [str(product_data["category_path"])]
 
+            # Enforce max category levels (safety check against product names)
+            # Real Tiki categories should have 3-4 levels, anything more is likely product name
+            MAX_CATEGORY_LEVELS = 4
+            if len(product_data["category_path"]) > MAX_CATEGORY_LEVELS:
+                product_data["category_path"] = product_data["category_path"][:MAX_CATEGORY_LEVELS]
+
             # Remove product name from category_path if it was mistakenly added
             product_name = product_data.get("name", "").strip()
-            if product_name and product_name in product_data["category_path"]:
-                product_data["category_path"] = [
-                    c for c in product_data["category_path"] if c != product_name
-                ]
+            if product_name and product_data["category_path"]:
+                # Check both exact match and prefix match (product name may be truncated in category_path)
+                filtered_path = []
+                for cat in product_data["category_path"]:
+                    # Skip if category text is suspiciously long (>80 chars = likely product name)
+                    # OR if it starts with the product name
+                    if len(cat) > 80 or (product_name and cat.upper().startswith(product_name[:30].upper())):
+                        continue
+                    filtered_path.append(cat)
+                
+                # If we filtered out the last item and product_name was in path exactly, use filtered version
+                if product_name in product_data["category_path"]:
+                    filtered_path = [c for c in product_data["category_path"] if c != product_name]
+                
+                product_data["category_path"] = filtered_path
 
             return product_data
 

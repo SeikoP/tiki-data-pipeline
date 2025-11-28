@@ -181,8 +181,7 @@ class StarSchemaBuilderV2:
                 level_1 VARCHAR(255),
                 level_2 VARCHAR(255),
                 level_3 VARCHAR(255),
-                level_4 VARCHAR(255),
-                full_path VARCHAR(1000)
+                level_4 VARCHAR(255)
             )
         """
         )
@@ -379,14 +378,11 @@ class StarSchemaBuilderV2:
 
                 if cat_key not in cat_cache:
                     cat_id = hashlib.md5(cat_key.encode()).hexdigest()[:16]
-                    
-                    # Build full_path string
-                    full_path = " > ".join([l for l in cat_path if l])[:1000]
 
                     self.target_cur.execute(
                         """
-                        INSERT INTO dim_category (category_id, category_path, level_1, level_2, level_3, level_4, full_path)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO dim_category (category_id, category_path, level_1, level_2, level_3, level_4)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (category_id) DO UPDATE
                         SET level_1 = EXCLUDED.level_1, 
                             level_2 = EXCLUDED.level_2,
@@ -401,7 +397,6 @@ class StarSchemaBuilderV2:
                             level_2,
                             level_3,
                             level_4,
-                            full_path,
                         ),
                     )
 
