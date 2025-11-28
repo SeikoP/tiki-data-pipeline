@@ -437,7 +437,7 @@ class StarSchemaBuilderV2:
                     date_val = prod["crawled_at"]
                     if isinstance(date_val, str):
                         date_val = datetime.fromisoformat(date_val.split()[0]).date()
-                except:
+                except (ValueError, AttributeError, TypeError):
                     date_val = datetime.now().date()
 
                 date_key = str(date_val)
@@ -463,7 +463,7 @@ class StarSchemaBuilderV2:
                 if price:
                     try:
                         price = float(price)
-                    except:
+                    except (ValueError, TypeError):
                         price = None
 
                 if not price:
@@ -484,7 +484,7 @@ class StarSchemaBuilderV2:
                 if orig_price:
                     try:
                         orig_price = float(orig_price)
-                    except:
+                    except (ValueError, TypeError):
                         orig_price = None
 
                 discount = prod.get("discount_percent")
@@ -531,7 +531,7 @@ class StarSchemaBuilderV2:
                 logger.warning(f"  Error product {idx}: {e}")
                 try:
                     self.target_conn.rollback()
-                except:
+                except Exception:
                     pass
                 continue
 

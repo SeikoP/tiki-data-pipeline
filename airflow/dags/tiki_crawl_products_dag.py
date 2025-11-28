@@ -1611,11 +1611,9 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
             # Kiểm tra cache với Redis (thay vì file cache)
             cache_hit = False
-            cache_miss_reason = None
 
             if redis_cache:
                 # Chuẩn hóa URL trước khi check cache (CRITICAL)
-                canonical_url = redis_cache._canonicalize_url(product_url)
                 product_id_for_cache = product_id
 
                 # Thử lấy từ Redis cache với flexible validation
@@ -1629,12 +1627,6 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     progress["crawled_product_ids"].add(product_id)
                     already_crawled += 1
                     skipped_count += 1
-                elif cached_detail is None:
-                    cache_miss_reason = "NO_CACHE"
-                else:
-                    cache_miss_reason = "INVALID_CACHE"
-            else:
-                cache_miss_reason = "REDIS_UNAVAILABLE"
 
             # Nếu chưa có valid cache, thêm vào danh sách crawl
             if not cache_hit:
@@ -3322,7 +3314,6 @@ def merge_product_details(**context) -> dict[str, Any]:
                     # Seller có thể là "Unknown" - vẫn lưu lại
                     # Những products này sẽ được crawl lại trong lần chạy tiếp theo
                     brand = product_with_detail.get("brand")
-                    seller = product_with_detail.get("seller_name")
 
                     # Only skip if BRAND is missing/empty (seller can be "Unknown")
                     if not brand or (isinstance(brand, str) and not brand.strip()):
@@ -5290,11 +5281,11 @@ def send_quality_report_discord():
 
         # Tạo báo cáo
         summarizer = AISummarizer()
-        report = summarizer.generate_data_quality_report(conn)
+        summarizer.generate_data_quality_report(conn)
         conn.close()
 
         # Làm sạch nội dung để tránh trùng tiêu đề và bớt icon
-        cleaned_report = _clean_report_text(report)
+        # cleaned_report = _clean_report_text(report)
 
         # Gửi Discord
         notifier = DiscordNotifier()
@@ -5304,7 +5295,7 @@ def send_quality_report_discord():
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(
             """
-            SELECT 
+            SELECT
                 name,
                 url,
                 discount_percent,
@@ -5327,7 +5318,7 @@ def send_quality_report_discord():
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(
             """
-            SELECT 
+            SELECT
                 COUNT(*) AS total_products,
                 COUNT(CASE WHEN sales_count IS NOT NULL AND sales_count > 0 THEN 1 END) AS with_sales,
                 COUNT(CASE WHEN discount_percent > 0 THEN 1 END) AS with_discount,
