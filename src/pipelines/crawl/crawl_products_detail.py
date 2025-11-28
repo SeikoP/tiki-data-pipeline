@@ -361,8 +361,15 @@ def crawl_product_detail_with_driver(
 # extract_product_id_from_url và parse_price đã được import từ utils
 
 
-def extract_product_detail(html_content, url, verbose=True):
-    """Extract thông tin chi tiết sản phẩm từ HTML"""
+def extract_product_detail(html_content, url, verbose=True, parent_category=None):
+    """Extract thông tin chi tiết sản phẩm từ HTML
+    
+    Args:
+        html_content: HTML content của trang product
+        url: URL của product
+        verbose: Có in log không
+        parent_category: Danh mục cha (vd: "Nhà Cửa - Đời Sống") để prepend vào category_path
+    """
     # Lazy import để tránh timeout khi load DAG
     from bs4 import BeautifulSoup
 
@@ -885,6 +892,13 @@ def extract_product_detail(html_content, url, verbose=True):
     # Ensure category_path is always a list
     if not isinstance(product_data.get("category_path"), list):
         product_data["category_path"] = [str(product_data["category_path"])]
+
+    # Prepend parent_category to category_path if provided
+    if parent_category and isinstance(parent_category, str) and parent_category.strip():
+        # Remove parent_category from path if it's already there (avoid duplicates)
+        existing_path = [c for c in product_data["category_path"] if c != parent_category]
+        # Prepend parent_category to the beginning
+        product_data["category_path"] = [parent_category] + existing_path
 
     return product_data
 
