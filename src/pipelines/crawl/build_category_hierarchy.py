@@ -26,6 +26,16 @@ import json
 import os
 from collections import defaultdict
 
+def normalize_category_name(name):
+    """Normalize category names to consistent format (Title Case)"""
+    # Map of common variations to standard format
+    name_map = {
+        'Nhà cửa - đời sống': 'Nhà Cửa - Đời Sống',
+        'nhà cửa - đời sống': 'Nhà Cửa - Đời Sống',
+    }
+    
+    return name_map.get(name, name)
+
 def build_category_hierarchy():
     """Build category hierarchy from crawled categories"""
     
@@ -52,7 +62,7 @@ def build_category_hierarchy():
         url = cat['url']
         parent_url = cat.get('parent_url')
         level = cat.get('level', 0)
-        name = cat['name']
+        name = normalize_category_name(cat['name'])
         
         url_to_category[url] = {
             'name': name,
@@ -68,7 +78,7 @@ def build_category_hierarchy():
     root_url = "https://tiki.vn/nha-cua-doi-song/c1883"
     if root_url not in url_to_category:
         url_to_category[root_url] = {
-            'name': 'Nhà cửa - đời sống',
+            'name': 'Nhà Cửa - Đời Sống',
             'parent_url': None,
             'level': 0,
             'slug': 'nha-cua-doi-song'
