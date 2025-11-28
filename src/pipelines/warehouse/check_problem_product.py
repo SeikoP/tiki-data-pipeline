@@ -1,7 +1,6 @@
 import psycopg2
-import json
 
-conn = psycopg2.connect('dbname=crawl_data user=postgres password=postgres host=localhost')
+conn = psycopg2.connect("dbname=crawl_data user=postgres password=postgres host=localhost")
 cur = conn.cursor()
 
 # Check product 783 and 839

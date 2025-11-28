@@ -1515,7 +1515,9 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     logger.info(
                         f"🔍 Đang kiểm tra {len(product_ids_to_check)} products trong database..."
                     )
-                    logger.info("   (chỉ skip products có price, sales_count VÀ brand - detail đầy đủ)")
+                    logger.info(
+                        "   (chỉ skip products có price, sales_count VÀ brand - detail đầy đủ)"
+                    )
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
                             # Chia nhỏ query nếu có quá nhiều product_ids
@@ -1544,7 +1546,9 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                         f"✅ Tìm thấy {len(existing_product_ids_in_db)} products đã có detail đầy đủ trong database"
                     )
                     logger.info("   (có price, sales_count VÀ brand - sẽ skip crawl lại)")
-                    logger.info("   💡 Products không có brand sẽ được crawl lại để lấy đầy đủ thông tin")
+                    logger.info(
+                        "   💡 Products không có brand sẽ được crawl lại để lấy đầy đủ thông tin"
+                    )
                     storage.close()
         except Exception as e:
             logger.warning(f"⚠️  Không thể kiểm tra database: {e}")
@@ -3319,7 +3323,7 @@ def merge_product_details(**context) -> dict[str, Any]:
                     # Những products này sẽ được crawl lại trong lần chạy tiếp theo
                     brand = product_with_detail.get("brand")
                     seller = product_with_detail.get("seller_name")
-                    
+
                     # Only skip if BRAND is missing/empty (seller can be "Unknown")
                     if not brand or (isinstance(brand, str) and not brand.strip()):
                         logger.warning(
@@ -3385,7 +3389,9 @@ def merge_product_details(**context) -> dict[str, Any]:
             no_brand_rate = (products_no_brand / stats["total_products"]) * 100
             if no_brand_rate > 10:
                 logger.warning("=" * 70)
-                logger.warning(f"⚠️  CẢNH BÁO: Có {products_no_brand} products ({no_brand_rate:.1f}%) không có brand!")
+                logger.warning(
+                    f"⚠️  CẢNH BÁO: Có {products_no_brand} products ({no_brand_rate:.1f}%) không có brand!"
+                )
                 logger.warning("   Những products này sẽ được crawl lại trong lần chạy tiếp theo.")
                 logger.warning("   Nguyên nhân có thể:")
                 logger.warning("   - Trang detail không load đầy đủ (network issue, timeout)")
@@ -3393,7 +3399,9 @@ def merge_product_details(**context) -> dict[str, Any]:
                 logger.warning("   - Rate limit quá cao (cần giảm TIKI_DETAIL_RATE_LIMIT_DELAY)")
                 logger.warning("=" * 70)
             elif no_brand_rate > 0:
-                logger.info(f"💡 Có {products_no_brand} products ({no_brand_rate:.1f}%) không có brand, sẽ crawl lại lần sau")
+                logger.info(
+                    f"💡 Có {products_no_brand} products ({no_brand_rate:.1f}%) không có brand, sẽ crawl lại lần sau"
+                )
 
         # Cập nhật stats để phản ánh số lượng products thực tế được lưu
         stats["products_saved"] = len(products_with_detail)
@@ -3993,32 +4001,44 @@ def load_products(**context) -> dict[str, Any]:
                         user=db_user,
                         password=db_password,
                     )
-                    
+
                     logger.info("=" * 70)
                     logger.info("🗑️  XÓA PRODUCTS CÓ BRAND HOẶC SELLER NULL KHỎI DATABASE")
                     logger.info("=" * 70)
-                    
+
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
                             # Đếm số lượng trước khi xóa
-                            cur.execute("SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';")
+                            cur.execute(
+                                "SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';"
+                            )
                             count_to_delete = cur.fetchone()[0]
-                            
+
                             if count_to_delete > 0:
-                                logger.info(f"🔍 Tìm thấy {count_to_delete} products có brand/seller null/empty")
-                                
+                                logger.info(
+                                    f"🔍 Tìm thấy {count_to_delete} products có brand/seller null/empty"
+                                )
+
                                 # Xóa products có brand hoặc seller null/empty
-                                cur.execute("DELETE FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';")
+                                cur.execute(
+                                    "DELETE FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';"
+                                )
                                 deleted_no_brand_count = cur.rowcount
                                 conn.commit()
-                                
-                                logger.info(f"✅ Đã xóa {deleted_no_brand_count} products có brand/seller null/empty")
-                                logger.info("💡 Những products này sẽ được crawl lại trong lần chạy tiếp theo")
+
+                                logger.info(
+                                    f"✅ Đã xóa {deleted_no_brand_count} products có brand/seller null/empty"
+                                )
+                                logger.info(
+                                    "💡 Những products này sẽ được crawl lại trong lần chạy tiếp theo"
+                                )
                             else:
-                                logger.info("✓ Không có products nào có brand/seller null/empty cần xóa")
-                    
+                                logger.info(
+                                    "✓ Không có products nào có brand/seller null/empty cần xóa"
+                                )
+
                     logger.info("=" * 70)
-                    
+
                     # Kiểm tra số lượng products trong DB sau khi xóa
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
@@ -4373,7 +4393,11 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                     # Tính màu theo success rate
                     if crawled_count > 0:
                         success_rate = (with_detail / crawled_count) * 100
-                        color = 0x00B894 if success_rate >= 80 else (0xF39C12 if success_rate >= 50 else 0xE74C3C)
+                        color = (
+                            0x00B894
+                            if success_rate >= 80
+                            else (0xF39C12 if success_rate >= 50 else 0xE74C3C)
+                        )
                     else:
                         success_rate = 0
                         color = 0x95A5A6
@@ -4381,24 +4405,40 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                     # Fields với error analysis đầy đủ
                     fields = []
                     fields.append({"name": "Total", "value": f"{total_products:,}", "inline": True})
-                    fields.append({"name": "Crawled", "value": f"{crawled_count:,}", "inline": True})
-                    fields.append({"name": "Success", "value": f"{with_detail:,} ({success_rate:.1f}%)", "inline": True})
-                    
+                    fields.append(
+                        {"name": "Crawled", "value": f"{crawled_count:,}", "inline": True}
+                    )
+                    fields.append(
+                        {
+                            "name": "Success",
+                            "value": f"{with_detail:,} ({success_rate:.1f}%)",
+                            "inline": True,
+                        }
+                    )
+
                     # Thêm error analysis chi tiết
                     if failed > 0 or timeout > 0:
                         total_errors = failed + timeout
-                        error_rate = (total_errors / crawled_count * 100) if crawled_count > 0 else 0
+                        error_rate = (
+                            (total_errors / crawled_count * 100) if crawled_count > 0 else 0
+                        )
                         err_info = f"**Total Errors: {total_errors}** ({error_rate:.1f}%)\n"
                         if failed > 0:
                             failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0
                             err_info += f"• Failed: {failed} ({failed_rate:.1f}%)\n"
                         if timeout > 0:
-                            timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0
+                            timeout_rate = (
+                                (timeout / crawled_count * 100) if crawled_count > 0 else 0
+                            )
                             err_info += f"• Timeout: {timeout} ({timeout_rate:.1f}%)"
-                        fields.append({"name": "Error Analysis", "value": err_info.strip(), "inline": False})
-                    
+                        fields.append(
+                            {"name": "Error Analysis", "value": err_info.strip(), "inline": False}
+                        )
+
                     if products_saved:
-                        fields.append({"name": "Saved to DB", "value": f"{products_saved:,}", "inline": True})
+                        fields.append(
+                            {"name": "Saved to DB", "value": f"{products_saved:,}", "inline": True}
+                        )
 
                     # Nội dung rõ ràng
                     content = "Tổng hợp dữ liệu crawl Tiki.vn\n"
@@ -4969,28 +5009,34 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
 def cleanup_old_backups(retention_count: int = 5) -> dict[str, Any]:
     """
     Cleanup old backup files, keep only latest N backups
-    
+
     Args:
         retention_count: Số lượng backups cần giữ lại (mặc định 5)
-    
+
     Returns:
         Dict: Số file đã xóa
     """
     from pathlib import Path
-    
+
     backup_dir = Path("/opt/airflow/backups/postgres")
     if not backup_dir.exists():
         # Fallback paths
-        for bd in [Path("/backups"), Path("/opt/airflow/data/backups/postgres"), Path("/tmp/backups")]:
+        for bd in [
+            Path("/backups"),
+            Path("/opt/airflow/data/backups/postgres"),
+            Path("/tmp/backups"),
+        ]:
             if bd.exists():
                 backup_dir = bd
                 break
         else:
             return {"status": "skipped", "reason": "No backup directory found"}
-    
+
     # Find all backup files sorted by modification time
-    backup_files = sorted(backup_dir.glob("crawl_data_*.sql"), key=lambda x: x.stat().st_mtime, reverse=True)
-    
+    backup_files = sorted(
+        backup_dir.glob("crawl_data_*.sql"), key=lambda x: x.stat().st_mtime, reverse=True
+    )
+
     deleted_count = 0
     if len(backup_files) > retention_count:
         for backup_file in backup_files[retention_count:]:
@@ -5001,8 +5047,12 @@ def cleanup_old_backups(retention_count: int = 5) -> dict[str, Any]:
                 print(f"🗑️  Xóa backup cũ: {backup_file.name} ({file_size:.2f}MB)")
             except Exception as e:
                 print(f"⚠️  Không xóa được {backup_file.name}: {e}")
-    
-    return {"status": "success", "deleted": deleted_count, "remaining": len(backup_files[: retention_count])}
+
+    return {
+        "status": "success",
+        "deleted": deleted_count,
+        "remaining": len(backup_files[:retention_count]),
+    }
 
 
 def backup_database(**context) -> dict[str, Any]:
@@ -5086,8 +5136,8 @@ def backup_database(**context) -> dict[str, Any]:
                 "-U",
                 postgres_user,
                 "--format=plain",  # Plain SQL format - dễ restore, tương thích
-                "--no-owner",      # Không dump owner info
-                "--no-acl",        # Không dump access privileges
+                "--no-owner",  # Không dump owner info
+                "--no-acl",  # Không dump access privileges
                 "crawl_data",
             ]
 
@@ -5195,12 +5245,12 @@ def send_quality_report_discord():
 
         # Loại bỏ emoji phổ biến (giữ tiếng Việt)
         emoji_pattern = (
-            "[\U0001F600-\U0001F64F]"  # emoticons
-            "|[\U0001F300-\U0001F5FF]"  # symbols & pictographs
-            "|[\U0001F680-\U0001F6FF]"  # transport & map
-            "|[\U0001F1E0-\U0001F1FF]"  # flags
-            "|[\u2600-\u26FF]"          # misc symbols
-            "|[\u2700-\u27BF]"          # dingbats
+            "[\U0001f600-\U0001f64f]"  # emoticons
+            "|[\U0001f300-\U0001f5ff]"  # symbols & pictographs
+            "|[\U0001f680-\U0001f6ff]"  # transport & map
+            "|[\U0001f1e0-\U0001f1ff]"  # flags
+            "|[\u2600-\u26ff]"  # misc symbols
+            "|[\u2700-\u27bf]"  # dingbats
         )
         try:
             text = re.sub(emoji_pattern, "", text)
@@ -5323,16 +5373,26 @@ def send_quality_report_discord():
 
         # Row 1: Status
         fields.append({"name": "Status", "value": "✅ Success", "inline": True})
-        fields.append({"name": "Time", "value": datetime.now().strftime("%H:%M:%S"), "inline": True})
+        fields.append(
+            {"name": "Time", "value": datetime.now().strftime("%H:%M:%S"), "inline": True}
+        )
         fields.append({"name": "DB", "value": "crawl_data", "inline": True})
 
         # Row 2: Coverage metrics
         fields.append({"name": "Coverage", "value": f"{coverage:.1f}% with sales", "inline": True})
-        fields.append({"name": "Discounts", "value": f"{(with_discount*100/total if total>0 else 0):.1f}% on sale", "inline": True})
+        fields.append(
+            {
+                "name": "Discounts",
+                "value": f"{(with_discount*100/total if total>0 else 0):.1f}% on sale",
+                "inline": True,
+            }
+        )
         fields.append({"name": "Total Sales", "value": f"{total_sales:,} units", "inline": True})
 
         # Separator
-        fields.append({"name": "═══════ TOP DEEP DISCOUNTS (>20%) ═══════", "value": "​", "inline": False})
+        fields.append(
+            {"name": "═══════ TOP DEEP DISCOUNTS (>20%) ═══════", "value": "​", "inline": False}
+        )
 
         # Thêm top 5 sản phẩm giảm giá theo 2 cột để rộng ngang
         if discount_products:
@@ -5371,7 +5431,9 @@ def send_quality_report_discord():
                 else:
                     fields.append({"name": "Product", "value": info1, "inline": False})
         else:
-            fields.append({"name": "Notice", "value": "No products with >20% discount found", "inline": False})
+            fields.append(
+                {"name": "Notice", "value": "No products with >20% discount found", "inline": False}
+            )
 
         success = notifier.send_message(
             content=description,
@@ -5380,20 +5442,14 @@ def send_quality_report_discord():
             fields=fields,
             footer="Tiki Pipeline - Airflow DAG | Data Quality Analysis",
         )
-        
+
         if success:
             logger.info("Đã gửi báo cáo lên Discord thành công!")
-            return {
-                "status": "success",
-                "message": "Discord report sent successfully"
-            }
+            return {"status": "success", "message": "Discord report sent successfully"}
         else:
             logger.warning("⚠️ Lỗi gửi Discord nhưng pipeline hoàn tất")
-            return {
-                "status": "warning",
-                "message": "Failed to send Discord report"
-            }
-            
+            return {"status": "warning", "message": "Failed to send Discord report"}
+
     except ImportError as e:
         logger.warning(f"⚠️ Import error: {e} - Discord report skipped")
         return {"status": "skipped", "reason": "Import error"}
@@ -5982,7 +6038,7 @@ with DAG(**DAG_CONFIG) as dag:
     task_save_products >> task_prepare_detail
     # Dependencies trong detail group đã được định nghĩa ở dòng 1800
     # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database -> discord_report
-    
+
     # Create Discord report task
     task_send_discord_report = PythonOperator(
         task_id="send_quality_report_discord",
@@ -5991,7 +6047,7 @@ with DAG(**DAG_CONFIG) as dag:
         pool="crawl_pool",
         trigger_rule="all_done",  # Chạy bất kể task trước có lỗi không
     )
-    
+
     (
         task_save_products_with_detail
         >> task_enrich_category_path

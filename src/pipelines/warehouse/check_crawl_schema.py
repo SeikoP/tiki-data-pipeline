@@ -1,14 +1,16 @@
 import psycopg2
 
-conn = psycopg2.connect('dbname=crawl_data user=postgres password=postgres host=localhost')
+conn = psycopg2.connect("dbname=crawl_data user=postgres password=postgres host=localhost")
 cur = conn.cursor()
 
-cur.execute("""
+cur.execute(
+    """
     SELECT column_name, data_type 
     FROM information_schema.columns 
     WHERE table_name='products' 
     ORDER BY ordinal_position
-""")
+"""
+)
 
 print("SCHEMA OF crawl_data.products:")
 print("-" * 50)
