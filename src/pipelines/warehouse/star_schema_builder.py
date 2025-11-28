@@ -177,11 +177,11 @@ class StarSchemaBuilderV2:
             CREATE TABLE dim_category (
                 category_sk SERIAL PRIMARY KEY,
                 category_id VARCHAR(50) UNIQUE,
+                category_path JSONB,
                 level_1 VARCHAR(255),
                 level_2 VARCHAR(255),
                 level_3 VARCHAR(255),
                 level_4 VARCHAR(255),
-                level_5 VARCHAR(255),
                 full_path VARCHAR(1000)
             )
         """
@@ -361,43 +361,47 @@ class StarSchemaBuilderV2:
                 prod_sk = prod_cache[pid]
 
                 # 2. Category
-                # category_path may have product name at the end, need to filter it out
-                # Valid categories should be 4-5 levels max
+                # Copy category_path directly from crawl_data and extract levels
                 cat_path = prod.get("category_path") or []
                 
                 if isinstance(cat_path, list) and len(cat_path) >= 1:
-                    # If path length > 5, last elements are likely product name
-                    # Keep only first 5 elements
-                    cat_path = cat_path[:5]
-                    
-                    # Extract levels 0-4 (L1 to L5)
-                    levels = cat_path[0:5]
-                    # Pad with None if needed
-                    levels = (list(levels) + [None] * 5)[:5]
+                    # Extract levels from category_path array
+                    # ['L1', 'L2', 'L3', 'L4'] -> level_1=L1, level_2=L2, level_3=L3, level_4=L4
+                    level_1 = cat_path[0] if len(cat_path) > 0 else None
+                    level_2 = cat_path[1] if len(cat_path) > 1 else None
+                    level_3 = cat_path[2] if len(cat_path) > 2 else None
+                    level_4 = cat_path[3] if len(cat_path) > 3 else None
                 else:
-                    levels = [None] * 5
+                    level_1 = level_2 = level_3 = level_4 = None
 
-                cat_key = json.dumps(levels, ensure_ascii=False)
+                # Create cache key from full path
+                cat_key = json.dumps(cat_path, ensure_ascii=False)
 
                 if cat_key not in cat_cache:
                     cat_id = hashlib.md5(cat_key.encode()).hexdigest()[:16]
+                    
+                    # Build full_path string
+                    full_path = " > ".join([l for l in cat_path if l])[:1000]
 
                     self.target_cur.execute(
                         """
-                        INSERT INTO dim_category (category_id, level_1, level_2, level_3, level_4, level_5, full_path)
+                        INSERT INTO dim_category (category_id, category_path, level_1, level_2, level_3, level_4, full_path)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (category_id) DO UPDATE
-                        SET level_1 = EXCLUDED.level_1
+                        SET level_1 = EXCLUDED.level_1, 
+                            level_2 = EXCLUDED.level_2,
+                            level_3 = EXCLUDED.level_3,
+                            level_4 = EXCLUDED.level_4
                         RETURNING category_sk
                     """,
                         (
                             cat_id,
-                            levels[0],
-                            levels[1],
-                            levels[2],
-                            levels[3],
-                            levels[4],
-                            " > ".join([l for l in levels if l])[:1000],
+                            json.dumps(cat_path),
+                            level_1,
+                            level_2,
+                            level_3,
+                            level_4,
+                            full_path,
                         ),
                     )
 
