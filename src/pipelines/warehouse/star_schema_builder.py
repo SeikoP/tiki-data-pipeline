@@ -361,11 +361,16 @@ class StarSchemaBuilderV2:
                 prod_sk = prod_cache[pid]
 
                 # 2. Category
-                # category_path = [Level1, Level2, Level3, Level4, Level5, ...]
-                # Extract all 5 levels directly
+                # category_path may have product name at the end, need to filter it out
+                # Valid categories should be 4-5 levels max
                 cat_path = prod.get("category_path") or []
+                
                 if isinstance(cat_path, list) and len(cat_path) >= 1:
-                    # Element 0 = Level 1, 1 = Level 2, 2 = Level 3, 3 = Level 4, 4 = Level 5
+                    # If path length > 5, last elements are likely product name
+                    # Keep only first 5 elements
+                    cat_path = cat_path[:5]
+                    
+                    # Extract levels 0-4 (L1 to L5)
                     levels = cat_path[0:5]
                     # Pad with None if needed
                     levels = (list(levels) + [None] * 5)[:5]
