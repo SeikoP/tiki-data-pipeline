@@ -125,57 +125,18 @@ class StarSchemaBuilderV2:
 
         self.target_conn.commit()
 
-        # Create tables
+        # Create DIMENSION tables first (no dependencies)
         self.target_cur.execute(
             """
-            CREATE TABLE dim_product (
-                product_sk SERIAL PRIMARY KEY,
-                product_id VARCHAR(50) UNIQUE,
-                product_name VARCHAR(500),
-                brand VARCHAR(255),
-                url VARCHAR(500),
-                created_at TIMESTAMP
+            CREATE TABLE dim_price_segment (
+                price_segment_sk SERIAL PRIMARY KEY,
+                segment_name VARCHAR(100) UNIQUE,
+                min_price NUMERIC,
+                max_price NUMERIC
             )
         """
         )
-        logger.info("✓ Created dim_product")
-
-        self.target_cur.execute(
-            """
-            CREATE TABLE dim_category (
-                category_sk SERIAL PRIMARY KEY,
-                category_id VARCHAR(50) UNIQUE,
-                level_1 VARCHAR(255),
-                level_2 VARCHAR(255),
-                level_3 VARCHAR(255),
-                level_4 VARCHAR(255),
-                level_5 VARCHAR(255),
-                full_path VARCHAR(1000)
-            )
-        """
-        )
-        logger.info("✓ Created dim_category")
-
-        self.target_cur.execute(
-            """
-            CREATE TABLE dim_seller (
-                seller_sk SERIAL PRIMARY KEY,
-                seller_id VARCHAR(50) UNIQUE,
-                seller_name VARCHAR(500)
-            )
-        """
-        )
-        logger.info("✓ Created dim_seller")
-
-        self.target_cur.execute(
-            """
-            CREATE TABLE dim_brand (
-                brand_sk SERIAL PRIMARY KEY,
-                brand_name VARCHAR(255) UNIQUE
-            )
-        """
-        )
-        logger.info("✓ Created dim_brand")
+        logger.info("✓ Created dim_price_segment")
 
         self.target_cur.execute(
             """
@@ -192,16 +153,55 @@ class StarSchemaBuilderV2:
 
         self.target_cur.execute(
             """
-            CREATE TABLE dim_price_segment (
-                price_segment_sk SERIAL PRIMARY KEY,
-                segment_name VARCHAR(100) UNIQUE,
-                min_price NUMERIC,
-                max_price NUMERIC
+            CREATE TABLE dim_brand (
+                brand_sk SERIAL PRIMARY KEY,
+                brand_name VARCHAR(255) UNIQUE
             )
         """
         )
-        logger.info("✓ Created dim_price_segment")
+        logger.info("✓ Created dim_brand")
 
+        self.target_cur.execute(
+            """
+            CREATE TABLE dim_seller (
+                seller_sk SERIAL PRIMARY KEY,
+                seller_id VARCHAR(50) UNIQUE,
+                seller_name VARCHAR(500)
+            )
+        """
+        )
+        logger.info("✓ Created dim_seller")
+
+        self.target_cur.execute(
+            """
+            CREATE TABLE dim_category (
+                category_sk SERIAL PRIMARY KEY,
+                category_id VARCHAR(50) UNIQUE,
+                category_path JSONB,
+                level_1 VARCHAR(255),
+                level_2 VARCHAR(255),
+                level_3 VARCHAR(255),
+                level_4 VARCHAR(255)
+            )
+        """
+        )
+        logger.info("✓ Created dim_category")
+
+        self.target_cur.execute(
+            """
+            CREATE TABLE dim_product (
+                product_sk SERIAL PRIMARY KEY,
+                product_id VARCHAR(50) UNIQUE,
+                product_name VARCHAR(500),
+                brand VARCHAR(255),
+                url VARCHAR(500),
+                created_at TIMESTAMP
+            )
+        """
+        )
+        logger.info("✓ Created dim_product")
+
+        # Create FACT table last (depends on all dimensions)
         self.target_cur.execute(
             """
             CREATE TABLE fact_product_sales (
@@ -360,30 +360,43 @@ class StarSchemaBuilderV2:
                 prod_sk = prod_cache[pid]
 
                 # 2. Category
+                # Copy category_path directly from crawl_data and extract levels
                 cat_path = prod.get("category_path") or []
-                valid_cats = [c for c in (cat_path[:4] if isinstance(cat_path, list) else []) if c]
-                cat_key = json.dumps(valid_cats, ensure_ascii=False)
+                
+                if isinstance(cat_path, list) and len(cat_path) >= 1:
+                    # Extract levels from category_path array
+                    # ['L1', 'L2', 'L3', 'L4'] -> level_1=L1, level_2=L2, level_3=L3, level_4=L4
+                    level_1 = cat_path[0] if len(cat_path) > 0 else None
+                    level_2 = cat_path[1] if len(cat_path) > 1 else None
+                    level_3 = cat_path[2] if len(cat_path) > 2 else None
+                    level_4 = cat_path[3] if len(cat_path) > 3 else None
+                else:
+                    level_1 = level_2 = level_3 = level_4 = None
+
+                # Create cache key from full path
+                cat_key = json.dumps(cat_path, ensure_ascii=False)
 
                 if cat_key not in cat_cache:
                     cat_id = hashlib.md5(cat_key.encode()).hexdigest()[:16]
-                    levels = valid_cats + [None] * (5 - len(valid_cats))
 
                     self.target_cur.execute(
                         """
-                        INSERT INTO dim_category (category_id, level_1, level_2, level_3, level_4, level_5, full_path)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO dim_category (category_id, category_path, level_1, level_2, level_3, level_4)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (category_id) DO UPDATE
-                        SET level_1 = EXCLUDED.level_1
+                        SET level_1 = EXCLUDED.level_1, 
+                            level_2 = EXCLUDED.level_2,
+                            level_3 = EXCLUDED.level_3,
+                            level_4 = EXCLUDED.level_4
                         RETURNING category_sk
                     """,
                         (
                             cat_id,
-                            levels[0],
-                            levels[1],
-                            levels[2],
-                            levels[3],
-                            levels[4],
-                            " > ".join(valid_cats)[:1000],
+                            json.dumps(cat_path),
+                            level_1,
+                            level_2,
+                            level_3,
+                            level_4,
                         ),
                     )
 

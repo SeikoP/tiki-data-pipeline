@@ -361,8 +361,61 @@ def crawl_product_detail_with_driver(
 # extract_product_id_from_url và parse_price đã được import từ utils
 
 
-def extract_product_detail(html_content, url, verbose=True):
-    """Extract thông tin chi tiết sản phẩm từ HTML"""
+def load_category_hierarchy():
+    """Load category hierarchy map to auto-detect parent categories"""
+    import os
+    hierarchy_file = "data/raw/category_hierarchy_map.json"
+    if os.path.exists(hierarchy_file):
+        try:
+            with open(hierarchy_file, encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def get_parent_category_name(category_url, hierarchy_map=None):
+    """Get parent category name from hierarchy map
+    
+    Args:
+        category_url: URL của danh mục (level 1-2)
+        hierarchy_map: Pre-loaded hierarchy map (optional)
+    
+    Returns:
+        str: Parent category name (Level 0) hoặc None
+    """
+    if hierarchy_map is None:
+        hierarchy_map = load_category_hierarchy()
+    
+    if not hierarchy_map:
+        return None
+    
+    cat_info = hierarchy_map.get(category_url)
+    if not cat_info:
+        return None
+    
+    # Lấy parent chain (danh sách các parent URLs từ root)
+    parent_chain = cat_info.get('parent_chain', [])
+    if parent_chain:
+        # Parent đầu tiên (Level 0) là "Nhà cửa - đời sống"
+        root_parent = parent_chain[0]
+        root_info = hierarchy_map.get(root_parent)
+        if root_info:
+            return root_info['name']
+    
+    return None
+
+
+def extract_product_detail(html_content, url, verbose=True, parent_category=None, hierarchy_map=None):
+    """Extract thông tin chi tiết sản phẩm từ HTML
+    
+    Args:
+        html_content: HTML content của trang product
+        url: URL của product
+        verbose: Có in log không
+        parent_category: Danh mục cha (vd: "Nhà Cửa - Đời Sống") để prepend vào category_path
+        hierarchy_map: Pre-loaded category hierarchy map (optional)
+    """
     # Lazy import để tránh timeout khi load DAG
     from bs4 import BeautifulSoup
 
@@ -546,18 +599,27 @@ def extract_product_detail(html_content, url, verbose=True):
                         product_data["images"].append(img_url)
             break
 
-    # 8. Extract category path
+    # 8. Extract category path (only from breadcrumb LINKS, not product name text)
+    # IMPORTANT: Tiki breadcrumbs may include product name at the end, so we limit to first 3-4 levels
     breadcrumb_selectors = [
         '[data-view-id="pdp_breadcrumb"] a',
         ".breadcrumb a",
         '[class*="breadcrumb"] a',
     ]
+    MAX_CATEGORY_LEVELS = 4  # Tiki categories should have max 3-4 levels
     for selector in breadcrumb_selectors:
         breadcrumbs = soup.select(selector)
         if breadcrumbs:
-            for breadcrumb in breadcrumbs:
+            for i, breadcrumb in enumerate(breadcrumbs):
+                # Skip if we already have max levels (to avoid product name at end)
+                if len(product_data["category_path"]) >= MAX_CATEGORY_LEVELS:
+                    break
+                
                 text = breadcrumb.get_text(strip=True)
-                if text and text not in ["Trang chủ", "Home"]:
+                href = breadcrumb.get("href", "").strip()
+                
+                # Only add if it has an href AND not a homepage link
+                if text and href and text not in ["Trang chủ", "Home"]:
                     product_data["category_path"].append(text)
             break
 
@@ -886,6 +948,57 @@ def extract_product_detail(html_content, url, verbose=True):
     if not isinstance(product_data.get("category_path"), list):
         product_data["category_path"] = [str(product_data["category_path"])]
 
+    # Enforce max category levels (safety check against product names)
+    # Real Tiki categories should have 3-4 levels, anything more is likely product name
+    MAX_CATEGORY_LEVELS = 4
+    if len(product_data["category_path"]) > MAX_CATEGORY_LEVELS:
+        product_data["category_path"] = product_data["category_path"][:MAX_CATEGORY_LEVELS]
+    
+    # Remove product name from category_path if it was mistakenly added
+    # (sometimes breadcrumbs or API data include product name at the end)
+    product_name = product_data.get("name", "").strip()
+    if product_name and product_data["category_path"]:
+        # Check both exact match and prefix match (product name may be truncated in category_path)
+        filtered_path = []
+        for cat in product_data["category_path"]:
+            # Skip if category text is suspiciously long (>80 chars = likely product name)
+            # OR if it starts with the product name
+            if len(cat) > 80 or (product_name and cat.upper().startswith(product_name[:30].upper())):
+                continue
+            filtered_path.append(cat)
+        
+        # If we filtered out the last item and product_name was in path exactly, use filtered version
+        if product_name in product_data["category_path"]:
+            filtered_path = [c for c in product_data["category_path"] if c != product_name]
+        
+        product_data["category_path"] = filtered_path
+
+    # Prepend parent_category to category_path if provided
+    if parent_category and isinstance(parent_category, str) and parent_category.strip():
+        # Remove parent_category from path if it's already there (avoid duplicates)
+        existing_path = [c for c in product_data["category_path"] if c != parent_category]
+        # Prepend parent_category to the beginning
+        product_data["category_path"] = [parent_category] + existing_path
+    elif not parent_category and len(product_data["category_path"]) == 3:
+        # Auto-detect parent category from hierarchy if path has only 3 levels
+        # This handles the case where breadcrumb is missing Level 0
+        if hierarchy_map is None:
+            hierarchy_map = load_category_hierarchy()
+        
+        if hierarchy_map:
+            # Try to find parent from first category item's hierarchy
+            first_item = product_data["category_path"][0] if product_data["category_path"] else None
+            
+            # Search for first item in hierarchy to determine parent category
+            for cat_url, cat_info in hierarchy_map.items():
+                if cat_info.get('name') == first_item:
+                    # Found this category in hierarchy, get its root parent
+                    parent_name = get_parent_category_name(cat_url, hierarchy_map)
+                    if parent_name and parent_name != first_item:
+                        # Add parent to beginning
+                        product_data["category_path"] = [parent_name] + product_data["category_path"]
+                    break
+
     return product_data
 
 
@@ -983,6 +1096,30 @@ async def crawl_product_detail_async(
             # Ensure category_path is always a list
             if not isinstance(product_data.get("category_path"), list):
                 product_data["category_path"] = [str(product_data["category_path"])]
+
+            # Enforce max category levels (safety check against product names)
+            # Real Tiki categories should have 3-4 levels, anything more is likely product name
+            MAX_CATEGORY_LEVELS = 4
+            if len(product_data["category_path"]) > MAX_CATEGORY_LEVELS:
+                product_data["category_path"] = product_data["category_path"][:MAX_CATEGORY_LEVELS]
+
+            # Remove product name from category_path if it was mistakenly added
+            product_name = product_data.get("name", "").strip()
+            if product_name and product_data["category_path"]:
+                # Check both exact match and prefix match (product name may be truncated in category_path)
+                filtered_path = []
+                for cat in product_data["category_path"]:
+                    # Skip if category text is suspiciously long (>80 chars = likely product name)
+                    # OR if it starts with the product name
+                    if len(cat) > 80 or (product_name and cat.upper().startswith(product_name[:30].upper())):
+                        continue
+                    filtered_path.append(cat)
+                
+                # If we filtered out the last item and product_name was in path exactly, use filtered version
+                if product_name in product_data["category_path"]:
+                    filtered_path = [c for c in product_data["category_path"] if c != product_name]
+                
+                product_data["category_path"] = filtered_path
 
             return product_data
 
