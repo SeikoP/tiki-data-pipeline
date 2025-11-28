@@ -86,7 +86,9 @@ class AISummarizer:
 
         # Validation: với_detail không nên lớn hơn crawled_count
         if with_detail > crawled_count:
-            logger.warning(f"⚠️  with_detail ({with_detail}) > crawled_count ({crawled_count}), điều chỉnh...")
+            logger.warning(
+                f"⚠️  with_detail ({with_detail}) > crawled_count ({crawled_count}), điều chỉnh..."
+            )
             with_detail = crawled_count
 
         # Tính toán các tỷ lệ dựa trên crawled_count (số thực tế đã crawl)
@@ -256,17 +258,18 @@ Data JSON:
     def generate_data_quality_report(self, conn) -> str:
         """
         Tạo báo cáo chất lượng dữ liệu với phân tích chiến lược giảm giá
-        
+
         Returns: Chuỗi báo cáo định dạng
         """
         try:
             import psycopg2
             from psycopg2.extras import RealDictCursor
-            
+
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            
+
             # Lấy thống kê tổng quan
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT 
                     COUNT(*) as total_products,
                     COUNT(CASE WHEN sales_count IS NOT NULL AND sales_count > 0 THEN 1 END) as with_sales,
@@ -274,11 +277,13 @@ Data JSON:
                     MAX(discount_percent) as max_discount,
                     MIN(discount_percent) as min_discount
                 FROM products
-            """)
+            """
+            )
             stats = cur.fetchone()
-            
+
             # Lấy top 5 sản phẩm giảm giá cao
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT 
                     product_id,
                     name,
@@ -292,61 +297,63 @@ Data JSON:
                     AND name IS NOT NULL
                 ORDER BY discount_percent DESC
                 LIMIT 5
-            """)
+            """
+            )
             discount_products = cur.fetchall()
-            
+
             # Xây dựng báo cáo
             report = "🤖 BÁO CÁO PHÂN TÍCH DỮ LIỆU SẢN PHẨM TIKI\n"
             report += "━" * 50 + "\n\n"
-            
+
             # I. Tổng quan
             report += "I. Tổng Quan Thu Thập Dữ Liệu\n\n"
-            total = stats['total_products'] or 0
-            with_sales = stats['with_sales'] or 0
+            total = stats["total_products"] or 0
+            with_sales = stats["with_sales"] or 0
             coverage = (with_sales * 100 / total) if total > 0 else 0
-            
+
             report += f"📊 Quy mô dataset:\n"
             report += f"   • Tổng sản phẩm trong DB: {total:,}\n"
             report += f"   • Sản phẩm có doanh số: {with_sales:,} ({coverage:.1f}%)\n"
-            report += f"   • Sản phẩm không có doanh số: {total - with_sales:,} ({100-coverage:.1f}%)\n\n"
-            
+            report += (
+                f"   • Sản phẩm không có doanh số: {total - with_sales:,} ({100-coverage:.1f}%)\n\n"
+            )
+
             report += "✅ Chất lượng:\n"
             report += f"   • Hợp lệ đầy đủ: {with_sales:,} / {total:,} = {coverage:.1f}% ✓\n"
             report += f"   • Lỗi / thiếu dữ liệu: {100-coverage:.1f}%\n"
             report += "   • Đánh giá: Dữ liệu ở mức chấp nhận được\n\n"
-            
+
             # II. Phân tích giảm giá
             report += "II. Phân Tích Chiến Lược Giảm Giá\n\n"
-            avg_disc = stats['avg_discount'] or 0
-            max_disc = stats['max_discount'] or 0
-            min_disc = stats['min_discount'] or 0
-            
+            avg_disc = stats["avg_discount"] or 0
+            max_disc = stats["max_discount"] or 0
+            min_disc = stats["min_discount"] or 0
+
             report += f"💰 Mức giảm giá trên thị trường:\n"
             report += f"   • Trung bình: {avg_disc:.1f}%\n"
             report += f"   • Phạm vi: {min_disc:.1f}% – {max_disc:.1f}%\n"
             report += f"   • Nhận định: Hầu hết sản phẩm áp dụng giảm giá nhẹ (<20%)\n\n"
-            
+
             # Top 5 sản phẩm giảm giá
             report += "📌 Các sản phẩm giảm giá sâu (>20%):\n\n"
             for i, prod in enumerate(discount_products, 1):
-                name = (prod['name'] or "N/A")[:50]
-                disc = prod['discount_percent'] or 0
-                price = prod['price'] or 0
-                sales = prod['sales_count'] or 0
-                url = prod.get('url') or ""
-                
+                name = (prod["name"] or "N/A")[:50]
+                disc = prod["discount_percent"] or 0
+                price = prod["price"] or 0
+                sales = prod["sales_count"] or 0
+                url = prod.get("url") or ""
+
                 report += f"{i}️⃣ {name}\n"
                 report += f"   Giảm: {disc:.1f}% | Giá: {price:,.0f}đ | Bán: {sales:,} cái\n"
                 if url:
                     report += f"   🔗 {url}\n"
                 report += "\n"
-            
+
             report += "💡 Insight: Giảm 60-70% hiệu quả nếu sản phẩm có thương hiệu mạnh\n"
             report += "   Giảm > 75% thường là tín hiệu 'thanh lý' hoặc 'giá gốc ảo'\n"
-            
+
             return report
-            
+
         except Exception as e:
             logger.error(f"❌ Lỗi tạo báo cáo: {e}")
             return ""
-
