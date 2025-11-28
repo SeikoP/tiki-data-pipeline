@@ -20,7 +20,7 @@ CATEGORY_POOL_SIZE = 8  # Tối ưu: selenium drivers cho category crawl
 # Product crawling configuration - OPTIMIZED
 PRODUCT_BATCH_SIZE = 12  # Products per batch (từ 15)
 PRODUCT_TIMEOUT = 120  # Seconds for product detail fetch (tăng từ 60 -> 120 để trang load đầy đủ)
-PRODUCT_POOL_SIZE = 15  # Selenium drivers , tốn ram hơn nhưng nhanh hơn
+PRODUCT_POOL_SIZE = 12  # Selenium drivers - match với crawl_pool (Airflow 12 slots), tiết kiệm ~150-300MB RAM
 
 # HTTP client configuration - OPTIMIZED
 HTTP_CONNECTOR_LIMIT = 100  # Tổng concurrent HTTP connections

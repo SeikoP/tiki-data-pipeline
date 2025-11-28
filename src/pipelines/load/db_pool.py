@@ -42,7 +42,7 @@ class PostgresConnectionPool:
         user: str | None = None,
         password: str | None = None,
         minconn: int = 2,
-        maxconn: int = 10,
+        maxconn: int = 20,
     ):
         """
         Initialize connection pool

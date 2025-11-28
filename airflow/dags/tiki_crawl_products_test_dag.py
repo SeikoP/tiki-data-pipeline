@@ -4742,22 +4742,6 @@ def health_check_monitoring(**context) -> dict[str, Any]:
         try:
             alerts = []
 
-            # TEST: Thêm test alert để verify webhook hoạt động
-            # TODO: Remove this after testing
-            try:
-                # Default test mode FALSE in production; set variable to true only when debugging
-                test_mode = (
-                    Variable.get("HEALTH_CHECK_TEST_ALERT", default="false").lower() == "true"
-                )
-                logger.info(f"🔍 Test mode check: HEALTH_CHECK_TEST_ALERT = {test_mode}")
-                if test_mode:
-                    alerts.append(
-                        "🧪 **TEST ALERT** - Đây là test alert để verify Discord webhook hoạt động"
-                    )
-                    logger.info("🧪 Test mode enabled - sẽ gửi test alert")
-            except Exception as e:
-                logger.warning(f"⚠️  Không check được test mode variable: {e}")
-
             # Check circuit breaker
             cb_state = result["circuit_breaker_state"]
             if cb_state.get("state") == "open":

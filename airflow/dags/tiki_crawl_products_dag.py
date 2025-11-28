@@ -790,160 +790,6 @@ def _fix_sys_path_for_pipelines_import(logger=None):
     return None
 
 
-def extract_and_load_categories_to_db(**context) -> dict[str, Any]:
-    """
-    Task 0: Extract categories từ categories_tree.json và load vào database
-
-    Returns:
-        Dict: Stats về việc load categories
-    """
-    logger = get_logger(context)
-    logger.info("=" * 70)
-    logger.info("📁 TASK: Extract & Load Categories to Database")
-    logger.info("=" * 70)
-
-    try:
-        # Import extract và load modules
-        try:
-            # Thử import từ đường dẫn trong Docker/Airflow
-            import importlib.util
-            import sys
-            from pathlib import Path
-
-            # Tìm đường dẫn đến extract_categories.py
-            possible_paths = [
-                "/opt/airflow/src/pipelines/extract/extract_categories.py",
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "..",
-                    "..",
-                    "src",
-                    "pipelines",
-                    "extract",
-                    "extract_categories.py",
-                ),
-                os.path.join(os.getcwd(), "src", "pipelines", "extract", "extract_categories.py"),
-            ]
-
-            extract_module_path = None
-            for path in possible_paths:
-                test_path = Path(path)
-                if test_path.exists():
-                    extract_module_path = test_path
-                    break
-
-            if extract_module_path:
-                spec = importlib.util.spec_from_file_location(
-                    "extract_categories", extract_module_path
-                )
-                if spec and spec.loader:
-                    extract_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(extract_module)
-                    extract_categories_from_tree_file = (
-                        extract_module.extract_categories_from_tree_file
-                    )
-                else:
-                    raise ImportError("Không thể load extract_categories module")
-            else:
-                raise ImportError("Không tìm thấy extract_categories.py")
-        except Exception as e:
-            logger.warning(f"⚠️  Không thể import extract module: {e}")
-            logger.info("Thử import trực tiếp...")
-            # Fallback: thử import trực tiếp
-            try:
-                from pipelines.extract.extract_categories import extract_categories_from_tree_file
-            except ImportError:
-                # Sửa sys.path và thử lại
-                _fix_sys_path_for_pipelines_import(logger)
-                try:
-                    from pipelines.extract.extract_categories import (
-                        extract_categories_from_tree_file,
-                    )
-                except ImportError as e:
-                    logger.error(f"❌ Không thể import extract_categories: {e}")
-                    logger.error(f"   sys.path: {sys.path}")
-                    raise
-
-        # Import DataLoader
-        try:
-            from pipelines.load.loader import DataLoader
-
-            logger.info("✅ Đã import DataLoader thành công")
-        except ImportError:
-            # Sửa sys.path và thử lại
-            _fix_sys_path_for_pipelines_import(logger)
-            try:
-                from pipelines.load.loader import DataLoader
-
-                logger.info("✅ Đã import DataLoader thành công")
-            except ImportError as e:
-                logger.error(f"❌ Không thể import DataLoader: {e}")
-                logger.error(f"   sys.path: {sys.path}")
-                raise
-
-        # 1. Extract categories từ tree file
-        tree_file = str(CATEGORIES_TREE_FILE)
-        logger.info(f"📖 Đang extract categories từ: {tree_file}")
-
-        if not os.path.exists(tree_file):
-            logger.warning(f"⚠️  Không tìm thấy file: {tree_file}")
-            logger.info("Bỏ qua task này, categories có thể đã được load trước đó")
-            return {
-                "total_loaded": 0,
-                "db_loaded": 0,
-                "success_count": 0,
-                "failed_count": 0,
-                "skipped": True,
-            }
-
-        categories = extract_categories_from_tree_file(tree_file)
-        logger.info(f"✅ Đã extract {len(categories)} categories")
-
-        # 2. Load vào database
-        logger.info("💾 Đang load categories vào database...")
-
-        # Lấy credentials từ environment variables
-        loader = DataLoader(
-            database=os.getenv("POSTGRES_DB", "crawl_data"),
-            host=os.getenv("POSTGRES_HOST", "postgres"),
-            port=int(os.getenv("POSTGRES_PORT", "5432")),
-            user=os.getenv("POSTGRES_USER", "airflow_user"),
-            password=os.getenv("POSTGRES_PASSWORD", ""),
-            batch_size=100,
-            enable_db=True,
-        )
-
-        try:
-            stats = loader.load_categories(
-                categories,
-                save_to_file=None,  # Không lưu file, chỉ load vào DB
-                upsert=True,
-                validate_before_load=True,
-            )
-
-            logger.info(f"✅ Đã load {stats['db_loaded']} categories vào database")
-            logger.info(f"   - Tổng số: {stats['total_loaded']}")
-            logger.info(f"   - Thành công: {stats['success_count']}")
-            logger.info(f"   - Thất bại: {stats['failed_count']}")
-
-            if stats.get("errors"):
-                logger.warning(f"⚠️  Có {len(stats['errors'])} lỗi (hiển thị 5 đầu tiên):")
-                for error in stats["errors"][:5]:
-                    logger.warning(f"   - {error}")
-
-            loader.close()
-            return stats
-
-        except Exception as e:
-            logger.error(f"❌ Lỗi khi load vào database: {e}", exc_info=True)
-            loader.close()
-            raise
-
-    except Exception as e:
-        logger.error(f"❌ Lỗi trong extract_and_load_categories_to_db: {e}", exc_info=True)
-        raise
-
-
 def load_categories(**context) -> list[dict[str, Any]]:
     """
     Task 1: Load danh sách danh mục từ file
@@ -1616,7 +1462,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Lấy cấu hình cho multi-day crawling
         # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
-            Variable.get("TIKI_PRODUCTS_PER_DAY", default="280")
+            Variable.get("TIKI_PRODUCTS_PER_DAY", default="500")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
             Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
@@ -2258,7 +2104,7 @@ def crawl_product_batch(
         rate_limit_delay = float(Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="1.5"))
 
         # Tạo semaphore để limit concurrent tasks (tối ưu throughput)
-        max_concurrent = int(Variable.get("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="15"))
+        max_concurrent = int(Variable.get("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="12"))
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def bounded_task(task_coro):
@@ -4822,22 +4668,6 @@ def health_check_monitoring(**context) -> dict[str, Any]:
         try:
             alerts = []
 
-            # TEST: Thêm test alert để verify webhook hoạt động
-            # TODO: Remove this after testing
-            try:
-                # Default test mode FALSE in production; set variable to true only when debugging
-                test_mode = (
-                    Variable.get("HEALTH_CHECK_TEST_ALERT", default="false").lower() == "true"
-                )
-                logger.info(f"🔍 Test mode check: HEALTH_CHECK_TEST_ALERT = {test_mode}")
-                if test_mode:
-                    alerts.append(
-                        "🧪 **TEST ALERT** - Đây là test alert để verify Discord webhook hoạt động"
-                    )
-                    logger.info("🧪 Test mode enabled - sẽ gửi test alert")
-            except Exception as e:
-                logger.warning(f"⚠️  Không check được test mode variable: {e}")
-
             # Check circuit breaker
             cb_state = result["circuit_breaker_state"]
             if cb_state.get("state") == "open":
@@ -5134,6 +4964,45 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
 
     logger.info("=" * 70)
     return result
+
+
+def cleanup_old_backups(retention_count: int = 5) -> dict[str, Any]:
+    """
+    Cleanup old backup files, keep only latest N backups
+    
+    Args:
+        retention_count: Số lượng backups cần giữ lại (mặc định 5)
+    
+    Returns:
+        Dict: Số file đã xóa
+    """
+    from pathlib import Path
+    
+    backup_dir = Path("/opt/airflow/backups/postgres")
+    if not backup_dir.exists():
+        # Fallback paths
+        for bd in [Path("/backups"), Path("/opt/airflow/data/backups/postgres"), Path("/tmp/backups")]:
+            if bd.exists():
+                backup_dir = bd
+                break
+        else:
+            return {"status": "skipped", "reason": "No backup directory found"}
+    
+    # Find all backup files sorted by modification time
+    backup_files = sorted(backup_dir.glob("crawl_data_*.sql"), key=lambda x: x.stat().st_mtime, reverse=True)
+    
+    deleted_count = 0
+    if len(backup_files) > retention_count:
+        for backup_file in backup_files[retention_count:]:
+            try:
+                file_size = backup_file.stat().st_size / (1024 * 1024)
+                backup_file.unlink()
+                deleted_count += 1
+                print(f"🗑️  Xóa backup cũ: {backup_file.name} ({file_size:.2f}MB)")
+            except Exception as e:
+                print(f"⚠️  Không xóa được {backup_file.name}: {e}")
+    
+    return {"status": "success", "deleted": deleted_count, "remaining": len(backup_files[: retention_count])}
 
 
 def backup_database(**context) -> dict[str, Any]:
@@ -6083,6 +5952,16 @@ with DAG(**DAG_CONFIG) as dag:
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
+        # Cleanup old backups task (keep only latest 5)
+        task_cleanup_backups = PythonOperator(
+            task_id="cleanup_old_backups",
+            python_callable=cleanup_old_backups,
+            op_kwargs={"retention_count": 5},
+            execution_timeout=timedelta(minutes=5),
+            pool="crawl_pool",
+            trigger_rule="all_done",
+        )
+
     # Định nghĩa dependencies
     # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Transform -> Load -> Validate -> Aggregate
 
@@ -6123,5 +6002,6 @@ with DAG(**DAG_CONFIG) as dag:
         >> task_health_check
         >> task_cleanup_cache
         >> task_backup_database
+        >> task_cleanup_backups
         >> task_send_discord_report  # Discord report là task cuối cùng
     )
