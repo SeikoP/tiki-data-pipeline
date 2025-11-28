@@ -5285,7 +5285,6 @@ def send_quality_report_discord():
         conn.close()
 
         # Làm sạch nội dung để tránh trùng tiêu đề và bớt icon
-        # cleaned_report = _clean_report_text(report)
 
         # Gửi Discord
         notifier = DiscordNotifier()
