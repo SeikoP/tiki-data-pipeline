@@ -42,10 +42,14 @@ class PostgresConnectionPool:
         user: str | None = None,
         password: str | None = None,
         minconn: int = 2,
-        maxconn: int = 20,
+        maxconn: int = 15,
     ):
         """
         Initialize connection pool
+
+        Note: maxconn=15 aligns with PRODUCT_POOL_SIZE=12 and
+        TIKI_DETAIL_MAX_CONCURRENT_TASKS=12, providing 3 extra connections
+        for overhead (cleanup tasks, monitoring, etc.).
 
         Args:
             host: Database host (default from env)

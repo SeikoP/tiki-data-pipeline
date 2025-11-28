@@ -18,11 +18,11 @@ CATEGORY_CONCURRENT_REQUESTS = 5  # Tối ưu: 5 thay vì 3 concurrent requests
 CATEGORY_POOL_SIZE = 8  # Tối ưu: selenium drivers cho category crawl
 
 # Product crawling configuration - OPTIMIZED
+# Note: PRODUCT_POOL_SIZE (12) aligns with Airflow's 12 slots and TIKI_DETAIL_MAX_CONCURRENT_TASKS.
+# db_pool.py maxconn (15) = PRODUCT_POOL_SIZE (12) + 3 overhead for cleanup/monitoring tasks.
 PRODUCT_BATCH_SIZE = 12  # Products per batch (từ 15)
 PRODUCT_TIMEOUT = 120  # Seconds for product detail fetch (tăng từ 60 -> 120 để trang load đầy đủ)
-PRODUCT_POOL_SIZE = (
-    12  # Selenium drivers - match với crawl_pool (Airflow 12 slots), tiết kiệm ~150-300MB RAM
-)
+PRODUCT_POOL_SIZE = 12  # Selenium drivers - match với crawl_pool (Airflow 12 slots)
 
 # HTTP client configuration - OPTIMIZED
 HTTP_CONNECTOR_LIMIT = 100  # Tổng concurrent HTTP connections
