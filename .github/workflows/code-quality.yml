@@ -34,8 +34,8 @@ jobs:
 
       - name: Run Bandit security check
         run: |
-          bandit -r src/ -f json -o bandit-report.json || true
-          bandit -r src/ || true
+          bandit -r src/ airflow/dags/ -f json -o bandit-report.json || true
+          bandit -r src/ airflow/dags/ || true
 
       - name: Check dependencies for vulnerabilities
         run: |
