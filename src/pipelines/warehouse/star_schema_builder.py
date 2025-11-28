@@ -125,20 +125,52 @@ class StarSchemaBuilderV2:
 
         self.target_conn.commit()
 
-        # Create tables
+        # Create DIMENSION tables first (no dependencies)
         self.target_cur.execute(
             """
-            CREATE TABLE dim_product (
-                product_sk SERIAL PRIMARY KEY,
-                product_id VARCHAR(50) UNIQUE,
-                product_name VARCHAR(500),
-                brand VARCHAR(255),
-                url VARCHAR(500),
-                created_at TIMESTAMP
+            CREATE TABLE dim_price_segment (
+                price_segment_sk SERIAL PRIMARY KEY,
+                segment_name VARCHAR(100) UNIQUE,
+                min_price NUMERIC,
+                max_price NUMERIC
             )
         """
         )
-        logger.info("✓ Created dim_product")
+        logger.info("✓ Created dim_price_segment")
+
+        self.target_cur.execute(
+            """
+            CREATE TABLE dim_date (
+                date_sk SERIAL PRIMARY KEY,
+                date_value DATE UNIQUE,
+                year INT,
+                month INT,
+                day INT
+            )
+        """
+        )
+        logger.info("✓ Created dim_date")
+
+        self.target_cur.execute(
+            """
+            CREATE TABLE dim_brand (
+                brand_sk SERIAL PRIMARY KEY,
+                brand_name VARCHAR(255) UNIQUE
+            )
+        """
+        )
+        logger.info("✓ Created dim_brand")
+
+        self.target_cur.execute(
+            """
+            CREATE TABLE dim_seller (
+                seller_sk SERIAL PRIMARY KEY,
+                seller_id VARCHAR(50) UNIQUE,
+                seller_name VARCHAR(500)
+            )
+        """
+        )
+        logger.info("✓ Created dim_seller")
 
         self.target_cur.execute(
             """
@@ -158,50 +190,19 @@ class StarSchemaBuilderV2:
 
         self.target_cur.execute(
             """
-            CREATE TABLE dim_seller (
-                seller_sk SERIAL PRIMARY KEY,
-                seller_id VARCHAR(50) UNIQUE,
-                seller_name VARCHAR(500)
+            CREATE TABLE dim_product (
+                product_sk SERIAL PRIMARY KEY,
+                product_id VARCHAR(50) UNIQUE,
+                product_name VARCHAR(500),
+                brand VARCHAR(255),
+                url VARCHAR(500),
+                created_at TIMESTAMP
             )
         """
         )
-        logger.info("✓ Created dim_seller")
+        logger.info("✓ Created dim_product")
 
-        self.target_cur.execute(
-            """
-            CREATE TABLE dim_brand (
-                brand_sk SERIAL PRIMARY KEY,
-                brand_name VARCHAR(255) UNIQUE
-            )
-        """
-        )
-        logger.info("✓ Created dim_brand")
-
-        self.target_cur.execute(
-            """
-            CREATE TABLE dim_date (
-                date_sk SERIAL PRIMARY KEY,
-                date_value DATE UNIQUE,
-                year INT,
-                month INT,
-                day INT
-            )
-        """
-        )
-        logger.info("✓ Created dim_date")
-
-        self.target_cur.execute(
-            """
-            CREATE TABLE dim_price_segment (
-                price_segment_sk SERIAL PRIMARY KEY,
-                segment_name VARCHAR(100) UNIQUE,
-                min_price NUMERIC,
-                max_price NUMERIC
-            )
-        """
-        )
-        logger.info("✓ Created dim_price_segment")
-
+        # Create FACT table last (depends on all dimensions)
         self.target_cur.execute(
             """
             CREATE TABLE fact_product_sales (
