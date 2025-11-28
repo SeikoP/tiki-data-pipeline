@@ -531,8 +531,8 @@ class StarSchemaBuilderV2:
                 logger.warning(f"  Error product {idx}: {e}")
                 try:
                     self.target_conn.rollback()
-                except Exception:
-                    pass
+                except Exception as rollback_exc:
+                    logger.error(f"    Rollback failed for product {idx}: {rollback_exc}")
                 continue
 
         self.target_conn.commit()
