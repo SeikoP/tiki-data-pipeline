@@ -68,21 +68,17 @@ Level 3: "Phụ kiện đi mưa"
 Level 4: (nếu có subcategory)
 ```
 
-**Vấn đề hiện tại:**
-- Breadcrumb từ website chỉ có Level 1-3
-- Cần thêm Level 0 (parent category) từ `categories.json`
-- Code sẽ mapping product → category để tìm parent
+**✅ VẤN ĐỀ ĐÃ ĐƯỢC SỬA:**
 
-**Sửa lỗi:**
-```python
-# crawl_products_detail.py - Dòng ~930
-# TRƯỚC:
-if parent_category and isinstance(parent_category, str):
-    product_data["category_path"] = [parent_category] + product_data["category_path"]
+Trước: Breadcrumb từ website chỉ có 3 level, không có Level 0 (parent)
 
-# SAU (cần fix):
-# Tự động lấy parent từ database hoặc categories.json
-```
+Giải pháp:
+- Tạo `build_category_hierarchy.py` để mapping tất cả categories với parent chain
+- Generate `category_hierarchy_map.json` chứa full hierarchy
+- Sửa `extract_product_detail()` để auto-detect parent khi path có 3 level
+- Tích hợp vào DAG để sử dụng hierarchy_map trong mỗi product extraction
+
+**Kết quả:** Tất cả products đều có 4 levels với parent category tự động được thêm vào!
 
 ## 4. Quy Trình Crawl Hoàn Chỉnh (E2E)
 
@@ -148,11 +144,29 @@ conn.close()
 
 | Lỗi | Nguyên Nhân | Giải Pháp |
 |-----|-----------|----------|
-| 465 products with 3 levels | Missing Level 0 (parent) | Sửa crawl_products_detail.py để add parent_category |
+| 465 products with 3 levels (CỐ ĐỊNH ✅) | Missing Level 0 (parent) | Dùng `build_category_hierarchy.py` + auto-detect trong `extract_product_detail` |
 | Breadcrumb không tìm thấy | HTML không render | Dùng `__NEXT_DATA__` từ JSON thay vì HTML parsing |
 | Category path có tên sản phẩm | Breadcrumb bị lộn | Filter product names từ breadcrumb |
 | Driver Selenium error | Chrome chưa cài | Cài: `pip install webdriver-manager` |
 
+## 8. Pipeline Initialization Checklist
+
+Khi setup lần đầu:
+
+- [ ] Chạy `extract_category_link_selenium.py` (lấy danh mục gốc)
+- [ ] Chạy `crawl_categories_optimized.py` (lấy tất cả danh mục)
+- [ ] Chạy `build_category_hierarchy.py` (tạo hierarchy map)
+- [ ] Kiểm tra `data/raw/category_hierarchy_map.json` tồn tại
+- [ ] Start Docker: `docker-compose up -d`
+- [ ] Trigger DAG `tiki_crawl_products` trong Airflow UI
+- [ ] Kiểm tra products trong DB có 4 levels
+
 ---
 
 **Cập nhật lần cuối:** 2024-11-28
+
+### Tính Năng Mới (v1.1)
+- ✅ Auto-detect parent category cho products (3 → 4 levels)
+- ✅ Category hierarchy mapping
+- ✅ DAG integration với hierarchy_map caching
+- ✅ Comprehensive README with troubleshooting
