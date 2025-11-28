@@ -361,13 +361,21 @@ class StarSchemaBuilderV2:
                 prod_sk = prod_cache[pid]
 
                 # 2. Category
+                # category_path = [Level1, Level2, Level3, Level4, Level5, ...]
+                # Extract all 5 levels directly
                 cat_path = prod.get("category_path") or []
-                valid_cats = [c for c in (cat_path[:4] if isinstance(cat_path, list) else []) if c]
-                cat_key = json.dumps(valid_cats, ensure_ascii=False)
+                if isinstance(cat_path, list) and len(cat_path) >= 1:
+                    # Element 0 = Level 1, 1 = Level 2, 2 = Level 3, 3 = Level 4, 4 = Level 5
+                    levels = cat_path[0:5]
+                    # Pad with None if needed
+                    levels = (list(levels) + [None] * 5)[:5]
+                else:
+                    levels = [None] * 5
+
+                cat_key = json.dumps(levels, ensure_ascii=False)
 
                 if cat_key not in cat_cache:
                     cat_id = hashlib.md5(cat_key.encode()).hexdigest()[:16]
-                    levels = valid_cats + [None] * (5 - len(valid_cats))
 
                     self.target_cur.execute(
                         """
@@ -384,7 +392,7 @@ class StarSchemaBuilderV2:
                             levels[2],
                             levels[3],
                             levels[4],
-                            " > ".join(valid_cats)[:1000],
+                            " > ".join([l for l in levels if l])[:1000],
                         ),
                     )
 

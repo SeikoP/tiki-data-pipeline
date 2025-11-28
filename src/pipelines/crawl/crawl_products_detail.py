@@ -553,7 +553,8 @@ def extract_product_detail(html_content, url, verbose=True, parent_category=None
                         product_data["images"].append(img_url)
             break
 
-    # 8. Extract category path
+    # 8. Extract category path (only from breadcrumb LINKS, not product name text)
+    # Note: Tiki breadcrumbs may include product name at the end, but we only want category links
     breadcrumb_selectors = [
         '[data-view-id="pdp_breadcrumb"] a',
         ".breadcrumb a",
@@ -564,7 +565,10 @@ def extract_product_detail(html_content, url, verbose=True, parent_category=None
         if breadcrumbs:
             for breadcrumb in breadcrumbs:
                 text = breadcrumb.get_text(strip=True)
-                if text and text not in ["Trang chủ", "Home"]:
+                # Only add if it has an href (actual category link, not product name)
+                # Product name won't have href, only category links will
+                href = breadcrumb.get("href", "").strip()
+                if text and href and text not in ["Trang chủ", "Home"]:
                     product_data["category_path"].append(text)
             break
 
@@ -893,6 +897,14 @@ def extract_product_detail(html_content, url, verbose=True, parent_category=None
     if not isinstance(product_data.get("category_path"), list):
         product_data["category_path"] = [str(product_data["category_path"])]
 
+    # Remove product name from category_path if it was mistakenly added
+    # (sometimes breadcrumbs or API data include product name at the end)
+    product_name = product_data.get("name", "").strip()
+    if product_name and product_name in product_data["category_path"]:
+        product_data["category_path"] = [
+            c for c in product_data["category_path"] if c != product_name
+        ]
+
     # Prepend parent_category to category_path if provided
     if parent_category and isinstance(parent_category, str) and parent_category.strip():
         # Remove parent_category from path if it's already there (avoid duplicates)
@@ -997,6 +1009,13 @@ async def crawl_product_detail_async(
             # Ensure category_path is always a list
             if not isinstance(product_data.get("category_path"), list):
                 product_data["category_path"] = [str(product_data["category_path"])]
+
+            # Remove product name from category_path if it was mistakenly added
+            product_name = product_data.get("name", "").strip()
+            if product_name and product_name in product_data["category_path"]:
+                product_data["category_path"] = [
+                    c for c in product_data["category_path"] if c != product_name
+                ]
 
             return product_data
 
