@@ -5024,7 +5024,7 @@ def cleanup_old_backups(retention_count: int = 5, **context) -> dict[str, Any]:
                 backup_dir = bd
                 break
         else:
-            logger.info("No backup directory found, skipping cleanup")
+            logger.warning("No backup directory found, skipping cleanup")
             return {"status": "skipped", "reason": "No backup directory found"}
 
     # Find all backup files sorted by modification time
