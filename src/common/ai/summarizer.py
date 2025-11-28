@@ -262,7 +262,6 @@ Data JSON:
         Returns: Chuỗi báo cáo định dạng
         """
         try:
-            import psycopg2
             from psycopg2.extras import RealDictCursor
 
             cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -270,7 +269,7 @@ Data JSON:
             # Lấy thống kê tổng quan
             cur.execute(
                 """
-                SELECT 
+                SELECT
                     COUNT(*) as total_products,
                     COUNT(CASE WHEN sales_count IS NOT NULL AND sales_count > 0 THEN 1 END) as with_sales,
                     AVG(discount_percent) as avg_discount,
@@ -284,7 +283,7 @@ Data JSON:
             # Lấy top 5 sản phẩm giảm giá cao
             cur.execute(
                 """
-                SELECT 
+                SELECT
                     product_id,
                     name,
                     url,
@@ -311,7 +310,7 @@ Data JSON:
             with_sales = stats["with_sales"] or 0
             coverage = (with_sales * 100 / total) if total > 0 else 0
 
-            report += f"📊 Quy mô dataset:\n"
+            report += "📊 Quy mô dataset:\n"
             report += f"   • Tổng sản phẩm trong DB: {total:,}\n"
             report += f"   • Sản phẩm có doanh số: {with_sales:,} ({coverage:.1f}%)\n"
             report += (
@@ -329,10 +328,10 @@ Data JSON:
             max_disc = stats["max_discount"] or 0
             min_disc = stats["min_discount"] or 0
 
-            report += f"💰 Mức giảm giá trên thị trường:\n"
+            report += "💰 Mức giảm giá trên thị trường:\n"
             report += f"   • Trung bình: {avg_disc:.1f}%\n"
             report += f"   • Phạm vi: {min_disc:.1f}% – {max_disc:.1f}%\n"
-            report += f"   • Nhận định: Hầu hết sản phẩm áp dụng giảm giá nhẹ (<20%)\n\n"
+            report += "   • Nhận định: Hầu hết sản phẩm áp dụng giảm giá nhẹ (<20%)\n\n"
 
             # Top 5 sản phẩm giảm giá
             report += "📌 Các sản phẩm giảm giá sâu (>20%):\n\n"
