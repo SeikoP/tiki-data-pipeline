@@ -4,8 +4,10 @@ import sys
 from pathlib import Path
 
 # Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.pipelines.crawl.config import MAX_CATEGORY_LEVELS
 from src.pipelines.crawl.crawl_products_detail import (
     extract_product_detail,
 )
@@ -98,11 +100,14 @@ print(
 )
 print(f"Result path ({len(result3['category_path'])} levels): {result3['category_path']}")
 
-if len(result3["category_path"]) == 5 and result3["category_path"][0] == "Nhà Cửa - Đời Sống":
+if (
+    len(result3["category_path"]) == MAX_CATEGORY_LEVELS
+    and result3["category_path"][0] == "Nhà Cửa - Đời Sống"
+):
     print("✅ PASS: Parent category added correctly to 4-level path!")
-elif len(result3["category_path"]) == 5:
+elif len(result3["category_path"]) == MAX_CATEGORY_LEVELS:
     print(
-        f"⚠️  WARN: 5 levels but parent is '{result3['category_path'][0]}' (expected 'Nhà Cửa - Đời Sống')"
+        f"⚠️  WARN: {MAX_CATEGORY_LEVELS} levels but parent is '{result3['category_path'][0]}' (expected 'Nhà Cửa - Đời Sống')"
     )
 elif len(result3["category_path"]) == 4:
     print("⚠️  PARTIAL: Still 4 levels, parent not added (but max level check ok)")
@@ -120,5 +125,5 @@ print(
     f"Test 2 (3 levels different): {len(result2['category_path'])} levels - {'✅' if len(result2['category_path']) == 4 else '❌'}"
 )
 print(
-    f"Test 3 (4 levels): {len(result3['category_path'])} levels - {'✅' if len(result3['category_path']) == 5 else '⚠️'}"
+    f"Test 3 (4 levels): {len(result3['category_path'])} levels - {'✅' if len(result3['category_path']) == MAX_CATEGORY_LEVELS else '⚠️'}"
 )

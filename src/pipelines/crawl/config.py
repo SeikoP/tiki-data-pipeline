@@ -11,6 +11,9 @@ def get_config() -> dict[str, Any]:
     return {"firecrawl_api_url": os.getenv("FIRECRAWL_API_URL", "http://localhost:3002")}
 
 
+# Category level configuration
+MAX_CATEGORY_LEVELS = 5  # Tiki categories can have up to 5 levels with parent category included
+
 # Category crawling configuration - OPTIMIZED
 CATEGORY_BATCH_SIZE = 12  # Categories per batch
 CATEGORY_TIMEOUT = 120  # Seconds - tối ưu: 120 thay vì 180 (2 phút)

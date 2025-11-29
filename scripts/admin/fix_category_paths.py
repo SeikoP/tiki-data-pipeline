@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.pipelines.crawl.config import MAX_CATEGORY_LEVELS
 from src.pipelines.crawl.crawl_products_detail import (
     get_parent_category_name,
     load_category_hierarchy,
@@ -91,9 +92,9 @@ def add_parent_to_path(category_path, hierarchy_map, name_to_url):
             if category_path[0] != parent_name:
                 # Add parent to beginning
                 new_path = [parent_name] + category_path
-                # Ensure not exceeding 5 levels
-                if len(new_path) > 5:
-                    new_path = new_path[:5]
+                # Ensure not exceeding MAX_CATEGORY_LEVELS
+                if len(new_path) > MAX_CATEGORY_LEVELS:
+                    new_path = new_path[:MAX_CATEGORY_LEVELS]
                 return new_path
 
     return category_path

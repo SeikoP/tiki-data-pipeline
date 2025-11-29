@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+from pipelines.crawl.config import MAX_CATEGORY_LEVELS
 
 
 def check_hierarchy_map():
@@ -134,17 +137,19 @@ def check_category_path_in_db():
 
         # Check for invalid paths
         cur.execute(
-            """
+            f"""
             SELECT COUNT(*) as count
             FROM products
             WHERE category_path IS NOT NULL
-            AND jsonb_array_length(category_path) > 5
+            AND jsonb_array_length(category_path) > {MAX_CATEGORY_LEVELS}
         """
         )
 
         invalid_count = cur.fetchone()[0]
         if invalid_count > 0:
-            print(f"⚠️  WARNING: Found {invalid_count} products with >5 levels (will be trimmed)")
+            print(
+                f"⚠️  WARNING: Found {invalid_count} products with >{MAX_CATEGORY_LEVELS} levels (will be trimmed)"
+            )
 
         # Check for null or empty paths
         cur.execute(
