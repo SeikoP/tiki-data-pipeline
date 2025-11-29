@@ -5,15 +5,15 @@ Bước này load dữ liệu đã transform vào PostgreSQL database.
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
 # Fix encoding cho Windows console
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Thêm src vào path
 project_root = Path(__file__).parent.parent
@@ -42,18 +42,18 @@ def main():
 
     # Đọc file từ bước 2
     input_file = project_root / "data" / "processed" / "demo_products_transformed.json"
-    
+
     if not input_file.exists():
         print(f"❌ Không tìm thấy file: {input_file}")
         print("💡 Chạy demo_step2_transform.py trước!")
         sys.exit(1)
 
     print(f"📂 Đang đọc file: {input_file}")
-    
+
     try:
-        with open(input_file, "r", encoding="utf-8") as f:
+        with open(input_file, encoding="utf-8") as f:
             data = json.load(f)
-        
+
         products = data.get("products", [])
         print(f"📊 Tổng số products: {len(products)}")
         print()
@@ -64,6 +64,7 @@ def main():
 
         # Cấu hình database (có thể lấy từ environment variables)
         import os
+
         db_host = os.getenv("POSTGRES_HOST", "localhost")
         db_port = int(os.getenv("POSTGRES_PORT", "5432"))
         db_name = os.getenv("POSTGRES_DB", "crawl_data")
@@ -109,9 +110,9 @@ def main():
             print(f"✅ DB loaded: {load_stats['db_loaded']}")
             print(f"✅ File loaded: {load_stats['file_loaded']}")
             print(f"❌ Failed: {load_stats['failed_count']}")
-            if load_stats.get('errors'):
+            if load_stats.get("errors"):
                 print(f"⚠️  Errors: {len(load_stats['errors'])}")
-                for error in load_stats['errors'][:3]:  # Hiển thị 3 lỗi đầu
+                for error in load_stats["errors"][:3]:  # Hiển thị 3 lỗi đầu
                     print(f"   - {error}")
             print("=" * 80)
             print()
@@ -133,6 +134,7 @@ def main():
             print("💡 Database có thể chưa được khởi động hoặc cấu hình sai.")
             print("   Dữ liệu vẫn được lưu vào file JSON.")
             import traceback
+
             traceback.print_exc()
 
         finally:
@@ -141,10 +143,10 @@ def main():
     except Exception as e:
         print(f"❌ Lỗi khi load: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
-

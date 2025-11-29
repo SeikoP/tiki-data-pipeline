@@ -13,6 +13,7 @@ from pathlib import Path
 try:
     import psycopg2
     from psycopg2.extras import RealDictCursor
+
     HAS_PSYCOPG2 = True
 except ImportError:
     HAS_PSYCOPG2 = False
@@ -53,21 +54,21 @@ def print_section(title: str):
 def analyze_current_state():
     """Analyze current state of data"""
     print_section("📊 PHÂN TÍCH TÌNH HÌNH HIỆN TẠI")
-    
+
     # Check file data
     print("📂 DỮ LIỆU FILE:")
     files_to_check = [
         ("Categories", Path("data/raw/categories_recursive_optimized.json")),
         ("Products", Path("data/processed/products_final.json")),
     ]
-    
+
     file_stats = {}
     for file_name, file_path in files_to_check:
         if file_path.exists():
             try:
                 with open(file_path, encoding="utf-8") as f:
                     data = json.load(f)
-                
+
                 count = 0
                 if isinstance(data, dict):
                     if "products" in data:
@@ -76,7 +77,7 @@ def analyze_current_state():
                         count = len(data["categories"])
                 elif isinstance(data, list):
                     count = len(data)
-                
+
                 print(f"   ✅ {file_name}: {GREEN}{count}{END} items")
                 file_stats[file_name] = count
             except Exception as e:
@@ -84,7 +85,7 @@ def analyze_current_state():
         else:
             print(f"   ❌ {file_name}: File không tồn tại")
             file_stats[file_name] = 0
-    
+
     # Check database
     print("\n🗄️ DỮ LIỆU DATABASE:")
     if HAS_PSYCOPG2:
@@ -97,31 +98,33 @@ def analyze_current_state():
                 database=POSTGRES_DB,
             )
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            
+
             # Check products
             cur.execute("SELECT COUNT(*) as cnt FROM products;")
             products_count = cur.fetchone()["cnt"]
             print(f"   ✅ Products table: {GREEN}{products_count}{END} rows")
-            
+
             # Check products with category_path
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT 
                     COUNT(*) as total,
                     SUM(CASE WHEN category_path IS NOT NULL THEN 1 ELSE 0 END) as with_path
                 FROM products;
-            """)
+            """
+            )
             stats = cur.fetchone()
             with_path = stats["with_path"] or 0
             print(f"      - Với category_path: {GREEN}{with_path}{END}/{products_count}")
-            
+
             # Check categories
             cur.execute("SELECT COUNT(*) as cnt FROM categories;")
             categories_count = cur.fetchone()["cnt"]
             print(f"   ✅ Categories table: {GREEN}{categories_count}{END} rows")
-            
+
             cur.close()
             conn.close()
-            
+
             db_stats = {
                 "products": products_count,
                 "products_with_path": with_path,
@@ -131,55 +134,61 @@ def analyze_current_state():
             print(f"   ❌ Database error: {e}")
             db_stats = {}
     else:
-        print(f"   ⚠️ psycopg2 not installed - cannot check database")
+        print("   ⚠️ psycopg2 not installed - cannot check database")
         db_stats = {}
-    
+
     return file_stats, db_stats
 
 
 def show_analysis(**kwargs):
     """Show analysis and recommendation"""
     print_section("📋 PHÂN TÍCH VÀ KHUYẾN CÁO")
-    
+
     file_stats = kwargs.get("file_stats", {})
     db_stats = kwargs.get("db_stats", {})
-    
+
     categories = file_stats.get("Categories", 0)
     products = file_stats.get("Products", 0)
     db_products = db_stats.get("products", 0)
     db_products_with_path = db_stats.get("products_with_path", 0)
-    
+
     print("🔍 TÌNH HÌNH HIỆN TẠI:\n")
-    
+
     # Analyze issues
     issues = []
-    
+
     # Issue 1: Products without category_path
     if db_products > 0 and db_products_with_path < db_products:
         missing_path = db_products - db_products_with_path
         pct = missing_path * 100 / db_products
-        issues.append({
-            "severity": "HIGH",
-            "issue": f"❌ {missing_path}/{db_products} products ({pct:.1f}%) KHÔNG có category_path",
-            "impact": "Breadcrumb navigation sẽ không hoạt động cho những products này",
-        })
-    
+        issues.append(
+            {
+                "severity": "HIGH",
+                "issue": f"❌ {missing_path}/{db_products} products ({pct:.1f}%) KHÔNG có category_path",
+                "impact": "Breadcrumb navigation sẽ không hoạt động cho những products này",
+            }
+        )
+
     # Issue 2: File data inconsistency
     if products > 0 and db_products > 0 and abs(products - db_products) > 100:
-        issues.append({
-            "severity": "MEDIUM",
-            "issue": f"⚠️ File có {products} products nhưng DB có {db_products} (khác nhau {abs(products - db_products)})",
-            "impact": "Dữ liệu trong file và database không đồng bộ",
-        })
-    
+        issues.append(
+            {
+                "severity": "MEDIUM",
+                "issue": f"⚠️ File có {products} products nhưng DB có {db_products} (khác nhau {abs(products - db_products)})",
+                "impact": "Dữ liệu trong file và database không đồng bộ",
+            }
+        )
+
     # Issue 3: Missing categories
     if categories > 0 and db_stats.get("categories", 0) == 0:
-        issues.append({
-            "severity": "MEDIUM",
-            "issue": f"⚠️ Categories file có {categories} categories nhưng DB không có",
-            "impact": "Category_path lookup sẽ không hoạt động",
-        })
-    
+        issues.append(
+            {
+                "severity": "MEDIUM",
+                "issue": f"⚠️ Categories file có {categories} categories nhưng DB không có",
+                "impact": "Category_path lookup sẽ không hoạt động",
+            }
+        )
+
     if issues:
         print("🚨 VẤN ĐỀ PHÁT HIỆN:\n")
         for i, issue in enumerate(issues, 1):
@@ -190,19 +199,20 @@ def show_analysis(**kwargs):
                 color = YELLOW
             else:
                 color = BLUE
-            
+
             print(f"{color}{i}. [{severity}]{END}")
             print(f"   {issue['issue']}")
             print(f"   Impact: {issue['impact']}\n")
     else:
         print(f"{GREEN}✅ Không phát hiện vấn đề lớn{END}\n")
-    
+
     # Recommendation
     print("\n📝 KHUYẾN CÁO:\n")
-    
+
     if db_products_with_path < db_products:
         print(f"{YELLOW}1. TRƯỜNG HỢP: Dữ liệu đã tồn tại nhưng category_path CHƯA HOÀN CHỈNH{END}")
-        print(f"""
+        print(
+            f"""
    {CYAN}✅ KHÔNG CẦN XÓA DB{END}
    
    {GREEN}Thay vào đó, làm theo các bước:{END}
@@ -226,22 +236,26 @@ def show_analysis(**kwargs):
       - Giữ lại dữ liệu crawled cũ (không mất công)
       - Chỉ cập nhật category_path missing
       - Tiết kiệm thời gian crawl
-        """)
-    
+        """
+        )
+
     else:
         print(f"{GREEN}1. TRƯỜNG HỢP: Dữ liệu đã hoàn chỉnh{END}")
-        print(f"""
+        print(
+            f"""
    {GREEN}✅ Dữ liệu đã sẵn sàng!{END}
    
    {CYAN}Bạn có thể:{END}
    - Sử dụng dữ liệu hiện tại cho analysis
    - Chạy lại DAG để update tất cả dữ liệu
    - XÓA DB CHỈ NẾU muốn reset toàn bộ
-        """)
-    
+        """
+        )
+
     print(f"\n{BLUE}{'=' * 80}{END}")
     print(f"{BLUE}2. NẾUVÌ CÓ LÍ DO XÓA DB (ví dụ: test crawl, reset data){END}")
-    print(f"""
+    print(
+        f"""
    {CYAN}Các bước xóa và crawl lại:{END}
    
    a) Backup dữ liệu (optional):
@@ -265,16 +279,18 @@ def show_analysis(**kwargs):
       - Transform và load vào DB (sạch và đầy đủ)
       
    ⏱️ Thời gian dự kiến: 1-3 giờ (tùy thuộc số categories/products)
-        """)
-    
+        """
+    )
+
     print(f"{BLUE}{'=' * 80}{END}")
 
 
 def show_menu():
     """Show menu for user to choose action"""
     print_section("🎯 CHỌN HÀNH ĐỘNG")
-    
-    print("""
+
+    print(
+        """
 1. ✅ Giữ DB, chỉ enrich category_path (RECOMMENDED)
    - Nhanh, không mất dữ liệu
    - Bổ sung category_path cho products thiếu
@@ -287,8 +303,9 @@ def show_menu():
 3. 💾 Xem thêm thông tin về backup/restore
    
 4. ❌ Thoát
-    """)
-    
+    """
+    )
+
     choice = input(f"\n{CYAN}Chọn (1-4): {END}").strip()
     return choice
 
@@ -296,8 +313,9 @@ def show_menu():
 def show_reset_warning():
     """Show warning before reset"""
     print_section("⚠️ CẢNH BÁO: RESET DATABASE")
-    
-    print(f"""
+
+    print(
+        f"""
 {RED}Bạn chuẩn bị XÓA TẤT CẢ DỮ LIỆU trong database!{END}
 
 {YELLOW}Điều này sẽ:{END}
@@ -311,8 +329,9 @@ def show_reset_warning():
   2. Khôi phục sau bằng restore script
 
 {YELLOW}Lưu ý: Hành động này KHÔNG THỂ ĐẢO NGƯỢC!{END}
-    """)
-    
+    """
+    )
+
     confirm = input(f"\n{RED}Bạn chắc chắn muốn tiếp tục? (yes/NO): {END}").strip().lower()
     return confirm == "yes"
 
@@ -322,20 +341,21 @@ def main():
     print(f"\n{YELLOW}{'=' * 80}{END}")
     print(f"{YELLOW}{'🗄️ DATABASE RESET ADVISOR':^80}{END}")
     print(f"{YELLOW}{'=' * 80}{END}")
-    
+
     # Analyze current state
     file_stats, db_stats = analyze_current_state()
-    
+
     # Show analysis
     show_analysis(file_stats=file_stats, db_stats=db_stats)
-    
+
     # Show menu
     while True:
         choice = show_menu()
-        
+
         if choice == "1":
             print(f"\n{GREEN}✅ Bạn đã chọn: Giữ DB, enrich category_path{END}")
-            print(f"""
+            print(
+                f"""
 {CYAN}Các bước tiếp theo:{END}
 
 1. Chạy enrich script:
@@ -352,13 +372,15 @@ def main():
    
 4. Verify kết quả sau khi DAG chạy xong:
    $ python scripts/visualize_final_data.py
-            """)
+            """
+            )
             break
-        
+
         elif choice == "2":
             if show_reset_warning():
                 print(f"\n{RED}Bắt đầu reset...{END}")
-                print(f"""
+                print(
+                    f"""
 {CYAN}Các bước:{END}
 
 1. Stop containers (nếu chạy):
@@ -380,11 +402,13 @@ def main():
 5. Run DAG để crawl lại từ đầu:
    - Truy cập http://localhost:8080
    - Trigger 'tiki_crawl_products' DAG
-                """)
+                """
+                )
             break
-        
+
         elif choice == "3":
-            print(f"""
+            print(
+                f"""
 {CYAN}📚 THÔNG TIN BACKUP/RESTORE:{END}
 
 {GREEN}BACKUP:{END}
@@ -404,15 +428,16 @@ def main():
 {GREEN}BACKUP SCRIPTS:{END}
   $ python scripts/backup-postgres.ps1      # Windows PowerShell
   $ bash scripts/backup-postgres.sh         # Linux/Mac
-            """)
-        
+            """
+            )
+
         elif choice == "4":
             print(f"\n{GREEN}Thoát{END}")
             break
-        
+
         else:
             print(f"{RED}Lựa chọn không hợp lệ{END}")
-    
+
     print(f"\n{BLUE}{'=' * 80}{END}\n")
 
 

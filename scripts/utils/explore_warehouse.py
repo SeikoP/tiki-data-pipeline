@@ -1,7 +1,6 @@
 import psycopg2
-import json
 
-conn = psycopg2.connect('dbname=tiki_warehouse user=postgres password=postgres host=localhost')
+conn = psycopg2.connect("dbname=tiki_warehouse user=postgres password=postgres host=localhost")
 cur = conn.cursor()
 
 print("\n" + "=" * 80)
@@ -10,10 +9,12 @@ print("=" * 80)
 
 # 1. Check tables
 print("\n1. DANH SÁCH BẢNG:")
-cur.execute("""
+cur.execute(
+    """
     SELECT table_name FROM information_schema.tables 
     WHERE table_schema = 'public' ORDER BY table_name
-""")
+"""
+)
 tables = cur.fetchall()
 for table in tables:
     cur.execute(f"SELECT COUNT(*) FROM {table[0]}")
@@ -25,16 +26,19 @@ print("\n2. SCHEMA CHI TIẾT:")
 
 # Fact table
 print("\n   FACT_PRODUCT_SALES:")
-cur.execute("""
+cur.execute(
+    """
     SELECT column_name, data_type FROM information_schema.columns 
     WHERE table_name = 'fact_product_sales' ORDER BY ordinal_position
-""")
+"""
+)
 for col, dtype in cur.fetchall():
     print(f"      - {col:30} : {dtype}")
 
 # 3. Sample data from fact
 print("\n3. DỮ LIỆU MẪU FACT_PRODUCT_SALES:")
-cur.execute("""
+cur.execute(
+    """
     SELECT 
         f.fact_id, p.product_name, b.brand_name, s.seller_name,
         f.price, f.discount_percent, f.quantity_sold, f.average_rating
@@ -43,7 +47,8 @@ cur.execute("""
     JOIN dim_brand b ON f.brand_sk = b.brand_sk
     JOIN dim_seller s ON f.seller_sk = s.seller_sk
     LIMIT 5
-""")
+"""
+)
 print("\n   Tình trạng dữ liệu mẫu:")
 for row in cur.fetchall():
     fact_id, product, brand, seller, price, discount, qty, rating = row
@@ -69,7 +74,8 @@ print(f"   - Phân khúc giá: {segments}")
 
 # 5. Data quality metrics
 print("\n5. CHỈ TIÊU CHẤT LƯỢNG DỮ LIỆU:")
-cur.execute("""
+cur.execute(
+    """
     SELECT 
         COUNT(*) as total_facts,
         COUNT(CASE WHEN price IS NOT NULL THEN 1 END) as has_price,
@@ -77,7 +83,8 @@ cur.execute("""
         ROUND(AVG(CASE WHEN price IS NOT NULL THEN price ELSE 0 END), 2) as avg_price,
         ROUND(AVG(CASE WHEN average_rating > 0 THEN average_rating ELSE 0 END), 2) as avg_rating
     FROM fact_product_sales
-""")
+"""
+)
 total, has_price, has_rating, avg_price, avg_rating = cur.fetchone()
 print(f"   - Tổng fact records: {total:,}")
 print(f"   - Có giá: {has_price:,} ({has_price*100/total:.1f}%)")
@@ -87,7 +94,8 @@ print(f"   - Rating trung bình: {avg_rating:.2f}/5")
 
 # 6. Price segments distribution
 print("\n6. PHÂN PHỐI PHÂN KHÚC GIÁ:")
-cur.execute("""
+cur.execute(
+    """
     SELECT 
         ps.segment_name, 
         COUNT(*) as product_count,
@@ -97,13 +105,17 @@ cur.execute("""
     JOIN dim_price_segment ps ON f.price_segment_sk = ps.price_segment_sk
     GROUP BY ps.segment_name
     ORDER BY product_count DESC
-""")
+"""
+)
 for segment, count, avg_p, revenue in cur.fetchall():
-    print(f"   - {segment:30} : {count:4,} sản phẩm | Giá TB: ${avg_p:,} | Doanh thu: ${revenue:,.0f}")
+    print(
+        f"   - {segment:30} : {count:4,} sản phẩm | Giá TB: ${avg_p:,} | Doanh thu: ${revenue:,.0f}"
+    )
 
 # 7. Top categories
 print("\n7. TOP 10 DANH MỤC:")
-cur.execute("""
+cur.execute(
+    """
     SELECT 
         dc.full_path,
         COUNT(*) as product_count,
@@ -113,13 +125,15 @@ cur.execute("""
     GROUP BY dc.full_path
     ORDER BY product_count DESC
     LIMIT 10
-""")
+"""
+)
 for path, count, rating in cur.fetchall():
     print(f"   - {path[:60]:60} : {count:4,} products | Rating: {rating}")
 
 # 8. Top brands
 print("\n8. TOP 10 THƯƠNG HIỆU:")
-cur.execute("""
+cur.execute(
+    """
     SELECT 
         db.brand_name,
         COUNT(*) as product_count,
@@ -130,7 +144,8 @@ cur.execute("""
     GROUP BY db.brand_name
     ORDER BY product_count DESC
     LIMIT 10
-""")
+"""
+)
 for brand, count, rating, price in cur.fetchall():
     print(f"   - {brand:30} : {count:4,} products | Rating: {rating} | Giá TB: ${price:,}")
 

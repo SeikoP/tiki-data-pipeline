@@ -19,7 +19,7 @@ print()
 try:
     with open(project_root / "data/test_output/demo_crawl_detail_comparison.json") as f:
         selenium_results = json.load(f)
-    
+
     with open(project_root / "data/test_output/http_crawl_results.json") as f:
         http_results = json.load(f)
 except Exception as e:

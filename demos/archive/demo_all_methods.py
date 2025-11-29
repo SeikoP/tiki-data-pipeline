@@ -13,9 +13,8 @@ Demo: Thử TẤT CẢ các cách crawl product detail
 import json
 import subprocess
 import time
-from pathlib import Path
-from typing import Optional
 from datetime import datetime
+from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 
@@ -31,7 +30,9 @@ results = {
 }
 
 # URL test
-test_url = "https://tiki.vn/binh-giu-nhiet-inox-304-elmich-el-8013ol-dung-tich-480ml-p120552065.html"
+test_url = (
+    "https://tiki.vn/binh-giu-nhiet-inox-304-elmich-el-8013ol-dung-tich-480ml-p120552065.html"
+)
 
 print(f"🔗 Test URL: {test_url[:70]}...\n")
 
@@ -46,10 +47,10 @@ try:
         ["curl", "-s", "-L", "-H", "User-Agent: Mozilla/5.0", test_url],
         capture_output=True,
         timeout=15,
-        text=True
+        text=True,
     )
     elapsed = time.time() - start
-    
+
     if result.returncode == 0 and len(result.stdout) > 1000:
         print(f"✅ Success ({elapsed:.2f}s, {len(result.stdout)} bytes)")
         results["methods"]["curl"] = {"success": True, "time": elapsed, "size": len(result.stdout)}
@@ -72,10 +73,10 @@ try:
         ["wget", "-q", "-U", "Mozilla/5.0", "-O", "-", test_url],
         capture_output=True,
         timeout=15,
-        text=True
+        text=True,
     )
     elapsed = time.time() - start
-    
+
     if result.returncode == 0 and len(result.stdout) > 1000:
         print(f"✅ Success ({elapsed:.2f}s, {len(result.stdout)} bytes)")
         results["methods"]["wget"] = {"success": True, "time": elapsed, "size": len(result.stdout)}
@@ -95,19 +96,24 @@ print("-" * 90)
 start = time.time()
 try:
     import requests
-    response = requests.get(
-        test_url,
-        headers={"User-Agent": "Mozilla/5.0"},
-        timeout=15
-    )
+
+    response = requests.get(test_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
     elapsed = time.time() - start
-    
+
     if response.status_code == 200 and len(response.text) > 1000:
         print(f"✅ Success ({elapsed:.2f}s, {len(response.text)} bytes)")
-        results["methods"]["requests"] = {"success": True, "time": elapsed, "size": len(response.text)}
+        results["methods"]["requests"] = {
+            "success": True,
+            "time": elapsed,
+            "size": len(response.text),
+        }
     else:
         print(f"⚠️  HTTP {response.status_code} ({elapsed:.2f}s)")
-        results["methods"]["requests"] = {"success": False, "time": elapsed, "status": response.status_code}
+        results["methods"]["requests"] = {
+            "success": False,
+            "time": elapsed,
+            "status": response.status_code,
+        }
 except Exception as e:
     elapsed = time.time() - start
     print(f"❌ Error: {e} ({elapsed:.2f}s)")
@@ -120,9 +126,10 @@ print("\n4️⃣ AIOHTTP (Async HTTP)")
 print("-" * 90)
 start = time.time()
 try:
-    import aiohttp
     import asyncio
-    
+
+    import aiohttp
+
     async def fetch_aiohttp():
         connector = aiohttp.TCPConnector(ssl=False)
         timeout = aiohttp.ClientTimeout(total=15)
@@ -132,13 +139,13 @@ try:
                     text = await response.text()
                     return len(text)
         return None
-    
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     size = loop.run_until_complete(fetch_aiohttp())
     loop.close()
     elapsed = time.time() - start
-    
+
     if size and size > 1000:
         print(f"✅ Success ({elapsed:.2f}s, {size} bytes)")
         results["methods"]["aiohttp"] = {"success": True, "time": elapsed, "size": size}
@@ -158,20 +165,25 @@ print("-" * 90)
 start = time.time()
 try:
     import httpx
+
     with httpx.Client() as client:
-        response = client.get(
-            test_url,
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15
-        )
+        response = client.get(test_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         elapsed = time.time() - start
-        
+
         if response.status_code == 200 and len(response.text) > 1000:
             print(f"✅ Success ({elapsed:.2f}s, {len(response.text)} bytes)")
-            results["methods"]["httpx"] = {"success": True, "time": elapsed, "size": len(response.text)}
+            results["methods"]["httpx"] = {
+                "success": True,
+                "time": elapsed,
+                "size": len(response.text),
+            }
         else:
             print(f"⚠️  HTTP {response.status_code} ({elapsed:.2f}s)")
-            results["methods"]["httpx"] = {"success": False, "time": elapsed, "status": response.status_code}
+            results["methods"]["httpx"] = {
+                "success": False,
+                "time": elapsed,
+                "status": response.status_code,
+            }
 except ImportError:
     print("❌ Not installed (pip install httpx)")
     results["methods"]["httpx"] = {"success": False, "error": "Not installed"}
@@ -188,14 +200,12 @@ print("-" * 90)
 start = time.time()
 try:
     import urllib.request
-    req = urllib.request.Request(
-        test_url,
-        headers={"User-Agent": "Mozilla/5.0"}
-    )
+
+    req = urllib.request.Request(test_url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=15) as response:
-        text = response.read().decode('utf-8')
+        text = response.read().decode("utf-8")
         elapsed = time.time() - start
-        
+
         if len(text) > 1000:
             print(f"✅ Success ({elapsed:.2f}s, {len(text)} bytes)")
             results["methods"]["urllib"] = {"success": True, "time": elapsed, "size": len(text)}
@@ -216,26 +226,24 @@ start = time.time()
 try:
     from selenium import webdriver
     from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    
+    from selenium.webdriver.support.ui import WebDriverWait
+
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    
+
     driver = webdriver.Chrome(options=options)
     driver.get(test_url)
-    
+
     # Wait for page load
-    WebDriverWait(driver, 10).until(
-        EC.presence_of_all_elements_located((By.TAG_NAME, "body"))
-    )
-    
+    WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.TAG_NAME, "body")))
+
     html = driver.page_source
     driver.quit()
-    
+
     elapsed = time.time() - start
-    
+
     if len(html) > 1000:
         print(f"✅ Success ({elapsed:.2f}s, {len(html)} bytes)")
         results["methods"]["selenium"] = {"success": True, "time": elapsed, "size": len(html)}
@@ -258,16 +266,16 @@ print("-" * 90)
 start = time.time()
 try:
     from playwright.sync_api import sync_playwright
-    
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto(test_url, wait_until="networkidle")
         html = page.content()
         browser.close()
-        
+
         elapsed = time.time() - start
-        
+
         if len(html) > 1000:
             print(f"✅ Success ({elapsed:.2f}s, {len(html)} bytes)")
             results["methods"]["playwright"] = {"success": True, "time": elapsed, "size": len(html)}
@@ -301,7 +309,7 @@ for rank, (method, data) in enumerate(sorted_methods, 1):
     time_str = f"{data['time']:.2f}s"
     size_str = f"{data.get('size', 'N/A')} bytes"
     speedup = successful[sorted_methods[0][0]]["time"] / data["time"] if sorted_methods else 0
-    
+
     if rank == 1:
         print(f"{method:<20} {time_str:<12} {size_str:<15} 🏆 FASTEST")
     else:
@@ -324,7 +332,7 @@ print()
 
 if sorted_methods:
     fastest = sorted_methods[0][0]
-    print(f"⭐ CÁC NHANH NHẤT:")
+    print("⭐ CÁC NHANH NHẤT:")
     for i, (method, data) in enumerate(sorted_methods[:3], 1):
         speedup = successful[sorted_methods[0][0]]["time"] / data["time"] if sorted_methods else 0
         print(f"   {i}. {method:.<20} {data['time']:>6.2f}s  ({speedup:.1f}x base)")

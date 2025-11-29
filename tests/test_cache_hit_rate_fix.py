@@ -7,7 +7,6 @@ Kiểm tra:
 3. Flexible validation hoạt động đúng
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -16,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.pipelines.crawl.config import (
     CACHE_ACCEPT_PARTIAL_DATA,
-    CACHE_MIN_FIELDS_FOR_VALIDITY,
     REDIS_CACHE_TTL_HTML,
     REDIS_CACHE_TTL_PRODUCT_DETAIL,
     REDIS_CACHE_TTL_PRODUCT_LIST,
@@ -200,7 +198,7 @@ def test_cache_hit_scenario():
     product_id = "apple_iphone_14"
     url_from_category_a = "https://tiki.vn/product-123?src=cat_a&utm_source=google&page=1"
 
-    print(f"\n1. First crawl from Category A:")
+    print("\n1. First crawl from Category A:")
     print(f"   URL: {url_from_category_a}")
     print(f"   Product ID: {product_id}")
     print(f"   → Cache stored with key: detail:{product_id}")
@@ -212,19 +210,19 @@ def test_cache_hit_scenario():
     canonical_a = cache._canonicalize_url(url_from_category_a)
     canonical_b = cache._canonicalize_url(url_from_category_b)
 
-    print(f"\n2. Second crawl from Category B:")
+    print("\n2. Second crawl from Category B:")
     print(f"   URL: {url_from_category_b}")
     print(f"   Product ID: {product_id} (SAME)")
     print(f"   Canonical URL: {canonical_b}")
     print(f"   → Check cache with key: detail:{product_id}")
-    print(f"   → CACHE HIT! ✅ (same product_id)")
+    print("   → CACHE HIT! ✅ (same product_id)")
 
-    print(f"\n3. Canonical URLs match:")
+    print("\n3. Canonical URLs match:")
     print(f"   A: {canonical_a}")
     print(f"   B: {canonical_b}")
     print(f"   Match: {canonical_a == canonical_b}")
 
-    print(f"\n✅ Same product from different categories → CACHE HIT (10% → 60-80%)")
+    print("\n✅ Same product from different categories → CACHE HIT (10% → 60-80%)")
     print("✅ TEST 5 PASSED\n")
 
 

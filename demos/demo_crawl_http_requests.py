@@ -26,12 +26,12 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
@@ -45,7 +45,9 @@ except ImportError as e:
     sys.exit(1)
 
 
-def crawl_product_detail_http(url: str, timeout: int = 10, verbose: bool = True) -> tuple[dict, float]:
+def crawl_product_detail_http(
+    url: str, timeout: int = 10, verbose: bool = True
+) -> tuple[dict, float]:
     """Crawl product detail bằng HTTP requests (KHÔNG Selenium)
 
     Args:
@@ -77,7 +79,10 @@ def crawl_product_detail_http(url: str, timeout: int = 10, verbose: bool = True)
         "specifications": {},
         "brand": "",
         "seller": {"name": "", "is_official": False},
-        "_metadata": {"extraction_method": "http_requests", "extracted_at": datetime.now().isoformat()},
+        "_metadata": {
+            "extraction_method": "http_requests",
+            "extracted_at": datetime.now().isoformat(),
+        },
     }
 
     try:
@@ -104,19 +109,25 @@ def crawl_product_detail_http(url: str, timeout: int = 10, verbose: bool = True)
             product_data["name"] = name_elem.get_text(strip=True)
 
         # Extract price
-        price_elem = soup.select_one('[data-view-id="pdp_product_price"], .product-price, [class*="price"]')
+        price_elem = soup.select_one(
+            '[data-view-id="pdp_product_price"], .product-price, [class*="price"]'
+        )
         if price_elem:
             price_text = price_elem.get_text(strip=True)
             try:
-                product_data["price"]["current_price"] = int(re.sub(r'\D', '', price_text)) if price_text else None
+                product_data["price"]["current_price"] = (
+                    int(re.sub(r"\D", "", price_text)) if price_text else None
+                )
             except:
                 pass
 
         # Extract rating
-        rating_elem = soup.select_one('[data-view-id="pdp_rating_score"], .rating, [class*="rating"]')
+        rating_elem = soup.select_one(
+            '[data-view-id="pdp_rating_score"], .rating, [class*="rating"]'
+        )
         if rating_elem:
             rating_text = rating_elem.get_text(strip=True)
-            match = re.search(r'(\d+\.?\d*)', rating_text)
+            match = re.search(r"(\d+\.?\d*)", rating_text)
             if match:
                 product_data["rating"]["average"] = float(match.group(1))
 
@@ -124,7 +135,7 @@ def crawl_product_detail_http(url: str, timeout: int = 10, verbose: bool = True)
         review_elem = soup.select_one('[class*="review"], [class*="rating-count"]')
         if review_elem:
             text = review_elem.get_text(strip=True)
-            match = re.search(r'(\d+)', text)
+            match = re.search(r"(\d+)", text)
             if match:
                 product_data["rating"]["total_reviews"] = int(match.group(1))
 
@@ -176,7 +187,10 @@ def crawl_product_detail_http(url: str, timeout: int = 10, verbose: bool = True)
                     if "images" in product_info and not product_data["images"]:
                         images = product_info["images"]
                         if isinstance(images, list):
-                            product_data["images"] = [img.get("url") if isinstance(img, dict) else str(img) for img in images[:10]]
+                            product_data["images"] = [
+                                img.get("url") if isinstance(img, dict) else str(img)
+                                for img in images[:10]
+                            ]
 
             except Exception as e:
                 if verbose:
@@ -199,7 +213,7 @@ def crawl_product_detail_http(url: str, timeout: int = 10, verbose: bool = True)
 
 def extract_product_id(url: str) -> str:
     """Extract product ID from URL"""
-    match = re.search(r'p(\d+)', url)
+    match = re.search(r"p(\d+)", url)
     return match.group(1) if match else ""
 
 
@@ -239,9 +253,9 @@ def main():
             success_count += 1
 
         # Print results
-        print(f"\n  📋 Results:")
+        print("\n  📋 Results:")
         print(f"    Name: {product_data.get('name', 'N/A')[:50]}")
-        price = product_data['price'].get('current_price')
+        price = product_data["price"].get("current_price")
         price_str = f"{price:,}" if price else "N/A"
         print(f"    Price: {price_str} VND")
         print(f"    Rating: {product_data['rating'].get('average', 'N/A')}/5")
@@ -249,16 +263,18 @@ def main():
         print(f"    Images: {len(product_data.get('images', []))}")
         print()
 
-        results["items"].append({
-            "url": url,
-            "product_name": product_data.get("name"),
-            "price": product_data["price"].get("current_price"),
-            "rating": product_data["rating"].get("average"),
-            "sales_count": product_data.get("sales_count"),
-            "images_count": len(product_data.get("images", [])),
-            "time": elapsed,
-            "success": bool(product_data.get("name")),
-        })
+        results["items"].append(
+            {
+                "url": url,
+                "product_name": product_data.get("name"),
+                "price": product_data["price"].get("current_price"),
+                "rating": product_data["rating"].get("average"),
+                "sales_count": product_data.get("sales_count"),
+                "images_count": len(product_data.get("images", [])),
+                "time": elapsed,
+                "success": bool(product_data.get("name")),
+            }
+        )
 
         time.sleep(1)  # Rate limiting
 

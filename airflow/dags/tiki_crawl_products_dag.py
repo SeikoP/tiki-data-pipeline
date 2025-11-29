@@ -107,25 +107,27 @@ _hierarchy_map_cache = None
 
 def get_hierarchy_map(force_reload=False):
     """Load category hierarchy map for auto-parent-detection
-    
+
     This map contains all categories with their parent chains,
     allowing extract_product_detail to auto-detect missing Level 0 (parent category)
     """
     global _hierarchy_map_cache
-    
+
     if _hierarchy_map_cache is not None and not force_reload:
         return _hierarchy_map_cache
-    
+
     try:
         hierarchy_file = "/opt/airflow/data/raw/category_hierarchy_map.json"
         if not os.path.exists(hierarchy_file):
             # Fallback to relative path
             hierarchy_file = os.path.join(os.getcwd(), "data", "raw", "category_hierarchy_map.json")
-        
+
         if os.path.exists(hierarchy_file):
-            with open(hierarchy_file, encoding='utf-8') as f:
+            with open(hierarchy_file, encoding="utf-8") as f:
                 _hierarchy_map_cache = json.load(f)
-                logging.info(f"✅ Loaded category hierarchy map: {len(_hierarchy_map_cache)} categories")
+                logging.info(
+                    f"✅ Loaded category hierarchy map: {len(_hierarchy_map_cache)} categories"
+                )
                 return _hierarchy_map_cache
         else:
             logging.warning(f"⚠️  Hierarchy map not found at {hierarchy_file}")
@@ -2025,7 +2027,9 @@ def crawl_product_batch(
                             # Parse HTML thành dict
                             try:
                                 hierarchy_map = get_hierarchy_map()
-                                detail = extract_product_detail(detail, product_url, verbose=False, hierarchy_map=hierarchy_map)
+                                detail = extract_product_detail(
+                                    detail, product_url, verbose=False, hierarchy_map=hierarchy_map
+                                )
                                 if detail and isinstance(detail, dict):
                                     # Kiểm tra xem có đầy đủ thông tin không
                                     has_name = bool(detail.get("name"))
@@ -2094,7 +2098,9 @@ def crawl_product_batch(
                     if html:
                         # Sử dụng hàm đã được import ở đầu file
                         hierarchy_map = get_hierarchy_map()
-                        detail = extract_product_detail(html, product_url, verbose=False, hierarchy_map=hierarchy_map)
+                        detail = extract_product_detail(
+                            html, product_url, verbose=False, hierarchy_map=hierarchy_map
+                        )
 
                         # Kiểm tra nếu extract_product_detail trả về HTML thay vì dict
                         if isinstance(detail, str) and detail.strip().startswith("<"):
@@ -2103,7 +2109,9 @@ def crawl_product_batch(
                             )
                             # Thử parse lại HTML
                             try:
-                                detail = extract_product_detail(html, product_url, verbose=False, hierarchy_map=hierarchy_map)
+                                detail = extract_product_detail(
+                                    html, product_url, verbose=False, hierarchy_map=hierarchy_map
+                                )
                             except Exception as parse_error:
                                 logger.warning(f"⚠️  Lỗi khi parse lại HTML: {parse_error}")
                                 detail = None
@@ -2569,7 +2577,9 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         # Extract detail
         try:
             hierarchy_map = get_hierarchy_map()
-            detail = extract_product_detail(html_content, product_url, verbose=False, hierarchy_map=hierarchy_map)
+            detail = extract_product_detail(
+                html_content, product_url, verbose=False, hierarchy_map=hierarchy_map
+            )
 
             if not detail:
                 raise ValueError("Không extract được detail từ HTML")

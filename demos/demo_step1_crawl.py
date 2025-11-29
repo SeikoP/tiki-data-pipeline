@@ -5,15 +5,15 @@ Bước này crawl danh sách sản phẩm từ các danh mục và lưu vào fi
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
 # Fix encoding cho Windows console
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Thêm src vào path
 project_root = Path(__file__).parent.parent
@@ -22,8 +22,8 @@ sys.path.insert(0, str(src_path))
 
 # Import crawl module
 try:
-    from pipelines.crawl.crawl_products import crawl_category_products
     from pipelines.crawl.config import get_config
+    from pipelines.crawl.crawl_products import crawl_category_products
 except ImportError as e:
     print(f"❌ Lỗi import: {e}")
     print("💡 Đảm bảo bạn đã cài đặt dependencies: pip install -r requirements.txt")
@@ -42,11 +42,11 @@ def main():
 
     # Cấu hình
     config = get_config()
-    
+
     # Demo: crawl một danh mục nhỏ (điện thoại)
     category_url = "https://tiki.vn/dien-thoai-may-tinh-bang/c1789"
     category_name = "Điện thoại & Máy tính bảng"
-    
+
     print(f"📂 Danh mục: {category_name}")
     print(f"🔗 URL: {category_url}")
     print()
@@ -57,13 +57,13 @@ def main():
         # Crawl products từ danh mục (giới hạn 2 trang để demo nhanh)
         products = []
         max_pages = 2  # Giới hạn số trang để demo nhanh
-        
+
         for page in range(1, max_pages + 1):
             print(f"   📄 Đang crawl trang {page}/{max_pages}...")
             page_products = crawl_category_products(
                 category_url=category_url,
                 page=page,
-                max_products=20  # Giới hạn 20 sản phẩm mỗi trang
+                max_products=20,  # Giới hạn 20 sản phẩm mỗi trang
             )
             if page_products:
                 products.extend(page_products)
@@ -90,7 +90,7 @@ def main():
             "category": category_name,
             "category_url": category_url,
             "total_products": len(products),
-            "products": products
+            "products": products,
         }
 
         with open(output_file, "w", encoding="utf-8") as f:
@@ -110,10 +110,10 @@ def main():
     except Exception as e:
         print(f"❌ Lỗi khi crawl: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
-

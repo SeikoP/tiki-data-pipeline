@@ -25,7 +25,7 @@ phases = {
             "Cleaned Docker cache",
             "Removed old logs",
             "Removed duplicate files",
-        ]
+        ],
     },
     "Phase 2: Quick Wins": {
         "completed": True,
@@ -35,11 +35,11 @@ phases = {
             "Chrome: Images disabled, plugins disabled",
             "Redis: Connection pooling (20-30% faster)",
             "PostgreSQL: 17 indexes (30-50% faster)",
-        ]
+        ],
     },
     "Phase 3: Code Structure": {
         "completed": "Partial (deferred)",
-        "note": "DAG modularization deferred to focus on performance"
+        "note": "DAG modularization deferred to focus on performance",
     },
     "Phase 4: Performance": {
         "completed": True,
@@ -61,7 +61,7 @@ phases = {
             "src/common/async_batch.py",
             "src/common/cache_utils.py",
             "src/common/memory_utils.py",
-        ]
+        ],
     },
     "Phase 5: Infrastructure": {
         "completed": True,
@@ -75,41 +75,41 @@ phases = {
             "airflow/setup/postgresql_tuning.conf",
             "docker-compose.performance.yml",
             "src/common/infrastructure_monitor.py",
-        ]
-    }
+        ],
+    },
 }
 
 # Print each phase
 for phase_name, details in phases.items():
     print(f"✅ {phase_name}")
-    
+
     if details.get("completed") == True:
         print("   Status: ✅ Completed")
     elif details.get("completed") == "Partial (deferred)":
         print("   Status: ⏸️ Partial (deferred)")
-    
+
     if "savings" in details:
         print(f"   Savings: {details['savings']}")
-    
+
     if "speedup" in details:
         print(f"   Speedup: {details['speedup']}")
-    
+
     if "modules" in details:
         print(f"   Modules: {details['modules']} created")
-    
+
     if "improvements" in details:
         print("   Improvements:")
         for imp in details["improvements"]:
             print(f"      • {imp}")
-    
+
     if "actions" in details:
         print("   Actions:")
         for action in details["actions"]:
             print(f"      • {action}")
-    
+
     if "note" in details:
         print(f"   Note: {details['note']}")
-    
+
     print()
 
 print("=" * 70)
@@ -140,13 +140,19 @@ print("1️⃣ Start optimized infrastructure:")
 print("   docker-compose -f docker-compose.yml -f docker-compose.performance.yml up -d")
 print()
 print("2️⃣ Apply PostgreSQL indexes:")
-print("   docker exec tiki-data-pipeline-postgres-1 psql -U $POSTGRES_USER -d crawl_data -f /docker-entrypoint-initdb.d/add_performance_indexes.sql")
+print(
+    "   docker exec tiki-data-pipeline-postgres-1 psql -U $POSTGRES_USER -d crawl_data -f /docker-entrypoint-initdb.d/add_performance_indexes.sql"
+)
 print()
 print("3️⃣ Test optimized pipeline:")
-print("   python -c 'from src.pipelines.optimized_pipeline import quick_test_optimized_pipeline; quick_test_optimized_pipeline(10)'")
+print(
+    "   python -c 'from src.pipelines.optimized_pipeline import quick_test_optimized_pipeline; quick_test_optimized_pipeline(10)'"
+)
 print()
 print("4️⃣ Monitor infrastructure:")
-print("   python -c 'from src.common.infrastructure_monitor import print_monitoring_report; print_monitoring_report()'")
+print(
+    "   python -c 'from src.common.infrastructure_monitor import print_monitoring_report; print_monitoring_report()'"
+)
 print()
 print("5️⃣ Run benchmark tests:")
 print("   python tests/test_parallel_benchmark.py")
