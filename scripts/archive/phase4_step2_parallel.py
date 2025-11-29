@@ -166,7 +166,7 @@ __all__ = ["ParallelCrawler"]
 
 parallel_crawler_path = project_root / "src" / "pipelines" / "crawl" / "parallel_crawler.py"
 
-with open(parallel_crawler_path, 'w', encoding='utf-8') as f:
+with open(parallel_crawler_path, "w", encoding="utf-8") as f:
     f.write(parallel_crawler_code)
 
 print(f"✅ Created: {parallel_crawler_path.relative_to(project_root)}")
@@ -270,7 +270,7 @@ __all__ = ["AsyncBatchProcessor"]
 
 async_batch_path = project_root / "src" / "common" / "async_batch.py"
 
-with open(async_batch_path, 'w', encoding='utf-8') as f:
+with open(async_batch_path, "w", encoding="utf-8") as f:
     f.write(async_batch_code)
 
 print(f"✅ Created: {async_batch_path.relative_to(project_root)}")
@@ -396,7 +396,7 @@ __all__ = [
 
 cache_utils_path = project_root / "src" / "common" / "cache_utils.py"
 
-with open(cache_utils_path, 'w', encoding='utf-8') as f:
+with open(cache_utils_path, "w", encoding="utf-8") as f:
     f.write(cache_utils_code)
 
 print(f"✅ Created: {cache_utils_path.relative_to(project_root)}")
@@ -409,7 +409,9 @@ print("📊 PHASE 4 STEP 2 COMPLETED")
 print("=" * 70)
 print()
 print("✅ Created advanced optimization modules:")
-print(f"   • parallel_crawler.py ({len(parallel_crawler_code)} bytes) - Parallel crawling with ThreadPool")
+print(
+    f"   • parallel_crawler.py ({len(parallel_crawler_code)} bytes) - Parallel crawling with ThreadPool"
+)
 print(f"   • async_batch.py ({len(async_batch_code)} bytes) - Async batch processing")
 print(f"   • cache_utils.py ({len(cache_utils_code)} bytes) - Multi-level caching")
 print()

@@ -17,18 +17,17 @@ Kết quả:
 
 import asyncio
 import json
-import os
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 # Fix encoding
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 project_root = Path(__file__).parent.parent
 src_path = project_root / "src"
@@ -36,8 +35,8 @@ sys.path.insert(0, str(src_path))
 
 try:
     from pipelines.crawl.crawl_products_detail import (
-        extract_product_detail,
         crawl_product_detail_with_selenium,
+        extract_product_detail,
     )
 except ImportError as e:
     print(f"❌ Lỗi import: {e}")
@@ -166,10 +165,9 @@ class CrawlBenchmark:
             # Comparison
             if data_sel and data_async:
                 match_name = data_sel.get("name") == data_async.get("name")
-                match_price = (
-                    data_sel.get("price", {}).get("current_price")
-                    == data_async.get("price", {}).get("current_price")
-                )
+                match_price = data_sel.get("price", {}).get("current_price") == data_async.get(
+                    "price", {}
+                ).get("current_price")
                 self.results["comparisons"].append(
                     {
                         "url": url,
@@ -200,9 +198,11 @@ class CrawlBenchmark:
                 "selenium": {
                     "success_count": sel["successes"],
                     "failure_count": sel["failures"],
-                    "success_rate": f"{(sel['successes'] / (sel['successes'] + sel['failures']) * 100):.1f}%"
-                    if (sel["successes"] + sel["failures"]) > 0
-                    else "N/A",
+                    "success_rate": (
+                        f"{(sel['successes'] / (sel['successes'] + sel['failures']) * 100):.1f}%"
+                        if (sel["successes"] + sel["failures"]) > 0
+                        else "N/A"
+                    ),
                     "avg_time": f"{safe_avg(sel['times']):.2f}s",
                     "min_time": f"{min(sel['times']):.2f}s" if sel["times"] else "N/A",
                     "max_time": f"{max(sel['times']):.2f}s" if sel["times"] else "N/A",
@@ -212,12 +212,18 @@ class CrawlBenchmark:
                 "async_http": {
                     "success_count": async_http["successes"],
                     "failure_count": async_http["failures"],
-                    "success_rate": f"{(async_http['successes'] / (async_http['successes'] + async_http['failures']) * 100):.1f}%"
-                    if (async_http["successes"] + async_http["failures"]) > 0
-                    else "N/A",
+                    "success_rate": (
+                        f"{(async_http['successes'] / (async_http['successes'] + async_http['failures']) * 100):.1f}%"
+                        if (async_http["successes"] + async_http["failures"]) > 0
+                        else "N/A"
+                    ),
                     "avg_time": f"{safe_avg(async_http['times']):.2f}s",
-                    "min_time": f"{min(async_http['times']):.2f}s" if async_http["times"] else "N/A",
-                    "max_time": f"{max(async_http['times']):.2f}s" if async_http["times"] else "N/A",
+                    "min_time": (
+                        f"{min(async_http['times']):.2f}s" if async_http["times"] else "N/A"
+                    ),
+                    "max_time": (
+                        f"{max(async_http['times']):.2f}s" if async_http["times"] else "N/A"
+                    ),
                     "total_time": f"{sum(async_http['times']):.2f}s",
                     "avg_data_quality": f"{safe_avg(async_http['data_quality']):.1f}/100",
                 },
@@ -231,7 +237,9 @@ class CrawlBenchmark:
         """Tạo khuyến nghị dựa vào kết quả"""
         sel_speed = sum(sel["times"]) if sel["times"] else float("inf")
         async_speed = sum(async_http["times"]) if async_http["times"] else float("inf")
-        sel_quality = sum(sel["data_quality"]) / len(sel["data_quality"]) if sel["data_quality"] else 0
+        sel_quality = (
+            sum(sel["data_quality"]) / len(sel["data_quality"]) if sel["data_quality"] else 0
+        )
         async_quality = (
             sum(async_http["data_quality"]) / len(async_http["data_quality"])
             if async_http["data_quality"]
@@ -241,9 +249,15 @@ class CrawlBenchmark:
         return {
             "best_for_speed": "AsyncHTTP" if async_speed < sel_speed else "Selenium",
             "best_for_data_quality": "Selenium" if sel_quality > async_quality else "AsyncHTTP",
-            "recommendation": "Use AsyncHTTP for bulk crawling (10-100+ products) - much faster and lighter"
-            if async_speed < sel_speed and async_quality > 70
-            else "Use Selenium for complete data - captures JavaScript-rendered content" if sel_quality > async_quality else "Use Hybrid approach - AsyncHTTP first, Selenium fallback for missing data",
+            "recommendation": (
+                "Use AsyncHTTP for bulk crawling (10-100+ products) - much faster and lighter"
+                if async_speed < sel_speed and async_quality > 70
+                else (
+                    "Use Selenium for complete data - captures JavaScript-rendered content"
+                    if sel_quality > async_quality
+                    else "Use Hybrid approach - AsyncHTTP first, Selenium fallback for missing data"
+                )
+            ),
             "speedup_factor": f"{sel_speed / async_speed:.1f}x" if async_speed > 0 else "N/A",
             "quality_difference": f"{(sel_quality - async_quality):.1f} points",
         }

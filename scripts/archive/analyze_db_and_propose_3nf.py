@@ -1,9 +1,9 @@
 """
 Script để kết nối PostgreSQL, phân tích schema hiện tại và đề xuất 3NF
 """
-import os
-import sys
+
 import json
+import sys
 from pathlib import Path
 
 # Add src to path
@@ -18,12 +18,13 @@ except ImportError:
 
 # Database connection config
 DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'database': 'crawl_data',
-    'user': 'postgres',
-    'password': 'postgres'
+    "host": "localhost",
+    "port": 5432,
+    "database": "crawl_data",
+    "user": "postgres",
+    "password": "postgres",
 }
+
 
 def connect_db():
     """Kết nối database"""
@@ -35,16 +36,18 @@ def connect_db():
         print(f"❌ Lỗi kết nối database: {e}")
         return None
 
+
 def analyze_table_schema(conn, table_name):
     """Phân tích schema của table"""
     print(f"\n{'='*60}")
     print(f"📊 Phân tích bảng: {table_name}")
-    print('='*60)
-    
+    print("=" * 60)
+
     cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
+
     # Get columns info
-    cursor.execute(f"""
+    cursor.execute(
+        f"""
         SELECT 
             column_name,
             data_type,
@@ -55,97 +58,109 @@ def analyze_table_schema(conn, table_name):
         WHERE table_schema = 'public'
         AND table_name = '{table_name}'
         ORDER BY ordinal_position
-    """)
-    
+    """
+    )
+
     columns = cursor.fetchall()
     print(f"\n📋 Columns ({len(columns)} cột):")
     for col in columns:
-        nullable = "NULL" if col['is_nullable'] == 'YES' else "NOT NULL"
-        max_len = f"({col['character_maximum_length']})" if col['character_maximum_length'] else ""
+        nullable = "NULL" if col["is_nullable"] == "YES" else "NOT NULL"
+        max_len = f"({col['character_maximum_length']})" if col["character_maximum_length"] else ""
         print(f"  - {col['column_name']}: {col['data_type']}{max_len} {nullable}")
-    
+
     # Get row count
     cursor.execute(f"SELECT COUNT(*) as count FROM {table_name}")
-    count = cursor.fetchone()['count']
+    count = cursor.fetchone()["count"]
     print(f"\n📈 Tổng số records: {count:,}")
-    
+
     # Sample data
     if count > 0:
         cursor.execute(f"SELECT * FROM {table_name} LIMIT 1")
         sample = cursor.fetchone()
-        print(f"\n🔍 Sample record (1 row):")
+        print("\n🔍 Sample record (1 row):")
         for key, value in sample.items():
             if isinstance(value, dict) or isinstance(value, list):
                 print(f"  {key}: {json.dumps(value, ensure_ascii=False)[:100]}...")
             else:
                 print(f"  {key}: {value}")
-    
+
     cursor.close()
     return columns, count
+
 
 def check_jsonb_structure(conn, table_name, jsonb_columns):
     """Kiểm tra cấu trúc JSONB columns"""
     print(f"\n🔎 Phân tích JSONB columns trong {table_name}:")
-    
+
     cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
+
     for col in jsonb_columns:
         # Get distinct keys in JSONB
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             SELECT DISTINCT jsonb_object_keys({col}) as key
             FROM {table_name}
             WHERE {col} IS NOT NULL
             LIMIT 20
-        """)
-        
-        keys = [row['key'] for row in cursor.fetchall()]
+        """
+        )
+
+        keys = [row["key"] for row in cursor.fetchall()]
         print(f"\n  📦 {col} - Keys tìm thấy: {keys}")
-        
+
         # Sample values
         if keys:
             sample_key = keys[0]
-            cursor.execute(f"""
+            cursor.execute(
+                f"""
                 SELECT {col}->'{sample_key}' as sample_value
                 FROM {table_name}
                 WHERE {col}->'{sample_key}' IS NOT NULL
                 LIMIT 1
-            """)
+            """
+            )
             sample = cursor.fetchone()
             if sample:
                 print(f"     Sample {sample_key}: {sample['sample_value']}")
-    
+
     cursor.close()
+
 
 def analyze_relationships(conn):
     """Phân tích mối quan hệ giữa products và categories"""
     print(f"\n{'='*60}")
     print("🔗 Phân tích mối quan hệ Products <-> Categories")
-    print('='*60)
-    
+    print("=" * 60)
+
     cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
+
     # Check products có category_url
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT 
             COUNT(*) as total,
             COUNT(category_url) as has_category_url,
             COUNT(DISTINCT category_url) as unique_categories
         FROM products
-    """)
+    """
+    )
     result = cursor.fetchone()
-    print(f"\n📊 Products statistics:")
+    print("\n📊 Products statistics:")
     print(f"  - Total products: {result['total']:,}")
-    print(f"  - Có category_url: {result['has_category_url']:,} ({result['has_category_url']/result['total']*100:.1f}%)")
+    print(
+        f"  - Có category_url: {result['has_category_url']:,} ({result['has_category_url']/result['total']*100:.1f}%)"
+    )
     print(f"  - Unique categories: {result['unique_categories']:,}")
-    
+
     # Check categories table
     cursor.execute("SELECT COUNT(*) as count FROM categories")
-    cat_count = cursor.fetchone()['count']
-    print(f"\n📊 Categories table:")
+    cat_count = cursor.fetchone()["count"]
+    print("\n📊 Categories table:")
     print(f"  - Total categories: {cat_count:,}")
-    
+
     # Sample join
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT 
             p.product_id,
             p.name as product_name,
@@ -157,23 +172,27 @@ def analyze_relationships(conn):
         FROM products p
         LEFT JOIN categories c ON p.category_url = c.url
         LIMIT 5
-    """)
-    
-    print(f"\n🔗 Sample join Products <-> Categories:")
+    """
+    )
+
+    print("\n🔗 Sample join Products <-> Categories:")
     for row in cursor.fetchall():
         print(f"  Product: {row['product_name'][:50]}")
         print(f"    Category URL: {row['category_url']}")
-        print(f"    Category: {row['category_name']} (ID: {row['category_id']}, Level: {row['level']})")
+        print(
+            f"    Category: {row['category_name']} (ID: {row['category_id']}, Level: {row['level']})"
+        )
         print()
-    
+
     cursor.close()
+
 
 def propose_3nf_schema():
     """Đề xuất schema 3NF"""
     print(f"\n{'='*60}")
     print("💡 ĐỀ XUẤT SCHEMA 3NF")
-    print('='*60)
-    
+    print("=" * 60)
+
     schema = """
 -- ============================================
 -- THIRD NORMAL FORM (3NF) SCHEMA
@@ -377,11 +396,12 @@ CREATE UNIQUE INDEX idx_mv_products_id ON view_products_enriched(product_id);
 -- Refresh command (run after data changes):
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY view_products_enriched;
 """
-    
+
     print(schema)
-    
+
     print("\n📋 Key Design Decisions:")
-    print("""
+    print(
+        """
 1. **Dimension Tables** (dim_*):
    - dim_categories: Hierarchical category tree
    - dim_sellers: Seller master data
@@ -409,14 +429,16 @@ CREATE UNIQUE INDEX idx_mv_products_id ON view_products_enriched(product_id);
    - Materialized view for analytics (denormalized for speed)
    - Proper indexes on FK and query columns
    - Separate metrics table (clean/recompute without touching main table)
-""")
+"""
+    )
+
 
 def generate_migration_script():
     """Tạo script migration từ current schema sang 3NF"""
     print(f"\n{'='*60}")
     print("🔄 MIGRATION SCRIPT")
-    print('='*60)
-    
+    print("=" * 60)
+
     migration = """
 -- ============================================
 -- MIGRATION: Current Schema -> 3NF
@@ -603,56 +625,60 @@ FROM categories;
 -- DROP TABLE IF EXISTS dim_categories CASCADE;
 -- DROP MATERIALIZED VIEW IF EXISTS view_products_enriched;
 """
-    
+
     print(migration)
+
 
 def main():
     """Main function"""
-    print("="*60)
+    print("=" * 60)
     print("🔍 DATABASE ANALYSIS & 3NF PROPOSAL")
-    print("="*60)
-    
+    print("=" * 60)
+
     conn = connect_db()
     if not conn:
         return
-    
+
     try:
         # Analyze current schema
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("📊 CURRENT SCHEMA ANALYSIS")
-        print("="*60)
-        
+        print("=" * 60)
+
         # Analyze products table
-        prod_cols, prod_count = analyze_table_schema(conn, 'products')
-        
+        prod_cols, prod_count = analyze_table_schema(conn, "products")
+
         # Check JSONB columns
-        jsonb_cols = [col['column_name'] for col in prod_cols 
-                     if col['data_type'] in ('jsonb', 'json')]
+        jsonb_cols = [
+            col["column_name"] for col in prod_cols if col["data_type"] in ("jsonb", "json")
+        ]
         if jsonb_cols:
-            check_jsonb_structure(conn, 'products', jsonb_cols)
-        
+            check_jsonb_structure(conn, "products", jsonb_cols)
+
         # Analyze categories table
-        cat_cols, cat_count = analyze_table_schema(conn, 'categories')
-        
+        cat_cols, cat_count = analyze_table_schema(conn, "categories")
+
         # Analyze relationships
         analyze_relationships(conn)
-        
+
         # Propose 3NF
         propose_3nf_schema()
-        
+
         # Generate migration
         generate_migration_script()
-        
+
         print("\n✅ Phân tích hoàn tất!")
-        print(f"📄 Lưu output này để tham khảo khi implement 3NF")
-        
+        print("📄 Lưu output này để tham khảo khi implement 3NF")
+
     except Exception as e:
         print(f"❌ Lỗi: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         conn.close()
         print("\n🔌 Đã đóng kết nối database")
+
 
 if __name__ == "__main__":
     main()

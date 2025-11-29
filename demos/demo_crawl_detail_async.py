@@ -17,18 +17,17 @@ Nhược điểm:
 
 import asyncio
 import json
-import os
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 # Fix encoding cho Windows console
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Thêm src vào path
 project_root = Path(__file__).parent.parent
@@ -38,8 +37,8 @@ sys.path.insert(0, str(src_path))
 # Import
 try:
     from pipelines.crawl.crawl_products_detail import (
-        extract_product_detail,
         crawl_product_detail_with_selenium,
+        extract_product_detail,
     )
 except ImportError as e:
     print(f"❌ Lỗi import: {e}")
@@ -111,7 +110,7 @@ async def crawl_product_detail_async_http(
             elapsed = time.time() - start_time
             return product_data, elapsed
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         if verbose:
             print(f"[AsyncHTTP] ⏱️  Timeout sau {timeout}s")
         elapsed = time.time() - start_time
@@ -300,37 +299,41 @@ async def run_comparison_async(urls: list, verbose: bool = True) -> dict:
             item_result["comparison"] = comparison
 
             # In chi tiết so sánh
-            print(f"\n📋 COMPARISON RESULTS:")
+            print("\n📋 COMPARISON RESULTS:")
             print("-" * 80)
-            print(f"📝 Product Name:")
+            print("📝 Product Name:")
             print(f"   Selenium: {comparison['name']['selenium'][:50]}")
             print(f"   AsyncHTTP: {comparison['name']['async'][:50]}")
             print(f"   ✓ Match: {comparison['name']['match']}")
 
-            print(f"\n💰 Price (Current):")
+            print("\n💰 Price (Current):")
             print(f"   Selenium: {comparison['price']['selenium_current']:,} VND")
             print(f"   AsyncHTTP: {comparison['price']['async_current']:,} VND")
             print(f"   ✓ Match: {comparison['price']['match_current']}")
 
-            print(f"\n⭐ Rating:")
-            print(f"   Selenium: {comparison['rating']['selenium_avg']}/5 ({comparison['rating']['selenium_count']} reviews)")
-            print(f"   AsyncHTTP: {comparison['rating']['async_avg']}/5 ({comparison['rating']['async_count']} reviews)")
+            print("\n⭐ Rating:")
+            print(
+                f"   Selenium: {comparison['rating']['selenium_avg']}/5 ({comparison['rating']['selenium_count']} reviews)"
+            )
+            print(
+                f"   AsyncHTTP: {comparison['rating']['async_avg']}/5 ({comparison['rating']['async_count']} reviews)"
+            )
             print(f"   ✓ Match Avg: {comparison['rating']['match_avg']}")
 
-            print(f"\n📊 Sales Count:")
+            print("\n📊 Sales Count:")
             print(f"   Selenium: {comparison['sales_count']['selenium']}")
             print(f"   AsyncHTTP: {comparison['sales_count']['async']}")
             print(f"   ✓ Match: {comparison['sales_count']['match']}")
 
-            print(f"\n🖼️  Images:")
+            print("\n🖼️  Images:")
             print(f"   Selenium: {comparison['images']['selenium_count']} images")
             print(f"   AsyncHTTP: {comparison['images']['async_count']} images")
 
-            print(f"\n⚙️  Specifications:")
+            print("\n⚙️  Specifications:")
             print(f"   Selenium: {comparison['specifications']['selenium_count']} specs")
             print(f"   AsyncHTTP: {comparison['specifications']['async_count']} specs")
 
-            print(f"\n⏱️  PERFORMANCE:")
+            print("\n⏱️  PERFORMANCE:")
             print(f"   Selenium: {time_selenium:.2f}s")
             print(f"   AsyncHTTP: {time_async:.2f}s")
             speedup = time_selenium / time_async if time_async > 0 else 0
@@ -352,15 +355,20 @@ async def run_comparison_async(urls: list, verbose: bool = True) -> dict:
         "async_total_time": f"{results['async_total_time']:.2f}s",
         "selenium_avg_time": f"{(results['selenium_total_time'] / len(urls)):.2f}s",
         "async_avg_time": f"{(results['async_total_time'] / len(urls)):.2f}s",
-        "overall_speedup": f"{(results['selenium_total_time'] / results['async_total_time']):.1f}x"
-        if results["async_total_time"] > 0
-        else "N/A",
+        "overall_speedup": (
+            f"{(results['selenium_total_time'] / results['async_total_time']):.1f}x"
+            if results["async_total_time"] > 0
+            else "N/A"
+        ),
         "recommendation": (
             "✅ AsyncHTTP đủ tốt - Nên dùng AsyncHTTP để tiết kiệm tài nguyên"
-            if async_success == selenium_success and results['async_total_time'] < results['selenium_total_time']
-            else "⚠️  AsyncHTTP thiếu dữ liệu - Cần dùng Selenium fallback"
-            if async_success < selenium_success
-            else "✅ AsyncHTTP tối ưu - Dùng AsyncHTTP cho tốc độ"
+            if async_success == selenium_success
+            and results["async_total_time"] < results["selenium_total_time"]
+            else (
+                "⚠️  AsyncHTTP thiếu dữ liệu - Cần dùng Selenium fallback"
+                if async_success < selenium_success
+                else "✅ AsyncHTTP tối ưu - Dùng AsyncHTTP cho tốc độ"
+            )
         ),
     }
 
@@ -386,8 +394,8 @@ def main():
 
     print(f"📋 Test URLs ({len(urls)} sản phẩm):")
     for i, url in enumerate(urls, 1):
-        domain = url.split('/')[2]
-        product_name = url.split('/')[3].replace('-', ' ')[:40]
+        domain = url.split("/")[2]
+        product_name = url.split("/")[3].replace("-", " ")[:40]
         print(f"   {i}. {product_name}...")
     print()
 
@@ -434,6 +442,7 @@ def main():
     except Exception as e:
         print(f"❌ Lỗi: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

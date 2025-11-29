@@ -9,15 +9,15 @@ Bước này transform dữ liệu sản phẩm đã crawl:
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
 # Fix encoding cho Windows console
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Thêm src vào path
 project_root = Path(__file__).parent.parent
@@ -46,18 +46,18 @@ def main():
 
     # Đọc file từ bước 1
     input_file = project_root / "data" / "raw" / "products" / "demo_products.json"
-    
+
     if not input_file.exists():
         print(f"❌ Không tìm thấy file: {input_file}")
         print("💡 Chạy demo_step1_crawl.py trước!")
         sys.exit(1)
 
     print(f"📂 Đang đọc file: {input_file}")
-    
+
     try:
-        with open(input_file, "r", encoding="utf-8") as f:
+        with open(input_file, encoding="utf-8") as f:
             data = json.load(f)
-        
+
         products = data.get("products", [])
         print(f"📊 Tổng số products: {len(products)}")
         print()
@@ -71,17 +71,17 @@ def main():
         sample_product = products[0]
         print(f"   - product_id: {sample_product.get('product_id')}")
         print(f"   - name: {sample_product.get('name')}")
-        print(f"   - sales_count: {sample_product.get('sales_count')} (type: {type(sample_product.get('sales_count'))})")
-        if 'price' in sample_product:
+        print(
+            f"   - sales_count: {sample_product.get('sales_count')} (type: {type(sample_product.get('sales_count'))})"
+        )
+        if "price" in sample_product:
             print(f"   - price: {sample_product.get('price')} (nested dict)")
         print()
 
         # Transform
         print("⏳ Đang transform...")
         transformer = DataTransformer(
-            strict_validation=False,
-            remove_invalid=True,
-            normalize_fields=True
+            strict_validation=False, remove_invalid=True, normalize_fields=True
         )
 
         transformed_products, transform_stats = transformer.transform_products(
@@ -95,7 +95,7 @@ def main():
         print(f"✅ Valid products: {transform_stats['valid_products']}")
         print(f"❌ Invalid products: {transform_stats['invalid_products']}")
         print(f"🔄 Duplicates removed: {transform_stats['duplicates_removed']}")
-        if transform_stats.get('errors'):
+        if transform_stats.get("errors"):
             print(f"⚠️  Errors: {len(transform_stats['errors'])}")
         print("=" * 80)
         print()
@@ -109,7 +109,9 @@ def main():
         transformed_sample = transformed_products[0]
         print(f"   - product_id: {transformed_sample.get('product_id')}")
         print(f"   - name: {transformed_sample.get('name')}")
-        print(f"   - sales_count: {transformed_sample.get('sales_count')} (type: {type(transformed_sample.get('sales_count'))})")
+        print(
+            f"   - sales_count: {transformed_sample.get('sales_count')} (type: {type(transformed_sample.get('sales_count'))})"
+        )
         print(f"   - price: {transformed_sample.get('price')} (flatten)")
         print(f"   - rating_average: {transformed_sample.get('rating_average')}")
         print(f"   - review_count: {transformed_sample.get('review_count')}")
@@ -127,7 +129,7 @@ def main():
             "source_file": str(input_file),
             "total_products": len(products),
             "transform_stats": transform_stats,
-            "products": transformed_products
+            "products": transformed_products,
         }
 
         with open(output_file, "w", encoding="utf-8") as f:
@@ -141,10 +143,10 @@ def main():
     except Exception as e:
         print(f"❌ Lỗi khi transform: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
-

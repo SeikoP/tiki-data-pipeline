@@ -18,7 +18,6 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 # Đường dẫn project root
 SCRIPT_DIR = Path(__file__).parent
@@ -29,7 +28,7 @@ BACKUP_DIR = PROJECT_ROOT / "backups" / "postgres"
 CONTAINER_NAME = os.getenv("POSTGRES_CONTAINER_NAME", "tiki-data-pipeline-postgres-1")
 
 
-def get_env_value(key: str, default: Optional[str] = None) -> Optional[str]:
+def get_env_value(key: str, default: str | None = None) -> str | None:
     """Lấy giá trị từ environment hoặc fallback .env nếu tồn tại"""
     val = os.getenv(key)
     if val:
@@ -167,19 +166,21 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
         env = os.environ.copy()
         env["PGPASSWORD"] = postgres_password
         result = subprocess.run(cmd, capture_output=True, check=False, timeout=600, env=env)
-        
+
         # Nếu dùng docker, copy file từ container ra host
         if use_docker and result.returncode == 0:
             docker_copy_cmd = [
                 "docker",
                 "cp",
                 f"{CONTAINER_NAME}:{container_backup_file}",
-                str(backup_file)
+                str(backup_file),
             ]
-            copy_result = subprocess.run(docker_copy_cmd, capture_output=True, check=False, timeout=60)
+            copy_result = subprocess.run(
+                docker_copy_cmd, capture_output=True, check=False, timeout=60
+            )
             if copy_result.returncode != 0:
                 error_msg = copy_result.stderr.decode("utf-8", errors="ignore")
-                print(f"❌ Lỗi khi copy file từ container:")
+                print("❌ Lỗi khi copy file từ container:")
                 print(error_msg)
                 if backup_file.exists():
                     backup_file.unlink()
@@ -198,7 +199,7 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
             if backup_file.exists():
                 backup_file.unlink()
             return False
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         print("❌ pg_dump không tìm thấy. Cần cài đặt postgresql-client trong container.")
         if backup_file.exists():
             backup_file.unlink()
@@ -271,7 +272,7 @@ def main():
     # Thông tin môi trường
     print(f"🔐 POSTGRES_USER: {get_env_value('POSTGRES_USER', 'airflow_user')}")
     # Ẩn password length only
-    pwd = get_env_value('POSTGRES_PASSWORD', '') or ''
+    pwd = get_env_value("POSTGRES_PASSWORD", "") or ""
     print(f"🔐 POSTGRES_PASSWORD: {'*' * len(pwd) if pwd else '(missing)'}")
     print()
 

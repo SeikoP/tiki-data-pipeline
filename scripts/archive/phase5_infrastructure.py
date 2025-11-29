@@ -24,7 +24,7 @@ print("🗄️ Step 1: PostgreSQL tuning configuration")
 print("-" * 70)
 print()
 
-postgres_tuning = '''# PostgreSQL Performance Tuning Configuration
+postgres_tuning = """# PostgreSQL Performance Tuning Configuration
 # Add these to postgresql.conf or set via ALTER SYSTEM
 
 # Memory Settings
@@ -63,10 +63,10 @@ track_activities = on
 track_counts = on
 track_io_timing = on
 track_functions = all
-'''
+"""
 
 postgres_file = project_root / "airflow" / "setup" / "postgresql_tuning.conf"
-with open(postgres_file, 'w', encoding='utf-8') as f:
+with open(postgres_file, "w", encoding="utf-8") as f:
     f.write(postgres_tuning)
 
 print(f"✅ Created: {postgres_file.relative_to(project_root)}")
@@ -77,7 +77,7 @@ print("🐳 Step 2: Docker Compose optimization")
 print("-" * 70)
 print()
 
-docker_override = '''# Docker Compose Override for Performance
+docker_override = """# Docker Compose Override for Performance
 # File: docker-compose.override.yml
 # Usage: Automatically merged with docker-compose.yml
 
@@ -177,10 +177,10 @@ services:
         reservations:
           cpus: '2.0'
           memory: 2G
-'''
+"""
 
 docker_file = project_root / "docker-compose.performance.yml"
-with open(docker_file, 'w', encoding='utf-8') as f:
+with open(docker_file, "w", encoding="utf-8") as f:
     f.write(docker_override)
 
 print(f"✅ Created: {docker_file.relative_to(project_root)}")
@@ -420,7 +420,7 @@ __all__ = [
 '''
 
 monitoring_file = project_root / "src" / "common" / "infrastructure_monitor.py"
-with open(monitoring_file, 'w', encoding='utf-8') as f:
+with open(monitoring_file, "w", encoding="utf-8") as f:
     f.write(monitoring_script)
 
 print(f"✅ Created: {monitoring_file.relative_to(project_root)}")
@@ -432,9 +432,9 @@ print("📊 PHASE 5 COMPLETED")
 print("=" * 70)
 print()
 print("✅ Created infrastructure optimization files:")
-print(f"   • postgresql_tuning.conf - PostgreSQL performance config")
-print(f"   • docker-compose.performance.yml - Docker resource limits & health checks")
-print(f"   • infrastructure_monitor.py - System monitoring utilities")
+print("   • postgresql_tuning.conf - PostgreSQL performance config")
+print("   • docker-compose.performance.yml - Docker resource limits & health checks")
+print("   • infrastructure_monitor.py - System monitoring utilities")
 print()
 print("🎯 Key Optimizations:")
 print("   • PostgreSQL: 256MB shared_buffers, SSD tuning (random_page_cost=1.1)")
@@ -445,5 +445,7 @@ print()
 print("📋 Apply optimizations:")
 print("   1. PostgreSQL: COPY postgresql_tuning.conf to container")
 print("   2. Docker: docker-compose -f docker-compose.yml -f docker-compose.performance.yml up -d")
-print("   3. Monitor: python -c 'from src.common.infrastructure_monitor import print_monitoring_report; print_monitoring_report()'")
+print(
+    "   3. Monitor: python -c 'from src.common.infrastructure_monitor import print_monitoring_report; print_monitoring_report()'"
+)
 print()

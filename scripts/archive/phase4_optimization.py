@@ -179,7 +179,7 @@ __all__ = [
 db_pool_path = project_root / "src" / "pipelines" / "load" / "db_pool.py"
 db_pool_path.parent.mkdir(parents=True, exist_ok=True)
 
-with open(db_pool_path, 'w', encoding='utf-8') as f:
+with open(db_pool_path, "w", encoding="utf-8") as f:
     f.write(db_pooling_code)
 
 print(f"✅ Created: {db_pool_path.relative_to(project_root)}")
@@ -320,7 +320,7 @@ __all__ = [
 batch_processor_path = project_root / "src" / "common" / "batch_processor.py"
 batch_processor_path.parent.mkdir(parents=True, exist_ok=True)
 
-with open(batch_processor_path, 'w', encoding='utf-8') as f:
+with open(batch_processor_path, "w", encoding="utf-8") as f:
     f.write(batch_processor_code)
 
 print(f"✅ Created: {batch_processor_path.relative_to(project_root)}")
@@ -449,7 +449,7 @@ __all__ = [
 
 memory_utils_path = project_root / "src" / "common" / "memory_utils.py"
 
-with open(memory_utils_path, 'w', encoding='utf-8') as f:
+with open(memory_utils_path, "w", encoding="utf-8") as f:
     f.write(memory_utils_code)
 
 print(f"✅ Created: {memory_utils_path.relative_to(project_root)}")

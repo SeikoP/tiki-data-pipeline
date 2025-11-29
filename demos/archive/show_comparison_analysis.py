@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 SO SANH: Tat ca phuong phap crawl vs cach hien tai cua du an
 
@@ -95,13 +94,13 @@ VAN DE CHINH PHAT HIEN
 =========================================================================
 
 1. HTTP 404 ERRORS (AsyncHTTP, HTTP Requests, Requests+Session, CloudScraper)
-   
+
    Nguyen nhan:
    * Tiki co anti-bot detection
    * URL co redirect hoac dynamic loading
    * Thieu proper headers hoac cookies
    * Tiki phat hien requests khong phai tu browser
-   
+
    Giai phap:
    * Can "User-Agent" + "Referer" headers thuc te
    * Can handle redirects
@@ -109,13 +108,13 @@ VAN DE CHINH PHAT HIEN
    * Fallback to Selenium neu HTTP fail
 
 2. EXTRACT DATA LOI (Selenium, Playwright, Smart Headers)
-   
+
    Nguyen nhan:
    * HTML structure cua Tiki phuc tap (React/Vue)
    * Du lieu trong JSON hoac attributes, khong trong plain text
    * Selectors khong chinh xac
    * Data render dong bang JS
-   
+
    Giai phap:
    * Tim du lieu trong <script> tags (JSON)
    * Tim du lieu trong data attributes (data-*)
@@ -123,13 +122,13 @@ VAN DE CHINH PHAT HIEN
    * Improve BeautifulSoup selectors
 
 3. PERFORMANCE (Selenium qua cham)
-   
+
    Nguyen nhan:
    * Selenium startup overhead
    * Full page load + JS execution
    * Scroll delays
    * Sequential processing
-   
+
    Giai phap:
    * Dung connection pooling (requests.Session)
    * Implement HTTP caching (Redis)
@@ -166,7 +165,7 @@ def crawl_product_detail_hybrid(url, max_retries=3):
                     return data  # Success, return immediately
         except:
             pass
-    
+
     # Step 2: Fallback to Selenium (100% reliable)
     driver = create_selenium_driver()
     driver.get(url)
@@ -255,7 +254,6 @@ Uoc luong improvement:
 =========================================================================
 """
 
-import sys
 from pathlib import Path
 
 print(__doc__)

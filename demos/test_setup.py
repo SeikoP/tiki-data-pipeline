@@ -16,10 +16,6 @@ print()
 # Test 1: Check imports
 print("📦 Test 1: Checking imports...")
 try:
-    from pipelines.crawl.crawl_products_detail import (
-        extract_product_detail,
-        crawl_product_detail_with_selenium,
-    )
     print("✅ crawl_products_detail imports OK")
 except Exception as e:
     print(f"❌ Error: {e}")
@@ -29,6 +25,7 @@ except Exception as e:
 print("\n📦 Test 2: Checking aiohttp...")
 try:
     import aiohttp
+
     print("✅ aiohttp installed")
 except ImportError:
     print("⚠️  aiohttp not installed")
@@ -38,6 +35,7 @@ except ImportError:
 print("\n📦 Test 3: Checking requests...")
 try:
     import requests
+
     print("✅ requests installed")
 except ImportError:
     print("⚠️  requests not installed")
@@ -47,6 +45,7 @@ except ImportError:
 print("\n📦 Test 4: Checking BeautifulSoup...")
 try:
     from bs4 import BeautifulSoup
+
     print("✅ BeautifulSoup installed")
 except ImportError:
     print("❌ BeautifulSoup not installed")
@@ -55,8 +54,9 @@ except ImportError:
 # Test 5: Test simple HTTP fetch (no Selenium)
 print("\n📦 Test 5: Testing simple HTTP fetch...")
 try:
-    import aiohttp
     import asyncio
+
+    import aiohttp
 
     async def test_fetch():
         """Test fetch without Selenium"""

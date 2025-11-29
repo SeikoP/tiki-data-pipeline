@@ -363,7 +363,7 @@ class StarSchemaBuilderV2:
                 # 2. Category
                 # Copy category_path directly from crawl_data and extract levels
                 cat_path = prod.get("category_path") or []
-                
+
                 if isinstance(cat_path, list) and len(cat_path) >= 1:
                     # Extract levels from category_path array
                     # ['L1', 'L2', 'L3', 'L4', 'L5'] -> level_1=L1, level_2=L2, level_3=L3, level_4=L4, level_5=L5

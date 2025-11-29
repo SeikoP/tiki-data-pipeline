@@ -4,7 +4,6 @@ Demo End-to-End: Chạy toàn bộ pipeline từ đầu đến cuối
 Pipeline: Crawl -> Transform -> Load
 """
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -12,8 +11,9 @@ from pathlib import Path
 # Fix encoding cho Windows console
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Thêm src vào path
 project_root = Path(__file__).parent.parent
@@ -22,10 +22,10 @@ sys.path.insert(0, str(src_path))
 
 # Import các modules
 try:
-    from pipelines.crawl.crawl_products import crawl_category_products
     from pipelines.crawl.config import get_config
-    from pipelines.transform.transformer import DataTransformer
+    from pipelines.crawl.crawl_products import crawl_category_products
     from pipelines.load.loader import DataLoader
+    from pipelines.transform.transformer import DataTransformer
 except ImportError as e:
     print(f"❌ Lỗi import: {e}")
     print("💡 Đảm bảo bạn đã cài đặt dependencies: pip install -r requirements.txt")
@@ -50,23 +50,21 @@ def main():
     # ==========================================
     print("📥 BƯỚC 1: CRAWL PRODUCTS")
     print("-" * 80)
-    
+
     category_url = "https://tiki.vn/dien-thoai-may-tinh-bang/c1789"
     category_name = "Điện thoại & Máy tính bảng"
-    
+
     print(f"📂 Danh mục: {category_name}")
     print(f"🔗 URL: {category_url}")
     print("⏳ Đang crawl...")
-    
+
     products = []
     max_pages = 2  # Giới hạn để demo nhanh
-    
+
     for page in range(1, max_pages + 1):
         print(f"   📄 Trang {page}/{max_pages}...", end=" ")
         page_products = crawl_category_products(
-            category_url=category_url,
-            page=page,
-            max_products=20
+            category_url=category_url, page=page, max_products=20
         )
         if page_products:
             products.extend(page_products)
@@ -88,16 +86,12 @@ def main():
     print("🔄 BƯỚC 2: TRANSFORM PRODUCTS")
     print("-" * 80)
     print("⏳ Đang transform...")
-    
+
     transformer = DataTransformer(
-        strict_validation=False,
-        remove_invalid=True,
-        normalize_fields=True
+        strict_validation=False, remove_invalid=True, normalize_fields=True
     )
 
-    transformed_products, transform_stats = transformer.transform_products(
-        products, validate=True
-    )
+    transformed_products, transform_stats = transformer.transform_products(products, validate=True)
 
     print(f"✅ Valid: {transform_stats['valid_products']}")
     print(f"❌ Invalid: {transform_stats['invalid_products']}")
@@ -113,8 +107,7 @@ def main():
     # ==========================================
     print("💾 BƯỚC 3: LOAD TO DATABASE")
     print("-" * 80)
-    
-    import os
+
     db_host = os.getenv("POSTGRES_HOST", "localhost")
     db_port = int(os.getenv("POSTGRES_PORT", "5432"))
     db_name = os.getenv("POSTGRES_DB", "crawl_data")
@@ -123,7 +116,7 @@ def main():
 
     print(f"🔌 Database: {db_host}:{db_port}/{db_name}")
     print("⏳ Đang load...")
-    
+
     loader = DataLoader(
         host=db_host,
         port=db_port,
@@ -178,4 +171,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
