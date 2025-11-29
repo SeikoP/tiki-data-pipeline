@@ -65,7 +65,7 @@ python demos/demo_step3_load.py
 python demos/demo_e2e_full.py
 ```
 
-### 5. `demo_crawl_detail_async.py` ⭐ NEW
+### 5. `demo_crawl_detail_async.py` ⭐
 **Mục đích**: So sánh crawl product detail: Selenium vs AsyncHTTP (không dùng Selenium)
 
 **Chức năng**:
@@ -96,7 +96,7 @@ python demos/demo_crawl_detail_async.py
 data/test_output/demo_crawl_detail_comparison.json
 ```
 
-### 6. `demo_crawl_detail_comparison.py` ⭐ NEW
+### 6. `demo_crawl_detail_comparison.py` ⭐
 **Mục đích**: Detailed benchmark - phân tích chi tiết Selenium vs AsyncHTTP
 
 **Chức năng**:
@@ -105,6 +105,19 @@ data/test_output/demo_crawl_detail_comparison.json
 - So sánh success rate, avg time, data quality
 - ASCII performance charts
 - Smart recommendations dựa vào kết quả
+
+---
+
+## 🗂️ Archived Demos
+
+Các demo sau đã được chuyển sang `demos/archive/` vì không còn sử dụng:
+- `compare_three_methods.py` - Old comparison (superseded by newer demos)
+- `COMPARISON_ANALYSIS.py` - Old analysis script
+- `CRAWL_COMPARISON_GUIDE.md` - Old comparison guide
+- `demo_all_crawl_methods_comprehensive.py` - Superseded by step-by-step demos
+- `demo_all_methods.py` - Superseded by newer comparison demos
+- `show_comparison_analysis.py` - Old analysis viewer
+- `test_all_8_methods.py` - Old test script
 
 **Metrics được đo lường**:
 - ⏱️ Performance: total time, avg time, min/max time
@@ -165,7 +178,7 @@ python demos/demo_step3_load.py
 python demos/demo_e2e_full.py
 ```
 
-### ⚡ Chạy benchmark crawl detail (NEW)
+### ⚡ Chạy benchmark crawl detail
 **So sánh tốc độ & chất lượng dữ liệu: Selenium vs AsyncHTTP**
 
 ```bash
@@ -175,12 +188,6 @@ python demos/demo_crawl_detail_async.py
 # Benchmark chi tiết với recommendations
 python demos/demo_crawl_detail_comparison.py
 ```
-
-**Khi nào nên chạy?**
-- Muốn kiểm tra xem nên dùng Selenium hay AsyncHTTP
-- Cần hiểu sự khác biệt về performance & data quality
-- Muốn optimize crawling speed cho project
-- Đang thực hiện code review/performance optimization
 
 ## 📁 Cấu trúc files output
 

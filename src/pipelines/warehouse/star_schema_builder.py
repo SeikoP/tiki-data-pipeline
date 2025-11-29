@@ -386,7 +386,7 @@ class StarSchemaBuilderV2:
                         INSERT INTO dim_category (category_id, category_path, level_1, level_2, level_3, level_4, level_5)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (category_id) DO UPDATE
-                        SET level_1 = EXCLUDED.level_1, 
+                        SET level_1 = EXCLUDED.level_1,
                             level_2 = EXCLUDED.level_2,
                             level_3 = EXCLUDED.level_3,
                             level_4 = EXCLUDED.level_4,

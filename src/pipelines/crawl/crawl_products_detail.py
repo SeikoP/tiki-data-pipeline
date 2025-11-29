@@ -613,7 +613,7 @@ def extract_product_detail(
     for selector in breadcrumb_selectors:
         breadcrumbs = soup.select(selector)
         if breadcrumbs:
-            for i, breadcrumb in enumerate(breadcrumbs):
+            for breadcrumb in breadcrumbs:
                 # Skip if we already have max levels (to avoid product name at end)
                 if len(product_data["category_path"]) >= MAX_CATEGORY_LEVELS:
                     break
