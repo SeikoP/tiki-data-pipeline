@@ -394,7 +394,6 @@ def main():
 
     print(f"📋 Test URLs ({len(urls)} sản phẩm):")
     for i, url in enumerate(urls, 1):
-        domain = url.split("/")[2]
         product_name = url.split("/")[3].replace("-", " ")[:40]
         print(f"   {i}. {product_name}...")
     print()
