@@ -606,7 +606,7 @@ def extract_product_detail(html_content, url, verbose=True, parent_category=None
         ".breadcrumb a",
         '[class*="breadcrumb"] a',
     ]
-    MAX_CATEGORY_LEVELS = 4  # Tiki categories should have max 3-4 levels
+    MAX_CATEGORY_LEVELS = 5  # Tiki categories can have up to 5 levels with parent category included
     for selector in breadcrumb_selectors:
         breadcrumbs = soup.select(selector)
         if breadcrumbs:
@@ -949,8 +949,8 @@ def extract_product_detail(html_content, url, verbose=True, parent_category=None
         product_data["category_path"] = [str(product_data["category_path"])]
 
     # Enforce max category levels (safety check against product names)
-    # Real Tiki categories should have 3-4 levels, anything more is likely product name
-    MAX_CATEGORY_LEVELS = 4
+    # Real Tiki categories should have 3-5 levels (including parent), anything more is likely product name
+    MAX_CATEGORY_LEVELS = 5
     if len(product_data["category_path"]) > MAX_CATEGORY_LEVELS:
         product_data["category_path"] = product_data["category_path"][:MAX_CATEGORY_LEVELS]
     
@@ -975,29 +975,78 @@ def extract_product_detail(html_content, url, verbose=True, parent_category=None
 
     # Prepend parent_category to category_path if provided
     if parent_category and isinstance(parent_category, str) and parent_category.strip():
-        # Remove parent_category from path if it's already there (avoid duplicates)
-        existing_path = [c for c in product_data["category_path"] if c != parent_category]
-        # Prepend parent_category to the beginning
-        product_data["category_path"] = [parent_category] + existing_path
-    elif not parent_category and len(product_data["category_path"]) == 3:
-        # Auto-detect parent category from hierarchy if path has only 3 levels
-        # This handles the case where breadcrumb is missing Level 0
-        if hierarchy_map is None:
-            hierarchy_map = load_category_hierarchy()
-        
-        if hierarchy_map:
-            # Try to find parent from first category item's hierarchy
-            first_item = product_data["category_path"][0] if product_data["category_path"] else None
+        try:
+            # Remove parent_category from path if it's already there (avoid duplicates)
+            existing_path = [c for c in product_data["category_path"] if c != parent_category]
+            # Prepend parent_category to the beginning
+            product_data["category_path"] = [parent_category] + existing_path
             
-            # Search for first item in hierarchy to determine parent category
-            for cat_url, cat_info in hierarchy_map.items():
-                if cat_info.get('name') == first_item:
-                    # Found this category in hierarchy, get its root parent
-                    parent_name = get_parent_category_name(cat_url, hierarchy_map)
-                    if parent_name and parent_name != first_item:
-                        # Add parent to beginning
-                        product_data["category_path"] = [parent_name] + product_data["category_path"]
-                    break
+            # Ensure we don't exceed max levels - if we have too many levels, trim from the end
+            if len(product_data["category_path"]) > 5:
+                product_data["category_path"] = product_data["category_path"][:5]
+        except Exception as e:
+            # Log but don't fail - just keep original path
+            if verbose:
+                print(f"[Warning] Error prepending parent category '{parent_category}': {e}")
+    elif not parent_category and len(product_data["category_path"]) >= 3 and len(product_data["category_path"]) <= 4:
+        # Auto-detect parent category from hierarchy if path has 3-4 levels
+        # This handles the case where breadcrumb is missing Level 0 (or has 4 levels without parent)
+        try:
+            if hierarchy_map is None:
+                hierarchy_map = load_category_hierarchy()
+            
+            if hierarchy_map:
+                # Try to find parent from first category item's hierarchy
+                first_item = product_data["category_path"][0] if product_data["category_path"] else None
+                
+                if first_item:
+                    try:
+                        # Build reverse lookup: name -> url for faster search
+                        name_to_url = {info.get('name'): url for url, info in hierarchy_map.items()}
+                        
+                        if first_item in name_to_url:
+                            # Found this category in hierarchy, get its root parent
+                            cat_url = name_to_url[first_item]
+                            parent_name = get_parent_category_name(cat_url, hierarchy_map)
+                            if parent_name and parent_name != first_item:
+                                # Check if parent is already at the beginning (avoid duplicates)
+                                if product_data["category_path"][0] != parent_name:
+                                    # Add parent to beginning
+                                    product_data["category_path"] = [parent_name] + product_data["category_path"]
+                                    # Ensure we don't exceed max levels - if we have too many levels, trim from the end
+                                    if len(product_data["category_path"]) > 5:
+                                        product_data["category_path"] = product_data["category_path"][:5]
+                    except Exception as e:
+                        # Log but don't fail - just keep original path
+                        if verbose:
+                            print(f"[Warning] Error auto-detecting parent for '{first_item}': {e}")
+        except Exception as e:
+            # Log but don't fail - just keep original path
+            if verbose:
+                print(f"[Warning] Error loading hierarchy map for auto-detect: {e}")
+
+    # Final validation: ensure category_path is a valid list
+    try:
+        if not isinstance(product_data.get("category_path"), list):
+            product_data["category_path"] = []
+        
+        # Ensure all items are strings
+        product_data["category_path"] = [
+            str(item).strip() for item in product_data["category_path"] 
+            if item and isinstance(item, (str, int, float))
+        ]
+        
+        # Remove empty strings
+        product_data["category_path"] = [item for item in product_data["category_path"] if item]
+        
+        # Final safety: ensure not exceeding max levels
+        if len(product_data["category_path"]) > 5:
+            product_data["category_path"] = product_data["category_path"][:5]
+            
+    except Exception as e:
+        if verbose:
+            print(f"[Warning] Error validating category_path: {e}")
+        product_data["category_path"] = []
 
     return product_data
 
@@ -1098,8 +1147,8 @@ async def crawl_product_detail_async(
                 product_data["category_path"] = [str(product_data["category_path"])]
 
             # Enforce max category levels (safety check against product names)
-            # Real Tiki categories should have 3-4 levels, anything more is likely product name
-            MAX_CATEGORY_LEVELS = 4
+            # Real Tiki categories should have 3-5 levels (including parent), anything more is likely product name
+            MAX_CATEGORY_LEVELS = 5
             if len(product_data["category_path"]) > MAX_CATEGORY_LEVELS:
                 product_data["category_path"] = product_data["category_path"][:MAX_CATEGORY_LEVELS]
 

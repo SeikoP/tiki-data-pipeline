@@ -21,7 +21,7 @@ print("=" * 100)
 
 # Get sample categories with their paths
 cur.execute('''
-SELECT category_path, level_1, level_2, level_3, level_4, full_path
+SELECT category_path, level_1, level_2, level_3, level_4, level_5
 FROM dim_category
 LIMIT 5
 ''')
@@ -34,7 +34,7 @@ for i, row in enumerate(cur.fetchall(), 1):
     print(f"   level_2: {row[2]}")
     print(f"   level_3: {row[3]}")
     print(f"   level_4: {row[4]}")
-    print(f"   full_path: {row[5]}")
+    print(f"   level_5: {row[5]}")
 
 # Verify all categories have category_path
 cur.execute('''
@@ -50,7 +50,7 @@ print(f"   With category_path: {row[1]}")
 
 # Verify level extraction is correct
 cur.execute('''
-SELECT category_path, level_1, level_2, level_3, level_4
+SELECT category_path, level_1, level_2, level_3, level_4, level_5
 FROM dim_category
 WHERE category_path IS NOT NULL
 LIMIT 3
@@ -59,8 +59,8 @@ LIMIT 3
 print(f"\n✅ Verify level extraction matches category_path:")
 for row in cur.fetchall():
     path = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-    expected = [row[1], row[2], row[3], row[4]]
-    actual = path[:4] if len(path) >= 4 else path + [None] * (4 - len(path))
+    expected = [row[1], row[2], row[3], row[4], row[5]]
+    actual = path[:5] if len(path) >= 5 else path + [None] * (5 - len(path))
     
     match = expected == actual
     status = "✓" if match else "✗"

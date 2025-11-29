@@ -181,7 +181,8 @@ class StarSchemaBuilderV2:
                 level_1 VARCHAR(255),
                 level_2 VARCHAR(255),
                 level_3 VARCHAR(255),
-                level_4 VARCHAR(255)
+                level_4 VARCHAR(255),
+                level_5 VARCHAR(255)
             )
         """
         )
@@ -365,13 +366,14 @@ class StarSchemaBuilderV2:
                 
                 if isinstance(cat_path, list) and len(cat_path) >= 1:
                     # Extract levels from category_path array
-                    # ['L1', 'L2', 'L3', 'L4'] -> level_1=L1, level_2=L2, level_3=L3, level_4=L4
+                    # ['L1', 'L2', 'L3', 'L4', 'L5'] -> level_1=L1, level_2=L2, level_3=L3, level_4=L4, level_5=L5
                     level_1 = cat_path[0] if len(cat_path) > 0 else None
                     level_2 = cat_path[1] if len(cat_path) > 1 else None
                     level_3 = cat_path[2] if len(cat_path) > 2 else None
                     level_4 = cat_path[3] if len(cat_path) > 3 else None
+                    level_5 = cat_path[4] if len(cat_path) > 4 else None
                 else:
-                    level_1 = level_2 = level_3 = level_4 = None
+                    level_1 = level_2 = level_3 = level_4 = level_5 = None
 
                 # Create cache key from full path
                 cat_key = json.dumps(cat_path, ensure_ascii=False)
@@ -381,13 +383,14 @@ class StarSchemaBuilderV2:
 
                     self.target_cur.execute(
                         """
-                        INSERT INTO dim_category (category_id, category_path, level_1, level_2, level_3, level_4)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        INSERT INTO dim_category (category_id, category_path, level_1, level_2, level_3, level_4, level_5)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (category_id) DO UPDATE
                         SET level_1 = EXCLUDED.level_1, 
                             level_2 = EXCLUDED.level_2,
                             level_3 = EXCLUDED.level_3,
-                            level_4 = EXCLUDED.level_4
+                            level_4 = EXCLUDED.level_4,
+                            level_5 = EXCLUDED.level_5
                         RETURNING category_sk
                     """,
                         (
@@ -397,6 +400,7 @@ class StarSchemaBuilderV2:
                             level_2,
                             level_3,
                             level_4,
+                            level_5,
                         ),
                     )
 

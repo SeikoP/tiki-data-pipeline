@@ -65,8 +65,10 @@ print(f"  Category Path ({len(result['category_path'])} levels):")
 for i, level in enumerate(result['category_path']):
     print(f"    {i}. {level}")
 
-# Verify we got 4 levels
-if len(result['category_path']) == 4:
+# Verify we got 4-5 levels
+if len(result['category_path']) == 5:
+    print("\n✅ SUCCESS: Category path now has 5 levels (Parent + 4 levels!)")
+elif len(result['category_path']) == 4:
     print("\n✅ SUCCESS: Category path now has 4 levels (Level 0 added!)")
 elif len(result['category_path']) == 3:
     print("\n⚠️  WARNING: Still only 3 levels")
