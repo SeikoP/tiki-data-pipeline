@@ -50,12 +50,14 @@ def get_selenium_options(headless: bool = True) -> Any | None:
 
         chrome_options = Options()
         if headless:
-            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--headless=new")  # Use new headless mode (faster)
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-plugins")  # Block plugins
+        chrome_options.add_argument("--disable-infobars")  # Disable info bars
         # Tối ưu hóa để khởi động nhanh hơn
         chrome_options.add_argument("--disable-background-timer-throttling")
         chrome_options.add_argument("--disable-backgrounding-occluded-windows")
@@ -83,11 +85,13 @@ def get_selenium_options(headless: bool = True) -> Any | None:
         chrome_options.add_argument(
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
-        # Performance optimizations
+        # Performance optimizations - Block unnecessary resources
         prefs = {
             "profile.managed_default_content_settings.images": 2,  # Block images for faster loading
+            "profile.default_content_setting_values.stylesheets": 2,  # Block CSS for faster loading
             "profile.default_content_setting_values.notifications": 2,
             "profile.default_content_setting_values.media_stream": 2,  # Block media streams
+            "profile.default_content_setting_values.plugins": 2,  # Block plugins
             "disk-cache-size": 4096,  # Limit cache size
         }
         chrome_options.add_experimental_option("prefs", prefs)

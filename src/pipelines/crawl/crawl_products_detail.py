@@ -136,21 +136,47 @@ def crawl_product_detail_with_selenium(
 
             driver.get(url)
 
-            # Chờ trang load - optimized wait time
-            time.sleep(1)  # Tăng từ 0.5s lên 1s để trang load thêm content
+            # Smart wait: Chờ page load với explicit wait (thay vì time.sleep fixed)
+            # Expected: Giảm wait time từ 1s → 0.3-0.8s (nếu page load nhanh)
+            try:
+                from src.pipelines.crawl.utils_selenium_wait import smart_wait_for_page_load
 
-            # Scroll để load các phần động - tối ưu
+                page_loaded = smart_wait_for_page_load(
+                    driver, check_product_elements=True, timeout=5, verbose=verbose
+                )
+                if not page_loaded and verbose:
+                    print("[Selenium] ⚠️  Page có thể chưa load đầy đủ, nhưng tiếp tục...")
+            except ImportError:
+                # Fallback về time.sleep nếu module chưa có
+                if verbose:
+                    print("[Selenium] ⚠️  Sử dụng time.sleep fallback (explicit waits không available)")
+                time.sleep(1)
+
+            # Scroll để load các phần động - tối ưu với explicit waits
             if verbose:
                 print("[Selenium] Đang scroll để load nội dung...")
 
-            # Optimized scrolling
+            # Optimized scrolling với smart waits
             try:
+                from src.pipelines.crawl.utils_selenium_wait import wait_after_scroll, wait_for_dynamic_content_loaded
+
                 driver.execute_script("window.scrollTo(0, 500);")
-                time.sleep(0.5)  # Chờ 0.5s để load content
+                wait_after_scroll(driver, timeout=1, verbose=verbose)  # Wait tối đa 1s
+
+                driver.execute_script("window.scrollTo(0, 1500);")
+                wait_after_scroll(driver, timeout=1, verbose=verbose)
+
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                # Wait cho dynamic content (sales_count, rating) load
+                wait_for_dynamic_content_loaded(driver, timeout=2, verbose=verbose)
+            except ImportError:
+                # Fallback về time.sleep nếu module chưa có
+                driver.execute_script("window.scrollTo(0, 500);")
+                time.sleep(0.5)
                 driver.execute_script("window.scrollTo(0, 1500);")
                 time.sleep(0.5)
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)  # Tăng từ 1s lên 2s để chắc chắn load đầy đủ dữ liệu
+                time.sleep(2)
             except Exception as scroll_error:
                 if verbose:
                     print(f"[Selenium] Warning: Lỗi khi scroll: {scroll_error}")
@@ -312,15 +338,34 @@ def crawl_product_detail_with_driver(
             print(f"[Selenium] Đang mở {url}... (reuse driver)")
         driver.get(url)
 
-        # Optimized scrolling
+        # Smart wait: Chờ page load với explicit wait
         try:
-            time.sleep(1)  # Tăng từ 0.5s lên 1s để trang load thêm content
+            from src.pipelines.crawl.utils_selenium_wait import smart_wait_for_page_load
+
+            smart_wait_for_page_load(driver, check_product_elements=True, timeout=5, verbose=verbose)
+        except ImportError:
+            time.sleep(1)  # Fallback
+
+        # Optimized scrolling với smart waits
+        try:
+            from src.pipelines.crawl.utils_selenium_wait import wait_after_scroll, wait_for_dynamic_content_loaded
+
             driver.execute_script("window.scrollTo(0, 500);")
-            time.sleep(0.5)  # Chờ 0.5s để load content
+            wait_after_scroll(driver, timeout=1, verbose=verbose)
+
+            driver.execute_script("window.scrollTo(0, 1500);")
+            wait_after_scroll(driver, timeout=1, verbose=verbose)
+
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            wait_for_dynamic_content_loaded(driver, timeout=2, verbose=verbose)
+        except ImportError:
+            # Fallback về time.sleep
+            driver.execute_script("window.scrollTo(0, 500);")
+            time.sleep(0.5)
             driver.execute_script("window.scrollTo(0, 1500);")
             time.sleep(0.5)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)  # Tăng từ 1s lên 2s để chắc chắn load đầy đủ dữ liệu
+            time.sleep(2)
         except Exception as scroll_error:
             if verbose:
                 print(f"[Selenium] Warning: Lỗi khi scroll: {scroll_error}")
@@ -1110,12 +1155,20 @@ async def crawl_product_detail_async(
     if create_session:
         import aiohttp
 
-        # Tối ưu: TCPConnector với pool size lớn hơn
+        # Tối ưu: TCPConnector với pool size lớn hơn (sử dụng config)
+        from src.pipelines.crawl.config import (
+            HTTP_CONNECTOR_LIMIT,
+            HTTP_CONNECTOR_LIMIT_PER_HOST,
+            HTTP_DNS_CACHE_TTL,
+        )
+
         connector = aiohttp.TCPConnector(
-            limit=100,  # Total limit for concurrent connections
-            limit_per_host=10,  # Limit per host (Tiki)
-            ttl_dns_cache=300,  # DNS cache 5 minutes
+            limit=HTTP_CONNECTOR_LIMIT,  # Sử dụng config (150)
+            limit_per_host=HTTP_CONNECTOR_LIMIT_PER_HOST,  # Sử dụng config (15)
+            ttl_dns_cache=HTTP_DNS_CACHE_TTL,  # Sử dụng config (1800s = 30 min)
             ssl=False,  # Disable SSL verification cho tốc độ
+            force_close=False,  # Keep connections alive for reuse
+            enable_cleanup_closed=True,
         )
         timeout = aiohttp.ClientTimeout(total=20, connect=10)  # Tối ưu: giảm timeout
         session = aiohttp.ClientSession(

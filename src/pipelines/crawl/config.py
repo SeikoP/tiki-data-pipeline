@@ -28,11 +28,11 @@ PRODUCT_POOL_SIZE = (
 )
 
 # HTTP client configuration - OPTIMIZED
-HTTP_CONNECTOR_LIMIT = 100  # Tổng concurrent HTTP connections
-HTTP_CONNECTOR_LIMIT_PER_HOST = 10  # Per-host limit
+HTTP_CONNECTOR_LIMIT = 150  # Tổng concurrent HTTP connections (tăng từ 100)
+HTTP_CONNECTOR_LIMIT_PER_HOST = 15  # Per-host limit (tăng từ 10)
 HTTP_TIMEOUT_TOTAL = 20  # Seconds (từ 30)
 HTTP_TIMEOUT_CONNECT = 10  # Seconds
-HTTP_DNS_CACHE_TTL = 300  # Seconds (5 phút)
+HTTP_DNS_CACHE_TTL = 1800  # Seconds (30 phút - tăng từ 5 phút để giảm DNS lookups)
 
 # Redis Cache TTL configuration - CRITICAL FOR CACHE HIT RATE
 REDIS_CACHE_TTL_PRODUCT_DETAIL = 604800  # 7 days (604800 seconds) - long TTL để maximize hits

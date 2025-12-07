@@ -1499,7 +1499,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Lấy cấu hình cho multi-day crawling
         # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
-            Variable.get("TIKI_PRODUCTS_PER_DAY", default="500")
+            Variable.get("TIKI_PRODUCTS_PER_DAY", default="50")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
             Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
@@ -2164,11 +2164,19 @@ def crawl_product_batch(
                     import aiohttp
 
                     timeout = aiohttp.ClientTimeout(total=30)
-                    # Tạo connector với optimized pooling
+                    # Tạo connector với optimized pooling (sử dụng config)
+                    from src.pipelines.crawl.config import (
+                        HTTP_CONNECTOR_LIMIT,
+                        HTTP_CONNECTOR_LIMIT_PER_HOST,
+                        HTTP_DNS_CACHE_TTL,
+                    )
+
                     connector = aiohttp.TCPConnector(
-                        limit=50,  # Tổng connection limit
-                        limit_per_host=10,  # Connection limit per host
-                        ttl_dns_cache=300,  # Cache DNS query 5 phút
+                        limit=HTTP_CONNECTOR_LIMIT,  # Sử dụng config (150)
+                        limit_per_host=HTTP_CONNECTOR_LIMIT_PER_HOST,  # Sử dụng config (15)
+                        ttl_dns_cache=HTTP_DNS_CACHE_TTL,  # Sử dụng config (1800s = 30 min)
+                        force_close=False,  # Keep connections alive for reuse
+                        enable_cleanup_closed=True,
                     )
                     # Tạo session trong async context (có event loop đang chạy)
                     # Đây là async function nên event loop đã có sẵn
