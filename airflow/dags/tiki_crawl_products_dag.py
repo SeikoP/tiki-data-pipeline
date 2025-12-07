@@ -2165,7 +2165,12 @@ def crawl_product_batch(
 
                     timeout = aiohttp.ClientTimeout(total=30)
                     # Tạo connector với optimized pooling (sử dụng config)
-                    from src.pipelines.crawl.config import (
+                    # Đảm bảo sys.path được cấu hình trước khi import
+                    src_path = Path("/opt/airflow/src")
+                    if src_path.exists() and str(src_path) not in sys.path:
+                        sys.path.insert(0, str(src_path))
+                    
+                    from pipelines.crawl.config import (
                         HTTP_CONNECTOR_LIMIT,
                         HTTP_CONNECTOR_LIMIT_PER_HOST,
                         HTTP_DNS_CACHE_TTL,
@@ -2839,7 +2844,12 @@ def merge_product_details(**context) -> dict[str, Any]:
         # Số lượng products thực tế được crawl
         expected_products_count = len(products_to_crawl) if products_to_crawl else 0
         # Với batch processing, số map_index = số batches, không phải số products
-        batch_size = 10
+        # Lấy batch size từ config
+        try:
+            from pipelines.crawl.config import PRODUCT_BATCH_SIZE
+            batch_size = PRODUCT_BATCH_SIZE
+        except Exception:
+            batch_size = 12  # Default fallback
         expected_crawl_count = (
             (expected_products_count + batch_size - 1) // batch_size
             if expected_products_count > 0
@@ -5811,8 +5821,54 @@ with DAG(**DAG_CONFIG) as dag:
 
             logger.info(f"✅ Retrieved {len(products_to_crawl)} products for detail crawl")
 
-            # Batch Processing: Chia products thành batches 15 products/batch (tối ưu: từ 15 -> 12 để parallel hơn)
-            batch_size = 15
+            # Dynamic Batch Sizing: Tính optimal batch size dựa trên số lượng products và available workers
+            def calculate_optimal_batch_size(
+                product_count: int,
+                available_workers: int = 12,  # Default Airflow worker concurrency
+                target_batch_time: int = 45,  # Target: mỗi batch xử lý trong 45-60 giây
+                min_batch: int = 5,
+                max_batch: int = 20,
+            ) -> int:
+                """Tính optimal batch size dựa trên context"""
+                # Ước tính: mỗi product mất ~3-5s để crawl
+                avg_product_time = 4.0  # seconds
+                
+                # Tính products per batch để đạt target time
+                products_per_batch = target_batch_time / avg_product_time
+                
+                # Điều chỉnh dựa trên số lượng products và workers
+                # Nếu có nhiều products, có thể tăng batch size
+                if product_count > 1000:
+                    products_per_batch *= 1.2
+                elif product_count < 100:
+                    products_per_batch *= 0.8
+                
+                # Đảm bảo trong khoảng min-max
+                optimal = max(min_batch, min(max_batch, int(products_per_batch)))
+                
+                logger.info(
+                    f"🔢 Dynamic batch sizing: {product_count} products, "
+                    f"{available_workers} workers → optimal batch size: {optimal}"
+                )
+                return optimal
+
+            # Lấy batch size từ config hoặc tính dynamic
+            try:
+                from pipelines.crawl.config import PRODUCT_BATCH_SIZE
+                base_batch_size = PRODUCT_BATCH_SIZE
+            except Exception:
+                base_batch_size = 12  # Default fallback
+
+            # Tính optimal batch size
+            optimal_batch_size = calculate_optimal_batch_size(
+                len(products_to_crawl),
+                available_workers=12,  # Có thể lấy từ Airflow Variable nếu cần
+            )
+            
+            # Dùng giá trị lớn hơn giữa config và optimal để đảm bảo hiệu quả
+            batch_size = max(base_batch_size, optimal_batch_size)
+            
+            # Batch Processing: Chia products thành batches
             batches = []
             for i in range(0, len(products_to_crawl), batch_size):
                 batch = products_to_crawl[i : i + batch_size]

@@ -13,7 +13,7 @@ import psycopg2
 from psycopg2.extras import Json, execute_values
 from psycopg2.pool import SimpleConnectionPool
 
-from src.pipelines.crawl.validate_category_path import fix_products_category_paths
+from ..validate_category_path import fix_products_category_paths
 
 
 class PostgresStorage:

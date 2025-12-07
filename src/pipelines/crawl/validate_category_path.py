@@ -9,8 +9,8 @@ Giải pháp: Validate và tự động fix để đảm bảo parent category l
 import logging
 from typing import Any
 
-from src.pipelines.crawl.config import MAX_CATEGORY_LEVELS
-from src.pipelines.crawl.crawl_products_detail import (
+from .config import MAX_CATEGORY_LEVELS
+from .crawl_products_detail import (
     get_parent_category_name,
     load_category_hierarchy,
 )

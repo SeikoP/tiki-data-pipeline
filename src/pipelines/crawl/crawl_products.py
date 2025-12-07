@@ -187,24 +187,19 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
         except Exception:
             pass  # Fallback về crawl
 
-    # Rate limiting - kiểm tra và đợi nếu cần
+    # Adaptive Rate Limiting
+    adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.redis_cache import get_redis_rate_limiter
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
+            from urllib.parse import urlparse
 
-            rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
-            if rate_limiter:
-                # Extract domain từ URL để rate limit theo domain
-                from urllib.parse import urlparse
-
+            adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
+            if adaptive_limiter:
                 domain = urlparse(url).netloc or "tiki.vn"
-
-                # Kiểm tra rate limit, đợi nếu cần
-                if not rate_limiter.is_allowed(domain):
-                    rate_limiter.wait_if_needed(domain)
+                adaptive_limiter.wait(domain)
         except Exception:
-            # Nếu rate limiter không available, fallback về sleep cố định
-            time.sleep(2)  # Delay cơ bản cho Selenium (lâu hơn requests)
+            time.sleep(0.7)  # Fixed delay fallback
 
     # Lazy import để tránh timeout khi load DAG
     from selenium import webdriver
@@ -322,24 +317,19 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
         except Exception:
             pass  # Fallback về crawl
 
-    # Rate limiting - kiểm tra và đợi nếu cần
+    # Adaptive Rate Limiting
+    adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.redis_cache import get_redis_rate_limiter
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
+            from urllib.parse import urlparse
 
-            rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
-            if rate_limiter:
-                # Extract domain từ URL để rate limit theo domain
-                from urllib.parse import urlparse
-
+            adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
+            if adaptive_limiter:
                 domain = urlparse(url).netloc or "tiki.vn"
-
-                # Kiểm tra rate limit, đợi nếu cần
-                if not rate_limiter.is_allowed(domain):
-                    rate_limiter.wait_if_needed(domain)
+                adaptive_limiter.wait(domain)
         except Exception:
-            # Nếu rate limiter không available, fallback về sleep cố định
-            time.sleep(1)  # Delay cơ bản
+            time.sleep(0.7)  # Fixed delay fallback
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -373,8 +363,31 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
                 except Exception:
                     pass  # Ignore cache errors
 
+            # Record success cho adaptive rate limiter
+            if adaptive_limiter:
+                try:
+                    from urllib.parse import urlparse
+                    domain = urlparse(url).netloc or "tiki.vn"
+                    adaptive_limiter.record_success(domain)
+                except Exception:
+                    pass
+
             return html
-        except requests.exceptions.RequestException:
+        except requests.exceptions.RequestException as e:
+            # Record error cho adaptive rate limiter
+            if adaptive_limiter:
+                try:
+                    from urllib.parse import urlparse
+                    domain = urlparse(url).netloc or "tiki.vn"
+                    error_type_str = None
+                    if "429" in str(e) or "Too Many Requests" in str(e):
+                        error_type_str = "429"
+                    elif "timeout" in str(e).lower():
+                        error_type_str = "timeout"
+                    adaptive_limiter.record_error(domain, error_type=error_type_str)
+                except Exception:
+                    pass
+
             if attempt == max_retries - 1:
                 raise
             time.sleep(2**attempt)  # Exponential backoff

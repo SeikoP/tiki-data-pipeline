@@ -124,11 +124,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1.0'
+          cpus: '1'
           memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     networks:
       - backend
 
@@ -164,11 +164,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
           cpus: '0.5'
           memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     networks:
       - backend
 
@@ -190,8 +190,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
+          cpus: '0.5'
+          memory: 512M
         reservations:
           cpus: '0.25'
           memory: 256M
@@ -205,10 +205,10 @@ services:
     command: scheduler
     environment:
       <<: *airflow-common-env
-      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: '30'
-      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: '60'
-      AIRFLOW__SCHEDULER__PARSING_PROCESSES: '2'
-      AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY: '512'
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: '60'
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: '120'
+      AIRFLOW__SCHEDULER__PARSING_PROCESSES: '1'
+      AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY: '256'
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8974/health\").read()' || exit 1"]
       interval: 30s
@@ -219,11 +219,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1.0'
+          cpus: '1'
           memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -266,17 +266,17 @@ services:
     environment:
       <<: *airflow-common-env
       DUMB_INIT_SETSID: "0"
-      AIRFLOW__CELERY__WORKER_CONCURRENCY: '4'
-      AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER: '2'
+      AIRFLOW__CELERY__WORKER_CONCURRENCY: '2'
+      AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER: '1'
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 4G
-        reservations:
-          cpus: '2.0'
+          cpus: '2'
           memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
     depends_on:
       <<: *airflow-common-depends-on
       airflow-apiserver:

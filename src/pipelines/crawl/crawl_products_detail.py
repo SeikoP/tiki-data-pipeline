@@ -93,28 +93,26 @@ def crawl_product_detail_with_selenium(
         except Exception:
             pass  # Fallback về crawl
 
-    # Rate limiting - kiểm tra và đợi nếu cần
+    # Adaptive Rate Limiting - tự động điều chỉnh delay
+    adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.redis_cache import get_redis_rate_limiter
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
+            from urllib.parse import urlparse
 
-            rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
-            if rate_limiter:
-                # Extract domain từ URL để rate limit theo domain
-                from urllib.parse import urlparse
-
+            adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
+            if adaptive_limiter:
                 domain = urlparse(url).netloc or "tiki.vn"
-
-                # Kiểm tra rate limit, đợi nếu cần
-                if not rate_limiter.is_allowed(domain):
-                    if verbose:
-                        print(f"[Rate Limiter] ⏳ Đợi rate limit cho {domain}...")
-                    rate_limiter.wait_if_needed(domain)
-        except Exception:
-            # Nếu rate limiter không available, fallback về sleep cố định
+                # Đợi với adaptive delay (tự động điều chỉnh)
+                if verbose:
+                    current_delay = adaptive_limiter.get_current_delay()
+                    print(f"[Adaptive Rate Limiter] ⏳ Delay: {current_delay:.2f}s cho {domain}")
+                adaptive_limiter.wait(domain)
+        except Exception as e:
+            # Fallback về fixed delay nếu adaptive limiter không available
             if verbose:
-                print("[Rate Limiter] ⚠️  Rate limiter không available, dùng delay cố định")
-            time.sleep(2)  # Delay cơ bản cho Selenium
+                print(f"[Rate Limiter] ⚠️  Adaptive limiter không available: {e}, dùng delay cố định")
+            time.sleep(0.7)  # Fixed delay fallback
 
     driver = None
     last_error = None
@@ -139,7 +137,7 @@ def crawl_product_detail_with_selenium(
             # Smart wait: Chờ page load với explicit wait (thay vì time.sleep fixed)
             # Expected: Giảm wait time từ 1s → 0.3-0.8s (nếu page load nhanh)
             try:
-                from src.pipelines.crawl.utils_selenium_wait import smart_wait_for_page_load
+                from .utils_selenium_wait import smart_wait_for_page_load
 
                 page_loaded = smart_wait_for_page_load(
                     driver, check_product_elements=True, timeout=5, verbose=verbose
@@ -158,7 +156,7 @@ def crawl_product_detail_with_selenium(
 
             # Optimized scrolling với smart waits
             try:
-                from src.pipelines.crawl.utils_selenium_wait import wait_after_scroll, wait_for_dynamic_content_loaded
+                from .utils_selenium_wait import wait_after_scroll, wait_for_dynamic_content_loaded
 
                 driver.execute_script("window.scrollTo(0, 500);")
                 wait_after_scroll(driver, timeout=1, verbose=verbose)  # Wait tối đa 1s
@@ -224,12 +222,36 @@ def crawl_product_detail_with_selenium(
                 driver.quit()
                 driver = None
 
+            # Record success cho adaptive rate limiter
+            if adaptive_limiter:
+                try:
+                    from urllib.parse import urlparse
+                    domain = urlparse(url).netloc or "tiki.vn"
+                    adaptive_limiter.record_success(domain)
+                except Exception:
+                    pass  # Ignore errors
+
             return full_html
 
         except Exception as e:
             last_error = e
             error_type = type(e).__name__
             error_msg = str(e)
+
+            # Record error cho adaptive rate limiter
+            if adaptive_limiter:
+                try:
+                    from urllib.parse import urlparse
+                    domain = urlparse(url).netloc or "tiki.vn"
+                    # Detect error type
+                    error_type_str = None
+                    if "429" in str(e) or "Too Many Requests" in str(e):
+                        error_type_str = "429"
+                    elif "timeout" in str(e).lower() or "Timeout" in error_type:
+                        error_type_str = "timeout"
+                    adaptive_limiter.record_error(domain, error_type=error_type_str)
+                except Exception:
+                    pass  # Ignore errors
 
             if verbose:
                 print(
@@ -312,24 +334,24 @@ def crawl_product_detail_with_driver(
         except Exception:
             pass
 
-    # Rate limiting nếu cần
+    # Adaptive Rate Limiting
+    adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.redis_cache import get_redis_rate_limiter
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
+            from urllib.parse import urlparse
 
-            rate_limiter = get_redis_rate_limiter("redis://redis:6379/2")
-            if rate_limiter:
-                from urllib.parse import urlparse
-
+            adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
+            if adaptive_limiter:
                 domain = urlparse(url).netloc or "tiki.vn"
-                if not rate_limiter.is_allowed(domain):
-                    if verbose:
-                        print(f"[Rate Limiter] ⏳ Đợi rate limit cho {domain}...")
-                    rate_limiter.wait_if_needed(domain)
-        except Exception:
+                if verbose:
+                    current_delay = adaptive_limiter.get_current_delay()
+                    print(f"[Adaptive Rate Limiter] ⏳ Delay: {current_delay:.2f}s cho {domain}")
+                adaptive_limiter.wait(domain)
+        except Exception as e:
             if verbose:
-                print("[Rate Limiter] ⚠️  Rate limiter không available, dùng delay cố định")
-            time.sleep(2)
+                print(f"[Rate Limiter] ⚠️  Adaptive limiter không available: {e}, dùng delay cố định")
+            time.sleep(0.7)  # Fixed delay fallback
 
     try:
         driver.set_page_load_timeout(timeout)
@@ -340,7 +362,7 @@ def crawl_product_detail_with_driver(
 
         # Smart wait: Chờ page load với explicit wait
         try:
-            from src.pipelines.crawl.utils_selenium_wait import smart_wait_for_page_load
+            from .utils_selenium_wait import smart_wait_for_page_load
 
             smart_wait_for_page_load(driver, check_product_elements=True, timeout=5, verbose=verbose)
         except ImportError:
@@ -348,7 +370,7 @@ def crawl_product_detail_with_driver(
 
         # Optimized scrolling với smart waits
         try:
-            from src.pipelines.crawl.utils_selenium_wait import wait_after_scroll, wait_for_dynamic_content_loaded
+            from .utils_selenium_wait import wait_after_scroll, wait_for_dynamic_content_loaded
 
             driver.execute_script("window.scrollTo(0, 500);")
             wait_after_scroll(driver, timeout=1, verbose=verbose)
@@ -394,9 +416,32 @@ def crawl_product_detail_with_driver(
             except Exception:
                 pass
 
+        # Record success cho adaptive rate limiter
+        if adaptive_limiter:
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc or "tiki.vn"
+                adaptive_limiter.record_success(domain)
+            except Exception:
+                pass
+
         return full_html
 
     except Exception as e:
+        # Record error cho adaptive rate limiter
+        if adaptive_limiter:
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc or "tiki.vn"
+                error_type_str = None
+                if "429" in str(e) or "Too Many Requests" in str(e):
+                    error_type_str = "429"
+                elif "timeout" in str(e).lower() or "Timeout" in type(e).__name__:
+                    error_type_str = "timeout"
+                adaptive_limiter.record_error(domain, error_type=error_type_str)
+            except Exception:
+                pass
+
         if verbose:
             print(f"[Selenium] Lỗi khi crawl (reuse driver): {type(e).__name__}: {e}")
         return None
@@ -1087,7 +1132,7 @@ def extract_product_detail(
 
     # Final validation: ensure category_path is valid and has parent category at index 0
     try:
-        from src.pipelines.crawl.validate_category_path import validate_and_fix_category_path
+        from .validate_category_path import validate_and_fix_category_path
 
         category_url = product_data.get("category_url")
         category_path = product_data.get("category_path")
@@ -1156,7 +1201,7 @@ async def crawl_product_detail_async(
         import aiohttp
 
         # Tối ưu: TCPConnector với pool size lớn hơn (sử dụng config)
-        from src.pipelines.crawl.config import (
+        from .config import (
             HTTP_CONNECTOR_LIMIT,
             HTTP_CONNECTOR_LIMIT_PER_HOST,
             HTTP_DNS_CACHE_TTL,
