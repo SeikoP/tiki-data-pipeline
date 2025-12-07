@@ -13,6 +13,8 @@ import psycopg2
 from psycopg2.extras import Json, execute_values
 from psycopg2.pool import SimpleConnectionPool
 
+from src.pipelines.crawl.validate_category_path import fix_products_category_paths
+
 
 class PostgresStorage:
     """Class để lưu và truy vấn dữ liệu crawl từ PostgreSQL với connection pooling tối ưu"""
@@ -309,6 +311,13 @@ class PostgresStorage:
         """
         if not products:
             return {"saved_count": 0, "inserted_count": 0, "updated_count": 0} if upsert else 0
+
+        # Tự động fix category_path để đảm bảo parent category ở index 0
+        try:
+            products = fix_products_category_paths(products, hierarchy_map=None, auto_fix=True)
+        except Exception as e:
+            # Log nhưng không fail nếu fix có lỗi
+            print(f"⚠️  Warning: Could not auto-fix category_path: {e}")
 
         saved_count = 0
         inserted_count = 0

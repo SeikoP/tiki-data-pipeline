@@ -1040,29 +1040,37 @@ def extract_product_detail(
             if verbose:
                 print(f"[Warning] Error loading hierarchy map for auto-detect: {e}")
 
-    # Final validation: ensure category_path is a valid list
+    # Final validation: ensure category_path is valid and has parent category at index 0
     try:
-        if not isinstance(product_data.get("category_path"), list):
-            product_data["category_path"] = []
+        from src.pipelines.crawl.validate_category_path import validate_and_fix_category_path
 
-        # Ensure all items are strings
-        product_data["category_path"] = [
-            str(item).strip()
-            for item in product_data["category_path"]
-            if item and isinstance(item, (str, int, float))
-        ]
+        category_url = product_data.get("category_url")
+        category_path = product_data.get("category_path")
 
-        # Remove empty strings
-        product_data["category_path"] = [item for item in product_data["category_path"] if item]
-
-        # Final safety: ensure not exceeding max levels
-        if len(product_data["category_path"]) > 5:
-            product_data["category_path"] = product_data["category_path"][:5]
+        # Validate và fix category_path để đảm bảo parent category ở index 0
+        product_data["category_path"] = validate_and_fix_category_path(
+            category_path=category_path,
+            category_url=category_url,
+            hierarchy_map=hierarchy_map,
+            auto_fix=True,
+        )
 
     except Exception as e:
         if verbose:
             print(f"[Warning] Error validating category_path: {e}")
-        product_data["category_path"] = []
+        # Fallback: Đảm bảo ít nhất là một list hợp lệ
+        try:
+            if not isinstance(product_data.get("category_path"), list):
+                product_data["category_path"] = []
+            else:
+                # Basic cleanup
+                product_data["category_path"] = [
+                    str(item).strip()
+                    for item in product_data["category_path"]
+                    if item and isinstance(item, (str, int, float))
+                ]
+        except Exception:
+            product_data["category_path"] = []
 
     return product_data
 
