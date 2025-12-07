@@ -6,7 +6,7 @@ with open("data/raw/category_hierarchy_map.json", encoding="utf-8") as f:
     hierarchy = json.load(f)
 
 # Find one level 1 category and check its hierarchy
-for url, info in hierarchy.items():
+for info in hierarchy.values():
     if info.get("level") == 1:
         print("Level 1 Category:")
         print(f"  Name: {info['name']}")
@@ -23,7 +23,7 @@ for url, info in hierarchy.items():
 
 # Test finding a level 2 category
 print("\n" + "=" * 60)
-for url, info in hierarchy.items():
+for info in hierarchy.values():
     if info.get("level") == 2:
         print("Level 2 Category:")
         print(f"  Name: {info['name']}")

@@ -8,7 +8,9 @@
 
 | File | Mô Tả | Sử Dụng Khi |
 |------|--------|-----------|
-| `OPTIMIZATION_ROADMAP.md` | 📍 W0-W6 timeline + metrics | Cần biết kế hoạch |
+| `ROADMAP_TOI_UU_TOC_DO_CRAWL.md` | 🚀 **NEW** - Roadmap tối ưu tốc độ crawl (Tiếng Việt) | Tối ưu crawl speed |
+| `SYSTEM_OPTIMIZATION_ROADMAP.md` | 🚀 Roadmap tối ưu toàn bộ hệ thống (6 phases) | Planning & Execution |
+| `OPTIMIZATION_ROADMAP.md` | 📍 W0-W6 timeline + metrics (Performance) | Cần biết kế hoạch performance |
 | `OPTIMIZATION_VISUAL_GUIDE.md` | 📊 Diagrams & visualization | Muốn hình ảnh trực quan |
 | `OPTIMIZATION_COMPLETED.md` | ✅ Checklist applied | Verify status |
 | `README.md` | 📌 File này | Overview |
@@ -21,7 +23,9 @@
 
 | Mục Đích | Đọc File |
 |---------|----------|
-| Biết lộ trình tuần | `OPTIMIZATION_ROADMAP.md` |
+| **Tối ưu tốc độ crawl (Tiếng Việt)** | `ROADMAP_TOI_UU_TOC_DO_CRAWL.md` ⭐ NEW |
+| **Lập kế hoạch tối ưu toàn bộ hệ thống** | `SYSTEM_OPTIMIZATION_ROADMAP.md` |
+| Biết lộ trình performance (W0-W6) | `OPTIMIZATION_ROADMAP.md` |
 | Xem biểu đồ hiệu suất | `OPTIMIZATION_VISUAL_GUIDE.md` |
 | Verify completed tasks | `OPTIMIZATION_COMPLETED.md` |
 

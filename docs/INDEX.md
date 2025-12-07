@@ -87,7 +87,8 @@ docs/
 | **Tuning tham số DAG** | `PARAMETERS_QUICK_REFERENCE.md` | 01-PARAMETERS |
 | **Xem tất cả tham số** | `PARAMETERS_DETAILED.md` | 01-PARAMETERS |
 | **So sánh tham số** | `PARAMETERS_MATRIX.md` | 01-PARAMETERS |
-| **Hiểu tối ưu hóa** | `OPTIMIZATION_ROADMAP.md` | 02-OPTIMIZATION |
+| **Lập kế hoạch tối ưu toàn bộ** | `SYSTEM_OPTIMIZATION_ROADMAP.md` | 02-OPTIMIZATION |
+| **Hiểu tối ưu hóa performance** | `OPTIMIZATION_ROADMAP.md` | 02-OPTIMIZATION |
 | **Quick visual guide** | `OPTIMIZATION_VISUAL_GUIDE.md` | 02-OPTIMIZATION |
 | **🔥 Cache optimization** | `CACHE_HIT_RATE_FIX.md` | 05-PERFORMANCE |
 | **Hiểu kiến trúc DAG** | `DAG_DATA_FLOW_ANALYSIS.md` | 03-ARCHITECTURE |
@@ -155,7 +156,8 @@ docs/
 - **README.md**: Overview các tham số
 
 ### 02-OPTIMIZATION (Tối Ưu Hóa & Performance)
-- **OPTIMIZATION_ROADMAP.md**: Chi tiết W0-W6, hiệu năng từng tuần
+- **SYSTEM_OPTIMIZATION_ROADMAP.md**: 🚀 **NEW** - Roadmap tối ưu toàn bộ hệ thống (6 phases, 6 tháng)
+- **OPTIMIZATION_ROADMAP.md**: Chi tiết W0-W6, hiệu năng từng tuần (Performance)
 - **OPTIMIZATION_VISUAL_GUIDE.md**: Diagram, visual comparison, quick guide
 - **OPTIMIZATION_COMPLETED.md**: Tối ưu hoàn thành, checklist
 - **CRAWL_OPTIMIZATION_PLAN.md**: Plan chi tiết (historical)

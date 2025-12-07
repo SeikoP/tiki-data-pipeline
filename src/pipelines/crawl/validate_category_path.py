@@ -6,16 +6,14 @@ Vấn đề: Một số products có category_path mà danh mục level 1 đang 
 Giải pháp: Validate và tự động fix để đảm bảo parent category luôn ở index 0.
 """
 
-import json
 import logging
 from typing import Any
 
-from src.pipelines.crawl.build_category_hierarchy import get_parent_category_for_product
+from src.pipelines.crawl.config import MAX_CATEGORY_LEVELS
 from src.pipelines.crawl.crawl_products_detail import (
     get_parent_category_name,
     load_category_hierarchy,
 )
-from src.pipelines.crawl.config import MAX_CATEGORY_LEVELS
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +109,7 @@ def validate_and_fix_category_path(
         if len(fixed_path) > MAX_CATEGORY_LEVELS:
             fixed_path = fixed_path[:MAX_CATEGORY_LEVELS]
 
-        logger.debug(
-            f"Fixed category_path: {category_path[:3]}... -> {fixed_path[:3]}..."
-        )
+        logger.debug(f"Fixed category_path: {category_path[:3]}... -> {fixed_path[:3]}...")
         return fixed_path
 
     # Nếu không cần fix, chỉ đảm bảo không vượt quá MAX
@@ -192,4 +188,3 @@ def fix_products_category_paths(
         logger.info(f"Fixed category_path for {fixed_count}/{len(products)} products")
 
     return fixed_products
-

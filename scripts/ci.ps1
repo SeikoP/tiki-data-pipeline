@@ -220,7 +220,7 @@ function Invoke-DockerTest {
     
     Write-Host "`nTesting Airflow API..." -ForegroundColor Yellow
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:8080/api/v2/version" -UseBasicParsing -TimeoutSec 10
+        $null = Invoke-WebRequest -Uri "http://localhost:8080/api/v2/version" -UseBasicParsing -TimeoutSec 10
         Write-Host "✅ Airflow API is responding!" -ForegroundColor Green
     } catch {
         Write-Host "⚠️  Airflow API not ready yet" -ForegroundColor Yellow
