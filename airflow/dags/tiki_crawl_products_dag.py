@@ -5045,17 +5045,20 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
     return result
 
 
-def cleanup_old_backups(retention_count: int = 5) -> dict[str, Any]:
+def cleanup_old_backups(retention_count: int = 5, **context) -> dict[str, Any]:
     """
     Cleanup old backup files, keep only latest N backups
 
     Args:
         retention_count: Số lượng backups cần giữ lại (mặc định 5)
+        **context: Airflow context for logging
 
     Returns:
         Dict: Số file đã xóa
     """
     from pathlib import Path
+
+    logger = get_logger(context)
 
     backup_dir = Path("/opt/airflow/backups/postgres")
     if not backup_dir.exists():
@@ -5069,6 +5072,7 @@ def cleanup_old_backups(retention_count: int = 5) -> dict[str, Any]:
                 backup_dir = bd
                 break
         else:
+            logger.warning("No backup directory found, skipping cleanup")
             return {"status": "skipped", "reason": "No backup directory found"}
 
     # Find all backup files sorted by modification time
@@ -5083,9 +5087,9 @@ def cleanup_old_backups(retention_count: int = 5) -> dict[str, Any]:
                 file_size = backup_file.stat().st_size / (1024 * 1024)
                 backup_file.unlink()
                 deleted_count += 1
-                print(f"🗑️  Xóa backup cũ: {backup_file.name} ({file_size:.2f}MB)")
+                logger.info(f"🗑️  Xóa backup cũ: {backup_file.name} ({file_size:.2f}MB)")
             except Exception as e:
-                print(f"⚠️  Không xóa được {backup_file.name}: {e}")
+                logger.warning(f"⚠️  Không xóa được {backup_file.name}: {e}")
 
     return {
         "status": "success",
