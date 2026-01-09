@@ -69,45 +69,44 @@ except ImportError:
         )
         PostgresStorageClass = _PostgresStorage2  # type: ignore[assignment]
     except ImportError:
+        try:
+            # Ưu tiên 3: Relative import (nếu chạy như package)
+            from ...crawl.storage import PostgresStorage as _PostgresStorage3  # type: ignore[attr-defined]
+            PostgresStorageClass = _PostgresStorage3  # type: ignore[assignment]
         except ImportError:
+            # Ưu tiên 4: Dynamic import bằng importlib
             try:
-                # Ưu tiên 3: Relative import (nếu chạy như package)
-                from ...crawl.storage import PostgresStorage as _PostgresStorage3  # type: ignore[attr-defined]
-                PostgresStorageClass = _PostgresStorage3  # type: ignore[assignment]
-            except ImportError:
-                # Ưu tiên 4: Dynamic import bằng importlib
-                try:
-                    import importlib.util
-                    import os
+                import importlib.util
+                import os
 
-            # Tìm đường dẫn đến postgres_storage.py
-            # Lấy đường dẫn tuyệt đối của file hiện tại
-            current_file = Path(__file__).resolve()
+        # Tìm đường dẫn đến postgres_storage.py
+        # Lấy đường dẫn tuyệt đối của file hiện tại
+        current_file = Path(__file__).resolve()
 
-            # Tìm đường dẫn src (có thể là parent hoặc grandparent)
-            # loader.py ở: src/pipelines/load/loader.py
-            # postgres_storage.py ở: src/pipelines/crawl/storage/postgres_storage.py
-            possible_paths = [
-                # Từ /opt/airflow/src (Docker default - ưu tiên)
-                Path("/opt/airflow/src/pipelines/crawl/storage/postgres_storage.py"),
-                # Từ current file: loader.py -> pipelines -> crawl/storage/postgres_storage.py
-                current_file.parent.parent / "crawl" / "storage" / "postgres_storage.py",
-                # Từ current file lên 1 cấp nữa (trong trường hợp đặc biệt)
-                current_file.parent.parent.parent
-                / "pipelines"
-                / "crawl"
-                / "storage"
-                / "postgres_storage.py",
-                # Từ current working directory
-                Path(os.getcwd())
-                / "src"
-                / "pipelines"
-                / "crawl"
-                / "storage"
-                / "postgres_storage.py",
-                # Từ workspace root
-                Path("/workspace/src/pipelines/crawl/storage/postgres_storage.py"),
-            ]
+        # Tìm đường dẫn src (có thể là parent hoặc grandparent)
+        # loader.py ở: src/pipelines/load/loader.py
+        # postgres_storage.py ở: src/pipelines/crawl/storage/postgres_storage.py
+        possible_paths = [
+            # Từ /opt/airflow/src (Docker default - ưu tiên)
+            Path("/opt/airflow/src/pipelines/crawl/storage/postgres_storage.py"),
+            # Từ current file: loader.py -> pipelines -> crawl/storage/postgres_storage.py
+            current_file.parent.parent / "crawl" / "storage" / "postgres_storage.py",
+            # Từ current file lên 1 cấp nữa (trong trường hợp đặc biệt)
+            current_file.parent.parent.parent
+            / "pipelines"
+            / "crawl"
+            / "storage"
+            / "postgres_storage.py",
+            # Từ current working directory
+            Path(os.getcwd())
+            / "src"
+            / "pipelines"
+            / "crawl"
+            / "storage"
+            / "postgres_storage.py",
+            # Từ workspace root
+            Path("/workspace/src/pipelines/crawl/storage/postgres_storage.py"),
+        ]
 
             postgres_storage_path = None
             for path in possible_paths:

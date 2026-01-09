@@ -111,7 +111,9 @@ def crawl_product_detail_with_selenium(
         except Exception as e:
             # Fallback về fixed delay nếu adaptive limiter không available
             if verbose:
-                print(f"[Rate Limiter] ⚠️  Adaptive limiter không available: {e}, dùng delay cố định")
+                print(
+                    f"[Rate Limiter] ⚠️  Adaptive limiter không available: {e}, dùng delay cố định"
+                )
             time.sleep(0.7)  # Fixed delay fallback
 
     driver = None
@@ -147,7 +149,9 @@ def crawl_product_detail_with_selenium(
             except ImportError:
                 # Fallback về time.sleep nếu module chưa có
                 if verbose:
-                    print("[Selenium] ⚠️  Sử dụng time.sleep fallback (explicit waits không available)")
+                    print(
+                        "[Selenium] ⚠️  Sử dụng time.sleep fallback (explicit waits không available)"
+                    )
                 time.sleep(1)
 
             # Scroll để load các phần động - tối ưu với explicit waits
@@ -226,6 +230,7 @@ def crawl_product_detail_with_selenium(
             if adaptive_limiter:
                 try:
                     from urllib.parse import urlparse
+
                     domain = urlparse(url).netloc or "tiki.vn"
                     adaptive_limiter.record_success(domain)
                 except Exception:
@@ -242,6 +247,7 @@ def crawl_product_detail_with_selenium(
             if adaptive_limiter:
                 try:
                     from urllib.parse import urlparse
+
                     domain = urlparse(url).netloc or "tiki.vn"
                     # Detect error type
                     error_type_str = None
@@ -350,7 +356,9 @@ def crawl_product_detail_with_driver(
                 adaptive_limiter.wait(domain)
         except Exception as e:
             if verbose:
-                print(f"[Rate Limiter] ⚠️  Adaptive limiter không available: {e}, dùng delay cố định")
+                print(
+                    f"[Rate Limiter] ⚠️  Adaptive limiter không available: {e}, dùng delay cố định"
+                )
             time.sleep(0.7)  # Fixed delay fallback
 
     try:
@@ -364,7 +372,9 @@ def crawl_product_detail_with_driver(
         try:
             from .utils_selenium_wait import smart_wait_for_page_load
 
-            smart_wait_for_page_load(driver, check_product_elements=True, timeout=5, verbose=verbose)
+            smart_wait_for_page_load(
+                driver, check_product_elements=True, timeout=5, verbose=verbose
+            )
         except ImportError:
             time.sleep(1)  # Fallback
 
@@ -420,6 +430,7 @@ def crawl_product_detail_with_driver(
         if adaptive_limiter:
             try:
                 from urllib.parse import urlparse
+
                 domain = urlparse(url).netloc or "tiki.vn"
                 adaptive_limiter.record_success(domain)
             except Exception:
@@ -432,6 +443,7 @@ def crawl_product_detail_with_driver(
         if adaptive_limiter:
             try:
                 from urllib.parse import urlparse
+
                 domain = urlparse(url).netloc or "tiki.vn"
                 error_type_str = None
                 if "429" in str(e) or "Too Many Requests" in str(e):

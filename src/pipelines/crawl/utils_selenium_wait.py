@@ -46,9 +46,9 @@ def wait_for_product_page_loaded(driver: Any, timeout: int = 5, verbose: bool = 
         # Priority: Product name > Price > Rating
         selectors_to_check = [
             ('h1[data-view-id="pdp_product_name"]', "product name"),
-            ('h1.product-name', "product name (alt)"),
+            ("h1.product-name", "product name (alt)"),
             ('[data-view-id="pdp_product_price"]', "product price"),
-            ('.product-price__current-price', "product price (alt)"),
+            (".product-price__current-price", "product price (alt)"),
         ]
 
         for selector, element_name in selectors_to_check:
@@ -93,7 +93,7 @@ def wait_for_dynamic_content_loaded(driver: Any, timeout: int = 3, verbose: bool
             ('[class*="sales"]', "sales count"),
             ('[data-view-id*="sales"]', "sales count (data-view)"),
             ('[data-view-id="pdp_rating_score"]', "rating"),
-            ('.rating-score', "rating (alt)"),
+            (".rating-score", "rating (alt)"),
         ]
 
         for selector, element_name in selectors:
@@ -143,6 +143,7 @@ def wait_after_scroll(driver: Any, timeout: int = 2, verbose: bool = False) -> b
         # Optional: Wait thêm một chút để đảm bảo lazy-loaded content
         # Nhưng chỉ wait thêm 0.3s thay vì fixed 2s
         import time
+
         time.sleep(0.3)  # Minimal wait cho lazy content
 
         if verbose:
@@ -160,10 +161,7 @@ def wait_after_scroll(driver: Any, timeout: int = 2, verbose: bool = False) -> b
 
 
 def smart_wait_for_page_load(
-    driver: Any, 
-    check_product_elements: bool = True,
-    timeout: int = 5,
-    verbose: bool = False
+    driver: Any, check_product_elements: bool = True, timeout: int = 5, verbose: bool = False
 ) -> bool:
     """
     Smart wait: Combine multiple checks để đảm bảo page đã load
@@ -206,4 +204,3 @@ def smart_wait_for_page_load(
         if verbose:
             print(f"[Wait] ⚠️  Error khi wait page load: {e}")
         return False
-

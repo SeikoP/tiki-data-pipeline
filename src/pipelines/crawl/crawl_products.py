@@ -367,6 +367,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
             if adaptive_limiter:
                 try:
                     from urllib.parse import urlparse
+
                     domain = urlparse(url).netloc or "tiki.vn"
                     adaptive_limiter.record_success(domain)
                 except Exception:
@@ -378,6 +379,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
             if adaptive_limiter:
                 try:
                     from urllib.parse import urlparse
+
                     domain = urlparse(url).netloc or "tiki.vn"
                     error_type_str = None
                     if "429" in str(e) or "Too Many Requests" in str(e):
