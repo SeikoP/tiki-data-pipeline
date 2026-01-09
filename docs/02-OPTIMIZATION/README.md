@@ -8,7 +8,8 @@
 
 | File | Mô Tả | Sử Dụng Khi |
 |------|--------|-----------|
-| `ROADMAP_TOI_UU_TOC_DO_CRAWL.md` | 🚀 **NEW** - Roadmap tối ưu tốc độ crawl (Tiếng Việt) | Tối ưu crawl speed |
+| `TOI_UU_KHONG_CAN_HARDWARE.md` | ⚡ **NEW** - Tối ưu ngay không cần hardware (2-3x faster) | Bắt đầu tối ưu ngay |
+| `ROADMAP_TOI_UU_TOC_DO_CRAWL.md` | 🚀 Roadmap tối ưu tốc độ crawl (Tiếng Việt) | Tối ưu crawl speed |
 | `SYSTEM_OPTIMIZATION_ROADMAP.md` | 🚀 Roadmap tối ưu toàn bộ hệ thống (6 phases) | Planning & Execution |
 | `OPTIMIZATION_ROADMAP.md` | 📍 W0-W6 timeline + metrics (Performance) | Cần biết kế hoạch performance |
 | `OPTIMIZATION_VISUAL_GUIDE.md` | 📊 Diagrams & visualization | Muốn hình ảnh trực quan |
@@ -23,7 +24,8 @@
 
 | Mục Đích | Đọc File |
 |---------|----------|
-| **Tối ưu tốc độ crawl (Tiếng Việt)** | `ROADMAP_TOI_UU_TOC_DO_CRAWL.md` ⭐ NEW |
+| **Tối ưu ngay không cần hardware** | `TOI_UU_KHONG_CAN_HARDWARE.md` ⭐ NEW |
+| **Tối ưu tốc độ crawl (Tiếng Việt)** | `ROADMAP_TOI_UU_TOC_DO_CRAWL.md` |
 | **Lập kế hoạch tối ưu toàn bộ hệ thống** | `SYSTEM_OPTIMIZATION_ROADMAP.md` |
 | Biết lộ trình performance (W0-W6) | `OPTIMIZATION_ROADMAP.md` |
 | Xem biểu đồ hiệu suất | `OPTIMIZATION_VISUAL_GUIDE.md` |

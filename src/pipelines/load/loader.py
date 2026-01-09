@@ -41,97 +41,120 @@ def serialize_for_json(obj: Any) -> Any:
 
 
 # Import PostgresStorage từ crawl storage - runtime import
-try:
-    # Thử import từ __init__.py của storage module (relative import)
-    from ...crawl.storage import PostgresStorage as _PostgresStorage  # type: ignore[attr-defined]
+# Đảm bảo sys.path được cấu hình đúng trước khi import
+import sys
+from pathlib import Path
 
+# Thêm /opt/airflow/src vào sys.path nếu chưa có (cho Docker environment)
+src_paths = [
+    Path("/opt/airflow/src"),  # Docker default path
+    Path(__file__).parent.parent.parent,  # Từ loader.py lên src
+]
+
+for src_path in src_paths:
+    if src_path.exists() and str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+        break
+
+PostgresStorageClass = None
+try:
+    # Ưu tiên 1: Absolute import (sau khi đã thêm src vào path)
+    from pipelines.crawl.storage import PostgresStorage as _PostgresStorage  # type: ignore[attr-defined]
     PostgresStorageClass = _PostgresStorage  # type: ignore[assignment]
 except ImportError:
     try:
-        # Thử import trực tiếp từ file (relative import)
-        from ...crawl.storage.postgres_storage import (
+        # Ưu tiên 2: Absolute import từ file trực tiếp
+        from pipelines.crawl.storage.postgres_storage import (
             PostgresStorage as _PostgresStorage2,  # type: ignore[attr-defined]
         )
-
         PostgresStorageClass = _PostgresStorage2  # type: ignore[assignment]
     except ImportError:
         try:
-            import importlib.util
-            import os
-            import sys
-            from pathlib import Path
+            # Ưu tiên 3: Relative import (nếu chạy như package)
+            from ...crawl.storage import PostgresStorage as _PostgresStorage3  # type: ignore[attr-defined]
+            PostgresStorageClass = _PostgresStorage3  # type: ignore[assignment]
+        except ImportError:
+            # Ưu tiên 4: Dynamic import bằng importlib
+            try:
+                import importlib.util
+                import os
 
-            # Tìm đường dẫn đến postgres_storage.py
-            # Lấy đường dẫn tuyệt đối của file hiện tại
-            current_file = Path(__file__).resolve()
+                # Tìm đường dẫn đến postgres_storage.py
+                # Lấy đường dẫn tuyệt đối của file hiện tại
+                current_file = Path(__file__).resolve()
 
-            # Tìm đường dẫn src (có thể là parent hoặc grandparent)
-            # loader.py ở: src/pipelines/load/loader.py
-            # postgres_storage.py ở: src/pipelines/crawl/storage/postgres_storage.py
-            possible_paths = [
-                # Từ /opt/airflow/src (Docker default - ưu tiên)
-                Path("/opt/airflow/src/pipelines/crawl/storage/postgres_storage.py"),
-                # Từ current file: loader.py -> pipelines -> crawl/storage/postgres_storage.py
-                current_file.parent.parent / "crawl" / "storage" / "postgres_storage.py",
-                # Từ current file lên 1 cấp nữa (trong trường hợp đặc biệt)
-                current_file.parent.parent.parent
-                / "pipelines"
-                / "crawl"
-                / "storage"
-                / "postgres_storage.py",
-                # Từ current working directory
-                Path(os.getcwd())
-                / "src"
-                / "pipelines"
-                / "crawl"
-                / "storage"
-                / "postgres_storage.py",
-                # Từ workspace root
-                Path("/workspace/src/pipelines/crawl/storage/postgres_storage.py"),
-            ]
-
-            postgres_storage_path = None
-            for path in possible_paths:
-                test_path = Path(path) if isinstance(path, str) else path
-                if test_path.exists() and test_path.is_file():
-                    postgres_storage_path = test_path
-                    break
-
-            if postgres_storage_path:
-                # Sử dụng importlib để load trực tiếp từ file
-                spec = importlib.util.spec_from_file_location(
-                    "postgres_storage", postgres_storage_path
-                )
-                if spec and spec.loader:
-                    postgres_storage_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(postgres_storage_module)
-                    PostgresStorageClass = postgres_storage_module.PostgresStorage  # type: ignore[assignment]
-            else:
-                # Nếu không tìm thấy file, thử thêm src vào path và import absolute
+                # Tìm đường dẫn src (có thể là parent hoặc grandparent)
                 # loader.py ở: src/pipelines/load/loader.py
-                # src ở: current_file.parent.parent.parent
-                src_path = current_file.parent.parent.parent
-                if src_path.exists() and str(src_path) not in sys.path:
-                    sys.path.insert(0, str(src_path))
+                # postgres_storage.py ở: src/pipelines/crawl/storage/postgres_storage.py
+                possible_paths = [
+                    # Từ /opt/airflow/src (Docker default - ưu tiên)
+                    Path("/opt/airflow/src/pipelines/crawl/storage/postgres_storage.py"),
+                    # Từ current file: loader.py -> pipelines -> crawl/storage/postgres_storage.py
+                    current_file.parent.parent / "crawl" / "storage" / "postgres_storage.py",
+                    # Từ current file lên 1 cấp nữa (trong trường hợp đặc biệt)
+                    current_file.parent.parent.parent
+                    / "pipelines"
+                    / "crawl"
+                    / "storage"
+                    / "postgres_storage.py",
+                    # Từ current working directory
+                    Path(os.getcwd())
+                    / "src"
+                    / "pipelines"
+                    / "crawl"
+                    / "storage"
+                    / "postgres_storage.py",
+                    # Từ workspace root
+                    Path("/workspace/src/pipelines/crawl/storage/postgres_storage.py"),
+                ]
 
-                try:
-                    from pipelines.crawl.storage import (
-                        PostgresStorage as _PostgresStorage3,  # type: ignore[attr-defined]
+                postgres_storage_path = None
+                for path in possible_paths:
+                    test_path = Path(path) if isinstance(path, str) else path
+                    if test_path.exists() and test_path.is_file():
+                        postgres_storage_path = test_path
+                        break
+
+                if postgres_storage_path:
+                    # Sử dụng importlib để load trực tiếp từ file
+                    spec = importlib.util.spec_from_file_location(
+                        "postgres_storage", postgres_storage_path
                     )
+                    if spec and spec.loader:
+                        postgres_storage_module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(postgres_storage_module)
+                        PostgresStorageClass = postgres_storage_module.PostgresStorage  # type: ignore[assignment]
+                else:
+                    # Nếu không tìm thấy file, thử thêm src vào path và import absolute
+                    # loader.py ở: src/pipelines/load/loader.py
+                    # src ở: current_file.parent.parent.parent
+                    src_path = current_file.parent.parent.parent
+                    if src_path.exists() and str(src_path) not in sys.path:
+                        sys.path.insert(0, str(src_path))
 
-                    PostgresStorageClass = _PostgresStorage3  # type: ignore[assignment]
-                except ImportError:
-                    try:
-                        from pipelines.crawl.storage.postgres_storage import (
-                            PostgresStorage as _PostgresStorage4,  # type: ignore[attr-defined]
-                        )
+                        try:
+                            from pipelines.crawl.storage import (
+                                PostgresStorage as _PostgresStorage4,  # type: ignore[attr-defined]
+                            )
+                            PostgresStorageClass = _PostgresStorage4  # type: ignore[assignment]
+                        except ImportError:
+                            try:
+                                from pipelines.crawl.storage.postgres_storage import (
+                                    PostgresStorage as _PostgresStorage5,  # type: ignore[attr-defined]
+                                )
+                                PostgresStorageClass = _PostgresStorage5  # type: ignore[assignment]
+                            except ImportError:
+                                # Không thể import, sẽ dùng file-based loading
+                                PostgresStorageClass = None
+            except Exception:
+                # Nếu importlib fail, set None
+                PostgresStorageClass = None
 
-                        PostgresStorageClass = _PostgresStorage4  # type: ignore[assignment]
-                    except ImportError as e:
-                        raise ImportError("Không tìm thấy postgres_storage.py") from e
-        except Exception as e:
-            logger.warning(f"⚠️  Không thể import PostgresStorage: {e}. Chỉ hỗ trợ load từ file.")
-            PostgresStorageClass = None
+# Nếu vẫn không import được, log warning
+if PostgresStorageClass is None:
+    logger.warning(
+        "⚠️  Không thể import PostgresStorage. Chỉ hỗ trợ load từ file (không có database)."
+    )
 
 
 class DataLoader:

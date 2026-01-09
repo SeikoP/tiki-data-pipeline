@@ -17,6 +17,16 @@ def setup_optimization_variables():
     """Thiết lập các Airflow Variables để tối ưu crawl"""
 
     variables = {
+        # === DAG SCHEDULE MODE ===
+        "TIKI_DAG_SCHEDULE_MODE": "manual",  # 'manual' hoặc 'scheduled'
+        # === CIRCUIT BREAKER ===
+        "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD": "5",  # Số lỗi tối đa trước khi mở circuit
+        "TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT": "60",  # Thời gian chờ trước khi thử lại (giây)
+        # === GRACEFUL DEGRADATION ===
+        "TIKI_DEGRADATION_FAILURE_THRESHOLD": "3",  # Số lỗi để bắt đầu degradation
+        "TIKI_DEGRADATION_RECOVERY_THRESHOLD": "5",  # Số success để recovery
+        # === REDIS CONFIGURATION ===
+        "REDIS_URL": "redis://redis:6379/3",  # Redis URL cho DLQ và các services khác
         # === SELENIUM POOL OPTIMIZATION ===
         "TIKI_DETAIL_POOL_SIZE": "8",  # Tăng từ 5 → 8
         # === RATE LIMITING OPTIMIZATION ===
@@ -40,22 +50,42 @@ def setup_optimization_variables():
 
     print("🔧 Thiết lập Airflow Variables để tối ưu crawl...\n")
 
+    created = 0
+    updated = 0
+    errors = 0
+
     for key, value in variables.items():
         try:
-            Variable.set(key, value)
-            print(f"✅ {key} = {value}")
+            # Kiểm tra xem variable đã tồn tại chưa
+            try:
+                existing = Variable.get(key)
+                Variable.set(key, value)
+                if existing != value:
+                    print(f"🔄 {key} = {value} (đã cập nhật từ {existing})")
+                    updated += 1
+                else:
+                    print(f"✓ {key} = {value} (không đổi)")
+            except Exception:
+                # Variable chưa tồn tại, tạo mới
+                Variable.set(key, value)
+                print(f"✅ {key} = {value} (mới tạo)")
+                created += 1
         except Exception as e:
             print(f"❌ {key}: {e}")
+            errors += 1
 
-    print("\n📊 Tóm tắt thay đổi:")
+    print("\n📊 Tóm tắt:")
     print("=" * 60)
-    print("Selenium Pool Size:          5 → 8")
-    print("Rate Limit Delay:            1.5s → 0.7s")
-    print("Crawl Timeout:               180s → 120s")
-    print("Page Load Timeout:           60s → 35s")
-    print("Async Concurrency:           (new) 15 tasks")
-    print("HTTP Connector Limit:        (new) 50 connections")
+    print(f"✅ Đã tạo mới: {created} variables")
+    print(f"🔄 Đã cập nhật: {updated} variables")
+    if errors > 0:
+        print(f"❌ Lỗi: {errors} variables")
     print("=" * 60)
+    print("\n📋 Các Variables quan trọng:")
+    print("   - TIKI_DAG_SCHEDULE_MODE: 'manual' (test) hoặc 'scheduled' (production)")
+    print("   - TIKI_CIRCUIT_BREAKER_*: Circuit breaker configuration")
+    print("   - TIKI_DEGRADATION_*: Graceful degradation configuration")
+    print("   - REDIS_URL: Redis connection cho DLQ")
     print("\n💡 Expected Improvement:")
     print("   - Current:  ~300-500 products/hour")
     print("   - Target:   ~1000-1500 products/hour")
