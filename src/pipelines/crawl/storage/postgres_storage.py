@@ -300,11 +300,22 @@ class PostgresStorage:
         columns: list[str],
         csv_buffer: io.StringIO,
         conflict_key: str,
-        update_extra_clause: str = "",
+        update_cols: list[str] | None = None,
         do_nothing: bool = False,
     ) -> int:
-        """Helper generic để thực hiện bulk merge (COPY + INSERT ON CONFLICT) qua staging table."""
+        """Helper generic để thực hiện bulk merge (COPY + INSERT ON CONFLICT) qua staging table.
 
+        Args:
+            cur: Database cursor
+            target_table: Target table name
+            staging_table: Staging table name
+            columns: Column names to insert
+            csv_buffer: CSV data buffer
+            conflict_key: Primary key column for conflict detection
+            update_cols: List of column names to update on conflict.
+                        If None, all columns except conflict_key will be updated
+            do_nothing: If True, do nothing on conflict instead of update
+        """
         # 1. Tạo staging table
         cur.execute(
             sql.SQL(
@@ -339,6 +350,15 @@ class PostgresStorage:
                 conflict=sql.Identifier(conflict_key),
             )
         else:
+            # Build update clause safely using sql.Identifier
+            if not update_cols:
+                update_cols = [c for c in columns if c != conflict_key]
+
+            update_parts = sql.SQL(",").join(
+                sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(col))
+                for col in update_cols
+            )
+
             merge_query = sql.SQL(
                 """
                 INSERT INTO {target} ({cols})
@@ -351,7 +371,7 @@ class PostgresStorage:
                 staging=sql.Identifier(staging_table),
                 cols=col_names,
                 conflict=sql.Identifier(conflict_key),
-                update_clause=sql.SQL(update_extra_clause),
+                update_clause=update_parts,
             )
 
         cur.execute(merge_query)
@@ -424,21 +444,20 @@ class PostgresStorage:
 
         csv_buffer = self._write_dicts_to_csv_buffer(prepared_categories, columns)
 
-        update_clause = """
-            name = EXCLUDED.name,
-            category_id = EXCLUDED.category_id,
-            image_url = EXCLUDED.image_url,
-            parent_url = EXCLUDED.parent_url,
-            level = EXCLUDED.level,
-            category_path = EXCLUDED.category_path,
-            root_category_name = EXCLUDED.root_category_name,
-            is_leaf = EXCLUDED.is_leaf,
-            updated_at = CURRENT_TIMESTAMP
-        """
-
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 self._ensure_categories_schema(cur)
+                # Column names to update on conflict
+                update_columns = [
+                    "name",
+                    "category_id",
+                    "image_url",
+                    "parent_url",
+                    "level",
+                    "category_path",
+                    "root_category_name",
+                    "is_leaf",
+                ]
                 return self._bulk_merge_via_staging(
                     cur,
                     "categories",
@@ -446,7 +465,7 @@ class PostgresStorage:
                     columns,
                     csv_buffer,
                     "url",
-                    update_clause,
+                    update_cols=update_columns,
                 )
 
     def save_products(
@@ -942,8 +961,8 @@ class PostgresStorage:
                 self._ensure_products_schema(cur)
                 self._ensure_history_schema(cur)
 
-                update_cols = [f"{c} = EXCLUDED.{c}" for c in columns if c != "product_id"]
-                update_stmt = ",".join(update_cols)
+                # Column names to update on conflict (all except product_id)
+                update_columns = [c for c in columns if c != "product_id"]
 
                 saved_count = self._bulk_merge_via_staging(
                     cur,
@@ -952,7 +971,7 @@ class PostgresStorage:
                     columns,
                     csv_buffer,
                     "product_id",
-                    update_stmt,
+                    update_cols=update_columns,
                     do_nothing=not upsert,
                 )
 
