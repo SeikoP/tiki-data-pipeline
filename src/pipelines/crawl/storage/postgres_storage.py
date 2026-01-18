@@ -488,6 +488,7 @@ class PostgresStorage:
         items_count: int = 0,
         category_url: str | None = None,
         product_id: str | None = None,
+        price: float | None = None,
         error_message: str | None = None,
         started_at: datetime | None = None,
     ) -> int:
@@ -500,6 +501,7 @@ class PostgresStorage:
             items_count: Số items đã crawl
             category_url: URL category (nếu có)
             product_id: Product ID (nếu có)
+            price: Giá sản phẩm (nếu có) - để tracking lịch sử giá
             error_message: Thông báo lỗi (nếu có)
             started_at: Thời gian bắt đầu
 
@@ -511,9 +513,9 @@ class PostgresStorage:
                 cur.execute(
                     """
                     INSERT INTO crawl_history
-                        (crawl_type, status, items_count, category_url, product_id,
+                        (crawl_type, status, items_count, category_url, product_id, price,
                          error_message, started_at, completed_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                     RETURNING id
                     """,
                     (
@@ -522,6 +524,7 @@ class PostgresStorage:
                         items_count,
                         category_url,
                         product_id,
+                        price,
                         error_message,
                         started_at or datetime.now(),
                     ),

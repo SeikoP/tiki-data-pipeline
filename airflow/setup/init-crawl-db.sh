@@ -85,6 +85,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-pos
         crawl_type VARCHAR(50) NOT NULL, -- 'categories', 'products', 'product_detail'
         category_url TEXT,
         product_id VARCHAR(255),
+        price DECIMAL(12, 2), -- Track price history
         status VARCHAR(20) NOT NULL, -- 'success', 'failed', 'partial'
         items_count INTEGER DEFAULT 0,
         error_message TEXT,

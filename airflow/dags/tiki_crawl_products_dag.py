@@ -687,6 +687,39 @@ if analytics_path and os.path.exists(analytics_path):
 else:
     DataAggregator = None
 
+# Import load_categories function from pipelines/load/load_categories_to_db.py
+load_categories_db_func = None
+try:
+    # Try dynamic import since it's outside airflow/dags
+    src_path = Path("/opt/airflow/src")
+    if src_path.exists() and str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+        
+    try:
+        from pipelines.load.load_categories_to_db import load_categories as _load_categories_db
+        load_categories_db_func = _load_categories_db
+    except ImportError:
+       # Fallback to manual path import
+       load_db_path = None
+       for base in possible_paths:
+           p = Path(base).parent / "load" / "load_categories_to_db.py"
+           if p.exists():
+               load_db_path = p
+               break
+       
+       if load_db_path:
+           import importlib.util
+           spec = importlib.util.spec_from_file_location("load_categories_to_db_mod", str(load_db_path))
+           if spec and spec.loader:
+               mod = importlib.util.module_from_spec(spec)
+               spec.loader.exec_module(mod)
+               load_categories_db_func = getattr(mod, "load_categories", None)
+
+except Exception as e:
+    import warnings
+    warnings.warn(f"Could not import load_categories_to_db: {e}") 
+
+
 # Import AISummarizer từ common/ai/
 if ai_path and os.path.exists(ai_path):
     try:
@@ -864,6 +897,32 @@ def load_categories(**context) -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"❌ Lỗi khi load categories: {e}", exc_info=True)
         raise
+
+
+def load_categories_to_db_wrapper(**context):
+    """
+    Task wrapper to run load_categories_to_db
+    """
+    logger = get_logger(context)
+    if not load_categories_db_func:
+        logger.warning("⚠️  Function load_categories không khả dụng. Bỏ qua.")
+        return 0
+        
+    try:
+        json_file = str(CATEGORIES_FILE)
+        if not os.path.exists(json_file):
+            logger.error(f"❌ File categories không tồn tại: {json_file}")
+            return 0
+            
+        logger.info(f"🚀 Loading categories to DB from {json_file}")
+        # Call the imported function
+        load_categories_db_func(json_file)
+        logger.info("✅ Finished loading categories to DB")
+        return 1
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi load categories vào DB: {e}", exc_info=True)
+        # Không fail task này để tránh chặn luồng chính
+        return 0
 
 
 def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
@@ -5341,13 +5400,23 @@ with DAG(**DAG_CONFIG) as dag:
             else:
                 logger.warning(f"⚠️ File categories không tồn tại: {CATEGORIES_FILE}")
 
+            # Debug logging for lookup
+            if category_path_lookup:
+                 sample_keys = list(category_path_lookup.keys())[:5]
+                 logger.info(f"🔍 [DEBUG] Sample category_path_lookup keys: {sample_keys}")
+                 
+                 sample_product_ids = [p.get("category_id") for p in products[:5] if p.get("category_id")]
+                 logger.info(f"🔍 [DEBUG] Sample product category_ids: {sample_product_ids}")
+
             # Bước 3: Enrich category_path cho products
             enriched = 0
             without_category_id = 0
+            debug_missing_ids = set()
+            
             for p in products:
                 # Nếu product có category_id nhưng chưa có category_path
                 if p.get("category_id") and not p.get("category_path"):
-                    cat_id = p["category_id"]
+                    cat_id = str(p["category_id"]).strip()
 
                     # Tìm category_path từ lookup map
                     if cat_id in category_path_lookup:
@@ -5356,6 +5425,11 @@ with DAG(**DAG_CONFIG) as dag:
                     else:
                         # Log: category_id không tìm thấy trong file categories
                         without_category_id += 1
+                        if len(debug_missing_ids) < 10:
+                            debug_missing_ids.add(cat_id)
+            
+            if debug_missing_ids:
+                logger.warning(f"⚠️ [DEBUG] Sample missing IDs in lookup: {list(debug_missing_ids)}")
 
             # Bước 4: Report
             if enriched > 0:
@@ -5448,7 +5522,17 @@ with DAG(**DAG_CONFIG) as dag:
 
     # Dependencies giữa các TaskGroup
     # Load categories trước, sau đó prepare crawl kwargs
-    task_load_categories >> task_prepare
+    # Thêm task load categories to DB
+    task_load_categories_db = PythonOperator(
+        task_id="load_categories_to_db",
+        python_callable=load_categories_to_db_wrapper,
+        execution_timeout=timedelta(minutes=5),
+        pool="crawl_pool",
+    )
+    
+    # Flow update: Load JSON -> Load DB -> Prepare Batch -> Crawl...
+    task_load_categories >> task_load_categories_db >> task_prepare
+
 
     # Prepare crawl kwargs -> crawl category (dynamic mapping)
     task_prepare >> task_crawl_category

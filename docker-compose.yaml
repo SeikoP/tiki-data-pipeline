@@ -20,7 +20,7 @@ x-airflow-common:
     # LocalExecutor reads this config for Execution API (double underscore notation)
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
     # JWT secret for API authentication (must be same across all components)
-    AIRFLOW__API_AUTH__JWT_SECRET: "KQMWSIkoNlaDJoH9euhMRdimVZD5sZXkRf5RLcHXJiE="
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET}
 
     # === Local Executor Configuration (LITE MODE) ===
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
