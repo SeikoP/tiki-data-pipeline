@@ -33,17 +33,14 @@ from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 
 # Import Variable và TaskGroup với suppress warning
+# Use standard Airflow 2.x style imports to avoid SDK API issues
 try:
-    # Thử import từ airflow.sdk (Airflow 3.x)
-    from airflow.sdk import TaskGroup, Variable
-
-    _Variable = Variable  # Alias để dùng wrapper
+    from airflow.utils.task_group import TaskGroup
 except ImportError:
-    # Fallback: dùng airflow.models và airflow.utils.task_group (Airflow 2.x)
+    # Fallback: nếu không có TaskGroup, tạo dummy class hoặc dùng SDK
     try:
-        from airflow.utils.task_group import TaskGroup
+        from airflow.sdk import TaskGroup
     except ImportError:
-        # Nếu không có TaskGroup, tạo dummy class
         class TaskGroup:
             def __init__(self, *args, **kwargs):
                 pass
@@ -54,7 +51,7 @@ except ImportError:
             def __exit__(self, *args):
                 pass
 
-    from airflow.models import Variable as _Variable
+from airflow.models import Variable as _Variable
 
 # Try to import redis_cache for caching
 redis_cache = None
@@ -66,29 +63,15 @@ try:
     if src_path.exists() and str(src_path) not in sys.path:
         sys.path.insert(0, str(src_path))
 
-    try:
-        from pipelines.crawl.storage.redis_cache import get_redis_cache  # type: ignore
-
-        redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
-    except Exception as import_err:
-        warnings.warn(
-            f"⚠️  Import get_redis_cache failed: {import_err} -> trying dynamic import", stacklevel=2
-        )
-        # Dynamic import fallback
-        import importlib.util
-
-        rc_path = src_path / "pipelines" / "crawl" / "storage" / "redis_cache.py"
-        get_redis_cache = None  # type: ignore
-        if rc_path.exists():
-            spec = importlib.util.spec_from_file_location("redis_cache_dyn", rc_path)
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)  # type: ignore
-                get_redis_cache = getattr(mod, "get_redis_cache", None)  # type: ignore
-            if get_redis_cache:
-                redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
+    # try:
+    #     from pipelines.crawl.storage.redis_cache import get_redis_cache  # type: ignore
+    # 
+    #     # AVOID TOP LEVEL CONNECTION!
+    #     # redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
+    # except Exception as import_err:
+    #     pass
 except Exception as e:
-    warnings.warn(f"Redis cache initialization failed: {e}", stacklevel=2)
+    warnings.warn(f"Redis cache initialization skipped: {e}", stacklevel=2)
     redis_cache = None
 
 
@@ -509,7 +492,7 @@ DEFAULT_ARGS = {
     "depends_on_past": False,
     "email_on_failure": False,
     "email_on_retry": False,
-    "retries": 3,  # Retry 3 lần
+    "retries": 0,  # Disable retries (was 3) - SDK API issues with retries
     "retry_delay": timedelta(minutes=2),  # Delay 2 phút giữa các retry
     "retry_exponential_backoff": True,  # Exponential backoff
     "max_retry_delay": timedelta(minutes=10),
@@ -544,7 +527,7 @@ dag_schedule_config = dag_schedule
 dag_doc_md = "Crawl sản phẩm từ Tiki.vn với Dynamic Task Mapping và Selenium"
 
 DAG_CONFIG = {
-    "dag_id": "tiki_crawl_products",
+    "dag_id": "tiki_crawl_products_v2",
     "description": dag_description,
     "doc_md": dag_doc_md,
     "default_args": DEFAULT_ARGS,
@@ -835,13 +818,19 @@ def load_categories(**context) -> list[dict[str, Any]]:
         List[Dict]: Danh sách danh mục
     """
     logger = get_logger(context)
+    print("DEBUG: Task load_categories starting...")
+    import os
+    import json
+    
     logger.info("=" * 70)
-    logger.info("📖 TASK: Load Categories")
-    logger.info("=" * 70)
+    logger.info("📖 TASK: Load Categories (DEBUG RELOAD)")
+    # Force reload timestamp: 2026-01-18 14:13
+    print(f"DEBUG: CWD: {os.getcwd()}")
+    print(f"DEBUG: PYTHONPATH: {sys.path}")
 
     try:
         categories_file = str(CATEGORIES_FILE)
-        logger.info(f"Đang đọc file: {categories_file}")
+        print(f"DEBUG: Reading file {categories_file}")
 
         if not os.path.exists(categories_file):
             raise FileNotFoundError(f"Không tìm thấy file: {categories_file}")
@@ -1499,7 +1488,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Lấy cấu hình cho multi-day crawling
         # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
-            Variable.get("TIKI_PRODUCTS_PER_DAY", default="500")
+            Variable.get("TIKI_PRODUCTS_PER_DAY", default="50")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
             Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")

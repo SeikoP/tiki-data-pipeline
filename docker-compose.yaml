@@ -11,10 +11,17 @@ x-airflow-common:
   environment:
     &airflow-common-env
     TZ: Asia/Ho_Chi_Minh
-    PYTHONPATH: /opt/airflow:/opt/airflow/src:/opt/airflow/dags
-    
+    PYTHONPATH: "/opt/airflow:/opt/airflow/src:/opt/airflow/dags:/home/airflow/.local/lib/python3.12/site-packages"
+    # === Disable SDK task supervision to avoid execution API calls ===
+    AIRFLOW__CORE__TASK_RUNNER: "StandardTaskRunner"
+    AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES: ""
+
     # === Local Executor Configuration (LITE MODE) ===
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__DATABASE_ACCESS_ISOLATION: 'false'
+    AIRFLOW__CORE__PARALLELISM: 32
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 16
+    
     # Database Connection
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
     
@@ -24,6 +31,14 @@ x-airflow-common:
     
     # Standalone DAG Processor is False in LocalExecutor (Scheduler handles it)
     AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: 'false'
+    
+    # Increase timeouts for large DAGs
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 300
+    AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: 300
+    
+    # === Simple Auth Manager for Airflow 3.x ===
+    # Format: username:Admin (role can be Admin, Op, User, Viewer, Public)
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${_AIRFLOW_WWW_USER_USERNAME:-admin}:Admin
     
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0}
 
@@ -117,6 +132,7 @@ services:
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
+    hostname: airflow-scheduler
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
       interval: 30s
