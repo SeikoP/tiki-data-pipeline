@@ -57,7 +57,6 @@ except ImportError:
 redis_cache = None
 try:
     # Ensure src path in sys.path for package-style imports
-    from pathlib import Path
 
     src_path = Path("/opt/airflow/src")
     if src_path.exists() and str(src_path) not in sys.path:
@@ -96,7 +95,6 @@ def safe_import_attr(module_path: str, attr_name: str, fallback_paths: list[Any]
             return None
 
         import importlib.util
-        from pathlib import Path
 
         # Try fallback file paths
         for base in fallback_paths:
@@ -736,7 +734,7 @@ else:
 load_categories_db_func = safe_import_attr(
     "pipelines.load.load_categories_to_db",
     "load_categories",
-    fallback_paths=[Path(p).parent for p in possible_paths]
+    fallback_paths=[Path(p).parent.parent for p in possible_paths]
 )
 
 if not load_categories_db_func:

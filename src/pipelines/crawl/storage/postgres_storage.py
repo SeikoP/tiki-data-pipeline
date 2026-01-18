@@ -7,6 +7,7 @@ import csv
 import io
 import json
 import os
+import re
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -15,6 +16,7 @@ from typing import Any
 import psycopg2
 from psycopg2.extras import Json, execute_values
 from psycopg2.pool import SimpleConnectionPool
+from psycopg2 import sql
 
 from ..validate_category_path import fix_products_category_paths
 
@@ -294,7 +296,6 @@ class PostgresStorage:
         do_nothing: bool = False,
     ) -> int:
         """Helper generic để thực hiện bulk merge (COPY + INSERT ON CONFLICT) qua staging table."""
-        from psycopg2 import sql
 
         # 1. Tạo staging table
         cur.execute(sql.SQL("""
@@ -350,8 +351,6 @@ class PostgresStorage:
         """
         if not categories:
             return 0
-
-        import re
 
         # Build URL -> category lookup for path building
         url_to_cat = {cat.get("url"): cat for cat in categories}
@@ -653,11 +652,7 @@ class PostgresStorage:
                 "inserted_count": inserted_count,
                 "updated_count": updated_count,
             }
-        return {
-            "saved_count": saved_count,
-            "inserted_count": saved_count,
-            "updated_count": 0,
-        }
+        return saved_count
 
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
@@ -836,11 +831,6 @@ class PostgresStorage:
         if not products:
             return
 
-        from datetime import datetime
-        import io
-        import csv
-        import json
-
         history_buffer = io.StringIO()
         h_writer = csv.writer(history_buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         current_ts = datetime.now().isoformat()
@@ -901,8 +891,10 @@ class PostgresStorage:
                 except Exception as e:
                     print(f"⚠️  Failed to log bulk history: {e}")
 
-                return {
-                    "saved_count": saved_count,
-                    "inserted_count": saved_count, # Approx
-                    "updated_count": 0
-                }
+                if upsert:
+                    return {
+                        "saved_count": saved_count,
+                        "inserted_count": saved_count,  # Approx
+                        "updated_count": 0,
+                    }
+                return saved_count
