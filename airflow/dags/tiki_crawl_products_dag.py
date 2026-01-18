@@ -4030,7 +4030,7 @@ def load_products(**context) -> dict[str, Any]:
                 database=db_name,
                 user=db_user,
                 password=db_password,
-                batch_size=100,
+                batch_size=int(Variable.get("TIKI_SAVE_BATCH_SIZE", default_var=2000)),
                 enable_db=True,
             )
 

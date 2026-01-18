@@ -8,6 +8,9 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
+import io
+import csv
+import json
 
 import psycopg2
 from psycopg2.extras import Json, execute_values
@@ -319,6 +322,14 @@ class PostgresStorage:
             # Log nhưng không fail nếu fix có lỗi
             print(f"⚠️  Warning: Could not auto-fix category_path: {e}")
 
+        # Tối ưu: Sử dụng Bulk COPY cho batch lớn (>200 items)
+        if len(products) >= 200:
+            try:
+                return self._save_products_bulk_copy(products, upsert)
+            except Exception as e:
+                print(f"⚠️  Bulk COPY process failed: {e}. Falling back to standard batch insert.")
+                # Fallback to standard flow below
+
         saved_count = 0
         inserted_count = 0
         updated_count = 0
@@ -616,3 +627,95 @@ class PostgresStorage:
             self._pool.closeall()
             self._pool = None
             self._pool_stats["active_connections"] = 0
+
+    def _save_products_bulk_copy(
+        self, products: list[dict[str, Any]], upsert: bool
+    ) -> dict[str, Any]:
+        """
+        Thực hiện Bulk Load sử dụng COPY protocol và Temporary Table.
+        Nhanh hơn 10-50x so với insert từng dòng.
+        """
+        if not products:
+            return {"saved_count": 0, "inserted_count": 0, "updated_count": 0}
+
+        # Định nghĩa danh sách cột cần insert (khớp với bảng DB)
+        columns = [
+            "product_id", "name", "url", "image_url", "category_url", "category_id", "category_path",
+            "sales_count", "price", "original_price", "discount_percent", "rating_average",
+            "review_count", "description", "specifications", "images",
+            "seller_name", "seller_id", "seller_is_official", "brand",
+            "stock_available", "stock_quantity", "stock_status", "shipping",
+            "estimated_revenue", "price_savings", "price_category", "popularity_score",
+            "value_score", "discount_amount", "sales_velocity"
+        ]
+
+        # Prepare CSV/TSV data in memory
+        csv_buffer = io.StringIO()
+        # Sử dụng Tab delimiter để tránh conflict với dấu phẩy trong text
+        writer = csv.writer(csv_buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+
+        for p in products:
+            row = []
+            for col in columns:
+                val = p.get(col)
+                if val is None:
+                    row.append("")  # Empty string for NULL in COPY CSV format
+                elif isinstance(val, (dict, list)):
+                    try:
+                        row.append(json.dumps(val, ensure_ascii=False))
+                    except Exception:
+                        row.append("{}")
+                else:
+                    row.append(val)
+            writer.writerow(row)
+
+        csv_buffer.seek(0)
+
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                # 1. Tạo Staging Table (Unlogged for speed)
+                cur.execute("""
+                    CREATE TEMP TABLE IF NOT EXISTS products_staging (
+                        LIKE products INCLUDING DEFAULTS
+                    ) ON COMMIT DROP;
+                    TRUNCATE products_staging;
+                """)
+
+                # 2. Bulk Copy vào Staging
+                # Sử dụng copy_expert để linh hoạt format
+                cur.copy_expert(
+                    f"COPY products_staging ({','.join(columns)}) FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')",
+                    csv_buffer
+                )
+
+                # 3. Merge (Upsert) từ Staging vào Target
+                saved_count = 0
+                if upsert:
+                    # Construct UPDATE SET clause dynamically
+                    update_cols = [f"{c} = EXCLUDED.{c}" for c in columns if c != "product_id"]
+                    update_stmt = ",".join(update_cols)
+
+                    sql = f"""
+                        INSERT INTO products ({','.join(columns)})
+                        SELECT {','.join(columns)} FROM products_staging
+                        ON CONFLICT (product_id) DO UPDATE SET
+                            {update_stmt},
+                            updated_at = CURRENT_TIMESTAMP;
+                    """
+                    cur.execute(sql)
+                    saved_count = cur.rowcount
+                else:
+                    cur.execute(f"""
+                        INSERT INTO products ({','.join(columns)})
+                        SELECT {','.join(columns)} FROM products_staging
+                        ON CONFLICT (product_id) DO NOTHING;
+                    """)
+                    saved_count = cur.rowcount
+
+                # Note: Với Bulk Merge, ta không phân biệt chính xác insert/update count
+                # Return approximate stats
+                return {
+                    "saved_count": saved_count,
+                    "inserted_count": saved_count, # Estimate
+                    "updated_count": 0
+                }
