@@ -97,8 +97,9 @@ def crawl_product_detail_with_selenium(
     adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
             from urllib.parse import urlparse
+
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
 
             adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
             if adaptive_limiter:
@@ -343,8 +344,9 @@ def crawl_product_detail_with_driver(
     adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
             from urllib.parse import urlparse
+
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
 
             adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
             if adaptive_limiter:

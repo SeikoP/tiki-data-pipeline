@@ -4,6 +4,7 @@ Load pipeline để load dữ liệu đã transform vào database
 
 import json
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,11 +41,6 @@ def serialize_for_json(obj: Any) -> Any:
         return obj
 
 
-# Import PostgresStorage từ crawl storage - runtime import
-# Đảm bảo sys.path được cấu hình đúng trước khi import
-import sys
-from pathlib import Path
-
 # Thêm /opt/airflow/src vào sys.path nếu chưa có (cho Docker environment)
 src_paths = [
     Path("/opt/airflow/src"),  # Docker default path
@@ -59,7 +55,10 @@ for src_path in src_paths:
 PostgresStorageClass = None
 try:
     # Ưu tiên 1: Absolute import (sau khi đã thêm src vào path)
-    from pipelines.crawl.storage import PostgresStorage as _PostgresStorage  # type: ignore[attr-defined]
+    from pipelines.crawl.storage import (
+        PostgresStorage as _PostgresStorage,  # type: ignore[attr-defined]
+    )
+
     PostgresStorageClass = _PostgresStorage  # type: ignore[assignment]
 except ImportError:
     try:
@@ -67,14 +66,17 @@ except ImportError:
         from pipelines.crawl.storage.postgres_storage import (
             PostgresStorage as _PostgresStorage2,  # type: ignore[attr-defined]
         )
+
         PostgresStorageClass = _PostgresStorage2  # type: ignore[assignment]
     except ImportError:
         try:
             # Ưu tiên 3: Relative import (nếu chạy như package)
-            from ...crawl.storage import PostgresStorage as _PostgresStorage3  # type: ignore[attr-defined]
+            from ...crawl.storage import (
+                PostgresStorage as _PostgresStorage3,  # type: ignore[attr-defined]
+            )
+
             PostgresStorageClass = _PostgresStorage3  # type: ignore[assignment]
         except ImportError:
-            # Ưu tiên 4: Dynamic import bằng importlib
             try:
                 import importlib.util
                 import os
@@ -136,12 +138,14 @@ except ImportError:
                             from pipelines.crawl.storage import (
                                 PostgresStorage as _PostgresStorage4,  # type: ignore[attr-defined]
                             )
+
                             PostgresStorageClass = _PostgresStorage4  # type: ignore[assignment]
                         except ImportError:
                             try:
                                 from pipelines.crawl.storage.postgres_storage import (
                                     PostgresStorage as _PostgresStorage5,  # type: ignore[attr-defined]
                                 )
+
                                 PostgresStorageClass = _PostgresStorage5  # type: ignore[assignment]
                             except ImportError:
                                 # Không thể import, sẽ dùng file-based loading
@@ -440,7 +444,9 @@ class DataLoader:
 
         # Load vào database
         if self.enable_db and self.db_storage:
-            logger.info("ℹ️ Skip saving categories to DB (Table 'categories' removed). Only saving to file.")
+            logger.info(
+                "ℹ️ Skip saving categories to DB (Table 'categories' removed). Only saving to file."
+            )
             # Database load logic removed as requested
 
         # Load vào file nếu cần

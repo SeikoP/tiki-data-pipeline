@@ -42,6 +42,7 @@ except ImportError:
     try:
         from airflow.sdk import TaskGroup
     except ImportError:
+
         class TaskGroup:
             def __init__(self, *args, **kwargs):
                 pass
@@ -77,12 +78,12 @@ except Exception as e:
 def safe_import_attr(module_path: str, attr_name: str, fallback_paths: list[Any] | None = None):
     """
     Import an attribute from a module with optional fallback file paths.
-    
+
     Args:
         module_path: Dot-separated path to the module (e.g., 'pipelines.load.module')
         attr_name: Name of the attribute to import (e.g., 'load_categories')
         fallback_paths: List of directory paths to check for the .py file if standard import fails
-        
+
     Returns:
         The imported attribute or None if not found
     """
@@ -101,7 +102,7 @@ def safe_import_attr(module_path: str, attr_name: str, fallback_paths: list[Any]
             # Convert module path to file path
             rel_file_path = module_path.replace(".", "/") + ".py"
             p = Path(base) / rel_file_path
-            
+
             if p.exists():
                 spec = importlib.util.spec_from_file_location(module_path, str(p))
                 if spec and spec.loader:
@@ -734,15 +735,19 @@ else:
 load_categories_db_func = safe_import_attr(
     "pipelines.load.load_categories_to_db",
     "load_categories",
-    fallback_paths=[Path(p).parent.parent for p in possible_paths]
+    fallback_paths=[Path(p).parent.parent for p in possible_paths],
 )
 
 if not load_categories_db_func:
     warnings.warn("load_categories_to_db not available; DB load will be skipped", stacklevel=2)
 
 # Global debug flags controlled via Airflow Variables
-DEBUG_LOAD_CATEGORIES = get_variable("TIKI_DEBUG_LOAD_CATEGORIES", default="false").lower() == "true"
-DEBUG_ENRICH_CATEGORY_PATH = get_variable("TIKI_DEBUG_ENRICH_CATEGORY_PATH", default="false").lower() == "true"
+DEBUG_LOAD_CATEGORIES = (
+    get_variable("TIKI_DEBUG_LOAD_CATEGORIES", default="false").lower() == "true"
+)
+DEBUG_ENRICH_CATEGORY_PATH = (
+    get_variable("TIKI_DEBUG_ENRICH_CATEGORY_PATH", default="false").lower() == "true"
+)
 
 
 # Import AISummarizer từ common/ai/
@@ -878,7 +883,7 @@ def load_categories(**context) -> list[dict[str, Any]]:
 
     logger.info("=" * 70)
     logger.info("📖 TASK: Load Categories")
-    
+
     if DEBUG_LOAD_CATEGORIES:
         logger.debug(f"DEBUG: CWD: {os.getcwd()}")
         logger.debug(f"DEBUG: PYTHONPATH: {sys.path}")
@@ -943,7 +948,7 @@ def load_categories_to_db_wrapper(**context):
 
         logger.info(f"🚀 Loading categories to DB from {json_file}")
         load_categories_db_func(json_file)
-        
+
         return {"status": "success"}
 
     except Exception as e:
@@ -2916,6 +2921,7 @@ def merge_product_details(**context) -> dict[str, Any]:
         # Lấy batch size từ config
         try:
             from pipelines.crawl.config import PRODUCT_BATCH_SIZE
+
             batch_size = PRODUCT_BATCH_SIZE
         except Exception:
             batch_size = 12  # Default fallback
@@ -4643,8 +4649,6 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
         return result
 
 
-
-
 def cleanup_redis_cache(**context) -> dict[str, Any]:
     """
     Task: Cleanup Redis cache
@@ -4772,8 +4776,6 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
 
     logger.info("=" * 70)
     return result
-
-
 
 
 def backup_database(**context) -> dict[str, Any]:
@@ -4936,8 +4938,6 @@ def backup_database(**context) -> dict[str, Any]:
         logger.error(f"❌ Lỗi trong backup_database task: {e}", exc_info=True)
         # Không fail task, chỉ log lỗi
         return {"status": "failed", "error": str(e)}
-
-
 
 
 # Tạo DAG duy nhất với schedule có thể config qua Variable
@@ -5280,6 +5280,7 @@ with DAG(**DAG_CONFIG) as dag:
             # Lấy batch size từ config hoặc tính dynamic
             try:
                 from pipelines.crawl.config import PRODUCT_BATCH_SIZE
+
                 base_batch_size = PRODUCT_BATCH_SIZE
             except Exception:
                 base_batch_size = 12  # Default fallback
@@ -5426,11 +5427,13 @@ with DAG(**DAG_CONFIG) as dag:
 
             # Debug logging for lookup
             if DEBUG_ENRICH_CATEGORY_PATH and category_path_lookup:
-                 sample_keys = list(category_path_lookup.keys())[:5]
-                 logger.debug(f"🔍 [DEBUG] Sample category_path_lookup keys: {sample_keys}")
- 
-                 sample_product_ids = [p.get("category_id") for p in products[:5] if p.get("category_id")]
-                 logger.debug(f"🔍 [DEBUG] Sample product category_ids: {sample_product_ids}")
+                sample_keys = list(category_path_lookup.keys())[:5]
+                logger.debug(f"🔍 [DEBUG] Sample category_path_lookup keys: {sample_keys}")
+
+                sample_product_ids = [
+                    p.get("category_id") for p in products[:5] if p.get("category_id")
+                ]
+                logger.debug(f"🔍 [DEBUG] Sample product category_ids: {sample_product_ids}")
 
             # Bước 3: Enrich category_path cho products
             enriched = 0
@@ -5523,7 +5526,6 @@ with DAG(**DAG_CONFIG) as dag:
             trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
         )
 
-
         # Cleanup Cache task (no TaskGroup to allow direct reference)
         task_cleanup_cache = PythonOperator(
             task_id="cleanup_redis_cache",
@@ -5556,7 +5558,6 @@ with DAG(**DAG_CONFIG) as dag:
 
     # Flow update: Load JSON -> Load DB -> Prepare Batch -> Crawl...
     task_load_categories >> task_load_categories_db >> task_prepare
-
 
     # Prepare crawl kwargs -> crawl category (dynamic mapping)
     task_prepare >> task_crawl_category

@@ -10,10 +10,10 @@ Tác dụng:
 from typing import Any
 
 try:
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.common.by import By
     from selenium.common.exceptions import TimeoutException
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.support.ui import WebDriverWait
 
     SELENIUM_AVAILABLE = True
 except ImportError:
@@ -147,7 +147,7 @@ def wait_after_scroll(driver: Any, timeout: int = 2, verbose: bool = False) -> b
         time.sleep(0.3)  # Minimal wait cho lazy content
 
         if verbose:
-            print(f"[Wait] ✅ Page ready sau scroll")
+            print("[Wait] ✅ Page ready sau scroll")
         return True
 
     except TimeoutException:
