@@ -1,18 +1,32 @@
 #!/bin/bash
 set -e
 
-echo "Creating crawl_data database for crawled products and categories..."
+# Use POSTGRES_DB from environment (defaults to 'tiki' from .env)
+CRAWL_DB="${POSTGRES_DB:-tiki}"
 
-# Sử dụng database mặc định (postgres) hoặc POSTGRES_DB nếu được set
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-postgres}" <<-EOSQL
-    -- Tạo database cho dữ liệu crawl
-    CREATE DATABASE crawl_data;
-    GRANT ALL PRIVILEGES ON DATABASE crawl_data TO $POSTGRES_USER;
+echo "Setting up crawl tables in database: $CRAWL_DB"
+
+# Connect to default database to create the crawl database if different from postgres
+if [ "$CRAWL_DB" != "postgres" ]; then
+    DB_EXISTS=$(psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" -tAc "SELECT 1 FROM pg_database WHERE datname='$CRAWL_DB'" 2>/dev/null || echo "")
     
-    -- Kết nối vào database crawl_data để tạo schema
-    \c crawl_data
-    
-    -- Bảng categories
+    if [ -z "$DB_EXISTS" ]; then
+        echo "Creating database $CRAWL_DB..."
+        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
+            CREATE DATABASE $CRAWL_DB;
+            GRANT ALL PRIVILEGES ON DATABASE $CRAWL_DB TO $POSTGRES_USER;
+EOSQL
+    else
+        echo "Database $CRAWL_DB already exists."
+    fi
+fi
+
+# Create tables in the crawl database
+echo "Creating tables in $CRAWL_DB..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQL
+    -- =====================================================
+    -- BẢNG CATEGORIES
+    -- =====================================================
     CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,
         category_id VARCHAR(255) UNIQUE,
@@ -21,16 +35,26 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-pos
         image_url TEXT,
         parent_url TEXT,
         level INTEGER,
+        -- NEW: Full path hierarchy as JSONB array
+        category_path JSONB,
+        -- NEW: Root category name for easy grouping
+        root_category_name VARCHAR(255),
+        -- NEW: Is this the deepest category (no children)
+        is_leaf BOOLEAN DEFAULT FALSE,
         product_count INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     
-    CREATE INDEX idx_categories_url ON categories(url);
-    CREATE INDEX idx_categories_parent_url ON categories(parent_url);
-    CREATE INDEX idx_categories_level ON categories(level);
+    CREATE INDEX IF NOT EXISTS idx_categories_url ON categories(url);
+    CREATE INDEX IF NOT EXISTS idx_categories_parent_url ON categories(parent_url);
+    CREATE INDEX IF NOT EXISTS idx_categories_level ON categories(level);
+    CREATE INDEX IF NOT EXISTS idx_categories_path ON categories USING GIN (category_path);
+    CREATE INDEX IF NOT EXISTS idx_categories_is_leaf ON categories(is_leaf);
     
-    -- Bảng products
+    -- =====================================================
+    -- BẢNG PRODUCTS
+    -- =====================================================
     CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
         product_id VARCHAR(255) UNIQUE NOT NULL,
@@ -49,17 +73,14 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-pos
         description TEXT,
         specifications JSONB,
         images JSONB,
-        -- Seller fields
         seller_name VARCHAR(500),
         seller_id VARCHAR(255),
         seller_is_official BOOLEAN DEFAULT FALSE,
-        -- Brand and stock fields
         brand VARCHAR(255),
         stock_available BOOLEAN,
         stock_quantity INTEGER,
         stock_status VARCHAR(50),
         shipping JSONB,
-        -- Computed fields
         estimated_revenue DECIMAL(15, 2),
         price_savings DECIMAL(12, 2),
         price_category VARCHAR(50),
@@ -67,35 +88,36 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-pos
         value_score DECIMAL(10, 2),
         discount_amount DECIMAL(12, 2),
         sales_velocity INTEGER,
-        -- Timestamps
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     
-    CREATE INDEX idx_products_product_id ON products(product_id);
-    CREATE INDEX idx_products_category_url ON products(category_url);
-    CREATE INDEX idx_products_category_id ON products(category_id);
-    CREATE INDEX idx_products_category_path ON products USING GIN (category_path);
-    CREATE INDEX idx_products_sales_count ON products(sales_count);
-    CREATE INDEX idx_products_crawled_at ON products(crawled_at);
+    CREATE INDEX IF NOT EXISTS idx_products_product_id ON products(product_id);
+    CREATE INDEX IF NOT EXISTS idx_products_category_url ON products(category_url);
+    CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
+    CREATE INDEX IF NOT EXISTS idx_products_category_path ON products USING GIN (category_path);
+    CREATE INDEX IF NOT EXISTS idx_products_sales_count ON products(sales_count);
+    CREATE INDEX IF NOT EXISTS idx_products_crawled_at ON products(crawled_at);
     
-    -- Bảng crawl_history để track lịch sử crawl
+    -- =====================================================
+    -- BẢNG CRAWL_HISTORY (Price Tracking Only)
+    -- =====================================================
     CREATE TABLE IF NOT EXISTS crawl_history (
         id SERIAL PRIMARY KEY,
-        crawl_type VARCHAR(50) NOT NULL, -- 'categories', 'products', 'product_detail'
-        category_url TEXT,
-        product_id VARCHAR(255),
-        status VARCHAR(20) NOT NULL, -- 'success', 'failed', 'partial'
-        items_count INTEGER DEFAULT 0,
-        error_message TEXT,
-        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        completed_at TIMESTAMP
+        product_id VARCHAR(255) NOT NULL,
+        price DECIMAL(12, 2),
+        -- NEW: Price change compared to previous crawl
+        price_change DECIMAL(12, 2),
+        crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     
-    CREATE INDEX idx_crawl_history_type ON crawl_history(crawl_type);
-    CREATE INDEX idx_crawl_history_started_at ON crawl_history(started_at);
+    CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
+    CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
+    CREATE INDEX IF NOT EXISTS idx_history_product_price ON crawl_history(product_id, crawled_at, price);
     
-    -- Function để tự động update updated_at
+    -- =====================================================
+    -- TRIGGERS
+    -- =====================================================
     CREATE OR REPLACE FUNCTION update_updated_at_column()
     RETURNS TRIGGER AS \$\$
     BEGIN
@@ -104,14 +126,12 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-pos
     END;
     \$\$ language 'plpgsql';
     
-    -- Trigger để tự động update updated_at cho products
     DROP TRIGGER IF EXISTS update_products_updated_at ON products;
     CREATE TRIGGER update_products_updated_at
         BEFORE UPDATE ON products
         FOR EACH ROW
         EXECUTE FUNCTION update_updated_at_column();
     
-    -- Trigger để tự động update updated_at cho categories
     DROP TRIGGER IF EXISTS update_categories_updated_at ON categories;
     CREATE TRIGGER update_categories_updated_at
         BEFORE UPDATE ON categories
@@ -122,5 +142,4 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-pos
     GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $POSTGRES_USER;
 EOSQL
 
-echo "Crawl data database and schema created successfully!"
-
+echo "✅ Database $CRAWL_DB setup completed!"

@@ -173,12 +173,11 @@ def crawl_product_detail_with_selenium(
                 wait_for_dynamic_content_loaded(driver, timeout=2, verbose=verbose)
             except ImportError:
                 # Fallback về time.sleep nếu module chưa có
-                driver.execute_script("window.scrollTo(0, 500);")
-                time.sleep(0.5)
-                driver.execute_script("window.scrollTo(0, 1500);")
-                time.sleep(0.5)
+                # Tối ưu: Scroll nhanh hơn, giảm wait time
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                time.sleep(0.1)
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
+                time.sleep(0.5)  # Giảm từ 2s -> 0.5s
             except Exception as scroll_error:
                 if verbose:
                     print(f"[Selenium] Warning: Lỗi khi scroll: {scroll_error}")
