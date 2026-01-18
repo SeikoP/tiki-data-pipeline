@@ -65,7 +65,7 @@ airflow variables set TIKI_DEGRADATION_RECOVERY_THRESHOLD "5" 2>/dev/null || tru
 # Database configuration (use environment variables as default)
 airflow variables set POSTGRES_HOST "${POSTGRES_HOST:-postgres}" 2>/dev/null || true
 airflow variables set POSTGRES_PORT "${POSTGRES_PORT:-5432}" 2>/dev/null || true
-airflow variables set POSTGRES_DB "crawl_data" 2>/dev/null || true
+airflow variables set POSTGRES_DB "${POSTGRES_DB:-tiki}" 2>/dev/null || true
 airflow variables set POSTGRES_USER "${POSTGRES_USER:-airflow_user}" 2>/dev/null || true
 # Note: Password should be set via Airflow UI or encrypted connection for security
 

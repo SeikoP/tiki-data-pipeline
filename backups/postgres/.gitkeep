@@ -1,4 +1,0 @@
-# Thư mục này chứa PostgreSQL backup files
-# Được mount từ Docker container
-# Backup files sẽ được tạo tự động hoặc thủ công
-

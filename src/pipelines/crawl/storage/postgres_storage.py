@@ -26,7 +26,7 @@ class PostgresStorage:
         self,
         host: str | None = None,
         port: int = 5432,
-        database: str = "crawl_data",
+        database: str | None = None,
         user: str | None = None,
         password: str | None = None,
         minconn: int = 2,
@@ -42,7 +42,7 @@ class PostgresStorage:
         Args:
             host: PostgreSQL host (mặc định: lấy từ env hoặc 'postgres')
             port: PostgreSQL port (mặc định: 5432)
-            database: Database name (mặc định: 'crawl_data')
+            database: Database name (mặc định: lấy từ POSTGRES_DB env hoặc 'tiki')
             user: PostgreSQL user (mặc định: lấy từ env)
             password: PostgreSQL password (mặc định: lấy từ env)
             minconn: Số connection tối thiểu trong pool (mặc định: 2)
@@ -54,7 +54,7 @@ class PostgresStorage:
         """
         self.host = host or os.getenv("POSTGRES_HOST", "postgres")
         self.port = port
-        self.database = database
+        self.database = database or os.getenv("POSTGRES_DB", "tiki")
         self.user = user or os.getenv("POSTGRES_USER", "airflow_user")
         self.password = password or os.getenv("POSTGRES_PASSWORD", "")
         self.minconn = minconn
@@ -174,85 +174,111 @@ class PostgresStorage:
 
     def save_categories(self, categories: list[dict[str, Any]]) -> int:
         """
-        Lưu danh sách categories vào DB sử dụng Bulk Copy.
-        Tự động tạo bảng nếu chưa có.
+        Lưu danh sách categories vào DB.
+        Xây dựng category_path, is_leaf, root_category_name từ hierarchy.
         """
         if not categories:
             return 0
 
-        columns = ["name", "url", "parent_url", "level", "image_url", "category_id"]
+        import re
+        import json
 
-        # Prepare CSV buffer
-        buffer = io.StringIO()
-        writer = csv.writer(buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-
-        for cat in categories:
-            # Extract ID from URL if not monitoring
-            cat_id = cat.get("category_id")
-            if not cat_id and cat.get("url"):
-                # Extract simple ID like c1234 from url
-                import re
-                match = re.search(r"c(\d+)", cat.get("url", ""))
-                if match:
-                    cat_id = match.group(1)
-
-            writer.writerow([
-                cat.get("name"),
-                cat.get("url"),
-                cat.get("parent_url"),
-                cat.get("level", 0),
-                cat.get("image_url"),
-                cat_id
-            ])
-        buffer.seek(0)
+        # Build URL -> category lookup for path building
+        url_to_cat = {cat.get("url"): cat for cat in categories}
+        
+        # Find all parent URLs to determine is_leaf
+        parent_urls = {cat.get("parent_url") for cat in categories if cat.get("parent_url")}
+        
+        def build_category_path(cat: dict) -> list[str]:
+            """Build path from root to current category"""
+            path = []
+            current = cat
+            visited = set()
+            
+            while current:
+                if current.get("url") in visited:
+                    break
+                visited.add(current.get("url"))
+                path.insert(0, current.get("name", ""))
+                parent_url = current.get("parent_url")
+                current = url_to_cat.get(parent_url) if parent_url else None
+            
+            return path
+        
+        def get_root_name(cat: dict) -> str:
+            """Get root category name"""
+            path = build_category_path(cat)
+            return path[0] if path else ""
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                # 1. Ensure Table Exists
+                # Ensure table exists with new columns
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS categories (
-                        url TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        parent_url TEXT,
-                        level INT,
+                        id SERIAL PRIMARY KEY,
+                        category_id VARCHAR(255) UNIQUE,
+                        name VARCHAR(500) NOT NULL,
+                        url TEXT NOT NULL UNIQUE,
                         image_url TEXT,
-                        category_id TEXT,
+                        parent_url TEXT,
+                        level INTEGER,
+                        category_path JSONB,
+                        root_category_name VARCHAR(255),
+                        is_leaf BOOLEAN DEFAULT FALSE,
+                        product_count INTEGER DEFAULT 0,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                     CREATE INDEX IF NOT EXISTS idx_cat_parent ON categories(parent_url);
                     CREATE INDEX IF NOT EXISTS idx_cat_level ON categories(level);
+                    CREATE INDEX IF NOT EXISTS idx_cat_path ON categories USING GIN (category_path);
+                    CREATE INDEX IF NOT EXISTS idx_cat_is_leaf ON categories(is_leaf);
                 """)
 
-                # 2. Create Temp Table for Staging
-                cur.execute("""
-                    CREATE TEMP TABLE IF NOT EXISTS categories_staging (
-                        LIKE categories INCLUDING DEFAULTS
-                    ) ON COMMIT DROP;
-                """)
-                cur.execute("TRUNCATE categories_staging;")
-
-                # 3. Bulk Copy to Staging
-                cur.copy_expert(
-                    f"COPY categories_staging ({','.join(columns)}) FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')",
-                    buffer
-                )
-
-                # 4. Merge (Upsert) to Main Table
-                # Update columns excluding PK (url) and created_at
-                cur.execute(f"""
-                    INSERT INTO categories ({','.join(columns)})
-                    SELECT {','.join(columns)} FROM categories_staging
-                    ON CONFLICT (url) DO UPDATE SET
-                        name = EXCLUDED.name,
-                        parent_url = EXCLUDED.parent_url,
-                        level = EXCLUDED.level,
-                        image_url = EXCLUDED.image_url,
-                        category_id = EXCLUDED.category_id,
-                        updated_at = CURRENT_TIMESTAMP;
-                """)
-
-                saved_count = cur.rowcount
+                saved_count = 0
+                for cat in categories:
+                    # Extract category_id from URL
+                    cat_id = cat.get("category_id")
+                    if not cat_id and cat.get("url"):
+                        match = re.search(r"c(\d+)", cat.get("url", ""))
+                        if match:
+                            cat_id = match.group(1)
+                    
+                    # Build category_path
+                    category_path = build_category_path(cat)
+                    root_name = category_path[0] if category_path else ""
+                    
+                    # Check if this is a leaf category (no children)
+                    is_leaf = cat.get("url") not in parent_urls
+                    
+                    cur.execute("""
+                        INSERT INTO categories 
+                            (category_id, name, url, image_url, parent_url, level, 
+                             category_path, root_category_name, is_leaf)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (url) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            category_id = EXCLUDED.category_id,
+                            image_url = EXCLUDED.image_url,
+                            parent_url = EXCLUDED.parent_url,
+                            level = EXCLUDED.level,
+                            category_path = EXCLUDED.category_path,
+                            root_category_name = EXCLUDED.root_category_name,
+                            is_leaf = EXCLUDED.is_leaf,
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (
+                        cat_id,
+                        cat.get("name"),
+                        cat.get("url"),
+                        cat.get("image_url"),
+                        cat.get("parent_url"),
+                        cat.get("level", 0),
+                        json.dumps(category_path, ensure_ascii=False),
+                        root_name,
+                        is_leaf
+                    ))
+                    saved_count += 1
+                
                 return saved_count
 
 
@@ -490,91 +516,115 @@ class PostgresStorage:
 
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
-        Log crawl history entries for a batch of products using bulk insert.
-        Used for tracking price history over time.
+        Log price history for products. Calculates price_change from previous crawl.
+        Schema: (product_id, price, price_change, crawled_at)
         """
         if not products:
             return
 
         from datetime import datetime
-        import csv
-        import io
-
-        current_ts = datetime.now().isoformat()
-        history_buffer = io.StringIO()
-        h_writer = csv.writer(history_buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-
-        for p in products:
-            if not p.get("product_id"):
-                continue
-            h_writer.writerow([
-                "product_tracking",  # crawl_type
-                "success",           # status
-                p.get("product_id"),
-                p.get("price") if p.get("price") is not None else "",
-                current_ts,          # started_at
-                current_ts           # completed_at
-            ])
-
-        history_buffer.seek(0)
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.copy_expert(
-                    "COPY crawl_history (crawl_type, status, product_id, price, started_at, completed_at) "
-                    "FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')",
-                    history_buffer
-                )
+                # Ensure table exists with new schema
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS crawl_history (
+                        id SERIAL PRIMARY KEY,
+                        product_id VARCHAR(255) NOT NULL,
+                        price DECIMAL(12, 2),
+                        price_change DECIMAL(12, 2),
+                        crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
+                    CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
+                """)
 
-    def log_crawl_history(
-        self,
-        crawl_type: str,
-        status: str,
-        items_count: int = 0,
-        category_url: str | None = None,
-        product_id: str | None = None,
-        price: float | None = None,
-        error_message: str | None = None,
-        started_at: datetime | None = None,
-    ) -> int:
+                for p in products:
+                    product_id = p.get("product_id")
+                    if not product_id:
+                        continue
+                    
+                    current_price = p.get("price")
+                    if current_price is None:
+                        continue
+                    
+                    # Get previous price for this product
+                    cur.execute("""
+                        SELECT price FROM crawl_history 
+                        WHERE product_id = %s 
+                        ORDER BY crawled_at DESC LIMIT 1
+                    """, (product_id,))
+                    
+                    row = cur.fetchone()
+                    previous_price = row[0] if row else None
+                    
+                    # Calculate price change
+                    price_change = None
+                    if previous_price is not None and current_price is not None:
+                        price_change = float(current_price) - float(previous_price)
+                    
+                    # Insert new price record
+                    cur.execute("""
+                        INSERT INTO crawl_history (product_id, price, price_change)
+                        VALUES (%s, %s, %s)
+                    """, (product_id, current_price, price_change))
+
+    def log_price_history(self, product_id: str, price: float) -> int:
         """
-        Ghi log lịch sử crawl
-
+        Log single product price to history.
+        
         Args:
-            crawl_type: Loại crawl ('categories', 'products', 'product_detail')
-            status: Trạng thái ('success', 'failed', 'partial')
-            items_count: Số items đã crawl
-            category_url: URL category (nếu có)
-            product_id: Product ID (nếu có)
-            price: Giá sản phẩm (nếu có) - để tracking lịch sử giá
-            error_message: Thông báo lỗi (nếu có)
-            started_at: Thời gian bắt đầu
-
+            product_id: Product ID
+            price: Current product price
+            
         Returns:
-            ID của record vừa tạo
+            ID of the new history record
         """
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO crawl_history
-                        (crawl_type, status, items_count, category_url, product_id, price,
-                         error_message, started_at, completed_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                # Get previous price
+                cur.execute("""
+                    SELECT price FROM crawl_history 
+                    WHERE product_id = %s 
+                    ORDER BY crawled_at DESC LIMIT 1
+                """, (product_id,))
+                
+                row = cur.fetchone()
+                previous_price = row[0] if row else None
+                
+                # Calculate price change
+                price_change = None
+                if previous_price is not None:
+                    price_change = float(price) - float(previous_price)
+                
+                cur.execute("""
+                    INSERT INTO crawl_history (product_id, price, price_change)
+                    VALUES (%s, %s, %s)
                     RETURNING id
-                    """,
-                    (
-                        crawl_type,
-                        status,
-                        items_count,
-                        category_url,
-                        product_id,
-                        price,
-                        error_message,
-                        started_at or datetime.now(),
-                    ),
-                )
+                """, (product_id, price, price_change))
+                
                 return cur.fetchone()[0]
+
+    def update_category_product_counts(self) -> int:
+        """
+        Update product_count for all categories based on actual products in DB.
+        Call this after saving products.
+        
+        Returns:
+            Number of categories updated
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE categories c
+                    SET product_count = COALESCE((
+                        SELECT COUNT(*) 
+                        FROM products p 
+                        WHERE p.category_url = c.url
+                    ), 0),
+                    updated_at = CURRENT_TIMESTAMP
+                """)
+                return cur.rowcount
 
     def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
         """Lấy danh sách products theo category_url"""
