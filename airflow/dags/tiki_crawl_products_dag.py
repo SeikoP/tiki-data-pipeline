@@ -75,10 +75,10 @@ except Exception as e:
     redis_cache = None
 
 
-# Wrapper function để suppress deprecation warning khi gọi Variable.get()
+# Wrapper function để suppress deprecation warning khi gọi get_variable()
 def get_variable(key: str, default: Any = None) -> Any:
     try:
-        return _Variable.get(key, default=default)
+        return _get_variable(key, default=default)
     except Exception:
         return default
 
@@ -501,10 +501,7 @@ DEFAULT_ARGS = {
 # Cấu hình DAG - Có thể chuyển đổi giữa tự động và thủ công qua Variable
 # Đọc schedule mode từ Airflow Variable (mặc định: 'manual' để test)
 # Có thể set Variable 'TIKI_DAG_SCHEDULE_MODE' = 'scheduled' để chạy tự động
-try:
-    schedule_mode = Variable.get("TIKI_DAG_SCHEDULE_MODE", default="manual")
-except Exception:
-    schedule_mode = "manual"  # Mặc định là manual để test
+schedule_mode = get_variable("TIKI_DAG_SCHEDULE_MODE", default="manual")
 
 # Xác định schedule dựa trên mode
 if schedule_mode == "scheduled":
@@ -581,8 +578,8 @@ write_lock = Lock()
 # Khởi tạo resilience patterns
 # Circuit breaker cho Tiki API
 tiki_circuit_breaker = CircuitBreaker(
-    failure_threshold=int(Variable.get("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default="5")),
-    recovery_timeout=int(Variable.get("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default="60")),
+    failure_threshold=int(get_variable("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default="5")),
+    recovery_timeout=int(get_variable("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default="60")),
     expected_exception=Exception,
     name="tiki_api",
 )
@@ -590,7 +587,7 @@ tiki_circuit_breaker = CircuitBreaker(
 # Dead Letter Queue
 try:
     # Thử dùng Redis nếu có
-    redis_url = Variable.get("REDIS_URL", default="redis://redis:6379/3")
+    redis_url = get_variable("REDIS_URL", default="redis://redis:6379/3")
     tiki_dlq = get_dlq(storage_type="redis", redis_url=redis_url)
 except Exception:
     # Fallback về file-based
@@ -605,8 +602,8 @@ except Exception:
 service_health = get_service_health()
 tiki_degradation = service_health.register_service(
     name="tiki",
-    failure_threshold=int(Variable.get("TIKI_DEGRADATION_FAILURE_THRESHOLD", default="3")),
-    recovery_threshold=int(Variable.get("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default="5")),
+    failure_threshold=int(get_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default="3")),
+    recovery_threshold=int(get_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default="5")),
 )
 
 # Import modules cho AI summarization và Discord notification
@@ -843,8 +840,8 @@ def load_categories(**context) -> list[dict[str, Any]]:
         # Lọc danh mục nếu cần (ví dụ: chỉ lấy level 2-4)
         # Có thể cấu hình qua Airflow Variable
         try:
-            min_level = int(Variable.get("TIKI_MIN_CATEGORY_LEVEL", default="2"))
-            max_level = int(Variable.get("TIKI_MAX_CATEGORY_LEVEL", default="4"))
+            min_level = int(get_variable("TIKI_MIN_CATEGORY_LEVEL", default="2"))
+            max_level = int(get_variable("TIKI_MAX_CATEGORY_LEVEL", default="4"))
             categories = [
                 cat for cat in categories if min_level <= cat.get("level", 0) <= max_level
             ]
@@ -854,7 +851,7 @@ def load_categories(**context) -> list[dict[str, Any]]:
 
         # Giới hạn số danh mục nếu cần (để test)
         try:
-            max_categories = int(Variable.get("TIKI_MAX_CATEGORIES", default="0"))
+            max_categories = int(get_variable("TIKI_MAX_CATEGORIES", default="0"))
             if max_categories > 0:
                 categories = categories[:max_categories]
                 logger.info(f"✓ Giới hạn: {max_categories} danh mục")
@@ -942,12 +939,12 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
 
         # Lấy cấu hình từ Airflow Variables
         max_pages = int(
-            Variable.get("TIKI_MAX_PAGES_PER_CATEGORY", default="20")
+            get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20")
         )  # Mặc định 20 trang để tránh timeout
-        use_selenium = Variable.get("TIKI_USE_SELENIUM", default="false").lower() == "true"
-        timeout = int(Variable.get("TIKI_CRAWL_TIMEOUT", default="300"))  # 5 phút mặc định
+        use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
+        timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300"))  # 5 phút mặc định
         rate_limit_delay = float(
-            Variable.get("TIKI_RATE_LIMIT_DELAY", default="1.0")
+            get_variable("TIKI_RATE_LIMIT_DELAY", default="1.0")
         )  # Delay 1s giữa các request
 
         # Rate limiting: delay trước khi crawl
@@ -1371,7 +1368,7 @@ def save_products(**context) -> str:
         logger.info(f"Đang lưu {len(products)} sản phẩm...")
 
         # Batch processing cho dữ liệu lớn
-        batch_size = int(Variable.get("TIKI_SAVE_BATCH_SIZE", default="10000"))
+        batch_size = int(get_variable("TIKI_SAVE_BATCH_SIZE", default="10000"))
 
         if len(products) > batch_size:
             logger.info(f"Chia nhỏ thành batches (mỗi batch {batch_size} sản phẩm)...")
@@ -1488,10 +1485,10 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Lấy cấu hình cho multi-day crawling
         # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
-            Variable.get("TIKI_PRODUCTS_PER_DAY", default="50")
+            get_variable("TIKI_PRODUCTS_PER_DAY", default="50")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
-            Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
+            get_variable("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
         )  # 0 = không giới hạn
 
         logger.info(
@@ -1507,20 +1504,20 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 logger.warning("⚠️  Không thể import PostgresStorage, bỏ qua kiểm tra database")
             else:
                 # Lấy database config
-                db_host = Variable.get(
+                db_host = get_variable(
                     "POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres")
                 )
                 db_port = int(
-                    Variable.get("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432"))
+                    get_variable("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432"))
                 )
-                db_name = Variable.get(
+                db_name = get_variable(
                     "POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data")
                 )
-                db_user = Variable.get(
+                db_user = get_variable(
                     "POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres")
                 )
                 # trufflehog:ignore - Fallback for development, production uses Airflow Variables
-                db_password = Variable.get(
+                db_password = get_variable(
                     "POSTGRES_PASSWORD", default=os.getenv("POSTGRES_PASSWORD", "postgres")
                 )
 
@@ -1885,7 +1882,7 @@ def crawl_product_batch(
         # Sử dụng hàm đã được import ở đầu file
         # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file
         pool_size = int(
-            Variable.get("TIKI_DETAIL_POOL_SIZE", default="2")
+            get_variable("TIKI_DETAIL_POOL_SIZE", default="2")
         )  # Tối ưu: tăng từ 5 -> 15
         driver_pool = _SeleniumDriverPool(
             pool_size=pool_size, headless=True, timeout=120
@@ -2131,10 +2128,10 @@ def crawl_product_batch(
         # Crawl tất cả products trong batch song song với async
         # (Event loop đã được tạo ở trên)
         # Sử dụng asyncio.gather() để crawl parallel
-        rate_limit_delay = float(Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.1"))
+        rate_limit_delay = float(get_variable("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.1"))
 
         # Tạo semaphore để limit concurrent tasks (tối ưu throughput)
-        max_concurrent = int(Variable.get("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="12"))
+        max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="12"))
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def bounded_task(task_coro):
@@ -2352,7 +2349,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
 
     # Kiểm tra cache trước - ưu tiên Redis, fallback về file
     # Kiểm tra xem có force refresh không (từ Airflow Variable)
-    force_refresh = Variable.get("TIKI_FORCE_REFRESH_CACHE", default="false").lower() == "true"
+    force_refresh = get_variable("TIKI_FORCE_REFRESH_CACHE", default="false").lower() == "true"
 
     if force_refresh:
         logger.info(f"🔄 FORCE REFRESH MODE: Bỏ qua cache cho product {product_id}")
@@ -2444,10 +2441,10 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
 
         # Lấy cấu hình
         rate_limit_delay = float(
-            Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.1")
+            get_variable("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.1")
         )  # Delay 1.5s cho detail (tối ưu từ 2.0s)
         timeout = int(
-            Variable.get("TIKI_DETAIL_CRAWL_TIMEOUT", default="180")
+            get_variable("TIKI_DETAIL_CRAWL_TIMEOUT", default="180")
         )  # 3 phút mỗi product (tăng từ 120s để tránh timeout)
 
         # Rate limiting
@@ -4003,12 +4000,12 @@ def load_products(**context) -> dict[str, Any]:
 
             # Lấy database config từ Airflow Variables hoặc environment variables
             # Ưu tiên: Airflow Variables > Environment Variables > Default
-            db_host = Variable.get("POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres"))
-            db_port = int(Variable.get("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432")))
-            db_name = Variable.get("POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data"))
-            db_user = Variable.get("POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres"))
+            db_host = get_variable("POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres"))
+            db_port = int(get_variable("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432")))
+            db_name = get_variable("POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data"))
+            db_user = get_variable("POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres"))
             # trufflehog:ignore - Fallback for development, production uses Airflow Variables
-            db_password = Variable.get(
+            db_password = get_variable(
                 "POSTGRES_PASSWORD", default=os.getenv("POSTGRES_PASSWORD", "postgres")
             )
 
@@ -4019,7 +4016,7 @@ def load_products(**context) -> dict[str, Any]:
                 database=db_name,
                 user=db_user,
                 password=db_password,
-                batch_size=int(Variable.get("TIKI_SAVE_BATCH_SIZE", default_var=2000)),
+                batch_size=int(get_variable("TIKI_SAVE_BATCH_SIZE", default=2000)),
                 enable_db=True,
             )
 
@@ -4999,7 +4996,7 @@ with DAG(**DAG_CONFIG) as dag:
             logger.info(f"✅ Đã lấy {len(categories)} categories")
 
             # Batch Processing: Chia categories thành batches
-            batch_size = int(Variable.get("TIKI_CATEGORY_BATCH_SIZE", default="10"))
+            batch_size = int(get_variable("TIKI_CATEGORY_BATCH_SIZE", default="10"))
             batches = []
             for i in range(0, len(categories), batch_size):
                 batch = categories[i : i + batch_size]

@@ -15,6 +15,12 @@ x-airflow-common:
     # === Disable SDK task supervision to avoid execution API calls ===
     AIRFLOW__CORE__TASK_RUNNER: "StandardTaskRunner"
     AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES: ""
+    # === Internal API for Airflow 3.x task execution ===
+    AIRFLOW__CORE__INTERNAL_API_URL: "http://airflow-webserver:8080"
+    # LocalExecutor reads this config for Execution API (double underscore notation)
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
+    # JWT secret for API authentication (must be same across all components)
+    AIRFLOW__API_AUTH__JWT_SECRET: "KQMWSIkoNlaDJoH9euhMRdimVZD5sZXkRf5RLcHXJiE="
 
     # === Local Executor Configuration (LITE MODE) ===
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
