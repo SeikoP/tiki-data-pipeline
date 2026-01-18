@@ -238,11 +238,35 @@ def print_stats():
                 print(f"  Level {level}: {stats['by_level'][level]} danh mục")
 
 
+def load_env_file():
+    """Load biến môi trường từ file .env ở root project"""
+    try:
+        # Tìm file .env: Từ file này (src/pipelines/crawl/...) ra root
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+        env_path = os.path.join(project_root, '.env')
+        
+        if os.path.exists(env_path):
+            print(f"📄 Loading config from {env_path}")
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, val = line.split('=', 1)
+                        if key not in os.environ: # Không override nếu đã set
+                            os.environ[key] = val
+    except Exception as e:
+        print(f"⚠️  Could not load .env file: {e}")
+
 def main():
     """Hàm main để crawl đệ quy với tối ưu"""
     
-    # URL danh mục gốc
-    root_url = "https://tiki.vn/nha-cua-doi-song/c1883"
+    # Load env file first
+    load_env_file()
+    
+    # URL danh mục gốc từ Env Var
+    default_url = "https://tiki.vn/nha-cua-doi-song/c1883"
+    root_url = os.getenv("CRAWL_ROOT_CATEGORY_URL", default_url)
     
     # Độ sâu tối đa (tăng lên 4 để bao quát hết)
     max_level = 4

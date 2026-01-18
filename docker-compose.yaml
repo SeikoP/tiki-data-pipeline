@@ -1,288 +1,134 @@
-name: tiki-data-pipeline
 
-# ============================================
-# TIKI DATA PIPELINE - Airflow với Selenium
-# ============================================
-# Services:
-# - PostgreSQL: Database cho Airflow metadata
-# - Redis: Celery message broker cho Airflow
-# - Airflow: Scheduler, Worker, API Server, DAG Processor, Triggerer
-# ============================================
-
+version: '3'
 x-airflow-common:
   &airflow-common
-  # Sử dụng custom Dockerfile nếu có để cài Chrome, nếu không dùng image mặc định
-  # Build sẽ được thử trước, nếu fail sẽ fallback về image
   build:
-    context: ${AIRFLOW_PROJ_DIR:-.}
+    context: .
     dockerfile: airflow/Dockerfile
-  image: ${AIRFLOW_IMAGE_NAME:-tiki-airflow:3.1.3}
+  image: tiki-airflow:3.1.3
   env_file:
-    - ${ENV_FILE_PATH:-.env}
+    - .env
   environment:
     &airflow-common-env
     TZ: Asia/Ho_Chi_Minh
     PYTHONPATH: /opt/airflow:/opt/airflow/src:/opt/airflow/dags
-    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Ho_Chi_Minh
-    # Postgres: Database airflow
-    # Sử dụng environment variables (KHÔNG hardcode default values)
-    # Yêu cầu: POSTGRES_USER và POSTGRES_PASSWORD phải được set trong .env file
-    # Thêm port :5432 để force TCP/IP connection thay vì Unix socket
-    # Format: postgresql+psycopg2://user:password@host:port/database
-    # Connection string đã có host và port (postgres:5432) nên psycopg2 sẽ tự động dùng TCP/IP connection
-    # Không cần thêm connect_args vì connection string đã đủ thông tin
-    # ggignore
+    
+    # === Local Executor Configuration (LITE MODE) ===
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    # Database Connection
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
-    # ggignore
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
-    # Redis: Airflow dùng database 0
-    # Nếu có REDIS_PASSWORD, format: redis://:REDIS_PASSWORD@redis:6379/0
-    # Nếu không có REDIS_PASSWORD, format: redis://:@redis:6379/0
-    AIRFLOW__CELERY__BROKER_URL: redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
-    AIRFLOW__CORE__FERNET_KEY: ''
+    
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    
+    # Standalone DAG Processor is False in LocalExecutor (Scheduler handles it)
+    AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: 'false'
+    
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0}
-    AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
+
   volumes:
-    - ${AIRFLOW_PROJ_DIR:-.}/airflow/dags:/opt/airflow/dags
-    - ${AIRFLOW_PROJ_DIR:-.}/airflow/logs:/opt/airflow/logs
-    - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
-    - ${AIRFLOW_PROJ_DIR:-.}/airflow/plugins:/opt/airflow/plugins
-    - ${AIRFLOW_PROJ_DIR:-.}/airflow/airflow_local_settings.py:/opt/airflow/airflow_local_settings.py
-    # Mount src và data để DAG có thể import modules và đọc/ghi dữ liệu
-    - ${AIRFLOW_PROJ_DIR:-.}/src:/opt/airflow/src
-    - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
-    # Mount scripts và backups để có thể chạy backup script
-    - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts
-    - ${AIRFLOW_PROJ_DIR:-.}/backups:/opt/airflow/backups
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/config:/opt/airflow/config
+    - ./src:/opt/airflow/src
+    - ./data:/opt/airflow/data
+    - ./scripts:/opt/airflow/scripts
   user: "${AIRFLOW_UID:-50000}:0"
-  networks:
-    - backend
   depends_on:
-    &airflow-common-depends-on
-    redis:
-      condition: service_healthy
     postgres:
       condition: service_healthy
 
 services:
   # ============================================
-  # POSTGRES - Database cho Airflow (với Performance Tuning)
+  # POSTGRES
   # ============================================
   postgres:
     image: postgres:16
-    # Load biến môi trường từ file .env (docker-compose tự động load .env, nhưng khai báo rõ ràng hơn)
-    env_file:
-      - ${ENV_FILE_PATH:-.env}
     environment:
-      # Yêu cầu: POSTGRES_USER và POSTGRES_PASSWORD phải được set trong .env file
-      # Xem .env.example để biết cách cấu hình
-      # LƯU Ý: PostgreSQL chỉ sử dụng POSTGRES_USER và POSTGRES_PASSWORD khi KHỞI TẠO database lần đầu
-      # Nếu database đã tồn tại (volume cũ), các giá trị này sẽ BỊ BỎ QUA
-      # Để thay đổi user/password sau khi database đã được tạo, cần chạy script reset password
-      # POSTGRES_DB: Database mặc định được tạo khi khởi tạo (dùng cho các script init)
       TZ: Asia/Ho_Chi_Minh
-      POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-crawl_data}
     ports:
-      # Expose PostgreSQL port để kết nối từ máy local
-      # Format: "host_port:container_port"
       - "5432:5432"
     volumes:
-      # Giữ database trong Docker volume (an toàn, performance tốt hơn)
       - postgres-shared-volume:/var/lib/postgresql/data
-      # Mount thư mục backup ra local để dễ export/import
-      - ${AIRFLOW_PROJ_DIR:-.}/backups/postgres:/backups
-      # Scripts để tự động tạo databases (chạy khi init lần đầu)
       - ./airflow/setup/init-airflow-db.sh:/docker-entrypoint-initdb.d/01-init-airflow-db.sh:ro
       - ./airflow/setup/init-crawl-db.sh:/docker-entrypoint-initdb.d/02-init-crawl-db.sh:ro
-    # Performance tuning
+    # Optimized for Local Performance
     command: >
       postgres
       -c shared_buffers=256MB
       -c effective_cache_size=1GB
       -c work_mem=16MB
       -c maintenance_work_mem=128MB
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c wal_buffers=16MB
-      -c checkpoint_completion_target=0.9
-      -c max_connections=100
+      -c max_connections=50
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
     networks:
       - backend
 
   # ============================================
-  # REDIS - Celery message broker + Cache + Rate Limiting (Optimized)
+  # REDIS (Cache & DLQ)
   # ============================================
-  # Databases:
-  # - Database 0: Celery message broker (Airflow)
-  # - Database 1: Cache (HTML, products, categories) - Optional
-  # - Database 2: Rate limiting & Distributed locking - Optional
   redis:
     image: redis:7.2-alpine
-    environment:
-      TZ: Asia/Ho_Chi_Minh
-    # Redis với performance optimization
-    command: >
-      redis-server
-      --bind 0.0.0.0
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      --save 60 1000
-      --appendonly yes
-      --tcp-backlog 511
-      --timeout 300
-      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    # Optimized for Cache Use-case (256MB max)
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    ports:
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 30s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 3
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
     networks:
       - backend
 
   # ============================================
-  # AIRFLOW SERVICES
+  # AIRFLOW (Webserver + Scheduler + Triggerer)
   # ============================================
-  airflow-apiserver:
+  airflow-webserver:
     <<: *airflow-common
-    command: api-server
+    command: webserver
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8080/api/v2/version\").read()' || exit 1"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 60s
+      retries: 3
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
     depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
 
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
-    environment:
-      <<: *airflow-common-env
-      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: '60'
-      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: '120'
-      AIRFLOW__SCHEDULER__PARSING_PROCESSES: '1'
-      AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY: '256'
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8974/health\").read()' || exit 1"]
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 60s
+      retries: 3
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
     depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
-
-  airflow-dag-processor:
-    <<: *airflow-common
-    command: dag-processor
-    healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-    depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
-
-  airflow-worker:
-    <<: *airflow-common
-    command: celery worker
-    healthcheck:
-      test:
-        - "CMD-SHELL"
-        - 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" || celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    environment:
-      <<: *airflow-common-env
-      DUMB_INIT_SETSID: "0"
-      AIRFLOW__CELERY__WORKER_CONCURRENCY: '2'
-      AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER: '1'
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1.0'
-          memory: 1G
-    depends_on:
-      <<: *airflow-common-depends-on
-      airflow-apiserver:
+      postgres:
         condition: service_healthy
-      airflow-init:
-        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
 
   airflow-triggerer:
     <<: *airflow-common
@@ -291,113 +137,48 @@ services:
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 30s
+      retries: 3
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
     depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
 
+  # ============================================
+  # INITIALIZATION
+  # ============================================
   airflow-init:
     <<: *airflow-common
     entrypoint: /bin/bash
     command:
       - -c
       - |
-        if [[ -z "${AIRFLOW_UID}" ]]; then
-          echo
-          echo -e "\033[1;33mWARNING!!!: AIRFLOW_UID not set!\e[0m"
-          echo "If you are on Linux, you SHOULD follow the instructions below to set "
-          echo "AIRFLOW_UID environment variable, otherwise files will be owned by root."
-          echo "For other operating systems you can get rid of the warning with manually created .env file:"
-          echo "    See: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#setting-the-right-airflow-user"
-          echo
-          export AIRFLOW_UID=$$(id -u)
-        fi
-        one_meg=1048576
-        mem_available=$$(($$(getconf _PHYS_PAGES) * $$(getconf PAGE_SIZE) / one_meg))
-        cpus_available=$$(grep -cE 'cpu[0-9]+' /proc/stat)
-        disk_available=$$(df / | tail -1 | awk '{print $$4}')
-        warning_resources="false"
-        if (( mem_available < 4000 )) ; then
-          echo
-          echo -e "\033[1;33mWARNING!!!: Not enough memory available for Docker.\e[0m"
-          echo "At least 4GB of memory required. You have $$(numfmt --to iec $$((mem_available * one_meg)))"
-          echo
-          warning_resources="true"
-        fi
-        if (( cpus_available < 2 )); then
-          echo
-          echo -e "\033[1;33mWARNING!!!: Not enough CPUS available for Docker.\e[0m"
-          echo "At least 2 CPUs recommended. You have $${cpus_available}"
-          echo
-          warning_resources="true"
-        fi
-        if (( disk_available < one_meg * 10 )); then
-          echo
-          echo -e "\033[1;33mWARNING!!!: Not enough Disk space available for Docker.\e[0m"
-          echo "At least 10 GBs recommended. You have $$(numfmt --to iec $$((disk_available * 1024 )))"
-          echo
-          warning_resources="true"
-        fi
-        if [[ $${warning_resources} == "true" ]]; then
-          echo
-          echo -e "\033[1;33mWARNING!!!: You have not enough resources to run Airflow (see above)!\e[0m"
-          echo "Please follow the instructions to increase amount of resources available:"
-          echo "   https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#before-you-begin"
-          echo
-        fi
-        echo
-        echo "Creating missing opt dirs if missing:"
-        echo
-        mkdir -v -p /opt/airflow/{logs,dags,plugins,config}
-        echo
-        echo "Airflow version:"
-        /entrypoint airflow version
-        echo
-        echo "Files in shared volumes:"
-        echo
-        ls -la /opt/airflow/{logs,dags,plugins,config}
-        echo
-        echo "Running airflow config list to create default config file if missing."
-        echo
-        /entrypoint airflow config list >/dev/null
-        echo
-        echo "Files in shared volumes:"
-        echo
-        ls -la /opt/airflow/{logs,dags,plugins,config}
-        echo
-        echo "Change ownership of files in /opt/airflow to ${AIRFLOW_UID}:0"
-        echo
-        chown -R "${AIRFLOW_UID}:0" /opt/airflow/
-        echo
-        echo "Change ownership of files in shared volumes to ${AIRFLOW_UID}:0"
-        echo
-        chown -v -R "${AIRFLOW_UID}:0" /opt/airflow/{logs,dags,plugins,config}
-        echo
-        echo "Files in shared volumes:"
-        echo
-        ls -la /opt/airflow/{logs,dags,plugins,config}
+        mkdir -p /opt/airflow/{logs,dags,plugins,config,src,data}
+        chown -R "${AIRFLOW_UID}:0" /opt/airflow/{logs,dags,plugins,config,src,data}
+        
+        echo "Initializing Airflow DB..."
+        airflow db migrate
+        
+        echo "Creating Admin User..."
+        airflow users create \
+          --username "${_AIRFLOW_WWW_USER_USERNAME}" \
+          --password "${_AIRFLOW_WWW_USER_PASSWORD}" \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com
+        
+        echo "Init Done."
     environment:
       <<: *airflow-common-env
-      _AIRFLOW_DB_MIGRATE: 'true'
-      _AIRFLOW_WWW_USER_CREATE: 'true'
-      # Yêu cầu: _AIRFLOW_WWW_USER_USERNAME và _AIRFLOW_WWW_USER_PASSWORD phải được set trong .env file
-      # Xem .env.example để biết cách cấu hình
-      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME}
-      # ggignore
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
-      _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0}
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-admin}
     user: "0:0"
+    networks:
+      - backend
 
 networks:
   backend:
@@ -405,5 +186,3 @@ networks:
 
 volumes:
   postgres-shared-volume:
-    driver: local
-

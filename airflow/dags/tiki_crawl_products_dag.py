@@ -553,7 +553,7 @@ DAG_CONFIG = {
     "catchup": False,  # Không chạy lại các task đã bỏ lỡ
     "tags": dag_tags,
     "max_active_runs": 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
-    "max_active_tasks": 15,  # Giảm xuống 10 tasks song song để tránh quá tải khi tạo Selenium driver
+    "max_active_tasks": 4,  # Tối ưu cho Local: 4 tasks * 4 drivers = 16 drivers (vừa đủ 16GB RAM)
 }
 
 # Thư mục dữ liệu
@@ -1499,7 +1499,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # Lấy cấu hình cho multi-day crawling
         # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
-            Variable.get("TIKI_PRODUCTS_PER_DAY", default="50")
+            Variable.get("TIKI_PRODUCTS_PER_DAY", default="500")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
             Variable.get("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
@@ -1896,7 +1896,7 @@ def crawl_product_batch(
         # Sử dụng hàm đã được import ở đầu file
         # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file
         pool_size = int(
-            Variable.get("TIKI_DETAIL_POOL_SIZE", default="15")
+            Variable.get("TIKI_DETAIL_POOL_SIZE", default="2")
         )  # Tối ưu: tăng từ 5 -> 15
         driver_pool = _SeleniumDriverPool(
             pool_size=pool_size, headless=True, timeout=120
@@ -2142,7 +2142,7 @@ def crawl_product_batch(
         # Crawl tất cả products trong batch song song với async
         # (Event loop đã được tạo ở trên)
         # Sử dụng asyncio.gather() để crawl parallel
-        rate_limit_delay = float(Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="1.5"))
+        rate_limit_delay = float(Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.1"))
 
         # Tạo semaphore để limit concurrent tasks (tối ưu throughput)
         max_concurrent = int(Variable.get("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="12"))
@@ -2455,7 +2455,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
 
         # Lấy cấu hình
         rate_limit_delay = float(
-            Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="1.5")
+            Variable.get("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.1")
         )  # Delay 1.5s cho detail (tối ưu từ 2.0s)
         timeout = int(
             Variable.get("TIKI_DETAIL_CRAWL_TIMEOUT", default="180")
