@@ -451,7 +451,7 @@ class PostgresStorage:
 
     def save_products(
         self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
-    ) -> int | dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Lưu danh sách products vào database (batch insert để tối ưu)
 
@@ -461,11 +461,11 @@ class PostgresStorage:
             batch_size: Số products insert mỗi lần
 
         Returns:
-            Nếu upsert=True: dict với keys: saved_count, inserted_count, updated_count
-            Nếu upsert=False: int (số products đã lưu thành công)
+            dict với keys: saved_count, inserted_count, updated_count
+            (inserted_count = 0 if upsert=False, since we're only inserting)
         """
         if not products:
-            return {"saved_count": 0, "inserted_count": 0, "updated_count": 0} if upsert else 0
+            return {"saved_count": 0, "inserted_count": 0, "updated_count": 0}
 
         # Tự động fix category_path để đảm bảo parent category ở index 0
         try:
