@@ -172,6 +172,89 @@ class PostgresStorage:
                     except Exception:
                         pass
 
+    def save_categories(self, categories: list[dict[str, Any]]) -> int:
+        """
+        Lưu danh sách categories vào DB sử dụng Bulk Copy.
+        Tự động tạo bảng nếu chưa có.
+        """
+        if not categories:
+            return 0
+            
+        columns = ["name", "url", "parent_url", "level", "image_url", "category_id"]
+        
+        # Prepare CSV buffer
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        
+        for cat in categories:
+            # Extract ID from URL if not monitoring
+            cat_id = cat.get("category_id")
+            if not cat_id and cat.get("url"):
+                # Extract simple ID like c1234 from url
+                import re
+                match = re.search(r"c(\d+)", cat.get("url", ""))
+                if match:
+                    cat_id = match.group(1)
+            
+            writer.writerow([
+                cat.get("name"), 
+                cat.get("url"), 
+                cat.get("parent_url"), 
+                cat.get("level", 0), 
+                cat.get("image_url"), 
+                cat_id
+            ])
+        buffer.seek(0)
+        
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                # 1. Ensure Table Exists
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS categories (
+                        url TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        parent_url TEXT,
+                        level INT,
+                        image_url TEXT,
+                        category_id TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_cat_parent ON categories(parent_url);
+                    CREATE INDEX IF NOT EXISTS idx_cat_level ON categories(level);
+                """)
+                
+                # 2. Create Temp Table for Staging
+                cur.execute("""
+                    CREATE TEMP TABLE IF NOT EXISTS categories_staging (
+                        LIKE categories INCLUDING DEFAULTS
+                    ) ON COMMIT DROP;
+                """)
+                cur.execute("TRUNCATE categories_staging;")
+                
+                # 3. Bulk Copy to Staging
+                cur.copy_expert(
+                    f"COPY categories_staging ({','.join(columns)}) FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')",
+                    buffer
+                )
+                
+                # 4. Merge (Upsert) to Main Table
+                # Update columns excluding PK (url) and created_at
+                cur.execute(f"""
+                    INSERT INTO categories ({','.join(columns)})
+                    SELECT {','.join(columns)} FROM categories_staging
+                    ON CONFLICT (url) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        parent_url = EXCLUDED.parent_url,
+                        level = EXCLUDED.level,
+                        image_url = EXCLUDED.image_url,
+                        category_id = EXCLUDED.category_id,
+                        updated_at = CURRENT_TIMESTAMP;
+                """)
+                
+                saved_count = cur.rowcount
+                return saved_count
+
 
 
     def save_products(
