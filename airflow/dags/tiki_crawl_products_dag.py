@@ -75,7 +75,52 @@ except Exception as e:
     redis_cache = None
 
 
-# Wrapper function để suppress deprecation warning khi gọi get_variable()
+def safe_import_attr(module_path: str, attr_name: str, fallback_paths: list[Any] | None = None):
+    """
+    Import an attribute from a module with optional fallback file paths.
+    
+    Args:
+        module_path: Dot-separated path to the module (e.g., 'pipelines.load.module')
+        attr_name: Name of the attribute to import (e.g., 'load_categories')
+        fallback_paths: List of directory paths to check for the .py file if standard import fails
+        
+    Returns:
+        The imported attribute or None if not found
+    """
+    try:
+        # Standard import
+        module = __import__(module_path, fromlist=[attr_name])
+        return getattr(module, attr_name, None)
+    except ImportError:
+        if not fallback_paths:
+            return None
+
+        import importlib.util
+        from pathlib import Path
+
+        # Try fallback file paths
+        for base in fallback_paths:
+            # Convert module path to file path
+            rel_file_path = module_path.replace(".", "/") + ".py"
+            p = Path(base) / rel_file_path
+            
+            if p.exists():
+                spec = importlib.util.spec_from_file_location(module_path, str(p))
+                if spec and spec.loader:
+                    try:
+                        mod = importlib.util.module_from_spec(spec)
+                        # Pre-populate sys.path if needed for internal imports in the module
+                        if str(Path(base)) not in sys.path:
+                            sys.path.insert(0, str(Path(base)))
+                        spec.loader.exec_module(mod)
+                        return getattr(mod, attr_name, None)
+                    except Exception as e:
+                        warnings.warn(f"Failed to load module from {p}: {e}", stacklevel=2)
+                        continue
+        return None
+
+
+# Wrapper function để từng bước thay thế print debug bằng logger.debug
 def get_variable(key: str, default: Any = None) -> Any:
     try:
         return Variable.get(key, default_var=default)
@@ -688,36 +733,18 @@ else:
     DataAggregator = None
 
 # Import load_categories function from pipelines/load/load_categories_to_db.py
-load_categories_db_func = None
-try:
-    # Try dynamic import since it's outside airflow/dags
-    src_path = Path("/opt/airflow/src")
-    if src_path.exists() and str(src_path) not in sys.path:
-        sys.path.insert(0, str(src_path))
+load_categories_db_func = safe_import_attr(
+    "pipelines.load.load_categories_to_db",
+    "load_categories",
+    fallback_paths=[Path(p).parent for p in possible_paths]
+)
 
-    try:
-        from pipelines.load.load_categories_to_db import load_categories as _load_categories_db
-        load_categories_db_func = _load_categories_db
-    except ImportError:
-       # Fallback to manual path import
-       load_db_path = None
-       for base in possible_paths:
-           p = Path(base).parent / "load" / "load_categories_to_db.py"
-           if p.exists():
-               load_db_path = p
-               break
+if not load_categories_db_func:
+    warnings.warn("load_categories_to_db not available; DB load will be skipped", stacklevel=2)
 
-       if load_db_path:
-           import importlib.util
-           spec = importlib.util.spec_from_file_location("load_categories_to_db_mod", str(load_db_path))
-           if spec and spec.loader:
-               mod = importlib.util.module_from_spec(spec)
-               spec.loader.exec_module(mod)
-               load_categories_db_func = getattr(mod, "load_categories", None)
-
-except Exception as e:
-    import warnings
-    warnings.warn(f"Could not import load_categories_to_db: {e}", stacklevel=2)
+# Global debug flags controlled via Airflow Variables
+DEBUG_LOAD_CATEGORIES = get_variable("TIKI_DEBUG_LOAD_CATEGORIES", default="false").lower() == "true"
+DEBUG_ENRICH_CATEGORY_PATH = get_variable("TIKI_DEBUG_ENRICH_CATEGORY_PATH", default="false").lower() == "true"
 
 
 # Import AISummarizer từ common/ai/
@@ -848,19 +875,20 @@ def load_categories(**context) -> list[dict[str, Any]]:
         List[Dict]: Danh sách danh mục
     """
     logger = get_logger(context)
-    print("DEBUG: Task load_categories starting...")
-    import json
-    import os
+    if DEBUG_LOAD_CATEGORIES:
+        logger.debug("DEBUG: Task load_categories starting...")
 
     logger.info("=" * 70)
-    logger.info("📖 TASK: Load Categories (DEBUG RELOAD)")
-    # Force reload timestamp: 2026-01-18 14:13
-    print(f"DEBUG: CWD: {os.getcwd()}")
-    print(f"DEBUG: PYTHONPATH: {sys.path}")
+    logger.info("📖 TASK: Load Categories")
+    
+    if DEBUG_LOAD_CATEGORIES:
+        logger.debug(f"DEBUG: CWD: {os.getcwd()}")
+        logger.debug(f"DEBUG: PYTHONPATH: {sys.path}")
 
     try:
         categories_file = str(CATEGORIES_FILE)
-        print(f"DEBUG: Reading file {categories_file}")
+        if DEBUG_LOAD_CATEGORIES:
+            logger.debug(f"DEBUG: Reading file {categories_file}")
 
         if not os.path.exists(categories_file):
             raise FileNotFoundError(f"Không tìm thấy file: {categories_file}")
@@ -902,7 +930,6 @@ def load_categories(**context) -> list[dict[str, Any]]:
 def load_categories_to_db_wrapper(**context):
     """
     Task wrapper to load categories from JSON file into PostgreSQL database.
-    Uses direct PostgresStorage.save_categories() as fallback if imported function fails.
     """
     logger = get_logger(context)
 
@@ -912,60 +939,18 @@ def load_categories_to_db_wrapper(**context):
             logger.error(f"❌ File categories không tồn tại: {json_file}")
             return {"status": "error", "message": "File not found", "count": 0}
 
+        if not load_categories_db_func:
+            logger.error("❌ load_categories_db_func not available")
+            return {"status": "error", "message": "Import failed"}
+
         logger.info(f"🚀 Loading categories to DB from {json_file}")
-
-        # Read categories from JSON
-        with open(json_file, encoding="utf-8") as f:
-            categories = json.load(f)
-
-        if not categories:
-            logger.warning("⚠️  File categories rỗng")
-            return {"status": "warning", "message": "Empty file", "count": 0}
-
-        logger.info(f"📊 Found {len(categories)} categories to load")
-
-        # Try imported function first
-        if load_categories_db_func:
-            try:
-                load_categories_db_func(json_file)
-                logger.info(f"✅ Loaded categories using imported function")
-                return {"status": "success", "count": len(categories)}
-            except Exception as e:
-                logger.warning(f"⚠️  Imported function failed: {e}, trying fallback...")
-
-        # Fallback: Use PostgresStorage directly
-        try:
-            PostgresStorage = _import_postgres_storage()
-            if PostgresStorage is None:
-                raise ImportError("PostgresStorage not available")
-
-            db_host = get_variable("POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres"))
-            db_port = int(get_variable("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432")))
-            db_name = get_variable("POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data"))
-            db_user = get_variable("POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres"))
-            db_password = get_variable("POSTGRES_PASSWORD", default=os.getenv("POSTGRES_PASSWORD", ""))
-
-            storage = PostgresStorage(
-                host=db_host,
-                port=db_port,
-                database=db_name,
-                user=db_user,
-                password=db_password,
-            )
-
-            saved_count = storage.save_categories(categories)
-            storage.close()
-
-            logger.info(f"✅ Loaded {saved_count} categories via PostgresStorage fallback")
-            return {"status": "success", "count": saved_count}
-
-        except Exception as fallback_error:
-            logger.error(f"❌ Fallback also failed: {fallback_error}", exc_info=True)
-            return {"status": "error", "message": str(fallback_error), "count": 0}
+        load_categories_db_func(json_file)
+        
+        return {"status": "success"}
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi load categories vào DB: {e}", exc_info=True)
-        return {"status": "error", "message": str(e), "count": 0}
+        return {"status": "error", "message": str(e)}
 
 
 def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
@@ -5442,12 +5427,12 @@ with DAG(**DAG_CONFIG) as dag:
                 logger.warning(f"⚠️ File categories không tồn tại: {CATEGORIES_FILE}")
 
             # Debug logging for lookup
-            if category_path_lookup:
+            if DEBUG_ENRICH_CATEGORY_PATH and category_path_lookup:
                  sample_keys = list(category_path_lookup.keys())[:5]
-                 logger.info(f"🔍 [DEBUG] Sample category_path_lookup keys: {sample_keys}")
-
+                 logger.debug(f"🔍 [DEBUG] Sample category_path_lookup keys: {sample_keys}")
+ 
                  sample_product_ids = [p.get("category_id") for p in products[:5] if p.get("category_id")]
-                 logger.info(f"🔍 [DEBUG] Sample product category_ids: {sample_product_ids}")
+                 logger.debug(f"🔍 [DEBUG] Sample product category_ids: {sample_product_ids}")
 
             # Bước 3: Enrich category_path cho products
             enriched = 0
@@ -5466,11 +5451,11 @@ with DAG(**DAG_CONFIG) as dag:
                     else:
                         # Log: category_id không tìm thấy trong file categories
                         without_category_id += 1
-                        if len(debug_missing_ids) < 10:
+                        if DEBUG_ENRICH_CATEGORY_PATH and len(debug_missing_ids) < 10:
                             debug_missing_ids.add(cat_id)
 
-            if debug_missing_ids:
-                logger.warning(f"⚠️ [DEBUG] Sample missing IDs in lookup: {list(debug_missing_ids)}")
+            if DEBUG_ENRICH_CATEGORY_PATH and debug_missing_ids:
+                logger.debug(f"⚠️ [DEBUG] Sample missing IDs in lookup: {list(debug_missing_ids)}")
 
             # Bước 4: Report
             if enriched > 0:

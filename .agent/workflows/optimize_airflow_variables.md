@@ -31,4 +31,6 @@ docker-compose exec airflow-webserver airflow variables set TIKI_PRODUCTS_PER_DA
 docker-compose exec airflow-webserver airflow variables set TIKI_DETAIL_POOL_SIZE 2
 docker-compose exec airflow-webserver airflow variables set TIKI_DETAIL_MAX_CONCURRENT_TASKS 4
 docker-compose exec airflow-webserver airflow variables set TIKI_DETAIL_RATE_LIMIT_DELAY 0.1
+docker-compose exec airflow-webserver airflow variables set TIKI_DETAIL_CRAWL_TIMEOUT 180
+docker-compose exec airflow-webserver airflow variables set TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD 10
 ```

@@ -4,23 +4,12 @@ import os
 import sys
 from pathlib import Path
 
-# Thêm đường dẫn src
-current_dir = Path(__file__).resolve().parent
-src_dir = current_dir.parent.parent
-sys.path.insert(0, str(src_dir))
-
-# Config DB host for local run
-if "POSTGRES_HOST" not in os.environ:
-    print("ℹ️  Setting POSTGRES_HOST=localhost for local execution")
-    os.environ["POSTGRES_HOST"] = "localhost"
-
-from pipelines.crawl.storage.postgres_storage import PostgresStorage
-
 def load_categories(json_file_path: str):
     """
     Load data from categories JSON file to DB using Bulk Copy.
     Re-creates table if needed.
     """
+    from pipelines.crawl.storage.postgres_storage import PostgresStorage
     print(f"📂 Reading categories from: {json_file_path}")
     
     if not os.path.exists(json_file_path):
@@ -53,6 +42,17 @@ def load_categories(json_file_path: str):
         traceback.print_exc()
 
 if __name__ == "__main__":
+    # Side-effects only when run as a script
+    current_dir = Path(__file__).resolve().parent
+    src_dir = current_dir.parent.parent
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+
+    # Config DB host for local run
+    if "POSTGRES_HOST" not in os.environ:
+        print("ℹ️  Setting POSTGRES_HOST=localhost for local execution")
+        os.environ["POSTGRES_HOST"] = "localhost"
+
     # Default path based on user's structure
     default_path = os.path.join(src_dir.parent, "data", "raw", "categories_recursive_optimized.json")
     

@@ -23,7 +23,7 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET}
     # Fernet key for Variable/Connection encryption (must be consistent across rebuilds)
     # Generate new key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-YlCImzjge_TeZc7pvk7btD7q8yNxzMC5B_QkS3oPWQk=}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
 
     # === Local Executor Configuration (LITE MODE) ===
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -190,7 +190,7 @@ services:
         su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow db migrate"
         
         echo "Creating Admin User..."
-        su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com" || true
+        su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow users create --username admin --password \"${_AIRFLOW_WWW_USER_PASSWORD}\" --firstname Admin --lastname User --role Admin --email admin@example.com" || true
         
         echo "Configuring Pools and Variables..."
         if [ -f /opt/airflow/setup/init-airflow-config.sh ]; then
@@ -204,7 +204,7 @@ services:
     environment:
       <<: *airflow-common-env
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
     user: "0:0"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
