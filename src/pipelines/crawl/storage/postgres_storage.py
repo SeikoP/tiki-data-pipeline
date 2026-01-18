@@ -172,130 +172,7 @@ class PostgresStorage:
                     except Exception:
                         pass
 
-    def save_categories(
-        self, categories: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
-    ) -> int:
-        """
-        Lưu danh sách categories vào database với batch processing tối ưu
 
-        Args:
-            categories: List các category dictionaries
-            upsert: Nếu True, update nếu đã tồn tại (dựa trên url)
-            batch_size: Số categories insert mỗi lần (mặc định: 100)
-
-        Returns:
-            Số categories đã lưu thành công
-        """
-        if not categories:
-            return 0
-
-        saved_count = 0
-        with self.get_connection() as conn:
-            with conn.cursor() as cur:
-                # Batch processing
-                for i in range(0, len(categories), batch_size):
-                    batch = categories[i : i + batch_size]
-                    try:
-                        # Chuẩn bị data cho batch insert
-                        values = [
-                            (
-                                cat.get("category_id"),
-                                cat.get("name"),
-                                cat.get("url"),
-                                cat.get("image_url"),
-                                cat.get("parent_url"),
-                                cat.get("level"),
-                                cat.get("product_count", 0),
-                            )
-                            for cat in batch
-                        ]
-
-                        if upsert:
-                            # Batch INSERT ... ON CONFLICT UPDATE
-                            execute_values(
-                                cur,
-                                """
-                                INSERT INTO categories
-                                    (category_id, name, url, image_url, parent_url, level, product_count)
-                                VALUES %s
-                                ON CONFLICT (url)
-                                DO UPDATE SET
-                                    name = EXCLUDED.name,
-                                    image_url = EXCLUDED.image_url,
-                                    parent_url = EXCLUDED.parent_url,
-                                    level = EXCLUDED.level,
-                                    product_count = EXCLUDED.product_count,
-                                    updated_at = CURRENT_TIMESTAMP
-                                """,
-                                values,
-                            )
-                        else:
-                            # Batch INSERT, bỏ qua nếu đã tồn tại
-                            execute_values(
-                                cur,
-                                """
-                                INSERT INTO categories
-                                    (category_id, name, url, image_url, parent_url, level, product_count)
-                                VALUES %s
-                                ON CONFLICT (url) DO NOTHING
-                                """,
-                                values,
-                            )
-
-                        saved_count += len(batch)
-                    except Exception as e:
-                        # Fallback: lưu từng item một
-                        print(f"⚠️  Lỗi khi lưu batch categories: {e}")
-                        for cat in batch:
-                            try:
-                                if upsert:
-                                    cur.execute(
-                                        """
-                                        INSERT INTO categories
-                                            (category_id, name, url, image_url, parent_url, level, product_count)
-                                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                        ON CONFLICT (url)
-                                        DO UPDATE SET
-                                            name = EXCLUDED.name,
-                                            image_url = EXCLUDED.image_url,
-                                            parent_url = EXCLUDED.parent_url,
-                                            level = EXCLUDED.level,
-                                            product_count = EXCLUDED.product_count,
-                                            updated_at = CURRENT_TIMESTAMP
-                                        """,
-                                        (
-                                            cat.get("category_id"),
-                                            cat.get("name"),
-                                            cat.get("url"),
-                                            cat.get("image_url"),
-                                            cat.get("parent_url"),
-                                            cat.get("level"),
-                                            cat.get("product_count", 0),
-                                        ),
-                                    )
-                                else:
-                                    cur.execute(
-                                        """
-                                        INSERT INTO categories
-                                            (category_id, name, url, image_url, parent_url, level, product_count)
-                                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                        ON CONFLICT (url) DO NOTHING
-                                        """,
-                                        (
-                                            cat.get("category_id"),
-                                            cat.get("name"),
-                                            cat.get("url"),
-                                            cat.get("image_url"),
-                                            cat.get("parent_url"),
-                                            cat.get("level"),
-                                            cat.get("product_count", 0),
-                                        ),
-                                    )
-                                saved_count += 1
-                            except Exception:
-                                continue
-
-        return saved_count
 
     def save_products(
         self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
@@ -587,13 +464,13 @@ class PostgresStorage:
                 return [dict(zip(columns, row, strict=False)) for row in cur.fetchall()]
 
     def get_category_stats(self) -> dict[str, Any]:
-        """Lấy thống kê tổng quan về categories và products"""
+        """Lấy thống kê tổng quan về products (Category stats removed)"""
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT
-                        (SELECT COUNT(*) FROM categories) as total_categories,
+                        0 as total_categories,
                         (SELECT COUNT(*) FROM products) as total_products,
                         (SELECT COUNT(DISTINCT category_url) FROM products) as categories_with_products,
                         (SELECT AVG(sales_count) FROM products WHERE sales_count IS NOT NULL) as avg_sales_count,
@@ -602,7 +479,7 @@ class PostgresStorage:
                 )
                 row = cur.fetchone()
                 return {
-                    "total_categories": row[0],
+                    "total_categories": 0,
                     "total_products": row[1],
                     "categories_with_products": row[2],
                     "avg_sales_count": float(row[3]) if row[3] else 0,
@@ -644,9 +521,7 @@ class PostgresStorage:
             "sales_count", "price", "original_price", "discount_percent", "rating_average",
             "review_count", "description", "specifications", "images",
             "seller_name", "seller_id", "seller_is_official", "brand",
-            "stock_available", "stock_quantity", "stock_status", "shipping",
-            "estimated_revenue", "price_savings", "price_category", "popularity_score",
-            "value_score", "discount_amount", "sales_velocity"
+            "stock_available", "stock_quantity", "stock_status", "shipping"
         ]
 
         # Prepare CSV/TSV data in memory
@@ -713,6 +588,33 @@ class PostgresStorage:
                     saved_count = cur.rowcount
 
                 # Note: Với Bulk Merge, ta không phân biệt chính xác insert/update count
+                
+                # 4. Ghi log lịch sử crawl (Product Tracking)
+                # Yêu cầu: "thêm ngày crawl và giá cập nhật vào bảng crawl_history"
+                try:
+                    history_buffer = io.StringIO()
+                    h_writer = csv.writer(history_buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                    current_ts = datetime.now().isoformat()
+                    
+                    for p in products:
+                        h_writer.writerow([
+                            "product_tracking", # crawl_type
+                            "success",          # status
+                            p.get("product_id"),
+                            p.get("price") if p.get("price") is not None else "",
+                            current_ts,         # started_at
+                            current_ts          # completed_at
+                        ])
+                    
+                    history_buffer.seek(0)
+                    cur.copy_expert(
+                        "COPY crawl_history (crawl_type, status, product_id, price, started_at, completed_at) FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')",
+                        history_buffer
+                    )
+                except Exception as e:
+                    print(f"⚠️  Failed to log history: {e}") 
+                    # Không fail task chính chỉ vì lỗi log history
+
                 # Return approximate stats
                 return {
                     "saved_count": saved_count,

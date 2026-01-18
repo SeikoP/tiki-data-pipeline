@@ -447,18 +447,8 @@ class DataLoader:
 
         # Load vào database
         if self.enable_db and self.db_storage:
-            try:
-                saved_count_cat: int = self.db_storage.save_categories(
-                    categories, upsert=upsert, batch_size=self.batch_size
-                )
-                self.stats["db_loaded"] = saved_count_cat
-                self.stats["success_count"] = saved_count_cat
-                logger.info(f"✅ Đã load {saved_count_cat} categories vào database")
-            except Exception as e:
-                error_msg = f"Lỗi khi load vào database: {str(e)}"
-                self.stats["errors"].append(error_msg)
-                self.stats["failed_count"] += len(categories)
-                logger.error(f"❌ {error_msg}")
+            logger.info("ℹ️ Skip saving categories to DB (Table 'categories' removed). Only saving to file.")
+            # Database load logic removed as requested
 
         # Load vào file nếu cần
         if save_to_file:

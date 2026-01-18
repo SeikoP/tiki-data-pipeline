@@ -137,8 +137,7 @@ class DataTransformer:
             # Transform format để phù hợp với database schema
             transformed = self._transform_to_db_format(transformed)
 
-            # Tạo computed fields
-            transformed = self._add_computed_fields(transformed)
+
 
             return transformed
 
@@ -308,14 +307,7 @@ class DataTransformer:
         db_product["specifications"] = product.get("specifications")
         db_product["images"] = product.get("images")
 
-        # Computed fields (doanh thu, metrics)
-        db_product["estimated_revenue"] = product.get("estimated_revenue")
-        db_product["price_savings"] = product.get("price_savings")
-        db_product["price_category"] = product.get("price_category")
-        db_product["popularity_score"] = product.get("popularity_score")
-        db_product["value_score"] = product.get("value_score")
-        db_product["discount_amount"] = product.get("discount_amount")
-        db_product["sales_velocity"] = product.get("sales_velocity")
+
 
         # Metadata (không lưu vào DB nhưng giữ lại cho reference)
         if "_metadata" in product:
@@ -334,121 +326,7 @@ class DataTransformer:
 
         return db_product
 
-    def _add_computed_fields(self, product: dict[str, Any]) -> dict[str, Any]:
-        """Thêm các trường tính toán"""
-        # 1. Doanh thu ước tính (Estimated Revenue)
-        # Doanh thu = số lượng đã bán * giá hiện tại
-        sales_count = product.get("sales_count")
-        price = (
-            product.get("price", {}).get("current_price")
-            if isinstance(product.get("price"), dict)
-            else product.get("price")
-        )
 
-        if sales_count and price:
-            estimated_revenue = sales_count * price
-            product["estimated_revenue"] = round(estimated_revenue, 2)
-        else:
-            product["estimated_revenue"] = None
-
-        # 2. Tiết kiệm (Price Savings)
-        # Tiết kiệm = giá gốc - giá hiện tại
-        original_price = (
-            product.get("price", {}).get("original_price")
-            if isinstance(product.get("price"), dict)
-            else product.get("original_price")
-        )
-
-        if price and original_price and original_price > price:
-            price_savings = original_price - price
-            product["price_savings"] = round(price_savings, 2)
-        else:
-            product["price_savings"] = None
-
-        # 3. Price Category (Phân loại giá)
-        if price:
-            if price < 500000:  # < 500k
-                product["price_category"] = "budget"
-            elif price < 2000000:  # 500k - 2M
-                product["price_category"] = "mid-range"
-            elif price < 10000000:  # 2M - 10M
-                product["price_category"] = "premium"
-            else:  # > 10M
-                product["price_category"] = "luxury"
-        else:
-            product["price_category"] = None
-
-        # 4. Popularity Score (Điểm độ phổ biến)
-        # Kết hợp sales_count, rating, review_count
-        rating_avg = (
-            product.get("rating", {}).get("average")
-            if isinstance(product.get("rating"), dict)
-            else product.get("rating_average")
-        )
-        review_count = (
-            product.get("rating", {}).get("total_reviews")
-            or product.get("rating", {}).get("review_count")
-            if isinstance(product.get("rating"), dict)
-            else product.get("review_count")
-        )
-
-        popularity_score = 0
-        if sales_count:
-            # Sales count chiếm 50% (normalize về scale 0-100)
-            # Giả sử max sales_count là 100k để normalize
-            max_sales = 100000
-            sales_score = min((sales_count / max_sales) * 50, 50)
-            popularity_score += sales_score
-
-        if rating_avg:
-            # Rating chiếm 30% (0-5 scale -> 0-30)
-            rating_score = (rating_avg / 5) * 30
-            popularity_score += rating_score
-
-        if review_count:
-            # Review count chiếm 20% (normalize về scale 0-100)
-            # Giả sử max review_count là 10k để normalize
-            max_reviews = 10000
-            review_score = min((review_count / max_reviews) * 20, 20)
-            popularity_score += review_score
-
-        product["popularity_score"] = round(popularity_score, 2) if popularity_score > 0 else None
-
-        # 5. Value Score (Điểm giá trị)
-        # Giá trị = rating / (price / 1000000) - rating càng cao, giá càng thấp thì điểm càng cao
-        if rating_avg and price and price > 0:
-            # Normalize price về triệu đồng
-            price_million = price / 1000000
-            # Tính value score: rating / price_million
-            # Nếu rating cao và giá thấp -> điểm cao
-            value_score = rating_avg / price_million if price_million > 0 else None
-            product["value_score"] = round(value_score, 2) if value_score else None
-        else:
-            product["value_score"] = None
-
-        # 6. Discount Amount (Số tiền giảm)
-        # Số tiền giảm = original_price - price (đã có trong price_savings nhưng đổi tên cho rõ ràng)
-        if not product.get("price_savings") and price and original_price and original_price > price:
-            product["discount_amount"] = round(original_price - price, 2)
-        else:
-            product["discount_amount"] = product.get("price_savings")
-
-        # 7. Sales Velocity (Tốc độ bán)
-        # Giả định: sales_velocity = sales_count (có thể tính chi tiết hơn nếu có dữ liệu theo thời gian)
-        product["sales_velocity"] = sales_count
-
-        # 8. Price per Unit (Giá trên đơn vị) - nếu có specifications về số lượng/khối lượng
-        # Ví dụ: giá trên m², giá trên kg, etc.
-        # Có thể implement nếu cần extract từ specifications
-
-        # Normalized brand name (loại bỏ "Thương hiệu: " prefix nếu có trong name)
-        if not product.get("brand") and product.get("name"):
-            # Thử extract brand từ name
-            # Một số pattern phổ biến: "Brand Name Product Name"
-            # Có thể implement logic extract brand ở đây nếu cần
-            pass
-
-        return product
 
     def validate_product(self, product: dict[str, Any]) -> tuple[bool, str | None]:
         """
