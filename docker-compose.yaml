@@ -21,6 +21,9 @@ x-airflow-common:
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
     # JWT secret for API authentication (must be same across all components)
     AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET}
+    # Fernet key for Variable/Connection encryption (must be consistent across rebuilds)
+    # Generate new key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-YlCImzjge_TeZc7pvk7btD7q8yNxzMC5B_QkS3oPWQk=}
 
     # === Local Executor Configuration (LITE MODE) ===
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -46,7 +49,8 @@ x-airflow-common:
     # Format: username:Admin (role can be Admin, Op, User, Viewer, Public)
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${_AIRFLOW_WWW_USER_USERNAME:-admin}:Admin
     
-    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-selenium>=4.0.0 beautifulsoup4>=4.12.0 requests>=2.31.0 lxml>=4.9.0 tqdm>=4.65.0 webdriver-manager>=4.0.0}
+    # Note: Python packages (selenium, beautifulsoup4, etc.) are installed at build time in Dockerfile
+    # for faster startup. No runtime pip install needed.
 
   volumes:
     - ./airflow/dags:/opt/airflow/dags
@@ -188,12 +192,28 @@ services:
         echo "Creating Admin User..."
         su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com" || true
         
+        echo "Configuring Pools and Variables..."
+        if [ -f /opt/airflow/setup/init-airflow-config.sh ]; then
+          chmod +x /opt/airflow/setup/init-airflow-config.sh
+          su -s /bin/bash airflow -c "cd /opt/airflow && /opt/airflow/setup/init-airflow-config.sh"
+        else
+          echo "Warning: init-airflow-config.sh not found, skipping pool/variable configuration"
+        fi
+        
         echo "Init Done."
     environment:
       <<: *airflow-common-env
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-admin}
     user: "0:0"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/config:/opt/airflow/config
+      - ./airflow/setup:/opt/airflow/setup
+      - ./src:/opt/airflow/src
+      - ./data:/opt/airflow/data
+      - ./scripts:/opt/airflow/scripts
     networks:
       - backend
 

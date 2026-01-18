@@ -21,3 +21,13 @@ RUN apt-get update && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 USER airflow
+
+# Install Python packages at build time (faster startup, no runtime install needed)
+RUN pip install --no-cache-dir \
+    selenium>=4.0.0 \
+    beautifulsoup4>=4.12.0 \
+    requests>=2.31.0 \
+    lxml>=4.9.0 \
+    tqdm>=4.65.0 \
+    webdriver-manager>=4.0.0 \
+    psycopg2-binary>=2.9.0

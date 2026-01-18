@@ -473,6 +473,13 @@ class PostgresStorage:
                             except Exception:
                                 continue
 
+        # Log crawl history for all saved products (for price tracking)
+        if saved_count > 0:
+            try:
+                self._log_batch_crawl_history(products[:saved_count])
+            except Exception as e:
+                print(f"⚠️  Failed to log crawl history: {e}")
+
         if upsert:
             return {
                 "saved_count": saved_count,
@@ -480,6 +487,44 @@ class PostgresStorage:
                 "updated_count": updated_count,
             }
         return saved_count
+
+    def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
+        """
+        Log crawl history entries for a batch of products using bulk insert.
+        Used for tracking price history over time.
+        """
+        if not products:
+            return
+
+        from datetime import datetime
+        import csv
+        import io
+
+        current_ts = datetime.now().isoformat()
+        history_buffer = io.StringIO()
+        h_writer = csv.writer(history_buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+
+        for p in products:
+            if not p.get("product_id"):
+                continue
+            h_writer.writerow([
+                "product_tracking",  # crawl_type
+                "success",           # status
+                p.get("product_id"),
+                p.get("price") if p.get("price") is not None else "",
+                current_ts,          # started_at
+                current_ts           # completed_at
+            ])
+
+        history_buffer.seek(0)
+
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.copy_expert(
+                    "COPY crawl_history (crawl_type, status, product_id, price, started_at, completed_at) "
+                    "FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')",
+                    history_buffer
+                )
 
     def log_crawl_history(
         self,

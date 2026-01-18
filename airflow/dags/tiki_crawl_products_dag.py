@@ -901,28 +901,71 @@ def load_categories(**context) -> list[dict[str, Any]]:
 
 def load_categories_to_db_wrapper(**context):
     """
-    Task wrapper to run load_categories_to_db
+    Task wrapper to load categories from JSON file into PostgreSQL database.
+    Uses direct PostgresStorage.save_categories() as fallback if imported function fails.
     """
     logger = get_logger(context)
-    if not load_categories_db_func:
-        logger.warning("⚠️  Function load_categories không khả dụng. Bỏ qua.")
-        return 0
 
     try:
         json_file = str(CATEGORIES_FILE)
         if not os.path.exists(json_file):
             logger.error(f"❌ File categories không tồn tại: {json_file}")
-            return 0
+            return {"status": "error", "message": "File not found", "count": 0}
 
         logger.info(f"🚀 Loading categories to DB from {json_file}")
-        # Call the imported function
-        load_categories_db_func(json_file)
-        logger.info("✅ Finished loading categories to DB")
-        return 1
+
+        # Read categories from JSON
+        with open(json_file, encoding="utf-8") as f:
+            categories = json.load(f)
+
+        if not categories:
+            logger.warning("⚠️  File categories rỗng")
+            return {"status": "warning", "message": "Empty file", "count": 0}
+
+        logger.info(f"📊 Found {len(categories)} categories to load")
+
+        # Try imported function first
+        if load_categories_db_func:
+            try:
+                load_categories_db_func(json_file)
+                logger.info(f"✅ Loaded categories using imported function")
+                return {"status": "success", "count": len(categories)}
+            except Exception as e:
+                logger.warning(f"⚠️  Imported function failed: {e}, trying fallback...")
+
+        # Fallback: Use PostgresStorage directly
+        try:
+            PostgresStorage = _import_postgres_storage()
+            if PostgresStorage is None:
+                raise ImportError("PostgresStorage not available")
+
+            db_host = get_variable("POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres"))
+            db_port = int(get_variable("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432")))
+            db_name = get_variable("POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data"))
+            db_user = get_variable("POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres"))
+            db_password = get_variable("POSTGRES_PASSWORD", default=os.getenv("POSTGRES_PASSWORD", ""))
+
+            storage = PostgresStorage(
+                host=db_host,
+                port=db_port,
+                database=db_name,
+                user=db_user,
+                password=db_password,
+            )
+
+            saved_count = storage.save_categories(categories)
+            storage.close()
+
+            logger.info(f"✅ Loaded {saved_count} categories via PostgresStorage fallback")
+            return {"status": "success", "count": saved_count}
+
+        except Exception as fallback_error:
+            logger.error(f"❌ Fallback also failed: {fallback_error}", exc_info=True)
+            return {"status": "error", "message": str(fallback_error), "count": 0}
+
     except Exception as e:
         logger.error(f"❌ Lỗi khi load categories vào DB: {e}", exc_info=True)
-        # Không fail task này để tránh chặn luồng chính
-        return 0
+        return {"status": "error", "message": str(e), "count": 0}
 
 
 def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
@@ -1541,8 +1584,6 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         already_crawled = 0
         db_hits = 0  # Products đã có trong DB
 
-        # Lấy cấu hình cho multi-day crawling
-        # Tính toán: 500 products ~ 52.75 phút -> 280 products ~ 30 phút
         products_per_day = int(
             get_variable("TIKI_PRODUCTS_PER_DAY", default="50")
         )  # Mặc định 280 products/ngày (~30 phút)
