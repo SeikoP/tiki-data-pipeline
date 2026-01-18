@@ -3,14 +3,14 @@ Utility để lưu dữ liệu crawl vào PostgreSQL database
 Tối ưu: Connection pooling, batch processing, error handling
 """
 
+import csv
+import io
+import json
 import os
 import time
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
-import io
-import csv
-import json
 
 import psycopg2
 from psycopg2.extras import Json, execute_values
@@ -179,13 +179,13 @@ class PostgresStorage:
         """
         if not categories:
             return 0
-            
+
         columns = ["name", "url", "parent_url", "level", "image_url", "category_id"]
-        
+
         # Prepare CSV buffer
         buffer = io.StringIO()
         writer = csv.writer(buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        
+
         for cat in categories:
             # Extract ID from URL if not monitoring
             cat_id = cat.get("category_id")
@@ -195,17 +195,17 @@ class PostgresStorage:
                 match = re.search(r"c(\d+)", cat.get("url", ""))
                 if match:
                     cat_id = match.group(1)
-            
+
             writer.writerow([
-                cat.get("name"), 
-                cat.get("url"), 
-                cat.get("parent_url"), 
-                cat.get("level", 0), 
-                cat.get("image_url"), 
+                cat.get("name"),
+                cat.get("url"),
+                cat.get("parent_url"),
+                cat.get("level", 0),
+                cat.get("image_url"),
                 cat_id
             ])
         buffer.seek(0)
-        
+
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 # 1. Ensure Table Exists
@@ -223,7 +223,7 @@ class PostgresStorage:
                     CREATE INDEX IF NOT EXISTS idx_cat_parent ON categories(parent_url);
                     CREATE INDEX IF NOT EXISTS idx_cat_level ON categories(level);
                 """)
-                
+
                 # 2. Create Temp Table for Staging
                 cur.execute("""
                     CREATE TEMP TABLE IF NOT EXISTS categories_staging (
@@ -231,13 +231,13 @@ class PostgresStorage:
                     ) ON COMMIT DROP;
                 """)
                 cur.execute("TRUNCATE categories_staging;")
-                
+
                 # 3. Bulk Copy to Staging
                 cur.copy_expert(
                     f"COPY categories_staging ({','.join(columns)}) FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')",
                     buffer
                 )
-                
+
                 # 4. Merge (Upsert) to Main Table
                 # Update columns excluding PK (url) and created_at
                 cur.execute(f"""
@@ -251,7 +251,7 @@ class PostgresStorage:
                         category_id = EXCLUDED.category_id,
                         updated_at = CURRENT_TIMESTAMP;
                 """)
-                
+
                 saved_count = cur.rowcount
                 return saved_count
 
@@ -674,14 +674,14 @@ class PostgresStorage:
                     saved_count = cur.rowcount
 
                 # Note: Với Bulk Merge, ta không phân biệt chính xác insert/update count
-                
+
                 # 4. Ghi log lịch sử crawl (Product Tracking)
                 # Yêu cầu: "thêm ngày crawl và giá cập nhật vào bảng crawl_history"
                 try:
                     history_buffer = io.StringIO()
                     h_writer = csv.writer(history_buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
                     current_ts = datetime.now().isoformat()
-                    
+
                     for p in products:
                         h_writer.writerow([
                             "product_tracking", # crawl_type
@@ -691,14 +691,14 @@ class PostgresStorage:
                             current_ts,         # started_at
                             current_ts          # completed_at
                         ])
-                    
+
                     history_buffer.seek(0)
                     cur.copy_expert(
                         "COPY crawl_history (crawl_type, status, product_id, price, started_at, completed_at) FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')",
                         history_buffer
                     )
                 except Exception as e:
-                    print(f"⚠️  Failed to log history: {e}") 
+                    print(f"⚠️  Failed to log history: {e}")
                     # Không fail task chính chỉ vì lỗi log history
 
                 # Return approximate stats

@@ -30,6 +30,7 @@ from threading import Lock
 from typing import Any
 
 from airflow import DAG
+from airflow.models import Variable
 from airflow.providers.standard.operators.python import PythonOperator
 
 # Import Variable và TaskGroup với suppress warning
@@ -51,7 +52,6 @@ except ImportError:
             def __exit__(self, *args):
                 pass
 
-from airflow.models import Variable as _Variable
 
 # Try to import redis_cache for caching
 redis_cache = None
@@ -65,7 +65,7 @@ try:
 
     # try:
     #     from pipelines.crawl.storage.redis_cache import get_redis_cache  # type: ignore
-    # 
+    #
     #     # AVOID TOP LEVEL CONNECTION!
     #     # redis_cache = get_redis_cache("redis://redis:6379/1")  # type: ignore
     # except Exception as import_err:
@@ -78,7 +78,7 @@ except Exception as e:
 # Wrapper function để suppress deprecation warning khi gọi get_variable()
 def get_variable(key: str, default: Any = None) -> Any:
     try:
-        return _get_variable(key, default=default)
+        return Variable.get(key, default_var=default)
     except Exception:
         return default
 
@@ -694,7 +694,7 @@ try:
     src_path = Path("/opt/airflow/src")
     if src_path.exists() and str(src_path) not in sys.path:
         sys.path.insert(0, str(src_path))
-        
+
     try:
         from pipelines.load.load_categories_to_db import load_categories as _load_categories_db
         load_categories_db_func = _load_categories_db
@@ -706,7 +706,7 @@ try:
            if p.exists():
                load_db_path = p
                break
-       
+
        if load_db_path:
            import importlib.util
            spec = importlib.util.spec_from_file_location("load_categories_to_db_mod", str(load_db_path))
@@ -717,7 +717,7 @@ try:
 
 except Exception as e:
     import warnings
-    warnings.warn(f"Could not import load_categories_to_db: {e}") 
+    warnings.warn(f"Could not import load_categories_to_db: {e}", stacklevel=2)
 
 
 # Import AISummarizer từ common/ai/
@@ -849,9 +849,9 @@ def load_categories(**context) -> list[dict[str, Any]]:
     """
     logger = get_logger(context)
     print("DEBUG: Task load_categories starting...")
-    import os
     import json
-    
+    import os
+
     logger.info("=" * 70)
     logger.info("📖 TASK: Load Categories (DEBUG RELOAD)")
     # Force reload timestamp: 2026-01-18 14:13
@@ -907,13 +907,13 @@ def load_categories_to_db_wrapper(**context):
     if not load_categories_db_func:
         logger.warning("⚠️  Function load_categories không khả dụng. Bỏ qua.")
         return 0
-        
+
     try:
         json_file = str(CATEGORIES_FILE)
         if not os.path.exists(json_file):
             logger.error(f"❌ File categories không tồn tại: {json_file}")
             return 0
-            
+
         logger.info(f"🚀 Loading categories to DB from {json_file}")
         # Call the imported function
         load_categories_db_func(json_file)
@@ -2214,7 +2214,7 @@ def crawl_product_batch(
                     src_path = Path("/opt/airflow/src")
                     if src_path.exists() and str(src_path) not in sys.path:
                         sys.path.insert(0, str(src_path))
-                    
+
                     from pipelines.crawl.config import (
                         HTTP_CONNECTOR_LIMIT,
                         HTTP_CONNECTOR_LIMIT_PER_HOST,
@@ -5233,20 +5233,20 @@ with DAG(**DAG_CONFIG) as dag:
                 """Tính optimal batch size dựa trên context"""
                 # Ước tính: mỗi product mất ~3-5s để crawl
                 avg_product_time = 4.0  # seconds
-                
+
                 # Tính products per batch để đạt target time
                 products_per_batch = target_batch_time / avg_product_time
-                
+
                 # Điều chỉnh dựa trên số lượng products và workers
                 # Nếu có nhiều products, có thể tăng batch size
                 if product_count > 1000:
                     products_per_batch *= 1.2
                 elif product_count < 100:
                     products_per_batch *= 0.8
-                
+
                 # Đảm bảo trong khoảng min-max
                 optimal = max(min_batch, min(max_batch, int(products_per_batch)))
-                
+
                 logger.info(
                     f"🔢 Dynamic batch sizing: {product_count} products, "
                     f"{available_workers} workers → optimal batch size: {optimal}"
@@ -5265,10 +5265,10 @@ with DAG(**DAG_CONFIG) as dag:
                 len(products_to_crawl),
                 available_workers=12,  # Có thể lấy từ Airflow Variable nếu cần
             )
-            
+
             # Dùng giá trị lớn hơn giữa config và optimal để đảm bảo hiệu quả
             batch_size = max(base_batch_size, optimal_batch_size)
-            
+
             # Batch Processing: Chia products thành batches
             batches = []
             for i in range(0, len(products_to_crawl), batch_size):
@@ -5404,7 +5404,7 @@ with DAG(**DAG_CONFIG) as dag:
             if category_path_lookup:
                  sample_keys = list(category_path_lookup.keys())[:5]
                  logger.info(f"🔍 [DEBUG] Sample category_path_lookup keys: {sample_keys}")
-                 
+
                  sample_product_ids = [p.get("category_id") for p in products[:5] if p.get("category_id")]
                  logger.info(f"🔍 [DEBUG] Sample product category_ids: {sample_product_ids}")
 
@@ -5412,7 +5412,7 @@ with DAG(**DAG_CONFIG) as dag:
             enriched = 0
             without_category_id = 0
             debug_missing_ids = set()
-            
+
             for p in products:
                 # Nếu product có category_id nhưng chưa có category_path
                 if p.get("category_id") and not p.get("category_path"):
@@ -5427,7 +5427,7 @@ with DAG(**DAG_CONFIG) as dag:
                         without_category_id += 1
                         if len(debug_missing_ids) < 10:
                             debug_missing_ids.add(cat_id)
-            
+
             if debug_missing_ids:
                 logger.warning(f"⚠️ [DEBUG] Sample missing IDs in lookup: {list(debug_missing_ids)}")
 
@@ -5529,7 +5529,7 @@ with DAG(**DAG_CONFIG) as dag:
         execution_timeout=timedelta(minutes=5),
         pool="crawl_pool",
     )
-    
+
     # Flow update: Load JSON -> Load DB -> Prepare Batch -> Crawl...
     task_load_categories >> task_load_categories_db >> task_prepare
 
