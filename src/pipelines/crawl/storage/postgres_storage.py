@@ -630,12 +630,10 @@ class PostgresStorage:
                         for product in batch:
                             try:
                                 result = self.save_products([product], upsert=upsert, batch_size=1)
-                                if upsert and isinstance(result, dict):
-                                    saved_count += 1
-                                    inserted_count += result.get("inserted_count", 0)
-                                    updated_count += result.get("updated_count", 0)
-                                else:
-                                    saved_count += 1
+                                # result is always a dict now
+                                saved_count += 1
+                                inserted_count += result.get("inserted_count", 0)
+                                updated_count += result.get("updated_count", 0)
                             except Exception:
                                 continue
 
@@ -646,13 +644,11 @@ class PostgresStorage:
             except Exception as e:
                 print(f"⚠️  Failed to log crawl history: {e}")
 
-        if upsert:
-            return {
-                "saved_count": saved_count,
-                "inserted_count": inserted_count,
-                "updated_count": updated_count,
-            }
-        return saved_count
+        return {
+            "saved_count": saved_count,
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
+        }
 
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
@@ -891,10 +887,8 @@ class PostgresStorage:
                 except Exception as e:
                     print(f"⚠️  Failed to log bulk history: {e}")
 
-                if upsert:
-                    return {
-                        "saved_count": saved_count,
-                        "inserted_count": saved_count,  # Approx
-                        "updated_count": 0,
-                    }
-                return saved_count
+                return {
+                    "saved_count": saved_count,
+                    "inserted_count": saved_count if upsert else 0,  # Approx; 0 if insert-only
+                    "updated_count": 0,
+                }

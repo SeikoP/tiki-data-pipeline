@@ -263,29 +263,22 @@ class DataLoader:
         # Load vào database
         if self.enable_db and self.db_storage:
             try:
-                result: Any = self.db_storage.save_products(
+                result: dict[str, Any] = self.db_storage.save_products(
                     products, upsert=upsert, batch_size=self.batch_size
                 )
 
-                # Xử lý kết quả (có thể là int hoặc dict)
-                if isinstance(result, dict):
-                    # Kết quả từ upsert=True: có thống kê INSERT vs UPDATE
-                    saved_count: int = result.get("saved_count", 0)
-                    inserted_count: int = result.get("inserted_count", 0)
-                    updated_count: int = result.get("updated_count", 0)
-                    self.stats["db_loaded"] = saved_count
-                    self.stats["success_count"] = saved_count
-                    self.stats["inserted_count"] = inserted_count
-                    self.stats["updated_count"] = updated_count
-                    logger.info(f"✅ Đã load {saved_count} products vào database")
+                # Xử lý kết quả (always dict with consistent structure)
+                saved_count: int = result.get("saved_count", 0)
+                inserted_count: int = result.get("inserted_count", 0)
+                updated_count: int = result.get("updated_count", 0)
+                self.stats["db_loaded"] = saved_count
+                self.stats["success_count"] = saved_count
+                self.stats["inserted_count"] = inserted_count
+                self.stats["updated_count"] = updated_count
+                logger.info(f"✅ Đã load {saved_count} products vào database")
+                if upsert:
                     logger.info(f"   - INSERT (mới): {inserted_count}")
                     logger.info(f"   - UPDATE (đã có): {updated_count}")
-                else:
-                    # Kết quả từ upsert=False: chỉ có số lượng
-                    saved_count_int: int = int(result)
-                    self.stats["db_loaded"] = saved_count_int
-                    self.stats["success_count"] = saved_count_int
-                    logger.info(f"✅ Đã load {saved_count_int} products vào database")
             except Exception as e:
                 error_msg = f"Lỗi khi load vào database: {str(e)}"
                 self.stats["errors"].append(error_msg)
