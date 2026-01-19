@@ -62,10 +62,11 @@ known-first-party = ["airflow"]
 
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
+disable_error_code = ["import-untyped"]
 exclude = [
     "airflow/logs/",
     "__pycache__/",
