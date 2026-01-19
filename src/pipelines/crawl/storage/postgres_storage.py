@@ -20,6 +20,40 @@ from psycopg2.pool import SimpleConnectionPool
 from ..validate_category_path import fix_products_category_paths
 
 
+def normalize_category_id(cat_id: str | None) -> str | None:
+    """
+    Normalize category ID to consistent format: 'c{id}'
+    
+    Args:
+        cat_id: Category ID in any format ('23570', 'c23570', etc.)
+    
+    Returns:
+        Normalized category ID ('c23570') or None
+    
+    Examples:
+        >>> normalize_category_id('23570')
+        'c23570'
+        >>> normalize_category_id('c23570')
+        'c23570'
+        >>> normalize_category_id(None)
+        None
+    """
+    if not cat_id:
+        return None
+    
+    # Convert to string and strip whitespace
+    cat_id_str = str(cat_id).strip()
+    
+    # Remove all 'c' prefixes and whitespace
+    clean_id = cat_id_str.replace('c', '').replace('C', '').strip()
+    
+    # Return with 'c' prefix if we have a valid ID
+    if clean_id and clean_id.isdigit():
+        return f"c{clean_id}"
+    
+    return None
+
+
 class PostgresStorage:
     """Class để lưu và truy vấn dữ liệu crawl từ PostgreSQL với connection pooling tối ưu"""
 
@@ -242,6 +276,7 @@ class PostgresStorage:
         specifications, popularity_score, discount_amount
         
         Đã thêm metadata columns: data_quality, last_crawl_status, retry_count
+        Đã thêm timestamp columns: last_crawled_at, last_crawl_attempt_at, first_seen_at
         """
         cur.execute(
             """
@@ -272,27 +307,57 @@ class PostgresStorage:
             -- Only essential index: category_id is used to join with categories table
             CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
             
-            -- NEW: Add metadata columns for data quality tracking
+            -- Metadata columns for data quality tracking
             ALTER TABLE products ADD COLUMN IF NOT EXISTS data_quality VARCHAR(50);
             ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawl_status VARCHAR(50);
             ALTER TABLE products ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
             
-            -- NEW: Index for filtering products by data quality
+            -- Timestamp columns for crawl tracking
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawled_at TIMESTAMP;
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawl_attempt_at TIMESTAMP;
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMP;
+            
+            -- Indexes for metadata and timestamp columns
             CREATE INDEX IF NOT EXISTS idx_products_data_quality ON products(data_quality);
             CREATE INDEX IF NOT EXISTS idx_products_retry_count ON products(retry_count);
+            CREATE INDEX IF NOT EXISTS idx_products_last_crawled_at ON products(last_crawled_at);
+            CREATE INDEX IF NOT EXISTS idx_products_last_crawl_attempt_at ON products(last_crawl_attempt_at);
         """
         )
+        
+        # Add foreign key constraint if not exists
+        cur.execute("""
+            SELECT constraint_name FROM information_schema.table_constraints
+            WHERE table_name = 'products'
+              AND constraint_type = 'FOREIGN KEY'
+              AND constraint_name = 'fk_products_category_id'
+        """)
+        
+        if not cur.fetchone():
+            try:
+                cur.execute("""
+                    ALTER TABLE products
+                    ADD CONSTRAINT fk_products_category_id
+                    FOREIGN KEY (category_id)
+                    REFERENCES categories(category_id)
+                    ON DELETE SET NULL
+                    ON UPDATE CASCADE
+                """)
+            except Exception:
+                # FK constraint may fail if there are orphan records
+                # This is expected and will be handled by migration script
+                pass
+
 
     def _ensure_history_schema(self, cur) -> None:
         """Đảm bảo bảng crawl_history và các index tồn tại.
 
-        Bảng này lưu lịch sử giá CHỈ KHI CÓ THAY ĐỔI (giá, discount, etc.)
-        để tiết kiệm dung lượng database.
-
+        Bảng này lưu lịch sử crawl cho MỌI lần crawl (không chỉ khi có thay đổi giá).
+        
         Schema đã được tối ưu và mở rộng:
         - Price tracking: price, original_price, discount_percent, price_change, previous_*
         - Detailed timestamps: started_at, completed_at, crawled_at
-        - Crawl metadata: crawl_status, retry_count, error_message
+        - Crawl metadata: crawl_type, crawl_status, retry_count, error_message
         - Data quality: missing_fields, data_completeness_score
         - Performance: crawl_duration_ms, page_load_time_ms
         """
@@ -322,29 +387,57 @@ class PostgresStorage:
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_original_price DECIMAL(12, 2);
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_discount_percent INTEGER;
             
-            -- NEW: Detailed timestamp tracking
+            -- Crawl type tracking: 'price_change', 'no_change', 'failed'
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_type VARCHAR(50) DEFAULT 'price_change';
+            
+            -- Detailed timestamp tracking
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
             
-            -- NEW: Crawl metadata for debugging and monitoring
+            -- Crawl metadata for debugging and monitoring
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_status VARCHAR(50);
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS error_message TEXT;
             
-            -- NEW: Data quality tracking
+            -- Data quality tracking
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS missing_fields JSONB;
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS data_completeness_score DECIMAL(3, 2);
             
-            -- NEW: Performance metrics
+            -- Performance metrics
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_duration_ms INTEGER;
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS page_load_time_ms INTEGER;
             
-            -- NEW: Indexes for new query patterns
+            -- Indexes for new query patterns
             CREATE INDEX IF NOT EXISTS idx_history_status ON crawl_history(crawl_status);
             CREATE INDEX IF NOT EXISTS idx_history_started_at ON crawl_history(started_at);
             CREATE INDEX IF NOT EXISTS idx_history_retry_count ON crawl_history(retry_count);
+            CREATE INDEX IF NOT EXISTS idx_history_crawl_type ON crawl_history(crawl_type);
         """
         )
+        
+        # Add foreign key constraint if not exists
+        cur.execute("""
+            SELECT constraint_name FROM information_schema.table_constraints
+            WHERE table_name = 'crawl_history'
+              AND constraint_type = 'FOREIGN KEY'
+              AND constraint_name = 'fk_crawl_history_product_id'
+        """)
+        
+        if not cur.fetchone():
+            try:
+                cur.execute("""
+                    ALTER TABLE crawl_history
+                    ADD CONSTRAINT fk_crawl_history_product_id
+                    FOREIGN KEY (product_id)
+                    REFERENCES products(product_id)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
+                """)
+            except Exception:
+                # FK constraint may fail if there are orphan records
+                # This is expected and will be handled by migration script
+                pass
+
 
     def _write_dicts_to_csv_buffer(
         self, rows: list[dict[str, Any]], columns: list[str]
@@ -459,7 +552,7 @@ class PostgresStorage:
     def save_categories(
         self,
         categories: list[dict[str, Any]],
-        only_leaf: bool = True,
+        only_leaf: bool = False,  # Changed: Load ALL categories by default
         sync_with_products: bool = False,
     ) -> int:
         """
@@ -467,8 +560,8 @@ class PostgresStorage:
 
         Args:
             categories: Danh sách categories cần lưu
-            only_leaf: Nếu True, chỉ lưu categories có is_leaf = true (mặc định).
-                      Nếu False, lưu tất cả categories.
+            only_leaf: Nếu True, chỉ lưu categories có is_leaf = true.
+                      Nếu False (DEFAULT), lưu tất cả categories including parents.
             sync_with_products: Nếu True, chỉ lưu các categories có match với product
                       (category_id có trong bảng products).
 
@@ -499,21 +592,55 @@ class PostgresStorage:
 
         # Get used category IDs if filtering is enabled
         used_category_ids = set()
+        urls_to_keep = set()  # URLs of categories to keep (including parents)
+        
         if sync_with_products:
             used_category_ids = self.get_used_category_ids()
             print(f"🔍 Found {len(used_category_ids)} active categories in products table")
+            
+            # Smart filtering: Find all leaf categories with products + their parent hierarchy
+            # Step 1: Find leaf categories that have products
+            for cat in categories:
+                cat_id = cat.get("category_id")
+                if not cat_id and cat.get("url"):
+                    match = re.search(r"c?(\d+)", cat.get("url", ""))
+                    if match:
+                        cat_id = match.group(1)
+                cat_id = normalize_category_id(cat_id)
+                
+                # Check if this category has products
+                is_leaf = cat.get("url") not in parent_urls
+                if is_leaf and cat_id:
+                    if cat_id in used_category_ids or (cat_id and cat_id[1:] in used_category_ids):
+                        # Add this leaf category
+                        urls_to_keep.add(cat.get("url"))
+                        
+                        # Step 2: Traverse up to collect ALL parent URLs
+                        current = cat
+                        visited = set()
+                        while current:
+                            url = current.get("url")
+                            if url in visited:
+                                break
+                            visited.add(url)
+                            urls_to_keep.add(url)
+                            parent_url = current.get("parent_url")
+                            current = url_to_cat.get(parent_url) if parent_url else None
+            
+            print(f"📂 Keeping {len(urls_to_keep)} categories (leaves + parents)")
 
         prepared_categories = []
         for cat in categories:
-            # Extract category_id from URL if missing - ALWAYS include 'c' prefix for consistency
+            # Extract and normalize category_id
             cat_id = cat.get("category_id")
             if not cat_id and cat.get("url"):
-                match = re.search(r"(c\d+)", cat.get("url", ""))
+                # Extract from URL
+                match = re.search(r"c?(\d+)", cat.get("url", ""))
                 if match:
-                    cat_id = match.group(1)  # Include 'c' prefix (e.g., 'c23570')
-            # Ensure existing category_id has 'c' prefix
-            elif cat_id and not cat_id.startswith("c"):
-                cat_id = f"c{cat_id}"
+                    cat_id = match.group(1)
+            
+            # Normalize to 'c{id}' format
+            cat_id = normalize_category_id(cat_id)
 
             category_path = build_category_path(cat)
             root_name = category_path[0] if category_path else ""
@@ -523,14 +650,10 @@ class PostgresStorage:
             if only_leaf and not is_leaf:
                 continue
 
-            # Nếu sync_with_products=True, chỉ lưu categories có trong products table
-            if sync_with_products and is_leaf:
-                # Check normalized ID
-                if cat_id not in used_category_ids:
-                    # Try alternate format (without 'c' prefix) just in case
-                    raw_id = cat_id[1:] if cat_id.startswith("c") else cat_id
-                    if raw_id not in used_category_ids:
-                        continue
+            # Nếu sync_with_products=True, chỉ lưu categories trong urls_to_keep
+            if sync_with_products:
+                if cat.get("url") not in urls_to_keep:
+                    continue
 
             # Extract level_1 đến level_5 từ category_path để thể hiện rõ theo từng độ sâu
             level_1 = category_path[0] if len(category_path) > 0 else None
@@ -575,7 +698,37 @@ class PostgresStorage:
             "is_leaf",
         ]
 
-        csv_buffer = self._write_dicts_to_csv_buffer(prepared_categories, columns)
+        # Deduplicate by category_id to prevent UniqueViolation
+        # Keep the entry with the shortest URL (usually the canonical one)
+        unique_categories_map = {}
+        for cat in prepared_categories:
+            cat_id = cat.get("category_id")
+            if not cat_id:
+                continue
+                
+            if cat_id in unique_categories_map:
+                existing = unique_categories_map[cat_id]
+                # If current URL is shorter or looks "better", replace
+                # Also prefer non-empty names
+                curr_url_len = len(cat.get("url", ""))
+                exist_url_len = len(existing.get("url", ""))
+                
+                replace = False
+                if curr_url_len < exist_url_len:
+                    replace = True
+                elif curr_url_len == exist_url_len:
+                     # Tie-breaker: prefer longer name (more descriptive)
+                     if len(cat.get("name", "")) > len(existing.get("name", "")):
+                         replace = True
+                
+                if replace:
+                    unique_categories_map[cat_id] = cat
+            else:
+                unique_categories_map[cat_id] = cat
+        
+        final_categories = list(unique_categories_map.values())
+
+        csv_buffer = self._write_dicts_to_csv_buffer(final_categories, columns)
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
@@ -630,6 +783,41 @@ class PostgresStorage:
 
                 return saved_count
 
+    def update_category_product_counts(self) -> int:
+        """
+        Cập nhật product_count cho tất cả categories từ bảng products thực tế.
+        
+        Phương pháp này đảm bảo:
+        - Giữ nguyên category hierarchy (tất cả parent categories)
+        - product_count chính xác dựa trên số products đã crawl
+        - Categories không có products sẽ có product_count = 0
+        
+        Returns:
+            Số lượng categories đã cập nhật
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Update product_count cho tất cả categories
+                cur.execute("""
+                    UPDATE categories c
+                    SET 
+                        product_count = COALESCE(
+                            (SELECT COUNT(*) 
+                             FROM products p 
+                             WHERE p.category_id = c.category_id),
+                            0
+                        ),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE c.is_leaf = true
+                """)
+                leaf_updated = cur.rowcount
+                
+                # Cũng có thể tính tổng product_count cho parent categories
+                # bằng cách sum product_count của các leaf categories con
+                # (optional - hiện tại chỉ update leaf categories)
+                
+                return leaf_updated
+
     def save_products(
         self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
     ) -> dict[str, Any]:
@@ -647,6 +835,11 @@ class PostgresStorage:
         """
         if not products:
             return {"saved_count": 0, "inserted_count": 0, "updated_count": 0}
+
+        # Normalize category_id for all products
+        for product in products:
+            if product.get("category_id"):
+                product["category_id"] = normalize_category_id(product["category_id"])
 
         # Tự động fix category_path để đảm bảo parent category ở index 0
         try:
@@ -694,7 +887,9 @@ class PostgresStorage:
                 for i in range(0, len(products), batch_size):
                     batch = products[i : i + batch_size]
                     try:
-                        # Chuẩn bị data cho batch insert (đã loại bỏ các trường: category_path, review_count, description, images, estimated_revenue, price_savings, price_category, value_score, sales_velocity, specifications, popularity_score, discount_amount)
+                        # Chuẩn bị data cho batch insert (core fields only)
+                        # Note: metadata columns (data_quality, last_crawl_status, retry_count)
+                        # are optional and may not exist in all DB setups
                         values = [
                             (
                                 product.get("product_id"),
@@ -712,11 +907,9 @@ class PostgresStorage:
                                 product.get("seller_name"),
                                 product.get("seller_id"),
                                 product.get("seller_is_official"),
-                                # Brand and stock
+                                # Brand and stock (only stock_available)
                                 product.get("brand"),
                                 product.get("stock_available"),
-                                product.get("stock_quantity"),
-                                product.get("stock_status"),
                                 Json(product.get("shipping")) if product.get("shipping") else None,
                             )
                             for product in batch
@@ -732,7 +925,7 @@ class PostgresStorage:
                             )
                             batch_updated = len(batch) - batch_inserted
 
-                            # Batch INSERT ... ON CONFLICT UPDATE (đã loại bỏ các trường đã xóa: specifications, popularity_score, discount_amount)
+                            # Batch INSERT ... ON CONFLICT UPDATE (core fields only)
                             execute_values(
                                 cur,
                                 """
@@ -740,7 +933,7 @@ class PostgresStorage:
                                     (product_id, name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, stock_quantity, stock_status, shipping)
+                                     stock_available, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id)
                                 DO UPDATE SET
@@ -759,8 +952,6 @@ class PostgresStorage:
                                     seller_is_official = EXCLUDED.seller_is_official,
                                     brand = EXCLUDED.brand,
                                     stock_available = EXCLUDED.stock_available,
-                                    stock_quantity = EXCLUDED.stock_quantity,
-                                    stock_status = EXCLUDED.stock_status,
                                     shipping = EXCLUDED.shipping,
                                     updated_at = CURRENT_TIMESTAMP
                                 """,
@@ -776,7 +967,7 @@ class PostgresStorage:
                             inserted_count += batch_inserted
                             updated_count += batch_updated
                         else:
-                            # Batch INSERT, bỏ qua nếu đã tồn tại (đã loại bỏ các trường đã xóa: specifications, popularity_score, discount_amount)
+                            # Batch INSERT, bỏ qua nếu đã tồn tại
                             execute_values(
                                 cur,
                                 """
@@ -784,7 +975,7 @@ class PostgresStorage:
                                     (product_id, name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, stock_quantity, stock_status, shipping)
+                                     stock_available, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id) DO NOTHING
                                 """,
@@ -850,10 +1041,10 @@ class PostgresStorage:
             if not cat_id.startswith("c"):
                 cat_id = f"c{cat_id}"
 
-            if cat_url not in categories_to_add:
+            if cat_id not in categories_to_add:
                 # Chỉ lưu category_id làm tên tạm.
                 # Tên đúng (tiếng Việt có dấu) sẽ được cập nhật khi task load categories chạy.
-                categories_to_add[cat_url] = {
+                categories_to_add[cat_id] = {
                     "category_id": cat_id,
                     "name": cat_id,  # Tạm dùng ID làm tên
                     "url": cat_url,
@@ -887,14 +1078,15 @@ class PostgresStorage:
 
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
-        Log price history for products CHỈ KHI CÓ THAY ĐỔI GIÁ.
-
+        Log crawl history for ALL products (không chỉ khi có thay đổi giá).
+        
         Tối ưu:
         - Sử dụng batch lookup để lấy giá cũ (thay vì query từng product)
-        - Chỉ INSERT khi giá thay đổi hoặc là lần crawl đầu tiên
-        - Tiết kiệm ~90% storage khi giá ổn định
-
-        Schema: (product_id, price, original_price, discount_percent, price_change, previous_*, crawled_at)
+        - INSERT cho mọi lần crawl với crawl_type: 'price_change', 'no_change', 'failed'
+        - Populate metadata fields từ _metadata
+        
+        Schema: (product_id, price, original_price, discount_percent, price_change, previous_*, 
+                 crawl_type, crawl_status, metadata, crawled_at)
         """
         if not products:
             return
@@ -930,7 +1122,7 @@ class PostgresStorage:
                     for row in cur.fetchall()
                 }
 
-                # Collect products that need history update
+                # Collect ALL products for history insert (not just changed ones)
                 records_to_insert = []
 
                 for p in valid_products:
@@ -940,21 +1132,15 @@ class PostgresStorage:
                     current_discount = p.get("discount_percent")
 
                     prev = previous_data.get(product_id)
-
+                    
+                    # Determine crawl_type and price_change
                     if prev is None:
-                        # First time crawl - always insert
-                        records_to_insert.append(
-                            {
-                                "product_id": product_id,
-                                "price": current_price,
-                                "original_price": current_original_price,
-                                "discount_percent": current_discount,
-                                "price_change": None,
-                                "previous_price": None,
-                                "previous_original_price": None,
-                                "previous_discount_percent": None,
-                            }
-                        )
+                        # First time crawl
+                        crawl_type = "price_change"  # First crawl counts as change
+                        price_change = None
+                        prev_price = None
+                        prev_original = None
+                        prev_discount = None
                     else:
                         # Check if anything changed
                         prev_price = float(prev["price"]) if prev["price"] else None
@@ -968,43 +1154,52 @@ class PostgresStorage:
                             float(current_original_price) if current_original_price else None
                         )
 
-                        # Only insert if price, original_price, or discount changed
+                        # Determine if price changed
                         price_changed = prev_price != current_price_float
                         original_changed = prev_original != current_original_float
                         discount_changed = prev_discount != current_discount
 
                         if price_changed or original_changed or discount_changed:
+                            crawl_type = "price_change"
                             price_change = None
                             if prev_price is not None and current_price_float is not None:
                                 price_change = current_price_float - prev_price
+                        else:
+                            crawl_type = "no_change"
+                            price_change = None
 
-                            # Extract metadata if available
-                            metadata = p.get("_metadata", {})
-                            
-                            records_to_insert.append(
-                                {
-                                    "product_id": product_id,
-                                    "price": current_price,
-                                    "original_price": current_original_price,
-                                    "discount_percent": current_discount,
-                                    "price_change": price_change,
-                                    "previous_price": prev_price,
-                                    "previous_original_price": prev_original,
-                                    "previous_discount_percent": prev_discount,
-                                    # NEW: Metadata fields
-                                    "started_at": metadata.get("started_at"),
-                                    "completed_at": metadata.get("completed_at"),
-                                    "crawl_status": metadata.get("crawl_status", "success"),
-                                    "retry_count": metadata.get("retry_count", 0),
-                                    "error_message": metadata.get("error_message"),
-                                    "missing_fields": metadata.get("missing_fields"),
-                                    "data_completeness_score": metadata.get("data_completeness_score"),
-                                    "crawl_duration_ms": metadata.get("crawl_duration_ms"),
-                                    "page_load_time_ms": metadata.get("page_load_time_ms"),
-                                }
-                            )
+                    # Extract metadata if available
+                    metadata = p.get("_metadata", {})
+                    
+                    # Override crawl_type if crawl failed
+                    if metadata.get("crawl_status") == "failed":
+                        crawl_type = "failed"
+                    
+                    records_to_insert.append(
+                        {
+                            "product_id": product_id,
+                            "price": current_price,
+                            "original_price": current_original_price,
+                            "discount_percent": current_discount,
+                            "price_change": price_change,
+                            "previous_price": prev_price,
+                            "previous_original_price": prev_original,
+                            "previous_discount_percent": prev_discount,
+                            "crawl_type": crawl_type,
+                            # Metadata fields
+                            "started_at": metadata.get("started_at"),
+                            "completed_at": metadata.get("completed_at"),
+                            "crawl_status": metadata.get("crawl_status", "success"),
+                            "retry_count": metadata.get("retry_count", 0),
+                            "error_message": metadata.get("error_message"),
+                            "missing_fields": metadata.get("missing_fields"),
+                            "data_completeness_score": metadata.get("data_completeness_score"),
+                            "crawl_duration_ms": metadata.get("crawl_duration_ms"),
+                            "page_load_time_ms": metadata.get("page_load_time_ms"),
+                        }
+                    )
 
-                # Batch insert all changed records with enhanced metadata
+                # Batch insert ALL records (changed and unchanged)
                 if records_to_insert:
                     from psycopg2.extras import Json, execute_values
 
@@ -1014,7 +1209,7 @@ class PostgresStorage:
                         INSERT INTO crawl_history
                             (product_id, price, original_price, discount_percent, price_change,
                              previous_price, previous_original_price, previous_discount_percent,
-                             started_at, completed_at, crawl_status, retry_count, error_message,
+                             crawl_type, started_at, completed_at, crawl_status, retry_count, error_message,
                              missing_fields, data_completeness_score, crawl_duration_ms, page_load_time_ms)
                         VALUES %s
                         """,
@@ -1028,7 +1223,8 @@ class PostgresStorage:
                                 r["previous_price"],
                                 r["previous_original_price"],
                                 r["previous_discount_percent"],
-                                # NEW: Metadata values
+                                r["crawl_type"],
+                                # Metadata values
                                 r.get("started_at"),
                                 r.get("completed_at"),
                                 r.get("crawl_status"),
@@ -1043,15 +1239,20 @@ class PostgresStorage:
                         ],
                     )
                     
-                    # Enhanced logging with quality metrics
+                    # Enhanced logging with quality metrics and crawl_type breakdown
+                    type_counts = {}
+                    for r in records_to_insert:
+                        ct = r.get("crawl_type", "unknown")
+                        type_counts[ct] = type_counts.get(ct, 0) + 1
+                    
                     avg_score = sum(r.get("data_completeness_score", 0) or 0 for r in records_to_insert) / len(records_to_insert) if records_to_insert else 0
                     retry_count = sum(1 for r in records_to_insert if r.get("retry_count", 0) > 0)
                     
+                    type_str = ", ".join(f"{k}: {v}" for k, v in type_counts.items())
                     print(
-                        f"📊 Price history: {len(records_to_insert)}/{len(valid_products)} products had changes "
+                        f"📊 Crawl history: {len(records_to_insert)} records ({type_str}) "
                         f"(avg quality: {avg_score:.2f}, {retry_count} retried)"
                     )
-
     def log_price_history(
         self,
         product_id: str,
@@ -1354,8 +1555,6 @@ class PostgresStorage:
             "seller_is_official",
             "brand",
             "stock_available",
-            "stock_quantity",
-            "stock_status",
             "shipping",
         ]
 

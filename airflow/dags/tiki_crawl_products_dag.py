@@ -1573,7 +1573,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         db_hits = 0  # Products đã có trong DB
 
         products_per_day = int(
-            get_variable("TIKI_PRODUCTS_PER_DAY", default="50")
+            get_variable("TIKI_PRODUCTS_PER_DAY", default="25")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
             get_variable("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
@@ -2452,28 +2452,37 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
             if redis_cache:
                 cached_detail = redis_cache.get_cached_product_detail(product_id)
                 if cached_detail:
-                    # Kiểm tra cache có đầy đủ không: cần có price và sales_count
                     has_price = cached_detail.get("price", {}).get("current_price")
                     has_sales_count = cached_detail.get("sales_count") is not None
+                    brand_value = cached_detail.get("brand")
+                    has_brand = bool(
+                        brand_value and (not isinstance(brand_value, str) or brand_value.strip())
+                    )
+                    seller_info = cached_detail.get("seller", {})
+                    seller_name = (
+                        seller_info.get("name") if isinstance(seller_info, dict) else None
+                    )
+                    has_seller = bool(
+                        seller_name and (not isinstance(seller_name, str) or seller_name.strip())
+                    )
 
-                    # Nếu đã có detail đầy đủ (có price và sales_count), dùng cache
-                    if has_price and has_sales_count:
+                    if has_price and has_sales_count and has_brand and has_seller:
                         logger.info("=" * 70)
                         logger.info(f"✅ SKIP CRAWL - Redis Cache Hit cho product {product_id}")
                         logger.info(f"   - Có price: {has_price}")
                         logger.info(f"   - Có sales_count: {has_sales_count}")
+                        logger.info(f"   - Có brand: {has_brand}")
+                        logger.info(f"   - Có seller: {has_seller}")
                         logger.info("   - Sử dụng cache, không cần crawl lại")
                         logger.info("=" * 70)
                         result["detail"] = cached_detail
                         result["status"] = "cached"
                         return result
-                elif has_price:
-                    # Cache có price nhưng thiếu sales_count → crawl lại để lấy sales_count
-                    logger.info(
-                        f"[Redis Cache] ⚠️  Cache thiếu sales_count cho product {product_id}, sẽ crawl lại"
-                    )
+                    if has_price or has_sales_count or has_brand or has_seller:
+                        logger.info(
+                            f"[Redis Cache] ⚠️  Cache thiếu dữ liệu cho product {product_id}, sẽ crawl lại"
+                        )
                 else:
-                    # Cache không đầy đủ → crawl lại
                     logger.info(
                         f"[Redis Cache] ⚠️  Cache không đầy đủ cho product {product_id}, sẽ crawl lại"
                     )
@@ -2488,16 +2497,29 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
                 try:
                     with open(cache_file, encoding="utf-8") as f:
                         cached_detail = json.load(f)
-                        # Kiểm tra cache có đầy đủ không: cần có price và sales_count
                         has_price = cached_detail.get("price", {}).get("current_price")
                         has_sales_count = cached_detail.get("sales_count") is not None
+                        brand_value = cached_detail.get("brand")
+                        has_brand = bool(
+                            brand_value
+                            and (not isinstance(brand_value, str) or brand_value.strip())
+                        )
+                        seller_info = cached_detail.get("seller", {})
+                        seller_name = (
+                            seller_info.get("name") if isinstance(seller_info, dict) else None
+                        )
+                        has_seller = bool(
+                            seller_name
+                            and (not isinstance(seller_name, str) or seller_name.strip())
+                        )
 
-                        # Nếu đã có detail đầy đủ (có price và sales_count), dùng cache
-                        if has_price and has_sales_count:
+                        if has_price and has_sales_count and has_brand and has_seller:
                             logger.info("=" * 70)
                             logger.info(f"✅ SKIP CRAWL - File Cache Hit cho product {product_id}")
                             logger.info(f"   - Có price: {has_price}")
                             logger.info(f"   - Có sales_count: {has_sales_count}")
+                            logger.info(f"   - Có brand: {has_brand}")
+                            logger.info(f"   - Có seller: {has_seller}")
                             logger.info("   - Sử dụng cache, không cần crawl lại")
                             logger.info("=" * 70)
                             result["detail"] = cached_detail
@@ -3449,6 +3471,19 @@ def merge_product_details(**context) -> dict[str, Any]:
                     # Thêm metadata
                     product_with_detail["detail_crawled_at"] = detail_result.get("crawled_at")
                     product_with_detail["detail_status"] = status
+                    detail_metadata = detail.get("_metadata")
+                    if detail_metadata:
+                        product_with_detail["_metadata"] = detail_metadata
+                        product_with_detail["_metadata"]["crawl_status"] = status
+                        if detail_result.get("crawled_at"):
+                            product_with_detail["_metadata"]["completed_at"] = detail_result.get(
+                                "crawled_at"
+                            )
+                    elif status or detail_result.get("crawled_at"):
+                        product_with_detail["_metadata"] = {
+                            "crawl_status": status,
+                            "completed_at": detail_result.get("crawled_at"),
+                        }
 
                     # CRITICAL: Lọc bỏ products có brand null/empty
                     # Brand thiếu thường dẫn đến nhiều trường khác cũng thiếu

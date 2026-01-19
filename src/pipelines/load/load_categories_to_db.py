@@ -32,12 +32,23 @@ def load_categories(json_file_path: str):
         storage = PostgresStorage()
         print("🚀 Importing to Database...")
 
-        saved_count = storage.save_categories(categories, sync_with_products=True)
+        # Load only categories that have products + their parent hierarchy
+        # This ensures clean data while preserving complete category paths
+        saved_count = storage.save_categories(
+            categories, 
+            only_leaf=False,  # Include parent categories for hierarchy
+            sync_with_products=True  # Smart filter: leaves with products + parents
+        )
 
         print(
-            f"✅ DONE! Successfully loaded {saved_count} categories (filtered by active products)."
+            f"✅ DONE! Successfully loaded {saved_count} categories (including parent categories)."
         )
         print("ℹ️  Table 'categories' relies on 'url' as Primary Key.")
+        
+        # Update product_count from actual products in database
+        print("📊 Updating product_count from products table...")
+        updated_count = storage.update_category_product_counts()
+        print(f"✅ Updated product_count for {updated_count} categories.")
 
     except Exception as e:
         print(f"❌ Error during load: {e}")

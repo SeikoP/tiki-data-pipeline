@@ -82,3 +82,34 @@ CRAWL_POST_SCROLL_SLEEP_NORMAL = 1.2  # seconds (increased from 0.8s)
 CRAWL_IMPLICIT_WAIT_RETRY = 8  # seconds (2x normal)
 CRAWL_DYNAMIC_CONTENT_WAIT_RETRY = 8  # seconds (2x normal)
 CRAWL_POST_SCROLL_SLEEP_RETRY = 2.4  # seconds (2x normal)
+
+# ========== SELLER NAME VALIDATION ==========
+# Default invalid patterns for seller_name (lowercase)
+# These values will cause seller_name to be set to NULL and trigger retry
+INVALID_SELLER_PATTERNS_DEFAULT = [
+    "đã mua",           # "Đã mua hàng", "xxx đã mua"
+    "đã bán",           # "Đã bán xxx"
+    "sold",             # "xxx sold"
+    "bought",           # "xxx bought"
+    "xem thêm",         # "Xem thêm"
+    "more info",        # "More info"
+    "chi tiết",         # "Chi tiết"
+    "loading",          # Loading placeholder
+    "đang tải",         # Đang tải\
+    "Đã mua hàng",
+]
+
+# Additional patterns from environment variable (comma-separated)
+# Example in .env: INVALID_SELLER_PATTERNS_EXTRA=pattern1,pattern2,pattern3
+_extra_patterns_str = os.getenv("INVALID_SELLER_PATTERNS_EXTRA", "")
+INVALID_SELLER_PATTERNS_EXTRA = [
+    p.strip().lower() for p in _extra_patterns_str.split(",") if p.strip()
+]
+
+# Combined list (default + extra from env)
+INVALID_SELLER_PATTERNS = INVALID_SELLER_PATTERNS_DEFAULT + INVALID_SELLER_PATTERNS_EXTRA
+
+# Minimum/Maximum length for valid seller name
+SELLER_NAME_MIN_LENGTH = int(os.getenv("SELLER_NAME_MIN_LENGTH", "2"))
+SELLER_NAME_MAX_LENGTH = int(os.getenv("SELLER_NAME_MAX_LENGTH", "100"))
+
