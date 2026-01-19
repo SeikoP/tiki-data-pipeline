@@ -173,6 +173,57 @@ def test_retry_logic_accepts_partial_after_max_retries(mock_html_missing_seller)
             assert mock_crawl.call_count == 3  # Initial + 2 retries
 
 
+def test_retry_logic_handles_permanent_failures():
+    """Test that permanent failures return last_product with failed status."""
+    from pipelines.crawl.crawl_products_detail import crawl_product_with_retry
+
+    original_product = {
+        "product_id": "123",
+        "_metadata": {},
+    }
+
+    with patch(
+        "pipelines.crawl.crawl_products_detail.crawl_product_detail_with_selenium"
+    ) as mock_crawl, patch(
+        "pipelines.crawl.crawl_products_detail.extract_product_detail"
+    ) as mock_extract:
+        # First attempt: crawl succeeds; subsequent attempts: crawl fails
+        mock_crawl.side_effect = [
+            "<html><body>Valid</body></html>",
+            Exception("crawl failed"),
+            Exception("crawl failed"),
+        ]
+
+        # Extraction is performed only once; subsequent calls should never happen
+        extracted_product = {
+            "product_id": "123",
+            "_metadata": {},
+        }
+        mock_extract.side_effect = [
+            extracted_product,
+            AssertionError(
+                "extract_product_detail should not be called after the first attempt"
+            ),
+        ]
+
+        result = crawl_product_with_retry(original_product, max_retries=2)
+
+        # After exhausting retries, we should return the last extracted product
+        assert result is not None
+        assert result["product_id"] == "123"
+        assert result["_metadata"]["retry_count"] == 2
+        assert result["_metadata"]["crawl_status"] == "failed"
+
+        # Ensure an error_message is set and is informative
+        error_message = result["_metadata"].get("error_message")
+        assert error_message is not None
+        assert "crawl failed" in error_message
+
+        # Verify call counts: initial success + 2 failing retries
+        assert mock_crawl.call_count == 3
+        assert mock_extract.call_count == 1
+
+
 def test_retry_logic_skips_missing_critical_fields():
     """Test that products with missing critical fields are skipped."""
     from pipelines.crawl.crawl_products_detail import crawl_product_with_retry
