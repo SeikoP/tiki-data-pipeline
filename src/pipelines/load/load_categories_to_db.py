@@ -36,7 +36,7 @@ def load_categories(json_file_path: str):
         # This ensures clean data while preserving complete category paths
         saved_count = storage.save_categories(
             categories, 
-            only_leaf=False,  # Include parent categories for hierarchy
+            only_leaf=True,  # Include only leaf categories as requested
             sync_with_products=True  # Smart filter: leaves with products + parents
         )
 

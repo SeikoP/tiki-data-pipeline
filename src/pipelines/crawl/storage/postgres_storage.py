@@ -1163,11 +1163,12 @@ class PostgresStorage:
                         # First time crawl
                         crawl_type = "price_change"  # First crawl counts as change
                         price_change = None
+                        price_change_percent = None  # FIX: Initialize to avoid NameError
                         prev_price = None
                         prev_original = None
                         prev_discount = None
-                        prev_sales = None  # NEW
-                        sales_change = None  # NEW
+                        prev_sales = None
+                        sales_change = None
                     else:
                         # Check if anything changed
                         prev_price = float(prev["price"]) if prev["price"] else None
@@ -1175,7 +1176,7 @@ class PostgresStorage:
                             float(prev["original_price"]) if prev["original_price"] else None
                         )
                         prev_discount = prev["discount_percent"]
-                        prev_sales = prev.get("sales_count")  # NEW
+                        prev_sales = prev.get("sales_count")
 
                         current_price_float = float(current_price) if current_price else None
                         current_original_float = (

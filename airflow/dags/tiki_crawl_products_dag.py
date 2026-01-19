@@ -5591,8 +5591,8 @@ with DAG(**DAG_CONFIG) as dag:
         pool="crawl_pool",
     )
 
-    # Flow update: Load JSON -> Load DB -> Prepare Batch -> Crawl...
-    task_load_categories >> task_load_categories_db >> task_prepare
+    # Flow update: Load JSON -> Prepare Batch -> Crawl...
+    task_load_categories >> task_prepare
 
     # Prepare crawl kwargs -> crawl category (dynamic mapping)
     task_prepare >> task_crawl_category
@@ -5603,16 +5603,17 @@ with DAG(**DAG_CONFIG) as dag:
     # Merge -> save products
     task_merge_products >> task_save_products
 
-    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> validate -> aggregate and notify
+    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> categories -> validate -> aggregate and notify
     task_save_products >> task_prepare_detail
     # Dependencies trong detail group đã được định nghĩa ở dòng 1800
-    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database -> discord_report
+    # Flow: save_products_with_detail -> transform -> load -> LOAD CATEGORIES -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database -> discord_report
 
     (
         task_save_products_with_detail
         >> task_enrich_category_path
         >> task_transform_products
         >> task_load_products
+        >> task_load_categories_db
         >> task_validate_data
         >> task_aggregate_and_notify
         >> task_cleanup_cache
