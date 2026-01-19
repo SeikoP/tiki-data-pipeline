@@ -353,27 +353,52 @@ class PostgresStorage:
         """Đảm bảo bảng crawl_history và các index tồn tại.
 
         Bảng này lưu lịch sử crawl cho MỌI lần crawl (không chỉ khi có thay đổi giá).
+        MỖI LẦN CRAWL = 1 RECORD MỚI (không ghi đè) → Lịch sử đầy đủ
         
-        Schema đã được tối ưu và mở rộng:
+        Schema tối ưu - CHỈ GIỮ CORE FIELDS:
         - Price tracking: price, original_price, discount_percent, price_change, previous_*
-        - Detailed timestamps: started_at, completed_at, crawled_at
-        - Crawl metadata: crawl_type, crawl_status, retry_count, error_message
-        - Data quality: missing_fields, data_completeness_score
-        - Performance: crawl_duration_ms, page_load_time_ms
+        - Price analysis: discount_amount (tiền giảm), price_change_percent (% thay đổi)
+        - Sales tracking: sales_count, sales_change
+        - Promotion: is_flash_sale (đang khuyến mãi mạnh)
+        - Crawl type: 'price_change', 'no_change'
+        - Timestamps: crawled_at, updated_at
+        
+        Đã XÓA các fields không populate được:
+        - started_at, completed_at (không track được từ app)
+        - crawl_status, retry_count, error_message (job-level, không product-level)
+        - missing_fields, data_completeness_score (không cần trong history)
+        - crawl_duration_ms, page_load_time_ms (performance metrics không cần lưu)
         """
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS crawl_history (
                 id SERIAL PRIMARY KEY,
                 product_id VARCHAR(255) NOT NULL,
+                
+                -- Price tracking
                 price DECIMAL(12, 2) NOT NULL,
                 original_price DECIMAL(12, 2),
                 discount_percent INTEGER,
+                discount_amount DECIMAL(12, 2),
                 price_change DECIMAL(12, 2),
+                price_change_percent DECIMAL(5, 2),
                 previous_price DECIMAL(12, 2),
                 previous_original_price DECIMAL(12, 2),
                 previous_discount_percent INTEGER,
-                crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                
+                -- Sales tracking
+                sales_count INTEGER,
+                sales_change INTEGER,
+                
+                -- Promotion tracking
+                is_flash_sale BOOLEAN DEFAULT FALSE,
+                
+                -- Metadata
+                crawl_type VARCHAR(20) DEFAULT 'price_change',
+                
+                -- Timestamps
+                crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
             -- Optimized indexes for common queries
@@ -381,37 +406,26 @@ class PostgresStorage:
             CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
             -- Composite index for getting latest price per product (most common query)
             CREATE INDEX IF NOT EXISTS idx_history_product_latest ON crawl_history(product_id, crawled_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_history_crawl_type ON crawl_history(crawl_type);
+            
+            -- Index for price change analysis
+            CREATE INDEX IF NOT EXISTS idx_history_price_change ON crawl_history(price_change) WHERE price_change IS NOT NULL;
+            -- Index for flash sale products
+            CREATE INDEX IF NOT EXISTS idx_history_flash_sale ON crawl_history(is_flash_sale) WHERE is_flash_sale = true;
+            -- Index for discount analysis
+            CREATE INDEX IF NOT EXISTS idx_history_discount ON crawl_history(discount_percent) WHERE discount_percent > 0;
 
             -- Ensure existing columns exist (migration for existing table)
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_price DECIMAL(12, 2);
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_original_price DECIMAL(12, 2);
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_discount_percent INTEGER;
-            
-            -- Crawl type tracking: 'price_change', 'no_change', 'failed'
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_type VARCHAR(50) DEFAULT 'price_change';
-            
-            -- Detailed timestamp tracking
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
-            
-            -- Crawl metadata for debugging and monitoring
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_status VARCHAR(50);
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS error_message TEXT;
-            
-            -- Data quality tracking
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS missing_fields JSONB;
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS data_completeness_score DECIMAL(3, 2);
-            
-            -- Performance metrics
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_duration_ms INTEGER;
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS page_load_time_ms INTEGER;
-            
-            -- Indexes for new query patterns
-            CREATE INDEX IF NOT EXISTS idx_history_status ON crawl_history(crawl_status);
-            CREATE INDEX IF NOT EXISTS idx_history_started_at ON crawl_history(started_at);
-            CREATE INDEX IF NOT EXISTS idx_history_retry_count ON crawl_history(retry_count);
-            CREATE INDEX IF NOT EXISTS idx_history_crawl_type ON crawl_history(crawl_type);
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_type VARCHAR(20) DEFAULT 'price_change';
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS sales_count INTEGER;
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS sales_change INTEGER;
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS discount_amount DECIMAL(12, 2);
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS price_change_percent DECIMAL(5, 2);
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS is_flash_sale BOOLEAN DEFAULT FALSE;
         """
         )
         
@@ -598,36 +612,41 @@ class PostgresStorage:
             used_category_ids = self.get_used_category_ids()
             print(f"🔍 Found {len(used_category_ids)} active categories in products table")
             
-            # Smart filtering: Find all leaf categories with products + their parent hierarchy
-            # Step 1: Find leaf categories that have products
-            for cat in categories:
-                cat_id = cat.get("category_id")
-                if not cat_id and cat.get("url"):
-                    match = re.search(r"c?(\d+)", cat.get("url", ""))
-                    if match:
-                        cat_id = match.group(1)
-                cat_id = normalize_category_id(cat_id)
+            # IMPORTANT: If no products exist yet, disable filtering to load all categories
+            if not used_category_ids:
+                print("⚠️  No products found - loading ALL categories (will filter on next run)")
+                sync_with_products = False  # Disable filtering
+            else:
+                # Smart filtering: Find all leaf categories with products + their parent hierarchy
+                # Step 1: Find leaf categories that have products
+                for cat in categories:
+                    cat_id = cat.get("category_id")
+                    if not cat_id and cat.get("url"):
+                        match = re.search(r"c?(\d+)", cat.get("url", ""))
+                        if match:
+                            cat_id = match.group(1)
+                    cat_id = normalize_category_id(cat_id)
+                    
+                    # Check if this category has products
+                    is_leaf = cat.get("url") not in parent_urls
+                    if is_leaf and cat_id:
+                        if cat_id in used_category_ids or (cat_id and cat_id[1:] in used_category_ids):
+                            # Add this leaf category
+                            urls_to_keep.add(cat.get("url"))
+                            
+                            # Step 2: Traverse up to collect ALL parent URLs
+                            current = cat
+                            visited = set()
+                            while current:
+                                url = current.get("url")
+                                if url in visited:
+                                    break
+                                visited.add(url)
+                                urls_to_keep.add(url)
+                                parent_url = current.get("parent_url")
+                                current = url_to_cat.get(parent_url) if parent_url else None
                 
-                # Check if this category has products
-                is_leaf = cat.get("url") not in parent_urls
-                if is_leaf and cat_id:
-                    if cat_id in used_category_ids or (cat_id and cat_id[1:] in used_category_ids):
-                        # Add this leaf category
-                        urls_to_keep.add(cat.get("url"))
-                        
-                        # Step 2: Traverse up to collect ALL parent URLs
-                        current = cat
-                        visited = set()
-                        while current:
-                            url = current.get("url")
-                            if url in visited:
-                                break
-                            visited.add(url)
-                            urls_to_keep.add(url)
-                            parent_url = current.get("parent_url")
-                            current = url_to_cat.get(parent_url) if parent_url else None
-            
-            print(f"📂 Keeping {len(urls_to_keep)} categories (leaves + parents)")
+                print(f"📂 Keeping {len(urls_to_keep)} categories (leaves + parents)")
 
         prepared_categories = []
         for cat in categories:
@@ -1101,14 +1120,14 @@ class PostgresStorage:
             with conn.cursor() as cur:
                 self._ensure_history_schema(cur)
 
-                # BATCH LOOKUP: Get all previous prices in one query
+                # BATCH LOOKUP: Get all previous prices AND sales in one query
                 product_ids = [p.get("product_id") for p in valid_products]
 
-                # Use DISTINCT ON to get latest price per product efficiently
+                # Use DISTINCT ON to get latest data per product efficiently
                 cur.execute(
                     """
                     SELECT DISTINCT ON (product_id)
-                        product_id, price, original_price, discount_percent
+                        product_id, price, original_price, discount_percent, sales_count
                     FROM crawl_history
                     WHERE product_id = ANY(%s)
                     ORDER BY product_id, crawled_at DESC
@@ -1116,9 +1135,14 @@ class PostgresStorage:
                     (product_ids,),
                 )
 
-                # Build lookup dict: product_id -> (price, original_price, discount_percent)
+                # Build lookup dict: product_id -> (price, original_price, discount_percent, sales_count)
                 previous_data = {
-                    row[0]: {"price": row[1], "original_price": row[2], "discount_percent": row[3]}
+                    row[0]: {
+                        "price": row[1], 
+                        "original_price": row[2], 
+                        "discount_percent": row[3],
+                        "sales_count": row[4]
+                    }
                     for row in cur.fetchall()
                 }
 
@@ -1130,6 +1154,7 @@ class PostgresStorage:
                     current_price = p.get("price")
                     current_original_price = p.get("original_price")
                     current_discount = p.get("discount_percent")
+                    current_sales = p.get("sales_count")  # NEW
 
                     prev = previous_data.get(product_id)
                     
@@ -1141,6 +1166,8 @@ class PostgresStorage:
                         prev_price = None
                         prev_original = None
                         prev_discount = None
+                        prev_sales = None  # NEW
+                        sales_change = None  # NEW
                     else:
                         # Check if anything changed
                         prev_price = float(prev["price"]) if prev["price"] else None
@@ -1148,6 +1175,7 @@ class PostgresStorage:
                             float(prev["original_price"]) if prev["original_price"] else None
                         )
                         prev_discount = prev["discount_percent"]
+                        prev_sales = prev.get("sales_count")  # NEW
 
                         current_price_float = float(current_price) if current_price else None
                         current_original_float = (
@@ -1162,55 +1190,65 @@ class PostgresStorage:
                         if price_changed or original_changed or discount_changed:
                             crawl_type = "price_change"
                             price_change = None
+                            price_change_percent = None
                             if prev_price is not None and current_price_float is not None:
                                 price_change = current_price_float - prev_price
+                                # Calculate percentage change
+                                if prev_price > 0:
+                                    price_change_percent = round((price_change / prev_price) * 100, 2)
                         else:
                             crawl_type = "no_change"
                             price_change = None
+                            price_change_percent = None
+                        
+                        # Calculate sales_change
+                        sales_change = None
+                        if prev_sales is not None and current_sales is not None:
+                            sales_change = current_sales - prev_sales
+                    
+                    # Calculate discount_amount (tiền giảm giá)
+                    discount_amount = None
+                    if current_original_price and current_price:
+                        discount_amount = float(current_original_price) - float(current_price)
+                    
+                    # Determine if flash sale (giảm >= 30% hoặc giảm >= 100k)
+                    is_flash_sale = False
+                    if current_discount and current_discount >= 30:
+                        is_flash_sale = True
+                    elif discount_amount and discount_amount >= 100000:
+                        is_flash_sale = True
 
-                    # Extract metadata if available
-                    metadata = p.get("_metadata", {})
-                    
-                    # Override crawl_type if crawl failed
-                    if metadata.get("crawl_status") == "failed":
-                        crawl_type = "failed"
-                    
                     records_to_insert.append(
                         {
                             "product_id": product_id,
                             "price": current_price,
                             "original_price": current_original_price,
                             "discount_percent": current_discount,
+                            "discount_amount": discount_amount,  # NEW
                             "price_change": price_change,
+                            "price_change_percent": price_change_percent,  # NEW
                             "previous_price": prev_price,
                             "previous_original_price": prev_original,
                             "previous_discount_percent": prev_discount,
+                            "sales_count": current_sales,
+                            "sales_change": sales_change,
+                            "is_flash_sale": is_flash_sale,  # NEW
                             "crawl_type": crawl_type,
-                            # Metadata fields
-                            "started_at": metadata.get("started_at"),
-                            "completed_at": metadata.get("completed_at"),
-                            "crawl_status": metadata.get("crawl_status", "success"),
-                            "retry_count": metadata.get("retry_count", 0),
-                            "error_message": metadata.get("error_message"),
-                            "missing_fields": metadata.get("missing_fields"),
-                            "data_completeness_score": metadata.get("data_completeness_score"),
-                            "crawl_duration_ms": metadata.get("crawl_duration_ms"),
-                            "page_load_time_ms": metadata.get("page_load_time_ms"),
                         }
                     )
 
                 # Batch insert ALL records (changed and unchanged)
                 if records_to_insert:
-                    from psycopg2.extras import Json, execute_values
+                    from psycopg2.extras import execute_values
 
                     execute_values(
                         cur,
                         """
                         INSERT INTO crawl_history
-                            (product_id, price, original_price, discount_percent, price_change,
+                            (product_id, price, original_price, discount_percent, discount_amount,
+                             price_change, price_change_percent,
                              previous_price, previous_original_price, previous_discount_percent,
-                             crawl_type, started_at, completed_at, crawl_status, retry_count, error_message,
-                             missing_fields, data_completeness_score, crawl_duration_ms, page_load_time_ms)
+                             sales_count, sales_change, is_flash_sale, crawl_type)
                         VALUES %s
                         """,
                         [
@@ -1219,40 +1257,29 @@ class PostgresStorage:
                                 r["price"],
                                 r["original_price"],
                                 r["discount_percent"],
+                                r["discount_amount"],  # NEW
                                 r["price_change"],
+                                r["price_change_percent"],  # NEW
                                 r["previous_price"],
                                 r["previous_original_price"],
                                 r["previous_discount_percent"],
+                                r["sales_count"],
+                                r["sales_change"],
+                                r["is_flash_sale"],  # NEW
                                 r["crawl_type"],
-                                # Metadata values
-                                r.get("started_at"),
-                                r.get("completed_at"),
-                                r.get("crawl_status"),
-                                r.get("retry_count", 0),
-                                r.get("error_message"),
-                                Json(r.get("missing_fields")) if r.get("missing_fields") else None,
-                                r.get("data_completeness_score"),
-                                r.get("crawl_duration_ms"),
-                                r.get("page_load_time_ms"),
                             )
                             for r in records_to_insert
                         ],
                     )
                     
-                    # Enhanced logging with quality metrics and crawl_type breakdown
+                    # Simple logging with crawl_type breakdown
                     type_counts = {}
                     for r in records_to_insert:
                         ct = r.get("crawl_type", "unknown")
                         type_counts[ct] = type_counts.get(ct, 0) + 1
                     
-                    avg_score = sum(r.get("data_completeness_score", 0) or 0 for r in records_to_insert) / len(records_to_insert) if records_to_insert else 0
-                    retry_count = sum(1 for r in records_to_insert if r.get("retry_count", 0) > 0)
-                    
                     type_str = ", ".join(f"{k}: {v}" for k, v in type_counts.items())
-                    print(
-                        f"📊 Crawl history: {len(records_to_insert)} records ({type_str}) "
-                        f"(avg quality: {avg_score:.2f}, {retry_count} retried)"
-                    )
+                    print(f"📊 Crawl history: {len(records_to_insert)} records ({type_str})")
     def log_price_history(
         self,
         product_id: str,
