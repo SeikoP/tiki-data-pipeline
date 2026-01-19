@@ -264,6 +264,9 @@ class PostgresStorage:
                 original_price DECIMAL(12, 2),
                 discount_percent INTEGER,
                 price_change DECIMAL(12, 2),
+                previous_price DECIMAL(12, 2),
+                previous_original_price DECIMAL(12, 2),
+                previous_discount_percent INTEGER,
                 crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             
@@ -272,6 +275,11 @@ class PostgresStorage:
             CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
             -- Composite index for getting latest price per product (most common query)
             CREATE INDEX IF NOT EXISTS idx_history_product_latest ON crawl_history(product_id, crawled_at DESC);
+
+            -- Ensure new columns exist (migration for existing table)
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_price DECIMAL(12, 2);
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_original_price DECIMAL(12, 2);
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_discount_percent INTEGER;
         """
         )
 
@@ -801,7 +809,7 @@ class PostgresStorage:
         - Chỉ INSERT khi giá thay đổi hoặc là lần crawl đầu tiên
         - Tiết kiệm ~90% storage khi giá ổn định
         
-        Schema: (product_id, price, original_price, discount_percent, price_change, crawled_at)
+        Schema: (product_id, price, original_price, discount_percent, price_change, previous_*, crawled_at)
         """
         if not products:
             return
@@ -859,6 +867,9 @@ class PostgresStorage:
                             "original_price": current_original_price,
                             "discount_percent": current_discount,
                             "price_change": None,
+                            "previous_price": None,
+                            "previous_original_price": None,
+                            "previous_discount_percent": None,
                         })
                     else:
                         # Check if anything changed
@@ -885,6 +896,9 @@ class PostgresStorage:
                                 "original_price": current_original_price,
                                 "discount_percent": current_discount,
                                 "price_change": price_change,
+                                "previous_price": prev_price,
+                                "previous_original_price": prev_original,
+                                "previous_discount_percent": prev_discount,
                             })
 
                 # Batch insert all changed records
@@ -894,7 +908,8 @@ class PostgresStorage:
                         cur,
                         """
                         INSERT INTO crawl_history 
-                            (product_id, price, original_price, discount_percent, price_change)
+                            (product_id, price, original_price, discount_percent, price_change,
+                             previous_price, previous_original_price, previous_discount_percent)
                         VALUES %s
                         """,
                         [
@@ -904,6 +919,9 @@ class PostgresStorage:
                                 r["original_price"],
                                 r["discount_percent"],
                                 r["price_change"],
+                                r["previous_price"],
+                                r["previous_original_price"],
+                                r["previous_discount_percent"],
                             )
                             for r in records_to_insert
                         ],
@@ -954,14 +972,21 @@ class PostgresStorage:
                         price_change = float(price) - float(prev_price)
                 else:
                     price_change = None  # First record
+                    prev_price, prev_original, prev_discount = None, None, None
 
                 cur.execute(
                     """
-                    INSERT INTO crawl_history (product_id, price, original_price, discount_percent, price_change)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO crawl_history (
+                        product_id, price, original_price, discount_percent, price_change,
+                        previous_price, previous_original_price, previous_discount_percent
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """,
-                    (product_id, price, original_price, discount_percent, price_change),
+                    (
+                        product_id, price, original_price, discount_percent, price_change,
+                        prev_price, prev_original, prev_discount
+                    ),
                 )
 
                 return cur.fetchone()[0]
@@ -1111,6 +1136,9 @@ class PostgresStorage:
                     current_original_price,
                     current_discount,
                     None,  # price_change
+                    None,  # previous_price
+                    None,  # previous_original_price
+                    None,  # previous_discount_percent
                 ))
             else:
                 prev_price = float(prev["price"]) if prev["price"] else None
@@ -1135,6 +1163,9 @@ class PostgresStorage:
                         current_original_price,
                         current_discount,
                         price_change,
+                        prev_price,
+                        prev_original,
+                        prev_discount,
                     ))
 
         # Batch insert changed records
@@ -1143,7 +1174,8 @@ class PostgresStorage:
                 cur,
                 """
                 INSERT INTO crawl_history 
-                    (product_id, price, original_price, discount_percent, price_change)
+                    (product_id, price, original_price, discount_percent, price_change,
+                     previous_price, previous_original_price, previous_discount_percent)
                 VALUES %s
                 """,
                 records_to_insert,

@@ -280,6 +280,15 @@ class DataLoader:
                 self.stats["inserted_count"] = inserted_count
                 self.stats["updated_count"] = updated_count
                 logger.info(f"✅ Đã load {saved_count} products vào database")
+                
+                # TỰ ĐỘNG CẬP NHẬT PRODUCT_COUNT CHO CATEGORIES
+                try:
+                    logger.info("🔢 Đang cập nhật product_count cho các categories...")
+                    updated_cats = self.db_storage.update_category_product_counts()
+                    logger.info(f"✅ Đã cập nhật product_count cho {updated_cats} categories")
+                except Exception as cat_err:
+                    logger.warning(f"⚠️  Không thể cập nhật product_count: {cat_err}")
+
                 if upsert:
                     logger.info(f"   - INSERT (mới): {inserted_count}")
                     logger.info(f"   - UPDATE (đã có): {updated_count}")
