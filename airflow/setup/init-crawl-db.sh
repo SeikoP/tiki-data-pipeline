@@ -26,6 +26,8 @@ echo "Creating tables in $CRAWL_DB..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQL
     -- =====================================================
     -- BẢNG CATEGORIES
+    -- Lưu ý: Bảng này chỉ lưu các category có is_leaf = true.
+    -- category_path được mở rộng với các trường level_1 đến level_5 để thể hiện rõ theo từng độ sâu.
     -- =====================================================
     CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,
@@ -35,11 +37,17 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         image_url TEXT,
         parent_url TEXT,
         level INTEGER,
-        -- NEW: Full path hierarchy as JSONB array
+        -- Full path hierarchy as JSONB array
         category_path JSONB,
-        -- NEW: Root category name for easy grouping
+        -- Mở rộng category_path theo từng độ sâu (level_1 đến level_5)
+        level_1 VARCHAR(255),
+        level_2 VARCHAR(255),
+        level_3 VARCHAR(255),
+        level_4 VARCHAR(255),
+        level_5 VARCHAR(255),
+        -- Root category name for easy grouping
         root_category_name VARCHAR(255),
-        -- NEW: Is this the deepest category (no children)
+        -- Is this the deepest category (no children) - chỉ lưu is_leaf = true
         is_leaf BOOLEAN DEFAULT FALSE,
         product_count INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -51,9 +59,14 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
     CREATE INDEX IF NOT EXISTS idx_categories_level ON categories(level);
     CREATE INDEX IF NOT EXISTS idx_categories_path ON categories USING GIN (category_path);
     CREATE INDEX IF NOT EXISTS idx_categories_is_leaf ON categories(is_leaf);
+    CREATE INDEX IF NOT EXISTS idx_categories_level1 ON categories(level_1);
+    CREATE INDEX IF NOT EXISTS idx_categories_level2 ON categories(level_2);
     
     -- =====================================================
     -- BẢNG PRODUCTS
+    -- Đã loại bỏ các trường: category_path, review_count, description, images,
+    -- estimated_revenue, price_savings, price_category, value_score, sales_velocity,
+    -- specifications, popularity_score, discount_amount
     -- =====================================================
     CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
@@ -63,16 +76,11 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         image_url TEXT,
         category_url TEXT,
         category_id VARCHAR(255),
-        category_path JSONB,
         sales_count INTEGER,
         price DECIMAL(12, 2),
         original_price DECIMAL(12, 2),
         discount_percent INTEGER,
         rating_average DECIMAL(3, 2),
-        review_count INTEGER,
-        description TEXT,
-        specifications JSONB,
-        images JSONB,
         seller_name VARCHAR(500),
         seller_id VARCHAR(255),
         seller_is_official BOOLEAN DEFAULT FALSE,
@@ -81,13 +89,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         stock_quantity INTEGER,
         stock_status VARCHAR(50),
         shipping JSONB,
-        estimated_revenue DECIMAL(15, 2),
-        price_savings DECIMAL(12, 2),
-        price_category VARCHAR(50),
-        popularity_score DECIMAL(10, 2),
-        value_score DECIMAL(10, 2),
-        discount_amount DECIMAL(12, 2),
-        sales_velocity INTEGER,
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -95,18 +96,21 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
     CREATE INDEX IF NOT EXISTS idx_products_product_id ON products(product_id);
     CREATE INDEX IF NOT EXISTS idx_products_category_url ON products(category_url);
     CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
-    CREATE INDEX IF NOT EXISTS idx_products_category_path ON products USING GIN (category_path);
     CREATE INDEX IF NOT EXISTS idx_products_sales_count ON products(sales_count);
     CREATE INDEX IF NOT EXISTS idx_products_crawled_at ON products(crawled_at);
     
     -- =====================================================
-    -- BẢNG CRAWL_HISTORY (Price Tracking Only)
+    -- BẢNG CRAWL_HISTORY (Lịch Sử Giá và Giảm Giá)
+    -- Lưu lịch sử giá và các giá trị liên quan khi crawl lại
+    -- Mỗi lần crawl sẽ tạo bản ghi mới để theo dõi thay đổi theo thời gian
     -- =====================================================
     CREATE TABLE IF NOT EXISTS crawl_history (
         id SERIAL PRIMARY KEY,
         product_id VARCHAR(255) NOT NULL,
         price DECIMAL(12, 2),
-        -- NEW: Price change compared to previous crawl
+        original_price DECIMAL(12, 2),
+        discount_percent INTEGER,
+        discount_amount DECIMAL(12, 2),
         price_change DECIMAL(12, 2),
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );

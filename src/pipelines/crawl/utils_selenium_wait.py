@@ -72,7 +72,9 @@ def wait_for_product_page_loaded(driver: Any, timeout: int = 5, verbose: bool = 
 
 def wait_for_dynamic_content_loaded(driver: Any, timeout: int = 3, verbose: bool = False) -> bool:
     """
-    Chờ dynamic content (sales_count, rating) load sau khi scroll
+    Chờ dynamic content (sales_count, rating, seller, price) load sau khi scroll
+    
+    Lưu ý: seller_name và original_price là dynamic content, cần wait để đảm bảo load đầy đủ.
 
     Args:
         driver: Selenium WebDriver
@@ -88,12 +90,19 @@ def wait_for_dynamic_content_loaded(driver: Any, timeout: int = 3, verbose: bool
     try:
         wait = WebDriverWait(driver, timeout=timeout)
 
-        # Check cho sales count hoặc rating (dynamic content thường load sau)
+        # Check cho sales count, rating, seller, hoặc price (dynamic content thường load sau)
         selectors = [
             ('[class*="sales"]', "sales count"),
             ('[data-view-id*="sales"]', "sales count (data-view)"),
             ('[data-view-id="pdp_rating_score"]', "rating"),
             (".rating-score", "rating (alt)"),
+            # Thêm check cho seller và price elements
+            ('[data-view-id="pdp_seller_name"]', "seller name"),
+            ('.SellerName__Name-sc-', "seller name (class)"),
+            ('[class*="seller"]', "seller"),
+            ('.product-price__list-price', "original price"),
+            ('[class*="original-price"]', "original price (alt)"),
+            ('[class*="list-price"]', "list price"),
         ]
 
         for selector, element_name in selectors:
