@@ -10,7 +10,6 @@ import os
 import re
 import time
 from contextlib import contextmanager
-from datetime import datetime
 from typing import Any
 
 import psycopg2
@@ -297,7 +296,7 @@ class PostgresStorage:
                 previous_discount_percent INTEGER,
                 crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             -- Optimized indexes for common queries
             CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
             CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
@@ -832,7 +831,7 @@ class PostgresStorage:
             with conn.cursor() as cur:
                 self._ensure_categories_schema(cur)
 
-                for cat_url, cat_info in categories_to_add.items():
+                for cat_info in categories_to_add.values():
                     # Insert only if not exists (by url)
                     cur.execute(
                         """
@@ -880,7 +879,7 @@ class PostgresStorage:
                 # Use DISTINCT ON to get latest price per product efficiently
                 cur.execute(
                     """
-                    SELECT DISTINCT ON (product_id) 
+                    SELECT DISTINCT ON (product_id)
                         product_id, price, original_price, discount_percent
                     FROM crawl_history
                     WHERE product_id = ANY(%s)
@@ -963,7 +962,7 @@ class PostgresStorage:
                     execute_values(
                         cur,
                         """
-                        INSERT INTO crawl_history 
+                        INSERT INTO crawl_history
                             (product_id, price, original_price, discount_percent, price_change,
                              previous_price, previous_original_price, previous_discount_percent)
                         VALUES %s
@@ -1083,7 +1082,7 @@ class PostgresStorage:
                     SET product_count = COALESCE((
                         SELECT COUNT(DISTINCT p.id)
                         FROM products p
-                        WHERE p.category_url = c.url 
+                        WHERE p.category_url = c.url
                            OR (c.category_id IS NOT NULL AND p.category_id = c.category_id)
                     ), 0),
                     updated_at = CURRENT_TIMESTAMP
@@ -1174,7 +1173,7 @@ class PostgresStorage:
 
         cur.execute(
             """
-            SELECT DISTINCT ON (product_id) 
+            SELECT DISTINCT ON (product_id)
                 product_id, price, original_price, discount_percent
             FROM crawl_history
             WHERE product_id = ANY(%s)
@@ -1250,7 +1249,7 @@ class PostgresStorage:
             execute_values(
                 cur,
                 """
-                INSERT INTO crawl_history 
+                INSERT INTO crawl_history
                     (product_id, price, original_price, discount_percent, price_change,
                      previous_price, previous_original_price, previous_discount_percent)
                 VALUES %s
