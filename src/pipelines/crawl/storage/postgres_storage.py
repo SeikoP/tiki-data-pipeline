@@ -202,11 +202,7 @@ class PostgresStorage:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE INDEX IF NOT EXISTS idx_cat_parent ON categories(parent_url);
-            CREATE INDEX IF NOT EXISTS idx_cat_level ON categories(level);
-            CREATE INDEX IF NOT EXISTS idx_cat_path ON categories USING GIN (category_path);
-            CREATE INDEX IF NOT EXISTS idx_cat_is_leaf ON categories(is_leaf);
-            CREATE INDEX IF NOT EXISTS idx_cat_level1 ON categories(level_1);
+            -- Only essential index: level_2 is used for category filtering queries
             CREATE INDEX IF NOT EXISTS idx_cat_level2 ON categories(level_2);
         """
         )
@@ -244,10 +240,8 @@ class PostgresStorage:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            -- Only essential index: category_id is used to join with categories table
             CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
-            CREATE INDEX IF NOT EXISTS idx_products_category_url ON products(category_url);
-            CREATE INDEX IF NOT EXISTS idx_products_price ON products(price);
-            CREATE INDEX IF NOT EXISTS idx_products_sales_count ON products(sales_count);
         """
         )
 
@@ -427,12 +421,15 @@ class PostgresStorage:
 
         prepared_categories = []
         for cat in categories:
-            # Extract category_id from URL if missing
+            # Extract category_id from URL if missing - ALWAYS include 'c' prefix for consistency
             cat_id = cat.get("category_id")
             if not cat_id and cat.get("url"):
-                match = re.search(r"c(\d+)", cat.get("url", ""))
+                match = re.search(r"(c\d+)", cat.get("url", ""))
                 if match:
-                    cat_id = match.group(1)
+                    cat_id = match.group(1)  # Include 'c' prefix (e.g., 'c23570')
+            # Ensure existing category_id has 'c' prefix
+            elif cat_id and not cat_id.startswith("c"):
+                cat_id = f"c{cat_id}"
 
             category_path = build_category_path(cat)
             root_name = category_path[0] if category_path else ""
@@ -506,7 +503,7 @@ class PostgresStorage:
                     "root_category_name",
                     "is_leaf",
                 ]
-                return self._bulk_merge_via_staging(
+                saved_count = self._bulk_merge_via_staging(
                     cur,
                     "categories",
                     "categories_staging",
@@ -515,6 +512,30 @@ class PostgresStorage:
                     "url",
                     update_cols=update_columns,
                 )
+                
+                # Auto-add missing parent categories (root categories)
+                # Tìm các parent_url không có trong data và tự động thêm
+                missing_parents = parent_urls - set(url_to_cat.keys())
+                if missing_parents:
+                    for parent_url in missing_parents:
+                        if not parent_url:
+                            continue
+                        # Extract category_id from URL
+                        match = re.search(r"(c\d+)", parent_url)
+                        cat_id = match.group(1) if match else None
+                        
+                        if cat_id:
+                            cur.execute(
+                                """
+                                INSERT INTO categories (category_id, name, url, parent_url, level, is_leaf, product_count)
+                                VALUES (%s, %s, %s, NULL, 0, false, 0)
+                                ON CONFLICT (url) DO NOTHING
+                                """,
+                                (cat_id, cat_id, parent_url),  # Tạm dùng ID làm tên
+                            )
+                    print(f"📂 Auto-added {len(missing_parents)} missing parent categories")
+                
+                return saved_count
 
     def save_products(
         self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
@@ -697,12 +718,79 @@ class PostgresStorage:
                 self._log_batch_crawl_history(products[:saved_count])
             except Exception as e:
                 print(f"⚠️  Failed to log crawl history: {e}")
+            
+            # Auto-sync: Ensure all categories from products exist in categories table
+            try:
+                self._ensure_categories_from_products(products[:saved_count])
+            except Exception as e:
+                print(f"⚠️  Failed to sync missing categories: {e}")
 
         return {
             "saved_count": saved_count,
             "inserted_count": inserted_count,
             "updated_count": updated_count,
         }
+
+    def _ensure_categories_from_products(self, products: list[dict[str, Any]]) -> int:
+        """
+        Tự động tạo missing categories từ products.
+        
+        Khi crawl products, category_id và category_url có thể chưa tồn tại trong bảng categories.
+        Method này sẽ tự động thêm các categories đó để đảm bảo data integrity.
+        
+        Returns:
+            Số categories mới được thêm
+        """
+        if not products:
+            return 0
+
+        # Collect unique category info from products
+        categories_to_add = {}
+        for p in products:
+            cat_id = p.get("category_id")
+            cat_url = p.get("category_url")
+            
+            if not cat_id or not cat_url:
+                continue
+            
+            # Ensure category_id has 'c' prefix
+            if not cat_id.startswith("c"):
+                cat_id = f"c{cat_id}"
+            
+            if cat_url not in categories_to_add:
+                # Chỉ lưu category_id làm tên tạm. 
+                # Tên đúng (tiếng Việt có dấu) sẽ được cập nhật khi task load categories chạy.
+                categories_to_add[cat_url] = {
+                    "category_id": cat_id,
+                    "name": cat_id,  # Tạm dùng ID làm tên
+                    "url": cat_url,
+                }
+
+        if not categories_to_add:
+            return 0
+
+        added_count = 0
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                self._ensure_categories_schema(cur)
+                
+                for cat_url, cat_info in categories_to_add.items():
+                    # Insert only if not exists (by url)
+                    cur.execute(
+                        """
+                        INSERT INTO categories (category_id, name, url, is_leaf, product_count)
+                        VALUES (%s, %s, %s, true, 0)
+                        ON CONFLICT (url) DO NOTHING
+                        """,
+                        (cat_info["category_id"], cat_info["name"], cat_info["url"]),
+                    )
+                    if cur.rowcount > 0:
+                        added_count += 1
+
+        if added_count > 0:
+            print(f"📂 Auto-added {added_count} missing categories from products")
+        
+        return added_count
 
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
