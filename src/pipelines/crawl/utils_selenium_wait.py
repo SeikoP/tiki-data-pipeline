@@ -73,7 +73,7 @@ def wait_for_product_page_loaded(driver: Any, timeout: int = 5, verbose: bool = 
 def wait_for_dynamic_content_loaded(driver: Any, timeout: int = 3, verbose: bool = False) -> bool:
     """
     Chờ dynamic content (sales_count, rating, seller, price) load sau khi scroll
-    
+
     Lưu ý: seller_name và original_price là dynamic content, cần wait để đảm bảo load đầy đủ.
 
     Args:
@@ -98,9 +98,9 @@ def wait_for_dynamic_content_loaded(driver: Any, timeout: int = 3, verbose: bool
             (".rating-score", "rating (alt)"),
             # Thêm check cho seller và price elements
             ('[data-view-id="pdp_seller_name"]', "seller name"),
-            ('.SellerName__Name-sc-', "seller name (class)"),
+            (".SellerName__Name-sc-", "seller name (class)"),
             ('[class*="seller"]', "seller"),
-            ('.product-price__list-price', "original price"),
+            (".product-price__list-price", "original price"),
             ('[class*="original-price"]', "original price (alt)"),
             ('[class*="list-price"]', "list price"),
         ]

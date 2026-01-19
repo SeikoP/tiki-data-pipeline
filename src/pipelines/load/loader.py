@@ -280,6 +280,15 @@ class DataLoader:
                 self.stats["inserted_count"] = inserted_count
                 self.stats["updated_count"] = updated_count
                 logger.info(f"✅ Đã load {saved_count} products vào database")
+
+                # TỰ ĐỘNG CẬP NHẬT PRODUCT_COUNT CHO CATEGORIES
+                try:
+                    logger.info("🔢 Đang cập nhật product_count cho các categories...")
+                    updated_cats = self.db_storage.update_category_product_counts()
+                    logger.info(f"✅ Đã cập nhật product_count cho {updated_cats} categories")
+                except Exception as cat_err:
+                    logger.warning(f"⚠️  Không thể cập nhật product_count: {cat_err}")
+
                 if upsert:
                     logger.info(f"   - INSERT (mới): {inserted_count}")
                     logger.info(f"   - UPDATE (đã có): {updated_count}")
@@ -444,10 +453,19 @@ class DataLoader:
 
         # Load vào database
         if self.enable_db and self.db_storage:
-            logger.info(
-                "ℹ️ Skip saving categories to DB (Table 'categories' removed). Only saving to file."
-            )
-            # Database load logic removed as requested
+            try:
+                # Load with sync_with_products=True to only load categories having products
+                saved_count = self.db_storage.save_categories(
+                    categories, only_leaf=True, sync_with_products=True
+                )
+                self.stats["db_loaded"] = saved_count
+                logger.info(
+                    f"✅ Đã load {saved_count} categories vào database (chỉ categories có products)"
+                )
+            except Exception as e:
+                error_msg = f"Lỗi khi load categories vào database: {str(e)}"
+                self.stats["errors"].append(error_msg)
+                logger.error(f"❌ {error_msg}")
 
         # Load vào file nếu cần
         if save_to_file:
