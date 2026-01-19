@@ -280,7 +280,7 @@ class DataLoader:
                 self.stats["inserted_count"] = inserted_count
                 self.stats["updated_count"] = updated_count
                 logger.info(f"✅ Đã load {saved_count} products vào database")
-                
+
                 # TỰ ĐỘNG CẬP NHẬT PRODUCT_COUNT CHO CATEGORIES
                 try:
                     logger.info("🔢 Đang cập nhật product_count cho các categories...")
@@ -459,7 +459,9 @@ class DataLoader:
                     categories, only_leaf=True, sync_with_products=True
                 )
                 self.stats["db_loaded"] = saved_count
-                logger.info(f"✅ Đã load {saved_count} categories vào database (chỉ categories có products)")
+                logger.info(
+                    f"✅ Đã load {saved_count} categories vào database (chỉ categories có products)"
+                )
             except Exception as e:
                 error_msg = f"Lỗi khi load categories vào database: {str(e)}"
                 self.stats["errors"].append(error_msg)

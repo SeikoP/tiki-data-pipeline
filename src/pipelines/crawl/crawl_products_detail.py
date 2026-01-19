@@ -178,7 +178,7 @@ def crawl_product_detail_with_selenium(
                 # Wait cho dynamic content (seller, price, sales_count, rating) load
                 # Tăng timeout lên 3s để đảm bảo seller và original_price được load
                 wait_for_dynamic_content_loaded(driver, timeout=3, verbose=verbose)
-                
+
                 # Thêm wait bổ sung sau khi scroll xong để đảm bảo dynamic content load đầy đủ
                 # Một số pages load chậm hơn → cần thêm 0.5-1s wait
                 time.sleep(0.8)  # Wait thêm để seller và price load đầy đủ
@@ -408,7 +408,7 @@ def crawl_product_detail_with_driver(
             # Wait cho dynamic content (seller, price, sales_count, rating) load
             # Tăng timeout lên 3s để đảm bảo seller và original_price được load
             wait_for_dynamic_content_loaded(driver, timeout=3, verbose=verbose)
-            
+
             # Thêm wait bổ sung sau khi scroll xong để đảm bảo dynamic content load đầy đủ
             # Một số pages load chậm hơn → cần thêm 0.5-1s wait
             time.sleep(0.8)  # Wait thêm để seller và price load đầy đủ
@@ -670,12 +670,12 @@ def extract_product_detail(
     # 4. Extract seller (mở rộng selectors để lấy đầy đủ seller_name)
     seller_selectors = [
         '[data-view-id="pdp_seller_name"]',
-        '.SellerName__Name-sc-',  # Tiki specific class
+        ".SellerName__Name-sc-",  # Tiki specific class
         '[class*="SellerName"]',
         '[class*="seller-name"]',
         '[class*="seller_info"]',
         '[data-testid="seller-name"]',
-        '.seller-name',
+        ".seller-name",
         '[class*="seller"]',
         'a[href*="/seller/"]',  # Link to seller page
         '[href*="seller_id"]',
@@ -686,13 +686,15 @@ def extract_product_detail(
         if seller_elem:
             seller_text = seller_elem.get_text(strip=True)
             # Nếu là link, lấy text hoặc title attribute
-            if seller_elem.name == 'a':
-                seller_text = seller_elem.get_text(strip=True) or seller_elem.get('title', '').strip()
-            
+            if seller_elem.name == "a":
+                seller_text = (
+                    seller_elem.get_text(strip=True) or seller_elem.get("title", "").strip()
+                )
+
             if seller_text and len(seller_text) > 1:  # Tránh lấy text quá ngắn
                 product_data["seller"]["name"] = seller_text
                 seller_name_found = True
-                
+
                 # Kiểm tra có phải official store không
                 seller_text_lower = seller_text.lower()
                 if (
@@ -702,27 +704,31 @@ def extract_product_detail(
                     or "tiki trading" in seller_text_lower
                 ):
                     product_data["seller"]["is_official"] = True
-                
+
                 # Extract seller_id từ href nếu có
-                if seller_elem.name == 'a':
-                    href = seller_elem.get('href', '')
-                    seller_id_match = re.search(r'seller[_-]?id[=:](\d+)|/seller/(\d+)', href, re.I)
+                if seller_elem.name == "a":
+                    href = seller_elem.get("href", "")
+                    seller_id_match = re.search(r"seller[_-]?id[=:](\d+)|/seller/(\d+)", href, re.I)
                     if seller_id_match:
-                        product_data["seller"]["seller_id"] = seller_id_match.group(1) or seller_id_match.group(2)
-                
+                        product_data["seller"]["seller_id"] = seller_id_match.group(
+                            1
+                        ) or seller_id_match.group(2)
+
                 break
-    
+
     # Fallback: Tìm trong script tags (Tiki thường embed JSON data)
     if not seller_name_found:
-        script_tags = soup.find_all('script', type='application/ld+json')
+        script_tags = soup.find_all("script", type="application/ld+json")
         for script in script_tags:
             try:
                 data = json.loads(script.string) if script.string else {}
                 # Tiki có thể lưu seller info trong structured data
                 if isinstance(data, dict):
-                    seller_info = data.get('brand') or data.get('seller') or data.get('manufacturer')
+                    seller_info = (
+                        data.get("brand") or data.get("seller") or data.get("manufacturer")
+                    )
                     if isinstance(seller_info, dict):
-                        seller_name = seller_info.get('name') or seller_info.get('@name')
+                        seller_name = seller_info.get("name") or seller_info.get("@name")
                         if seller_name:
                             product_data["seller"]["name"] = seller_name
                             seller_name_found = True

@@ -33,8 +33,10 @@ def load_categories(json_file_path: str):
         print("🚀 Importing to Database...")
 
         saved_count = storage.save_categories(categories, sync_with_products=True)
-        
-        print(f"✅ DONE! Successfully loaded {saved_count} categories (filtered by active products).")
+
+        print(
+            f"✅ DONE! Successfully loaded {saved_count} categories (filtered by active products)."
+        )
         print("ℹ️  Table 'categories' relies on 'url' as Primary Key.")
 
     except Exception as e:

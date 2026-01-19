@@ -320,27 +320,28 @@ def crawl_category_recursive_optimized(
         # Format: {level: [(url, parent_url), ...]}
         queue = defaultdict(list)
         queue[0] = [(root_url, None)]
-        
+
         # QUAN TRỌNG: Thêm root category vào đầu kết quả (chỉ chạy 1 lần)
         # Để đảm bảo category hierarchy đầy đủ (root -> children -> grandchildren)
         import re
-        match = re.search(r'/([^/]+)/(c\d+)', root_url)
+
+        match = re.search(r"/([^/]+)/(c\d+)", root_url)
         if match:
             root_slug = match.group(1)
             root_cat_id = match.group(2)
-            root_name = root_slug.replace('-', ' ').title()
-            
+            root_name = root_slug.replace("-", " ").title()
+
             root_category = {
-                'name': root_name,
-                'slug': root_slug,
-                'url': root_url,
-                'image_url': '',
-                'parent_url': '',  # Root không có parent
-                'level': 0
+                "name": root_name,
+                "slug": root_slug,
+                "url": root_url,
+                "image_url": "",
+                "parent_url": "",  # Root không có parent
+                "level": 0,
             }
             all_categories.append(root_category)
             print(f"Da them root category: {root_name} ({root_cat_id})")
-        
+
         # Crawl từng level một
         for current_level in range(max_level + 1):
             if current_level not in queue or not queue[current_level]:

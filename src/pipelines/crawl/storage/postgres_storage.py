@@ -110,7 +110,7 @@ class PostgresStorage:
                 return True
         except Exception:
             return False
-            
+
     def get_used_category_ids(self) -> set[str]:
         """Lấy danh sách unique category_id từ bảng products"""
         used_ids = set()
@@ -124,7 +124,9 @@ class PostgresStorage:
                     if not cur.fetchone()[0]:
                         return used_ids
 
-                    cur.execute("SELECT DISTINCT category_id FROM products WHERE category_id IS NOT NULL")
+                    cur.execute(
+                        "SELECT DISTINCT category_id FROM products WHERE category_id IS NOT NULL"
+                    )
                     rows = cur.fetchall()
                     for row in rows:
                         cat_id = row[0]
@@ -202,7 +204,7 @@ class PostgresStorage:
 
     def _ensure_categories_schema(self, cur) -> None:
         """Đảm bảo bảng categories và các index tồn tại.
-        
+
         Lưu ý: Bảng này chỉ lưu các category có is_leaf = true.
         category_path được mở rộng với các trường level_1 đến level_5 để thể hiện rõ theo từng độ sâu.
         """
@@ -235,7 +237,7 @@ class PostgresStorage:
 
     def _ensure_products_schema(self, cur) -> None:
         """Đảm bảo bảng products và các index tồn tại.
-        
+
         Đã loại bỏ các trường: category_path, review_count, description, images,
         estimated_revenue, price_savings, price_category, value_score, sales_velocity,
         specifications, popularity_score, discount_amount
@@ -273,10 +275,10 @@ class PostgresStorage:
 
     def _ensure_history_schema(self, cur) -> None:
         """Đảm bảo bảng crawl_history và các index tồn tại.
-        
+
         Bảng này lưu lịch sử giá CHỈ KHI CÓ THAY ĐỔI (giá, discount, etc.)
         để tiết kiệm dung lượng database.
-        
+
         Schema đã được tối ưu:
         - Loại bỏ: crawl_type, status, started_at, completed_at (không cần thiết)
         - Giữ lại: product_id, price, original_price, discount_percent, price_change, crawled_at
@@ -420,21 +422,21 @@ class PostgresStorage:
         return cur.rowcount
 
     def save_categories(
-        self, 
-        categories: list[dict[str, Any]], 
+        self,
+        categories: list[dict[str, Any]],
         only_leaf: bool = True,
-        sync_with_products: bool = False
+        sync_with_products: bool = False,
     ) -> int:
         """
         Lưu danh sách categories vào DB sử dụng bulk processing tối ưu.
-        
+
         Args:
             categories: Danh sách categories cần lưu
             only_leaf: Nếu True, chỉ lưu categories có is_leaf = true (mặc định).
                       Nếu False, lưu tất cả categories.
             sync_with_products: Nếu True, chỉ lưu các categories có match với product
                       (category_id có trong bảng products).
-                      
+
         Returns:
             Số lượng categories đã lưu
         """
@@ -460,7 +462,6 @@ class PostgresStorage:
                 current = url_to_cat.get(parent_url) if parent_url else None
             return path
 
-        
         # Get used category IDs if filtering is enabled
         used_category_ids = set()
         if sync_with_products:
@@ -492,7 +493,7 @@ class PostgresStorage:
                 # Check normalized ID
                 if cat_id not in used_category_ids:
                     # Try alternate format (without 'c' prefix) just in case
-                    raw_id = cat_id[1:] if cat_id.startswith('c') else cat_id
+                    raw_id = cat_id[1:] if cat_id.startswith("c") else cat_id
                     if raw_id not in used_category_ids:
                         continue
 
@@ -569,7 +570,7 @@ class PostgresStorage:
                     "url",
                     update_cols=update_columns,
                 )
-                
+
                 # Auto-add missing parent categories (root categories)
                 # Tìm các parent_url không có trong data và tự động thêm
                 missing_parents = parent_urls - set(url_to_cat.keys())
@@ -580,7 +581,7 @@ class PostgresStorage:
                         # Extract category_id from URL
                         match = re.search(r"(c\d+)", parent_url)
                         cat_id = match.group(1) if match else None
-                        
+
                         if cat_id:
                             cur.execute(
                                 """
@@ -591,7 +592,7 @@ class PostgresStorage:
                                 (cat_id, cat_id, parent_url),  # Tạm dùng ID làm tên
                             )
                     print(f"📂 Auto-added {len(missing_parents)} missing parent categories")
-                
+
                 return saved_count
 
     def save_products(
@@ -775,7 +776,7 @@ class PostgresStorage:
                 self._log_batch_crawl_history(products[:saved_count])
             except Exception as e:
                 print(f"⚠️  Failed to log crawl history: {e}")
-            
+
             # Auto-sync: Ensure all categories from products exist in categories table
             try:
                 self._ensure_categories_from_products(products[:saved_count])
@@ -791,10 +792,10 @@ class PostgresStorage:
     def _ensure_categories_from_products(self, products: list[dict[str, Any]]) -> int:
         """
         Tự động tạo missing categories từ products.
-        
+
         Khi crawl products, category_id và category_url có thể chưa tồn tại trong bảng categories.
         Method này sẽ tự động thêm các categories đó để đảm bảo data integrity.
-        
+
         Returns:
             Số categories mới được thêm
         """
@@ -806,16 +807,16 @@ class PostgresStorage:
         for p in products:
             cat_id = p.get("category_id")
             cat_url = p.get("category_url")
-            
+
             if not cat_id or not cat_url:
                 continue
-            
+
             # Ensure category_id has 'c' prefix
             if not cat_id.startswith("c"):
                 cat_id = f"c{cat_id}"
-            
+
             if cat_url not in categories_to_add:
-                # Chỉ lưu category_id làm tên tạm. 
+                # Chỉ lưu category_id làm tên tạm.
                 # Tên đúng (tiếng Việt có dấu) sẽ được cập nhật khi task load categories chạy.
                 categories_to_add[cat_url] = {
                     "category_id": cat_id,
@@ -830,7 +831,7 @@ class PostgresStorage:
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 self._ensure_categories_schema(cur)
-                
+
                 for cat_url, cat_info in categories_to_add.items():
                     # Insert only if not exists (by url)
                     cur.execute(
@@ -846,29 +847,26 @@ class PostgresStorage:
 
         if added_count > 0:
             print(f"📂 Auto-added {added_count} missing categories from products")
-        
+
         return added_count
 
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
         Log price history for products CHỈ KHI CÓ THAY ĐỔI GIÁ.
-        
+
         Tối ưu:
         - Sử dụng batch lookup để lấy giá cũ (thay vì query từng product)
         - Chỉ INSERT khi giá thay đổi hoặc là lần crawl đầu tiên
         - Tiết kiệm ~90% storage khi giá ổn định
-        
+
         Schema: (product_id, price, original_price, discount_percent, price_change, previous_*, crawled_at)
         """
         if not products:
             return
 
         # Filter products with valid price
-        valid_products = [
-            p for p in products 
-            if p.get("product_id") and p.get("price") is not None
-        ]
-        
+        valid_products = [p for p in products if p.get("product_id") and p.get("price") is not None]
+
         if not valid_products:
             return
 
@@ -878,7 +876,7 @@ class PostgresStorage:
 
                 # BATCH LOOKUP: Get all previous prices in one query
                 product_ids = [p.get("product_id") for p in valid_products]
-                
+
                 # Use DISTINCT ON to get latest price per product efficiently
                 cur.execute(
                     """
@@ -890,7 +888,7 @@ class PostgresStorage:
                     """,
                     (product_ids,),
                 )
-                
+
                 # Build lookup dict: product_id -> (price, original_price, discount_percent)
                 previous_data = {
                     row[0]: {"price": row[1], "original_price": row[2], "discount_percent": row[3]}
@@ -899,60 +897,69 @@ class PostgresStorage:
 
                 # Collect products that need history update
                 records_to_insert = []
-                
+
                 for p in valid_products:
                     product_id = p.get("product_id")
                     current_price = p.get("price")
                     current_original_price = p.get("original_price")
                     current_discount = p.get("discount_percent")
-                    
+
                     prev = previous_data.get(product_id)
-                    
+
                     if prev is None:
                         # First time crawl - always insert
-                        records_to_insert.append({
-                            "product_id": product_id,
-                            "price": current_price,
-                            "original_price": current_original_price,
-                            "discount_percent": current_discount,
-                            "price_change": None,
-                            "previous_price": None,
-                            "previous_original_price": None,
-                            "previous_discount_percent": None,
-                        })
-                    else:
-                        # Check if anything changed
-                        prev_price = float(prev["price"]) if prev["price"] else None
-                        prev_original = float(prev["original_price"]) if prev["original_price"] else None
-                        prev_discount = prev["discount_percent"]
-                        
-                        current_price_float = float(current_price) if current_price else None
-                        current_original_float = float(current_original_price) if current_original_price else None
-                        
-                        # Only insert if price, original_price, or discount changed
-                        price_changed = prev_price != current_price_float
-                        original_changed = prev_original != current_original_float
-                        discount_changed = prev_discount != current_discount
-                        
-                        if price_changed or original_changed or discount_changed:
-                            price_change = None
-                            if prev_price is not None and current_price_float is not None:
-                                price_change = current_price_float - prev_price
-                            
-                            records_to_insert.append({
+                        records_to_insert.append(
+                            {
                                 "product_id": product_id,
                                 "price": current_price,
                                 "original_price": current_original_price,
                                 "discount_percent": current_discount,
-                                "price_change": price_change,
-                                "previous_price": prev_price,
-                                "previous_original_price": prev_original,
-                                "previous_discount_percent": prev_discount,
-                            })
+                                "price_change": None,
+                                "previous_price": None,
+                                "previous_original_price": None,
+                                "previous_discount_percent": None,
+                            }
+                        )
+                    else:
+                        # Check if anything changed
+                        prev_price = float(prev["price"]) if prev["price"] else None
+                        prev_original = (
+                            float(prev["original_price"]) if prev["original_price"] else None
+                        )
+                        prev_discount = prev["discount_percent"]
+
+                        current_price_float = float(current_price) if current_price else None
+                        current_original_float = (
+                            float(current_original_price) if current_original_price else None
+                        )
+
+                        # Only insert if price, original_price, or discount changed
+                        price_changed = prev_price != current_price_float
+                        original_changed = prev_original != current_original_float
+                        discount_changed = prev_discount != current_discount
+
+                        if price_changed or original_changed or discount_changed:
+                            price_change = None
+                            if prev_price is not None and current_price_float is not None:
+                                price_change = current_price_float - prev_price
+
+                            records_to_insert.append(
+                                {
+                                    "product_id": product_id,
+                                    "price": current_price,
+                                    "original_price": current_original_price,
+                                    "discount_percent": current_discount,
+                                    "price_change": price_change,
+                                    "previous_price": prev_price,
+                                    "previous_original_price": prev_original,
+                                    "previous_discount_percent": prev_discount,
+                                }
+                            )
 
                 # Batch insert all changed records
                 if records_to_insert:
                     from psycopg2.extras import execute_values
+
                     execute_values(
                         cur,
                         """
@@ -975,9 +982,17 @@ class PostgresStorage:
                             for r in records_to_insert
                         ],
                     )
-                    print(f"📊 Price history: {len(records_to_insert)}/{len(valid_products)} products had changes")
+                    print(
+                        f"📊 Price history: {len(records_to_insert)}/{len(valid_products)} products had changes"
+                    )
 
-    def log_price_history(self, product_id: str, price: float, original_price: float | None = None, discount_percent: int | None = None) -> int | None:
+    def log_price_history(
+        self,
+        product_id: str,
+        price: float,
+        original_price: float | None = None,
+        discount_percent: int | None = None,
+    ) -> int | None:
         """
         Log single product price to history CHỈ KHI CÓ THAY ĐỔI.
 
@@ -1004,17 +1019,21 @@ class PostgresStorage:
                 )
 
                 row = cur.fetchone()
-                
+
                 if row:
                     prev_price, prev_original, prev_discount = row
                     # Check if anything changed
-                    price_changed = (float(prev_price) if prev_price else None) != (float(price) if price else None)
-                    original_changed = (float(prev_original) if prev_original else None) != (float(original_price) if original_price else None)
+                    price_changed = (float(prev_price) if prev_price else None) != (
+                        float(price) if price else None
+                    )
+                    original_changed = (float(prev_original) if prev_original else None) != (
+                        float(original_price) if original_price else None
+                    )
                     discount_changed = prev_discount != discount_percent
-                    
+
                     if not (price_changed or original_changed or discount_changed):
                         return None  # No change, skip insert
-                    
+
                     # Calculate price change
                     price_change = None
                     if prev_price is not None:
@@ -1033,8 +1052,14 @@ class PostgresStorage:
                     RETURNING id
                 """,
                     (
-                        product_id, price, original_price, discount_percent, price_change,
-                        prev_price, prev_original, prev_discount
+                        product_id,
+                        price,
+                        original_price,
+                        discount_percent,
+                        price_change,
+                        prev_price,
+                        prev_original,
+                        prev_discount,
                     ),
                 )
 
@@ -1129,7 +1154,7 @@ class PostgresStorage:
 
     def _bulk_log_product_price_history(self, cur, products: list[dict[str, Any]]) -> None:
         """Bulk log crawl history CHỈ KHI CÓ THAY ĐỔI GIÁ.
-        
+
         Tối ưu:
         - Batch lookup previous prices
         - Chỉ insert khi có thay đổi
@@ -1139,17 +1164,14 @@ class PostgresStorage:
             return
 
         # Filter products with valid data
-        valid_products = [
-            p for p in products 
-            if p.get("product_id") and p.get("price") is not None
-        ]
-        
+        valid_products = [p for p in products if p.get("product_id") and p.get("price") is not None]
+
         if not valid_products:
             return
 
         # BATCH LOOKUP: Get all previous prices in one query
         product_ids = [p.get("product_id") for p in valid_products]
-        
+
         cur.execute(
             """
             SELECT DISTINCT ON (product_id) 
@@ -1160,7 +1182,7 @@ class PostgresStorage:
             """,
             (product_ids,),
         )
-        
+
         previous_data = {
             row[0]: {"price": row[1], "original_price": row[2], "discount_percent": row[3]}
             for row in cur.fetchall()
@@ -1168,54 +1190,60 @@ class PostgresStorage:
 
         # Collect records with changes
         records_to_insert = []
-        
+
         for p in valid_products:
             product_id = p.get("product_id")
             current_price = p.get("price")
             current_original_price = p.get("original_price")
             current_discount = p.get("discount_percent")
-            
+
             prev = previous_data.get(product_id)
-            
+
             if prev is None:
                 # First time - always insert
-                records_to_insert.append((
-                    product_id,
-                    current_price,
-                    current_original_price,
-                    current_discount,
-                    None,  # price_change
-                    None,  # previous_price
-                    None,  # previous_original_price
-                    None,  # previous_discount_percent
-                ))
-            else:
-                prev_price = float(prev["price"]) if prev["price"] else None
-                prev_original = float(prev["original_price"]) if prev["original_price"] else None
-                prev_discount = prev["discount_percent"]
-                
-                current_price_float = float(current_price) if current_price else None
-                current_original_float = float(current_original_price) if current_original_price else None
-                
-                price_changed = prev_price != current_price_float
-                original_changed = prev_original != current_original_float
-                discount_changed = prev_discount != current_discount
-                
-                if price_changed or original_changed or discount_changed:
-                    price_change = None
-                    if prev_price is not None and current_price_float is not None:
-                        price_change = current_price_float - prev_price
-                    
-                    records_to_insert.append((
+                records_to_insert.append(
+                    (
                         product_id,
                         current_price,
                         current_original_price,
                         current_discount,
-                        price_change,
-                        prev_price,
-                        prev_original,
-                        prev_discount,
-                    ))
+                        None,  # price_change
+                        None,  # previous_price
+                        None,  # previous_original_price
+                        None,  # previous_discount_percent
+                    )
+                )
+            else:
+                prev_price = float(prev["price"]) if prev["price"] else None
+                prev_original = float(prev["original_price"]) if prev["original_price"] else None
+                prev_discount = prev["discount_percent"]
+
+                current_price_float = float(current_price) if current_price else None
+                current_original_float = (
+                    float(current_original_price) if current_original_price else None
+                )
+
+                price_changed = prev_price != current_price_float
+                original_changed = prev_original != current_original_float
+                discount_changed = prev_discount != current_discount
+
+                if price_changed or original_changed or discount_changed:
+                    price_change = None
+                    if prev_price is not None and current_price_float is not None:
+                        price_change = current_price_float - prev_price
+
+                    records_to_insert.append(
+                        (
+                            product_id,
+                            current_price,
+                            current_original_price,
+                            current_discount,
+                            price_change,
+                            prev_price,
+                            prev_original,
+                            prev_discount,
+                        )
+                    )
 
         # Batch insert changed records
         if records_to_insert:
@@ -1229,7 +1257,9 @@ class PostgresStorage:
                 """,
                 records_to_insert,
             )
-            print(f"📊 Bulk price history: {len(records_to_insert)}/{len(valid_products)} products had changes")
+            print(
+                f"📊 Bulk price history: {len(records_to_insert)}/{len(valid_products)} products had changes"
+            )
 
     def _save_products_bulk_copy(
         self, products: list[dict[str, Any]], upsert: bool
