@@ -48,3 +48,37 @@ CACHE_MIN_FIELDS_FOR_VALIDITY = [
     "name",
 ]  # Product needs at least one of these
 CACHE_ACCEPT_PARTIAL_DATA = True  # Chấp nhận partial cache (không cần tất cả fields)
+
+# ========== RETRY CONFIGURATION - HYBRID APPROACH ==========
+# Conditional retry for missing critical fields (seller_name, brand)
+PRODUCT_RETRY_MAX_ATTEMPTS = 2  # Retry up to 2 times for missing critical fields
+PRODUCT_RETRY_DELAY_BASE = 3  # Base delay in seconds between retries
+PRODUCT_RETRY_WAIT_MULTIPLIER = 2  # Multiply wait times on retry (e.g., 4s -> 8s implicit_wait)
+
+# ========== DATA QUALITY THRESHOLDS ==========
+# Fields classification for validation
+DATA_QUALITY_CRITICAL_FIELDS = ["name", "price", "product_id"]  # Must have to save
+DATA_QUALITY_IMPORTANT_FIELDS = [
+    "seller_name",
+    "brand",
+    "category_id",
+]  # Should have, trigger retry if missing
+DATA_QUALITY_OPTIONAL_FIELDS = [
+    "rating_average",
+    "sales_count",
+    "stock_quantity",
+]  # Nice to have
+
+# Minimum completeness score to accept product (0.0 - 1.0)
+DATA_QUALITY_MIN_SCORE = 0.7  # 70% completeness threshold
+
+# Wait time adjustments for retry (Tier 1 + Tier 2 approach)
+# Tier 1: Normal crawl (moderate increase from current)
+CRAWL_IMPLICIT_WAIT_NORMAL = 4  # seconds (increased from 3s)
+CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL = 4  # seconds (increased from 3s)
+CRAWL_POST_SCROLL_SLEEP_NORMAL = 1.2  # seconds (increased from 0.8s)
+
+# Tier 2: Retry crawl (2x wait times)
+CRAWL_IMPLICIT_WAIT_RETRY = 8  # seconds (2x normal)
+CRAWL_DYNAMIC_CONTENT_WAIT_RETRY = 8  # seconds (2x normal)
+CRAWL_POST_SCROLL_SLEEP_RETRY = 2.4  # seconds (2x normal)

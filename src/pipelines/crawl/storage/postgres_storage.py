@@ -240,6 +240,8 @@ class PostgresStorage:
         Đã loại bỏ các trường: category_path, review_count, description, images,
         estimated_revenue, price_savings, price_category, value_score, sales_velocity,
         specifications, popularity_score, discount_amount
+        
+        Đã thêm metadata columns: data_quality, last_crawl_status, retry_count
         """
         cur.execute(
             """
@@ -269,6 +271,15 @@ class PostgresStorage:
             );
             -- Only essential index: category_id is used to join with categories table
             CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
+            
+            -- NEW: Add metadata columns for data quality tracking
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS data_quality VARCHAR(50);
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawl_status VARCHAR(50);
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+            
+            -- NEW: Index for filtering products by data quality
+            CREATE INDEX IF NOT EXISTS idx_products_data_quality ON products(data_quality);
+            CREATE INDEX IF NOT EXISTS idx_products_retry_count ON products(retry_count);
         """
         )
 
@@ -278,9 +289,12 @@ class PostgresStorage:
         Bảng này lưu lịch sử giá CHỈ KHI CÓ THAY ĐỔI (giá, discount, etc.)
         để tiết kiệm dung lượng database.
 
-        Schema đã được tối ưu:
-        - Loại bỏ: crawl_type, status, started_at, completed_at (không cần thiết)
-        - Giữ lại: product_id, price, original_price, discount_percent, price_change, crawled_at
+        Schema đã được tối ưu và mở rộng:
+        - Price tracking: price, original_price, discount_percent, price_change, previous_*
+        - Detailed timestamps: started_at, completed_at, crawled_at
+        - Crawl metadata: crawl_status, retry_count, error_message
+        - Data quality: missing_fields, data_completeness_score
+        - Performance: crawl_duration_ms, page_load_time_ms
         """
         cur.execute(
             """
@@ -303,10 +317,32 @@ class PostgresStorage:
             -- Composite index for getting latest price per product (most common query)
             CREATE INDEX IF NOT EXISTS idx_history_product_latest ON crawl_history(product_id, crawled_at DESC);
 
-            -- Ensure new columns exist (migration for existing table)
+            -- Ensure existing columns exist (migration for existing table)
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_price DECIMAL(12, 2);
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_original_price DECIMAL(12, 2);
             ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_discount_percent INTEGER;
+            
+            -- NEW: Detailed timestamp tracking
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
+            
+            -- NEW: Crawl metadata for debugging and monitoring
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_status VARCHAR(50);
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS error_message TEXT;
+            
+            -- NEW: Data quality tracking
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS missing_fields JSONB;
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS data_completeness_score DECIMAL(3, 2);
+            
+            -- NEW: Performance metrics
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_duration_ms INTEGER;
+            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS page_load_time_ms INTEGER;
+            
+            -- NEW: Indexes for new query patterns
+            CREATE INDEX IF NOT EXISTS idx_history_status ON crawl_history(crawl_status);
+            CREATE INDEX IF NOT EXISTS idx_history_started_at ON crawl_history(started_at);
+            CREATE INDEX IF NOT EXISTS idx_history_retry_count ON crawl_history(retry_count);
         """
         )
 
@@ -942,6 +978,9 @@ class PostgresStorage:
                             if prev_price is not None and current_price_float is not None:
                                 price_change = current_price_float - prev_price
 
+                            # Extract metadata if available
+                            metadata = p.get("_metadata", {})
+                            
                             records_to_insert.append(
                                 {
                                     "product_id": product_id,
@@ -952,19 +991,31 @@ class PostgresStorage:
                                     "previous_price": prev_price,
                                     "previous_original_price": prev_original,
                                     "previous_discount_percent": prev_discount,
+                                    # NEW: Metadata fields
+                                    "started_at": metadata.get("started_at"),
+                                    "completed_at": metadata.get("completed_at"),
+                                    "crawl_status": metadata.get("crawl_status", "success"),
+                                    "retry_count": metadata.get("retry_count", 0),
+                                    "error_message": metadata.get("error_message"),
+                                    "missing_fields": metadata.get("missing_fields"),
+                                    "data_completeness_score": metadata.get("data_completeness_score"),
+                                    "crawl_duration_ms": metadata.get("crawl_duration_ms"),
+                                    "page_load_time_ms": metadata.get("page_load_time_ms"),
                                 }
                             )
 
-                # Batch insert all changed records
+                # Batch insert all changed records with enhanced metadata
                 if records_to_insert:
-                    from psycopg2.extras import execute_values
+                    from psycopg2.extras import Json, execute_values
 
                     execute_values(
                         cur,
                         """
                         INSERT INTO crawl_history
                             (product_id, price, original_price, discount_percent, price_change,
-                             previous_price, previous_original_price, previous_discount_percent)
+                             previous_price, previous_original_price, previous_discount_percent,
+                             started_at, completed_at, crawl_status, retry_count, error_message,
+                             missing_fields, data_completeness_score, crawl_duration_ms, page_load_time_ms)
                         VALUES %s
                         """,
                         [
@@ -977,12 +1028,28 @@ class PostgresStorage:
                                 r["previous_price"],
                                 r["previous_original_price"],
                                 r["previous_discount_percent"],
+                                # NEW: Metadata values
+                                r.get("started_at"),
+                                r.get("completed_at"),
+                                r.get("crawl_status"),
+                                r.get("retry_count", 0),
+                                r.get("error_message"),
+                                Json(r.get("missing_fields")) if r.get("missing_fields") else None,
+                                r.get("data_completeness_score"),
+                                r.get("crawl_duration_ms"),
+                                r.get("page_load_time_ms"),
                             )
                             for r in records_to_insert
                         ],
                     )
+                    
+                    # Enhanced logging with quality metrics
+                    avg_score = sum(r.get("data_completeness_score", 0) or 0 for r in records_to_insert) / len(records_to_insert) if records_to_insert else 0
+                    retry_count = sum(1 for r in records_to_insert if r.get("retry_count", 0) > 0)
+                    
                     print(
-                        f"📊 Price history: {len(records_to_insert)}/{len(valid_products)} products had changes"
+                        f"📊 Price history: {len(records_to_insert)}/{len(valid_products)} products had changes "
+                        f"(avg quality: {avg_score:.2f}, {retry_count} retried)"
                     )
 
     def log_price_history(
