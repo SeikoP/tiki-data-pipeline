@@ -453,10 +453,17 @@ class DataLoader:
 
         # Load vào database
         if self.enable_db and self.db_storage:
-            logger.info(
-                "ℹ️ Skip saving categories to DB (Table 'categories' removed). Only saving to file."
-            )
-            # Database load logic removed as requested
+            try:
+                # Load with sync_with_products=True to only load categories having products
+                saved_count = self.db_storage.save_categories(
+                    categories, only_leaf=True, sync_with_products=True
+                )
+                self.stats["db_loaded"] = saved_count
+                logger.info(f"✅ Đã load {saved_count} categories vào database (chỉ categories có products)")
+            except Exception as e:
+                error_msg = f"Lỗi khi load categories vào database: {str(e)}"
+                self.stats["errors"].append(error_msg)
+                logger.error(f"❌ {error_msg}")
 
         # Load vào file nếu cần
         if save_to_file:

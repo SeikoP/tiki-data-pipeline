@@ -110,6 +110,32 @@ class PostgresStorage:
                 return True
         except Exception:
             return False
+            
+    def get_used_category_ids(self) -> set[str]:
+        """Lấy danh sách unique category_id từ bảng products"""
+        used_ids = set()
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Check if products table exists
+                    cur.execute(
+                        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'products')"
+                    )
+                    if not cur.fetchone()[0]:
+                        return used_ids
+
+                    cur.execute("SELECT DISTINCT category_id FROM products WHERE category_id IS NOT NULL")
+                    rows = cur.fetchall()
+                    for row in rows:
+                        cat_id = row[0]
+                        if cat_id:
+                            # Normalize: ensure 'c' prefix if it looks like just numbers
+                            if str(cat_id).isdigit():
+                                cat_id = f"c{cat_id}"
+                            used_ids.add(cat_id)
+        except Exception as e:
+            print(f"⚠️  Error getting used category IDs: {e}")
+        return used_ids
 
     @contextmanager
     def get_connection(self, retries: int = 3):
@@ -393,7 +419,12 @@ class PostgresStorage:
         cur.execute(merge_query)
         return cur.rowcount
 
-    def save_categories(self, categories: list[dict[str, Any]], only_leaf: bool = True) -> int:
+    def save_categories(
+        self, 
+        categories: list[dict[str, Any]], 
+        only_leaf: bool = True,
+        sync_with_products: bool = False
+    ) -> int:
         """
         Lưu danh sách categories vào DB sử dụng bulk processing tối ưu.
         
@@ -401,6 +432,8 @@ class PostgresStorage:
             categories: Danh sách categories cần lưu
             only_leaf: Nếu True, chỉ lưu categories có is_leaf = true (mặc định).
                       Nếu False, lưu tất cả categories.
+            sync_with_products: Nếu True, chỉ lưu các categories có match với product
+                      (category_id có trong bảng products).
                       
         Returns:
             Số lượng categories đã lưu
@@ -427,6 +460,13 @@ class PostgresStorage:
                 current = url_to_cat.get(parent_url) if parent_url else None
             return path
 
+        
+        # Get used category IDs if filtering is enabled
+        used_category_ids = set()
+        if sync_with_products:
+            used_category_ids = self.get_used_category_ids()
+            print(f"🔍 Found {len(used_category_ids)} active categories in products table")
+
         prepared_categories = []
         for cat in categories:
             # Extract category_id from URL if missing - ALWAYS include 'c' prefix for consistency
@@ -446,6 +486,15 @@ class PostgresStorage:
             # Nếu only_leaf=True, chỉ lưu categories có is_leaf=True
             if only_leaf and not is_leaf:
                 continue
+
+            # Nếu sync_with_products=True, chỉ lưu categories có trong products table
+            if sync_with_products and is_leaf:
+                # Check normalized ID
+                if cat_id not in used_category_ids:
+                    # Try alternate format (without 'c' prefix) just in case
+                    raw_id = cat_id[1:] if cat_id.startswith('c') else cat_id
+                    if raw_id not in used_category_ids:
+                        continue
 
             # Extract level_1 đến level_5 từ category_path để thể hiện rõ theo từng độ sâu
             level_1 = category_path[0] if len(category_path) > 0 else None
