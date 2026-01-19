@@ -254,28 +254,30 @@ class PostgresStorage:
     def _ensure_history_schema(self, cur) -> None:
         """Đảm bảo bảng crawl_history và các index tồn tại.
         
-        Bảng này lưu lịch sử giá và các giá trị liên quan (giảm giá, original_price, etc.)
-        khi crawl lại sẽ tạo bản ghi mới để theo dõi thay đổi theo thời gian.
+        Bảng này lưu lịch sử giá CHỈ KHI CÓ THAY ĐỔI (giá, discount, etc.)
+        để tiết kiệm dung lượng database.
+        
+        Schema đã được tối ưu:
+        - Loại bỏ: crawl_type, status, started_at, completed_at (không cần thiết)
+        - Giữ lại: product_id, price, original_price, discount_percent, price_change, crawled_at
         """
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS crawl_history (
                 id SERIAL PRIMARY KEY,
-                crawl_type VARCHAR(100) DEFAULT 'product_tracking',
-                status VARCHAR(50) DEFAULT 'success',
                 product_id VARCHAR(255) NOT NULL,
-                price DECIMAL(12, 2),
+                price DECIMAL(12, 2) NOT NULL,
                 original_price DECIMAL(12, 2),
                 discount_percent INTEGER,
-                discount_amount DECIMAL(12, 2),
                 price_change DECIMAL(12, 2),
-                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            
+            -- Optimized indexes for common queries
             CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
             CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
-            CREATE INDEX IF NOT EXISTS idx_history_product_price ON crawl_history(product_id, crawled_at, price);
+            -- Composite index for getting latest price per product (most common query)
+            CREATE INDEX IF NOT EXISTS idx_history_product_latest ON crawl_history(product_id, crawled_at DESC);
         """
         )
 
@@ -704,80 +706,142 @@ class PostgresStorage:
 
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
-        Log price history for products. Calculates price_change from previous crawl.
-        Lưu thêm original_price, discount_percent, discount_amount để theo dõi lịch sử giảm giá.
-        Schema: (product_id, price, original_price, discount_percent, discount_amount, price_change, crawled_at)
+        Log price history for products CHỈ KHI CÓ THAY ĐỔI GIÁ.
+        
+        Tối ưu:
+        - Sử dụng batch lookup để lấy giá cũ (thay vì query từng product)
+        - Chỉ INSERT khi giá thay đổi hoặc là lần crawl đầu tiên
+        - Tiết kiệm ~90% storage khi giá ổn định
+        
+        Schema: (product_id, price, original_price, discount_percent, price_change, crawled_at)
         """
         if not products:
             return
 
+        # Filter products with valid price
+        valid_products = [
+            p for p in products 
+            if p.get("product_id") and p.get("price") is not None
+        ]
+        
+        if not valid_products:
+            return
+
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                # Ensure table exists with new schema (có original_price, discount_percent, discount_amount)
                 self._ensure_history_schema(cur)
 
-                for p in products:
+                # BATCH LOOKUP: Get all previous prices in one query
+                product_ids = [p.get("product_id") for p in valid_products]
+                
+                # Use DISTINCT ON to get latest price per product efficiently
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (product_id) 
+                        product_id, price, original_price, discount_percent
+                    FROM crawl_history
+                    WHERE product_id = ANY(%s)
+                    ORDER BY product_id, crawled_at DESC
+                    """,
+                    (product_ids,),
+                )
+                
+                # Build lookup dict: product_id -> (price, original_price, discount_percent)
+                previous_data = {
+                    row[0]: {"price": row[1], "original_price": row[2], "discount_percent": row[3]}
+                    for row in cur.fetchall()
+                }
+
+                # Collect products that need history update
+                records_to_insert = []
+                
+                for p in valid_products:
                     product_id = p.get("product_id")
-                    if not product_id:
-                        continue
-
                     current_price = p.get("price")
-                    if current_price is None:
-                        continue
+                    current_original_price = p.get("original_price")
+                    current_discount = p.get("discount_percent")
+                    
+                    prev = previous_data.get(product_id)
+                    
+                    if prev is None:
+                        # First time crawl - always insert
+                        records_to_insert.append({
+                            "product_id": product_id,
+                            "price": current_price,
+                            "original_price": current_original_price,
+                            "discount_percent": current_discount,
+                            "price_change": None,
+                        })
+                    else:
+                        # Check if anything changed
+                        prev_price = float(prev["price"]) if prev["price"] else None
+                        prev_original = float(prev["original_price"]) if prev["original_price"] else None
+                        prev_discount = prev["discount_percent"]
+                        
+                        current_price_float = float(current_price) if current_price else None
+                        current_original_float = float(current_original_price) if current_original_price else None
+                        
+                        # Only insert if price, original_price, or discount changed
+                        price_changed = prev_price != current_price_float
+                        original_changed = prev_original != current_original_float
+                        discount_changed = prev_discount != current_discount
+                        
+                        if price_changed or original_changed or discount_changed:
+                            price_change = None
+                            if prev_price is not None and current_price_float is not None:
+                                price_change = current_price_float - prev_price
+                            
+                            records_to_insert.append({
+                                "product_id": product_id,
+                                "price": current_price,
+                                "original_price": current_original_price,
+                                "discount_percent": current_discount,
+                                "price_change": price_change,
+                            })
 
-                    # Get previous price for this product
-                    cur.execute(
+                # Batch insert all changed records
+                if records_to_insert:
+                    from psycopg2.extras import execute_values
+                    execute_values(
+                        cur,
                         """
-                        SELECT price FROM crawl_history
-                        WHERE product_id = %s
-                        ORDER BY crawled_at DESC LIMIT 1
-                    """,
-                        (product_id,),
+                        INSERT INTO crawl_history 
+                            (product_id, price, original_price, discount_percent, price_change)
+                        VALUES %s
+                        """,
+                        [
+                            (
+                                r["product_id"],
+                                r["price"],
+                                r["original_price"],
+                                r["discount_percent"],
+                                r["price_change"],
+                            )
+                            for r in records_to_insert
+                        ],
                     )
+                    print(f"📊 Price history: {len(records_to_insert)}/{len(valid_products)} products had changes")
 
-                    row = cur.fetchone()
-                    previous_price = row[0] if row else None
-
-                    # Calculate price change
-                    price_change = None
-                    if previous_price is not None and current_price is not None:
-                        price_change = float(current_price) - float(previous_price)
-
-                    # Extract discount-related fields
-                    original_price = p.get("original_price")
-                    discount_percent = p.get("discount_percent")
-                    discount_amount = p.get("discount_amount")
-
-                    # Insert new price record with discount information
-                    cur.execute(
-                        """
-                        INSERT INTO crawl_history (product_id, price, original_price, discount_percent, discount_amount, price_change)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                    """,
-                        (product_id, current_price, original_price, discount_percent, discount_amount, price_change),
-                    )
-
-    def log_price_history(self, product_id: str, price: float, original_price: float | None = None, discount_percent: int | None = None, discount_amount: float | None = None) -> int:
+    def log_price_history(self, product_id: str, price: float, original_price: float | None = None, discount_percent: int | None = None) -> int | None:
         """
-        Log single product price to history.
+        Log single product price to history CHỈ KHI CÓ THAY ĐỔI.
 
         Args:
             product_id: Product ID
             price: Current product price
             original_price: Original price before discount
             discount_percent: Discount percentage
-            discount_amount: Discount amount
 
         Returns:
-            ID of the new history record
+            ID of the new history record, or None if no change
         """
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 self._ensure_history_schema(cur)
-                # Get previous price
+                # Get previous data
                 cur.execute(
                     """
-                    SELECT price FROM crawl_history
+                    SELECT price, original_price, discount_percent FROM crawl_history
                     WHERE product_id = %s
                     ORDER BY crawled_at DESC LIMIT 1
                 """,
@@ -785,20 +849,31 @@ class PostgresStorage:
                 )
 
                 row = cur.fetchone()
-                previous_price = row[0] if row else None
-
-                # Calculate price change
-                price_change = None
-                if previous_price is not None:
-                    price_change = float(price) - float(previous_price)
+                
+                if row:
+                    prev_price, prev_original, prev_discount = row
+                    # Check if anything changed
+                    price_changed = (float(prev_price) if prev_price else None) != (float(price) if price else None)
+                    original_changed = (float(prev_original) if prev_original else None) != (float(original_price) if original_price else None)
+                    discount_changed = prev_discount != discount_percent
+                    
+                    if not (price_changed or original_changed or discount_changed):
+                        return None  # No change, skip insert
+                    
+                    # Calculate price change
+                    price_change = None
+                    if prev_price is not None:
+                        price_change = float(price) - float(prev_price)
+                else:
+                    price_change = None  # First record
 
                 cur.execute(
                     """
-                    INSERT INTO crawl_history (product_id, price, original_price, discount_percent, discount_amount, price_change)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO crawl_history (product_id, price, original_price, discount_percent, price_change)
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING id
                 """,
-                    (product_id, price, original_price, discount_percent, discount_amount, price_change),
+                    (product_id, price, original_price, discount_percent, price_change),
                 )
 
                 return cur.fetchone()[0]
@@ -891,41 +966,101 @@ class PostgresStorage:
             self._pool_stats["active_connections"] = 0
 
     def _bulk_log_product_price_history(self, cur, products: list[dict[str, Any]]) -> None:
-        """Bulk log crawl history using COPY protocol.
-        Lưu thêm original_price, discount_percent, discount_amount để theo dõi lịch sử giảm giá.
+        """Bulk log crawl history CHỈ KHI CÓ THAY ĐỔI GIÁ.
+        
+        Tối ưu:
+        - Batch lookup previous prices
+        - Chỉ insert khi có thay đổi
+        - Sử dụng execute_values thay vì COPY (để có thể filter)
         """
         if not products:
             return
 
-        history_buffer = io.StringIO()
-        h_writer = csv.writer(
-            history_buffer, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL
-        )
-        current_ts = datetime.now().isoformat()
+        # Filter products with valid data
+        valid_products = [
+            p for p in products 
+            if p.get("product_id") and p.get("price") is not None
+        ]
+        
+        if not valid_products:
+            return
 
-        for p in products:
-            h_writer.writerow(
-                [
-                    "product_tracking",  # crawl_type
-                    "success",  # status
-                    p.get("product_id"),
-                    p.get("price") if p.get("price") is not None else "",
-                    p.get("original_price") if p.get("original_price") is not None else "",
-                    p.get("discount_percent") if p.get("discount_percent") is not None else "",
-                    p.get("discount_amount") if p.get("discount_amount") is not None else "",
-                    "",  # price_change Placeholder (sẽ tính sau)
-                    current_ts,  # started_at
-                    current_ts,  # completed_at
-                    current_ts,  # crawled_at
-                ]
+        # BATCH LOOKUP: Get all previous prices in one query
+        product_ids = [p.get("product_id") for p in valid_products]
+        
+        cur.execute(
+            """
+            SELECT DISTINCT ON (product_id) 
+                product_id, price, original_price, discount_percent
+            FROM crawl_history
+            WHERE product_id = ANY(%s)
+            ORDER BY product_id, crawled_at DESC
+            """,
+            (product_ids,),
+        )
+        
+        previous_data = {
+            row[0]: {"price": row[1], "original_price": row[2], "discount_percent": row[3]}
+            for row in cur.fetchall()
+        }
+
+        # Collect records with changes
+        records_to_insert = []
+        
+        for p in valid_products:
+            product_id = p.get("product_id")
+            current_price = p.get("price")
+            current_original_price = p.get("original_price")
+            current_discount = p.get("discount_percent")
+            
+            prev = previous_data.get(product_id)
+            
+            if prev is None:
+                # First time - always insert
+                records_to_insert.append((
+                    product_id,
+                    current_price,
+                    current_original_price,
+                    current_discount,
+                    None,  # price_change
+                ))
+            else:
+                prev_price = float(prev["price"]) if prev["price"] else None
+                prev_original = float(prev["original_price"]) if prev["original_price"] else None
+                prev_discount = prev["discount_percent"]
+                
+                current_price_float = float(current_price) if current_price else None
+                current_original_float = float(current_original_price) if current_original_price else None
+                
+                price_changed = prev_price != current_price_float
+                original_changed = prev_original != current_original_float
+                discount_changed = prev_discount != current_discount
+                
+                if price_changed or original_changed or discount_changed:
+                    price_change = None
+                    if prev_price is not None and current_price_float is not None:
+                        price_change = current_price_float - prev_price
+                    
+                    records_to_insert.append((
+                        product_id,
+                        current_price,
+                        current_original_price,
+                        current_discount,
+                        price_change,
+                    ))
+
+        # Batch insert changed records
+        if records_to_insert:
+            execute_values(
+                cur,
+                """
+                INSERT INTO crawl_history 
+                    (product_id, price, original_price, discount_percent, price_change)
+                VALUES %s
+                """,
+                records_to_insert,
             )
-
-        history_buffer.seek(0)
-        cur.copy_expert(
-            "COPY crawl_history (crawl_type, status, product_id, price, original_price, discount_percent, discount_amount, price_change, started_at, completed_at, crawled_at) "
-            "FROM STDIN WITH (FORMAT CSV, DELIMITER '\t', NULL '', QUOTE '\"')",
-            history_buffer,
-        )
+            print(f"📊 Bulk price history: {len(records_to_insert)}/{len(valid_products)} products had changes")
 
     def _save_products_bulk_copy(
         self, products: list[dict[str, Any]], upsert: bool
