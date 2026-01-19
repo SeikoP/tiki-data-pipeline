@@ -1,30 +1,141 @@
+# Dependabot Configuration - Comprehensive Setup
+# Automatically keeps dependencies up-to-date and secure
+
 version: 2
 updates:
-  # Python dependencies
+  # ==================== PYTHON DEPENDENCIES ====================
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"  # Changed to daily for immediate check
+      time: "21:00"  # 9 PM Vietnam time - will run tonight
+      timezone: "Asia/Ho_Chi_Minh"
+    
+    # Limit concurrent PRs to avoid spam
     open-pull-requests-limit: 5
+    
+    # Auto-merge minor/patch updates (optional - enable after testing)
+    # allow:
+    #   - dependency-type: "direct"
+    #     update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+    
+    # Reviewers and assignees
+    reviewers:
+      - "SeikoP"  # Replace with your GitHub username
+    
+    # Labels for easy filtering
     labels:
       - "dependencies"
       - "python"
+      - "automated"
+    
+    # Commit message prefix
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+      include: "scope"
+    
+    # Grouping strategy - group minor/patch updates together
+    groups:
+      # Group all patch updates together
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+      
+      # Group development dependencies
+      dev-dependencies:
+        patterns:
+          - "pytest*"
+          - "black"
+          - "ruff"
+          - "mypy"
+          - "pre-commit"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # Group Airflow-related packages
+      airflow-ecosystem:
+        patterns:
+          - "apache-airflow*"
+          - "airflow-*"
+        update-types:
+          - "minor"
+          - "patch"
+    
+    # Ignore specific dependencies (if needed)
+    ignore:
+      # Example: Pin specific version
+      # - dependency-name: "apache-airflow"
+      #   versions: ["2.8.x"]
+      
+      # Ignore major version updates for critical packages
+      - dependency-name: "apache-airflow"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "selenium"
+        update-types: ["version-update:semver-major"]
 
-  # Docker dependencies
+  # ==================== DOCKER DEPENDENCIES ====================
   - package-ecosystem: "docker"
     directory: "/airflow"
     schedule:
-      interval: "weekly"
+      interval: "daily"  # Changed to daily for immediate check
+      time: "21:00"
+      timezone: "Asia/Ho_Chi_Minh"
+    
+    open-pull-requests-limit: 3
+    
+    reviewers:
+      - "SeikoP"
+    
     labels:
       - "dependencies"
       - "docker"
+      - "infrastructure"
+    
+    commit-message:
+      prefix: "docker"
+    
+    # Group Docker base images
+    groups:
+      docker-base-images:
+        patterns:
+          - "python"
+          - "postgres"
+          - "redis"
 
-  # GitHub Actions
+  # ==================== GITHUB ACTIONS ====================
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"  # Changed to daily for immediate check  
+      time: "21:00"
+      timezone: "Asia/Ho_Chi_Minh"
+    
+    open-pull-requests-limit: 3
+    
+    reviewers:
+      - "SeikoP"
+    
     labels:
       - "dependencies"
       - "github-actions"
+      - "ci-cd"
+    
+    commit-message:
+      prefix: "ci"
+    
+    # Group all GitHub Actions updates
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
+# ==================== BEST PRACTICES NOTES ====================
+# 1. Review PRs before merging - don't auto-merge blindly
+# 2. Test in staging environment first for major updates
+# 3. Check CHANGELOG/release notes for breaking changes
+# 4. Monitor CI/CD pipeline after dependency updates
+# 5. Keep requirements.txt and pyproject.toml in sync
