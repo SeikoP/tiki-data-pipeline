@@ -7,12 +7,14 @@ import csv
 import io
 import json
 import os
+import re
 import time
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extras import Json, execute_values
 from psycopg2.pool import SimpleConnectionPool
 
@@ -173,8 +175,13 @@ class PostgresStorage:
                         pass
 
     def _ensure_categories_schema(self, cur) -> None:
-        """Đảm bảo bảng categories và các index tồn tại."""
-        cur.execute("""
+        """Đảm bảo bảng categories và các index tồn tại.
+        
+        Lưu ý: Bảng này chỉ lưu các category có is_leaf = true.
+        category_path được mở rộng với các trường level_1 đến level_5 để thể hiện rõ theo từng độ sâu.
+        """
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS categories (
                 id SERIAL PRIMARY KEY,
                 category_id VARCHAR(255) UNIQUE,
@@ -184,6 +191,11 @@ class PostgresStorage:
                 parent_url TEXT,
                 level INTEGER,
                 category_path JSONB,
+                level_1 VARCHAR(255),
+                level_2 VARCHAR(255),
+                level_3 VARCHAR(255),
+                level_4 VARCHAR(255),
+                level_5 VARCHAR(255),
                 root_category_name VARCHAR(255),
                 is_leaf BOOLEAN DEFAULT FALSE,
                 product_count INTEGER DEFAULT 0,
@@ -194,11 +206,20 @@ class PostgresStorage:
             CREATE INDEX IF NOT EXISTS idx_cat_level ON categories(level);
             CREATE INDEX IF NOT EXISTS idx_cat_path ON categories USING GIN (category_path);
             CREATE INDEX IF NOT EXISTS idx_cat_is_leaf ON categories(is_leaf);
-        """)
+            CREATE INDEX IF NOT EXISTS idx_cat_level1 ON categories(level_1);
+            CREATE INDEX IF NOT EXISTS idx_cat_level2 ON categories(level_2);
+        """
+        )
 
     def _ensure_products_schema(self, cur) -> None:
-        """Đảm bảo bảng products và các index tồn tại."""
-        cur.execute("""
+        """Đảm bảo bảng products và các index tồn tại.
+        
+        Đã loại bỏ các trường: category_path, review_count, description, images,
+        estimated_revenue, price_savings, price_category, value_score, sales_velocity,
+        specifications, popularity_score, discount_amount
+        """
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS products (
                 id SERIAL PRIMARY KEY,
                 product_id VARCHAR(255) UNIQUE,
@@ -207,16 +228,11 @@ class PostgresStorage:
                 image_url TEXT,
                 category_url TEXT,
                 category_id VARCHAR(255),
-                category_path JSONB,
                 sales_count INTEGER,
                 price DECIMAL(15, 2),
                 original_price DECIMAL(15, 2),
                 discount_percent INTEGER,
                 rating_average DECIMAL(3, 2),
-                review_count INTEGER,
-                description TEXT,
-                specifications JSONB,
-                images JSONB,
                 seller_name VARCHAR(500),
                 seller_id VARCHAR(255),
                 seller_is_official BOOLEAN,
@@ -225,13 +241,6 @@ class PostgresStorage:
                 stock_quantity INTEGER,
                 stock_status VARCHAR(100),
                 shipping JSONB,
-                estimated_revenue DECIMAL(15, 2),
-                price_savings DECIMAL(15, 2),
-                price_category VARCHAR(100),
-                popularity_score DECIMAL(5, 2),
-                value_score DECIMAL(5, 2),
-                discount_amount DECIMAL(15, 2),
-                sales_velocity DECIMAL(10, 2),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -239,17 +248,26 @@ class PostgresStorage:
             CREATE INDEX IF NOT EXISTS idx_products_category_url ON products(category_url);
             CREATE INDEX IF NOT EXISTS idx_products_price ON products(price);
             CREATE INDEX IF NOT EXISTS idx_products_sales_count ON products(sales_count);
-        """)
+        """
+        )
 
     def _ensure_history_schema(self, cur) -> None:
-        """Đảm bảo bảng crawl_history và các index tồn tại."""
-        cur.execute("""
+        """Đảm bảo bảng crawl_history và các index tồn tại.
+        
+        Bảng này lưu lịch sử giá và các giá trị liên quan (giảm giá, original_price, etc.)
+        khi crawl lại sẽ tạo bản ghi mới để theo dõi thay đổi theo thời gian.
+        """
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS crawl_history (
                 id SERIAL PRIMARY KEY,
                 crawl_type VARCHAR(100) DEFAULT 'product_tracking',
                 status VARCHAR(50) DEFAULT 'success',
                 product_id VARCHAR(255) NOT NULL,
                 price DECIMAL(12, 2),
+                original_price DECIMAL(12, 2),
+                discount_percent INTEGER,
+                discount_amount DECIMAL(12, 2),
                 price_change DECIMAL(12, 2),
                 started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -257,12 +275,16 @@ class PostgresStorage:
             );
             CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
             CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
-        """)
+            CREATE INDEX IF NOT EXISTS idx_history_product_price ON crawl_history(product_id, crawled_at, price);
+        """
+        )
 
-    def _write_dicts_to_csv_buffer(self, rows: list[dict[str, Any]], columns: list[str]) -> io.StringIO:
+    def _write_dicts_to_csv_buffer(
+        self, rows: list[dict[str, Any]], columns: list[str]
+    ) -> io.StringIO:
         """Chuyển đổi danh sách dict thành CSV buffer (tab-separated)."""
         buf = io.StringIO()
-        writer = csv.writer(buf, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        writer = csv.writer(buf, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL)
 
         for item in rows:
             row = []
@@ -290,81 +312,111 @@ class PostgresStorage:
         columns: list[str],
         csv_buffer: io.StringIO,
         conflict_key: str,
-        update_extra_clause: str = "",
+        update_cols: list[str] | None = None,
         do_nothing: bool = False,
     ) -> int:
-        """Helper generic để thực hiện bulk merge (COPY + INSERT ON CONFLICT) qua staging table."""
-        from psycopg2 import sql
+        """Helper generic để thực hiện bulk merge (COPY + INSERT ON CONFLICT) qua staging table.
 
+        Args:
+            cur: Database cursor
+            target_table: Target table name
+            staging_table: Staging table name
+            columns: Column names to insert
+            csv_buffer: CSV data buffer
+            conflict_key: Primary key column for conflict detection
+            update_cols: List of column names to update on conflict.
+                        If None, all columns except conflict_key will be updated
+            do_nothing: If True, do nothing on conflict instead of update
+        """
         # 1. Tạo staging table
-        cur.execute(sql.SQL("""
+        cur.execute(
+            sql.SQL(
+                """
             CREATE TEMP TABLE IF NOT EXISTS {staging} (
                 LIKE {target} INCLUDING DEFAULTS
             ) ON COMMIT DROP;
             TRUNCATE {staging};
-        """).format(
-            staging=sql.Identifier(staging_table),
-            target=sql.Identifier(target_table)
-        ))
+        """
+            ).format(staging=sql.Identifier(staging_table), target=sql.Identifier(target_table))
+        )
 
         # 2. Bulk Copy vào staging
         col_names = sql.SQL(",").join(map(sql.Identifier, columns))
-        copy_query = sql.SQL("COPY {staging} ({cols}) FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')").format(
-            staging=sql.Identifier(staging_table),
-            cols=col_names
-        )
+        copy_query = sql.SQL(
+            "COPY {staging} ({cols}) FROM STDIN WITH (FORMAT CSV, DELIMITER '\t', NULL '', QUOTE '\"')"
+        ).format(staging=sql.Identifier(staging_table), cols=col_names)
         cur.copy_expert(copy_query.as_string(cur.connection), csv_buffer)
 
         # 3. Merge vào target table
         if do_nothing:
-            merge_query = sql.SQL("""
+            merge_query = sql.SQL(
+                """
                 INSERT INTO {target} ({cols})
                 SELECT {cols} FROM {staging}
                 ON CONFLICT ({conflict}) DO NOTHING;
-            """).format(
-                target=sql.Identifier(target_table),
-                staging=sql.Identifier(staging_table),
-                cols=col_names,
-                conflict=sql.Identifier(conflict_key)
-            )
-        else:
-            merge_query = sql.SQL("""
-                INSERT INTO {target} ({cols})
-                SELECT {cols} FROM {staging}
-                ON CONFLICT ({conflict}) DO UPDATE SET
-                    {update_clause};
-            """).format(
+            """
+            ).format(
                 target=sql.Identifier(target_table),
                 staging=sql.Identifier(staging_table),
                 cols=col_names,
                 conflict=sql.Identifier(conflict_key),
-                update_clause=sql.SQL(update_extra_clause)
             )
-        
+        else:
+            # Build update clause safely using sql.Identifier
+            if not update_cols:
+                update_cols = [c for c in columns if c != conflict_key]
+
+            update_parts = sql.SQL(",").join(
+                sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(col))
+                for col in update_cols
+            )
+
+            merge_query = sql.SQL(
+                """
+                INSERT INTO {target} ({cols})
+                SELECT {cols} FROM {staging}
+                ON CONFLICT ({conflict}) DO UPDATE SET
+                    {update_clause};
+            """
+            ).format(
+                target=sql.Identifier(target_table),
+                staging=sql.Identifier(staging_table),
+                cols=col_names,
+                conflict=sql.Identifier(conflict_key),
+                update_clause=update_parts,
+            )
+
         cur.execute(merge_query)
         return cur.rowcount
 
-    def save_categories(self, categories: list[dict[str, Any]]) -> int:
+    def save_categories(self, categories: list[dict[str, Any]], only_leaf: bool = True) -> int:
         """
         Lưu danh sách categories vào DB sử dụng bulk processing tối ưu.
+        
+        Args:
+            categories: Danh sách categories cần lưu
+            only_leaf: Nếu True, chỉ lưu categories có is_leaf = true (mặc định).
+                      Nếu False, lưu tất cả categories.
+                      
+        Returns:
+            Số lượng categories đã lưu
         """
         if not categories:
             return 0
 
-        import re
-
         # Build URL -> category lookup for path building
         url_to_cat = {cat.get("url"): cat for cat in categories}
-        
+
         # Find all parent URLs to determine is_leaf
         parent_urls = {cat.get("parent_url") for cat in categories if cat.get("parent_url")}
-        
+
         def build_category_path(cat: dict) -> list[str]:
             path = []
             current = cat
             visited = set()
             while current:
-                if current.get("url") in visited: break
+                if current.get("url") in visited:
+                    break
                 visited.add(current.get("url"))
                 path.insert(0, current.get("name", ""))
                 parent_url = current.get("parent_url")
@@ -377,56 +429,94 @@ class PostgresStorage:
             cat_id = cat.get("category_id")
             if not cat_id and cat.get("url"):
                 match = re.search(r"c(\d+)", cat.get("url", ""))
-                if match: cat_id = match.group(1)
-            
+                if match:
+                    cat_id = match.group(1)
+
             category_path = build_category_path(cat)
             root_name = category_path[0] if category_path else ""
             is_leaf = cat.get("url") not in parent_urls
-            
-            prepared_categories.append({
-                "category_id": cat_id,
-                "name": cat.get("name"),
-                "url": cat.get("url"),
-                "image_url": cat.get("image_url"),
-                "parent_url": cat.get("parent_url"),
-                "level": cat.get("level", 0),
-                "category_path": category_path,
-                "root_category_name": root_name,
-                "is_leaf": is_leaf
-            })
+
+            # Nếu only_leaf=True, chỉ lưu categories có is_leaf=True
+            if only_leaf and not is_leaf:
+                continue
+
+            # Extract level_1 đến level_5 từ category_path để thể hiện rõ theo từng độ sâu
+            level_1 = category_path[0] if len(category_path) > 0 else None
+            level_2 = category_path[1] if len(category_path) > 1 else None
+            level_3 = category_path[2] if len(category_path) > 2 else None
+            level_4 = category_path[3] if len(category_path) > 3 else None
+            level_5 = category_path[4] if len(category_path) > 4 else None
+
+            prepared_categories.append(
+                {
+                    "category_id": cat_id,
+                    "name": cat.get("name"),
+                    "url": cat.get("url"),
+                    "image_url": cat.get("image_url"),
+                    "parent_url": cat.get("parent_url"),
+                    "level": cat.get("level", 0),
+                    "category_path": category_path,
+                    "level_1": level_1,
+                    "level_2": level_2,
+                    "level_3": level_3,
+                    "level_4": level_4,
+                    "level_5": level_5,
+                    "root_category_name": root_name,
+                    "is_leaf": is_leaf,
+                }
+            )
 
         columns = [
-            "category_id", "name", "url", "image_url", "parent_url", 
-            "level", "category_path", "root_category_name", "is_leaf"
+            "category_id",
+            "name",
+            "url",
+            "image_url",
+            "parent_url",
+            "level",
+            "category_path",
+            "level_1",
+            "level_2",
+            "level_3",
+            "level_4",
+            "level_5",
+            "root_category_name",
+            "is_leaf",
         ]
-        
+
         csv_buffer = self._write_dicts_to_csv_buffer(prepared_categories, columns)
-        
-        update_clause = """
-            name = EXCLUDED.name,
-            category_id = EXCLUDED.category_id,
-            image_url = EXCLUDED.image_url,
-            parent_url = EXCLUDED.parent_url,
-            level = EXCLUDED.level,
-            category_path = EXCLUDED.category_path,
-            root_category_name = EXCLUDED.root_category_name,
-            is_leaf = EXCLUDED.is_leaf,
-            updated_at = CURRENT_TIMESTAMP
-        """
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 self._ensure_categories_schema(cur)
+                # Column names to update on conflict
+                update_columns = [
+                    "name",
+                    "category_id",
+                    "image_url",
+                    "parent_url",
+                    "level",
+                    "category_path",
+                    "level_1",
+                    "level_2",
+                    "level_3",
+                    "level_4",
+                    "level_5",
+                    "root_category_name",
+                    "is_leaf",
+                ]
                 return self._bulk_merge_via_staging(
-                    cur, "categories", "categories_staging", columns, 
-                    csv_buffer, "url", update_clause
+                    cur,
+                    "categories",
+                    "categories_staging",
+                    columns,
+                    csv_buffer,
+                    "url",
+                    update_cols=update_columns,
                 )
-
-
 
     def save_products(
         self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
-    ) -> int | dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Lưu danh sách products vào database (batch insert để tối ưu)
 
@@ -436,11 +526,11 @@ class PostgresStorage:
             batch_size: Số products insert mỗi lần
 
         Returns:
-            Nếu upsert=True: dict với keys: saved_count, inserted_count, updated_count
-            Nếu upsert=False: int (số products đã lưu thành công)
+            dict với keys: saved_count, inserted_count, updated_count
+            (inserted_count = 0 if upsert=False, since we're only inserting)
         """
         if not products:
-            return {"saved_count": 0, "inserted_count": 0, "updated_count": 0} if upsert else 0
+            return {"saved_count": 0, "inserted_count": 0, "updated_count": 0}
 
         # Tự động fix category_path để đảm bảo parent category ở index 0
         try:
@@ -488,7 +578,7 @@ class PostgresStorage:
                 for i in range(0, len(products), batch_size):
                     batch = products[i : i + batch_size]
                     try:
-                        # Chuẩn bị data cho batch insert
+                        # Chuẩn bị data cho batch insert (đã loại bỏ các trường: category_path, review_count, description, images, estimated_revenue, price_savings, price_category, value_score, sales_velocity, specifications, popularity_score, discount_amount)
                         values = [
                             (
                                 product.get("product_id"),
@@ -496,25 +586,12 @@ class PostgresStorage:
                                 product.get("url"),
                                 product.get("image_url"),
                                 product.get("category_url"),
-                                product.get("category_id"),  # Thêm category_id
-                                (
-                                    Json(product.get("category_path"))
-                                    if product.get("category_path")
-                                    else None
-                                ),  # Thêm category_path (JSONB)
+                                product.get("category_id"),
                                 product.get("sales_count"),
                                 product.get("price"),
                                 product.get("original_price"),
                                 product.get("discount_percent"),
                                 product.get("rating_average"),
-                                product.get("review_count"),
-                                product.get("description"),
-                                (
-                                    Json(product.get("specifications"))
-                                    if product.get("specifications")
-                                    else None
-                                ),
-                                Json(product.get("images")) if product.get("images") else None,
                                 # Seller fields
                                 product.get("seller_name"),
                                 product.get("seller_id"),
@@ -525,14 +602,6 @@ class PostgresStorage:
                                 product.get("stock_quantity"),
                                 product.get("stock_status"),
                                 Json(product.get("shipping")) if product.get("shipping") else None,
-                                # Computed fields
-                                product.get("estimated_revenue"),
-                                product.get("price_savings"),
-                                product.get("price_category"),
-                                product.get("popularity_score"),
-                                product.get("value_score"),
-                                product.get("discount_amount"),
-                                product.get("sales_velocity"),
                             )
                             for product in batch
                         ]
@@ -547,18 +616,15 @@ class PostgresStorage:
                             )
                             batch_updated = len(batch) - batch_inserted
 
-                            # Batch INSERT ... ON CONFLICT UPDATE
+                            # Batch INSERT ... ON CONFLICT UPDATE (đã loại bỏ các trường đã xóa: specifications, popularity_score, discount_amount)
                             execute_values(
                                 cur,
                                 """
                                 INSERT INTO products
-                                    (product_id, name, url, image_url, category_url, category_id, category_path, sales_count,
+                                    (product_id, name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average,
-                                     review_count, description, specifications, images,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, stock_quantity, stock_status, shipping,
-                                     estimated_revenue, price_savings, price_category, popularity_score,
-                                     value_score, discount_amount, sales_velocity)
+                                     stock_available, stock_quantity, stock_status, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id)
                                 DO UPDATE SET
@@ -567,16 +633,11 @@ class PostgresStorage:
                                     image_url = EXCLUDED.image_url,
                                     category_url = EXCLUDED.category_url,
                                     category_id = EXCLUDED.category_id,
-                                    category_path = EXCLUDED.category_path,
                                     sales_count = EXCLUDED.sales_count,
                                     price = EXCLUDED.price,
                                     original_price = EXCLUDED.original_price,
                                     discount_percent = EXCLUDED.discount_percent,
                                     rating_average = EXCLUDED.rating_average,
-                                    review_count = EXCLUDED.review_count,
-                                    description = EXCLUDED.description,
-                                    specifications = EXCLUDED.specifications,
-                                    images = EXCLUDED.images,
                                     seller_name = EXCLUDED.seller_name,
                                     seller_id = EXCLUDED.seller_id,
                                     seller_is_official = EXCLUDED.seller_is_official,
@@ -585,13 +646,6 @@ class PostgresStorage:
                                     stock_quantity = EXCLUDED.stock_quantity,
                                     stock_status = EXCLUDED.stock_status,
                                     shipping = EXCLUDED.shipping,
-                                    estimated_revenue = EXCLUDED.estimated_revenue,
-                                    price_savings = EXCLUDED.price_savings,
-                                    price_category = EXCLUDED.price_category,
-                                    popularity_score = EXCLUDED.popularity_score,
-                                    value_score = EXCLUDED.value_score,
-                                    discount_amount = EXCLUDED.discount_amount,
-                                    sales_velocity = EXCLUDED.sales_velocity,
                                     updated_at = CURRENT_TIMESTAMP
                                 """,
                                 values,
@@ -606,18 +660,15 @@ class PostgresStorage:
                             inserted_count += batch_inserted
                             updated_count += batch_updated
                         else:
-                            # Batch INSERT, bỏ qua nếu đã tồn tại
+                            # Batch INSERT, bỏ qua nếu đã tồn tại (đã loại bỏ các trường đã xóa: specifications, popularity_score, discount_amount)
                             execute_values(
                                 cur,
                                 """
                                 INSERT INTO products
-                                    (product_id, name, url, image_url, category_url, category_id, category_path, sales_count,
+                                    (product_id, name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average,
-                                     review_count, description, specifications, images,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, stock_quantity, stock_status, shipping,
-                                     estimated_revenue, price_savings, price_category, popularity_score,
-                                     value_score, discount_amount, sales_velocity)
+                                     stock_available, stock_quantity, stock_status, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id) DO NOTHING
                                 """,
@@ -631,12 +682,10 @@ class PostgresStorage:
                         for product in batch:
                             try:
                                 result = self.save_products([product], upsert=upsert, batch_size=1)
-                                if upsert and isinstance(result, dict):
-                                    saved_count += 1
-                                    inserted_count += result.get("inserted_count", 0)
-                                    updated_count += result.get("updated_count", 0)
-                                else:
-                                    saved_count += 1
+                                # result is always a dict now
+                                saved_count += 1
+                                inserted_count += result.get("inserted_count", 0)
+                                updated_count += result.get("updated_count", 0)
                             except Exception:
                                 continue
 
@@ -647,128 +696,138 @@ class PostgresStorage:
             except Exception as e:
                 print(f"⚠️  Failed to log crawl history: {e}")
 
-        if upsert:
-            return {
-                "saved_count": saved_count,
-                "inserted_count": inserted_count,
-                "updated_count": updated_count,
-            }
         return {
             "saved_count": saved_count,
-            "inserted_count": saved_count,
-            "updated_count": 0,
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
         }
 
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
         Log price history for products. Calculates price_change from previous crawl.
-        Schema: (product_id, price, price_change, crawled_at)
+        Lưu thêm original_price, discount_percent, discount_amount để theo dõi lịch sử giảm giá.
+        Schema: (product_id, price, original_price, discount_percent, discount_amount, price_change, crawled_at)
         """
         if not products:
             return
 
-        from datetime import datetime
-
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                # Ensure table exists with new schema
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS crawl_history (
-                        id SERIAL PRIMARY KEY,
-                        product_id VARCHAR(255) NOT NULL,
-                        price DECIMAL(12, 2),
-                        price_change DECIMAL(12, 2),
-                        crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
-                    CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
-                """)
+                # Ensure table exists with new schema (có original_price, discount_percent, discount_amount)
+                self._ensure_history_schema(cur)
 
                 for p in products:
                     product_id = p.get("product_id")
                     if not product_id:
                         continue
-                    
+
                     current_price = p.get("price")
                     if current_price is None:
                         continue
-                    
+
                     # Get previous price for this product
-                    cur.execute("""
-                        SELECT price FROM crawl_history 
-                        WHERE product_id = %s 
+                    cur.execute(
+                        """
+                        SELECT price FROM crawl_history
+                        WHERE product_id = %s
                         ORDER BY crawled_at DESC LIMIT 1
-                    """, (product_id,))
-                    
+                    """,
+                        (product_id,),
+                    )
+
                     row = cur.fetchone()
                     previous_price = row[0] if row else None
-                    
+
                     # Calculate price change
                     price_change = None
                     if previous_price is not None and current_price is not None:
                         price_change = float(current_price) - float(previous_price)
-                    
-                    # Insert new price record
-                    cur.execute("""
-                        INSERT INTO crawl_history (product_id, price, price_change)
-                        VALUES (%s, %s, %s)
-                    """, (product_id, current_price, price_change))
 
-    def log_price_history(self, product_id: str, price: float) -> int:
+                    # Extract discount-related fields
+                    original_price = p.get("original_price")
+                    discount_percent = p.get("discount_percent")
+                    discount_amount = p.get("discount_amount")
+
+                    # Insert new price record with discount information
+                    cur.execute(
+                        """
+                        INSERT INTO crawl_history (product_id, price, original_price, discount_percent, discount_amount, price_change)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                        (product_id, current_price, original_price, discount_percent, discount_amount, price_change),
+                    )
+
+    def log_price_history(self, product_id: str, price: float, original_price: float | None = None, discount_percent: int | None = None, discount_amount: float | None = None) -> int:
         """
         Log single product price to history.
-        
+
         Args:
             product_id: Product ID
             price: Current product price
-            
+            original_price: Original price before discount
+            discount_percent: Discount percentage
+            discount_amount: Discount amount
+
         Returns:
             ID of the new history record
         """
         with self.get_connection() as conn:
             with conn.cursor() as cur:
+                self._ensure_history_schema(cur)
                 # Get previous price
-                cur.execute("""
-                    SELECT price FROM crawl_history 
-                    WHERE product_id = %s 
+                cur.execute(
+                    """
+                    SELECT price FROM crawl_history
+                    WHERE product_id = %s
                     ORDER BY crawled_at DESC LIMIT 1
-                """, (product_id,))
-                
+                """,
+                    (product_id,),
+                )
+
                 row = cur.fetchone()
                 previous_price = row[0] if row else None
-                
+
                 # Calculate price change
                 price_change = None
                 if previous_price is not None:
                     price_change = float(price) - float(previous_price)
-                
-                cur.execute("""
-                    INSERT INTO crawl_history (product_id, price, price_change)
-                    VALUES (%s, %s, %s)
+
+                cur.execute(
+                    """
+                    INSERT INTO crawl_history (product_id, price, original_price, discount_percent, discount_amount, price_change)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     RETURNING id
-                """, (product_id, price, price_change))
-                
+                """,
+                    (product_id, price, original_price, discount_percent, discount_amount, price_change),
+                )
+
                 return cur.fetchone()[0]
 
     def update_category_product_counts(self) -> int:
         """
         Update product_count for all categories based on actual products in DB.
+        Match products với categories theo category_url hoặc category_id để đảm bảo tính đúng.
         Call this after saving products.
-        
+
         Returns:
             Number of categories updated
         """
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
+                # Match products với categories theo cả category_url và category_id
+                cur.execute(
+                    """
                     UPDATE categories c
                     SET product_count = COALESCE((
-                        SELECT COUNT(*) 
-                        FROM products p 
-                        WHERE p.category_url = c.url
+                        SELECT COUNT(DISTINCT p.id)
+                        FROM products p
+                        WHERE p.category_url = c.url 
+                           OR (c.category_id IS NOT NULL AND p.category_id = c.category_id)
                     ), 0),
                     updated_at = CURRENT_TIMESTAMP
-                """)
+                    WHERE c.is_leaf = TRUE
+                """
+                )
                 return cur.rowcount
 
     def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
@@ -778,7 +837,7 @@ class PostgresStorage:
                 cur.execute(
                     """
                     SELECT product_id, name, url, image_url, sales_count, price,
-                           rating_average, review_count, crawled_at
+                           rating_average, crawled_at
                     FROM products
                     WHERE category_url = %s
                     ORDER BY sales_count DESC NULLS LAST, crawled_at DESC
@@ -832,36 +891,40 @@ class PostgresStorage:
             self._pool_stats["active_connections"] = 0
 
     def _bulk_log_product_price_history(self, cur, products: list[dict[str, Any]]) -> None:
-        """Bulk log crawl history using COPY protocol."""
+        """Bulk log crawl history using COPY protocol.
+        Lưu thêm original_price, discount_percent, discount_amount để theo dõi lịch sử giảm giá.
+        """
         if not products:
             return
 
-        from datetime import datetime
-        import io
-        import csv
-        import json
-
         history_buffer = io.StringIO()
-        h_writer = csv.writer(history_buffer, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        h_writer = csv.writer(
+            history_buffer, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL
+        )
         current_ts = datetime.now().isoformat()
 
         for p in products:
-            h_writer.writerow([
-                "product_tracking", # crawl_type
-                "success",          # status
-                p.get("product_id"),
-                p.get("price") if p.get("price") is not None else "",
-                "",                 # price_change Placeholder
-                current_ts,         # started_at
-                current_ts,         # completed_at
-                current_ts          # crawled_at
-            ])
+            h_writer.writerow(
+                [
+                    "product_tracking",  # crawl_type
+                    "success",  # status
+                    p.get("product_id"),
+                    p.get("price") if p.get("price") is not None else "",
+                    p.get("original_price") if p.get("original_price") is not None else "",
+                    p.get("discount_percent") if p.get("discount_percent") is not None else "",
+                    p.get("discount_amount") if p.get("discount_amount") is not None else "",
+                    "",  # price_change Placeholder (sẽ tính sau)
+                    current_ts,  # started_at
+                    current_ts,  # completed_at
+                    current_ts,  # crawled_at
+                ]
+            )
 
         history_buffer.seek(0)
         cur.copy_expert(
-            "COPY crawl_history (crawl_type, status, product_id, price, price_change, started_at, completed_at, crawled_at) "
-            "FROM STDIN WITH (FORMAT CSV, DELIMITER '\\t', NULL '', QUOTE '\"')",
-            history_buffer
+            "COPY crawl_history (crawl_type, status, product_id, price, original_price, discount_percent, discount_amount, price_change, started_at, completed_at, crawled_at) "
+            "FROM STDIN WITH (FORMAT CSV, DELIMITER '\t', NULL '', QUOTE '\"')",
+            history_buffer,
         )
 
     def _save_products_bulk_copy(
@@ -871,14 +934,29 @@ class PostgresStorage:
         if not products:
             return {"saved_count": 0, "inserted_count": 0, "updated_count": 0}
 
+        # Đã loại bỏ các trường: category_path, review_count, description, images,
+        # estimated_revenue, price_savings, price_category, value_score, sales_velocity,
+        # specifications, popularity_score, discount_amount
         columns = [
-            "product_id", "name", "url", "image_url", "category_url", "category_id", "category_path",
-            "sales_count", "price", "original_price", "discount_percent", "rating_average",
-            "review_count", "description", "specifications", "images",
-            "seller_name", "seller_id", "seller_is_official", "brand",
-            "stock_available", "stock_quantity", "stock_status", "shipping",
-            "estimated_revenue", "price_savings", "price_category", "popularity_score",
-            "value_score", "discount_amount", "sales_velocity"
+            "product_id",
+            "name",
+            "url",
+            "image_url",
+            "category_url",
+            "category_id",
+            "sales_count",
+            "price",
+            "original_price",
+            "discount_percent",
+            "rating_average",
+            "seller_name",
+            "seller_id",
+            "seller_is_official",
+            "brand",
+            "stock_available",
+            "stock_quantity",
+            "stock_status",
+            "shipping",
         ]
 
         csv_buffer = self._write_dicts_to_csv_buffer(products, columns)
@@ -888,12 +966,18 @@ class PostgresStorage:
                 self._ensure_products_schema(cur)
                 self._ensure_history_schema(cur)
 
-                update_cols = [f"{c} = EXCLUDED.{c}" for c in columns if c != "product_id"]
-                update_stmt = ",".join(update_cols)
+                # Column names to update on conflict (all except product_id)
+                update_columns = [c for c in columns if c != "product_id"]
 
                 saved_count = self._bulk_merge_via_staging(
-                    cur, "products", "products_staging", columns,
-                    csv_buffer, "product_id", update_stmt, do_nothing=not upsert
+                    cur,
+                    "products",
+                    "products_staging",
+                    columns,
+                    csv_buffer,
+                    "product_id",
+                    update_cols=update_columns,
+                    do_nothing=not upsert,
                 )
 
                 try:
@@ -903,6 +987,6 @@ class PostgresStorage:
 
                 return {
                     "saved_count": saved_count,
-                    "inserted_count": saved_count, # Approx
-                    "updated_count": 0
+                    "inserted_count": saved_count if upsert else 0,  # Approx; 0 if insert-only
+                    "updated_count": 0,
                 }

@@ -191,8 +191,9 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
     adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
             from urllib.parse import urlparse
+
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
 
             adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
             if adaptive_limiter:
@@ -321,8 +322,9 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
     adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
             from urllib.parse import urlparse
+
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
 
             adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
             if adaptive_limiter:

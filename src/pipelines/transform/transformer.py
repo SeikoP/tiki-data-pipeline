@@ -137,8 +137,6 @@ class DataTransformer:
             # Transform format để phù hợp với database schema
             transformed = self._transform_to_db_format(transformed)
 
-
-
             return transformed
 
         except Exception as e:
@@ -307,8 +305,6 @@ class DataTransformer:
         db_product["specifications"] = product.get("specifications")
         db_product["images"] = product.get("images")
 
-
-
         # Metadata (không lưu vào DB nhưng giữ lại cho reference)
         if "_metadata" in product:
             db_product["_metadata"] = product["_metadata"]
@@ -325,8 +321,6 @@ class DataTransformer:
                 db_product["crawled_at"] = parsed_dt.isoformat() if parsed_dt else str(crawled_at)
 
         return db_product
-
-
 
     def validate_product(self, product: dict[str, Any]) -> tuple[bool, str | None]:
         """

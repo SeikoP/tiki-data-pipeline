@@ -8,8 +8,6 @@ Thay vì dùng fixed delay, adaptive rate limiter sẽ:
 """
 
 import time
-from collections import deque
-from typing import Any
 
 try:
     import redis

@@ -23,7 +23,8 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET}
     # Fernet key for Variable/Connection encryption (must be consistent across rebuilds)
     # Generate new key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    # If not set in .env, will use empty string (Airflow will generate one, but it won't persist across restarts)
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-}
 
     # === Local Executor Configuration (LITE MODE) ===
     AIRFLOW__CORE__EXECUTOR: LocalExecutor

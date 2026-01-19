@@ -4,6 +4,7 @@ Load pipeline để load dữ liệu đã transform vào database
 
 import json
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,11 +41,6 @@ def serialize_for_json(obj: Any) -> Any:
         return obj
 
 
-# Import PostgresStorage từ crawl storage - runtime import
-# Đảm bảo sys.path được cấu hình đúng trước khi import
-import sys
-from pathlib import Path
-
 # Thêm /opt/airflow/src vào sys.path nếu chưa có (cho Docker environment)
 src_paths = [
     Path("/opt/airflow/src"),  # Docker default path
@@ -59,7 +55,10 @@ for src_path in src_paths:
 PostgresStorageClass = None
 try:
     # Ưu tiên 1: Absolute import (sau khi đã thêm src vào path)
-    from pipelines.crawl.storage import PostgresStorage as _PostgresStorage  # type: ignore[attr-defined]
+    from pipelines.crawl.storage import (
+        PostgresStorage as _PostgresStorage,  # type: ignore[attr-defined]
+    )
+
     PostgresStorageClass = _PostgresStorage  # type: ignore[assignment]
 except ImportError:
     try:
@@ -67,14 +66,17 @@ except ImportError:
         from pipelines.crawl.storage.postgres_storage import (
             PostgresStorage as _PostgresStorage2,  # type: ignore[attr-defined]
         )
+
         PostgresStorageClass = _PostgresStorage2  # type: ignore[assignment]
     except ImportError:
         try:
             # Ưu tiên 3: Relative import (nếu chạy như package)
-            from ...crawl.storage import PostgresStorage as _PostgresStorage3  # type: ignore[attr-defined]
+            from ...crawl.storage import (
+                PostgresStorage as _PostgresStorage3,  # type: ignore[attr-defined]
+            )
+
             PostgresStorageClass = _PostgresStorage3  # type: ignore[assignment]
         except ImportError:
-            # Ưu tiên 4: Dynamic import bằng importlib
             try:
                 import importlib.util
                 import os
@@ -136,12 +138,14 @@ except ImportError:
                             from pipelines.crawl.storage import (
                                 PostgresStorage as _PostgresStorage4,  # type: ignore[attr-defined]
                             )
+
                             PostgresStorageClass = _PostgresStorage4  # type: ignore[assignment]
                         except ImportError:
                             try:
                                 from pipelines.crawl.storage.postgres_storage import (
                                     PostgresStorage as _PostgresStorage5,  # type: ignore[attr-defined]
                                 )
+
                                 PostgresStorageClass = _PostgresStorage5  # type: ignore[assignment]
                             except ImportError:
                                 # Không thể import, sẽ dùng file-based loading
@@ -263,29 +267,22 @@ class DataLoader:
         # Load vào database
         if self.enable_db and self.db_storage:
             try:
-                result: Any = self.db_storage.save_products(
+                result: dict[str, Any] = self.db_storage.save_products(
                     products, upsert=upsert, batch_size=self.batch_size
                 )
 
-                # Xử lý kết quả (có thể là int hoặc dict)
-                if isinstance(result, dict):
-                    # Kết quả từ upsert=True: có thống kê INSERT vs UPDATE
-                    saved_count: int = result.get("saved_count", 0)
-                    inserted_count: int = result.get("inserted_count", 0)
-                    updated_count: int = result.get("updated_count", 0)
-                    self.stats["db_loaded"] = saved_count
-                    self.stats["success_count"] = saved_count
-                    self.stats["inserted_count"] = inserted_count
-                    self.stats["updated_count"] = updated_count
-                    logger.info(f"✅ Đã load {saved_count} products vào database")
+                # Xử lý kết quả (always dict with consistent structure)
+                saved_count: int = result.get("saved_count", 0)
+                inserted_count: int = result.get("inserted_count", 0)
+                updated_count: int = result.get("updated_count", 0)
+                self.stats["db_loaded"] = saved_count
+                self.stats["success_count"] = saved_count
+                self.stats["inserted_count"] = inserted_count
+                self.stats["updated_count"] = updated_count
+                logger.info(f"✅ Đã load {saved_count} products vào database")
+                if upsert:
                     logger.info(f"   - INSERT (mới): {inserted_count}")
                     logger.info(f"   - UPDATE (đã có): {updated_count}")
-                else:
-                    # Kết quả từ upsert=False: chỉ có số lượng
-                    saved_count_int: int = int(result)
-                    self.stats["db_loaded"] = saved_count_int
-                    self.stats["success_count"] = saved_count_int
-                    logger.info(f"✅ Đã load {saved_count_int} products vào database")
             except Exception as e:
                 error_msg = f"Lỗi khi load vào database: {str(e)}"
                 self.stats["errors"].append(error_msg)
@@ -447,7 +444,9 @@ class DataLoader:
 
         # Load vào database
         if self.enable_db and self.db_storage:
-            logger.info("ℹ️ Skip saving categories to DB (Table 'categories' removed). Only saving to file.")
+            logger.info(
+                "ℹ️ Skip saving categories to DB (Table 'categories' removed). Only saving to file."
+            )
             # Database load logic removed as requested
 
         # Load vào file nếu cần

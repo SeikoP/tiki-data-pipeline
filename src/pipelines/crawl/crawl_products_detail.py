@@ -97,8 +97,9 @@ def crawl_product_detail_with_selenium(
     adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
             from urllib.parse import urlparse
+
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
 
             adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
             if adaptive_limiter:
@@ -159,6 +160,7 @@ def crawl_product_detail_with_selenium(
                 print("[Selenium] Đang scroll để load nội dung...")
 
             # Optimized scrolling với smart waits
+            # Scroll để load seller và price information (dynamic content)
             try:
                 from .utils_selenium_wait import wait_after_scroll, wait_for_dynamic_content_loaded
 
@@ -168,16 +170,25 @@ def crawl_product_detail_with_selenium(
                 driver.execute_script("window.scrollTo(0, 1500);")
                 wait_after_scroll(driver, timeout=1, verbose=verbose)
 
+                # Scroll đến seller section (thường ở giữa page)
+                driver.execute_script("window.scrollTo(0, 2500);")
+                wait_after_scroll(driver, timeout=1, verbose=verbose)
+
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                # Wait cho dynamic content (sales_count, rating) load
-                wait_for_dynamic_content_loaded(driver, timeout=2, verbose=verbose)
+                # Wait cho dynamic content (seller, price, sales_count, rating) load
+                # Tăng timeout lên 3s để đảm bảo seller và original_price được load
+                wait_for_dynamic_content_loaded(driver, timeout=3, verbose=verbose)
+                
+                # Thêm wait bổ sung sau khi scroll xong để đảm bảo dynamic content load đầy đủ
+                # Một số pages load chậm hơn → cần thêm 0.5-1s wait
+                time.sleep(0.8)  # Wait thêm để seller và price load đầy đủ
             except ImportError:
                 # Fallback về time.sleep nếu module chưa có
-                # Tối ưu: Scroll nhanh hơn, giảm wait time
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-                time.sleep(0.1)
+                # Scroll đến seller section và wait lâu hơn
+                driver.execute_script("window.scrollTo(0, 2500);")
+                time.sleep(1.0)  # Wait lâu hơn cho seller section
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(0.5)  # Giảm từ 2s -> 0.5s
+                time.sleep(1.5)  # Wait cho dynamic content (seller, price)
             except Exception as scroll_error:
                 if verbose:
                     print(f"[Selenium] Warning: Lỗi khi scroll: {scroll_error}")
@@ -343,8 +354,9 @@ def crawl_product_detail_with_driver(
     adaptive_limiter = None
     if use_rate_limiting:
         try:
-            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
             from urllib.parse import urlparse
+
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
 
             adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
             if adaptive_limiter:
@@ -378,6 +390,7 @@ def crawl_product_detail_with_driver(
             time.sleep(1)  # Fallback
 
         # Optimized scrolling với smart waits
+        # Scroll để load seller và price information (dynamic content)
         try:
             from .utils_selenium_wait import wait_after_scroll, wait_for_dynamic_content_loaded
 
@@ -387,16 +400,28 @@ def crawl_product_detail_with_driver(
             driver.execute_script("window.scrollTo(0, 1500);")
             wait_after_scroll(driver, timeout=1, verbose=verbose)
 
+            # Scroll đến seller section (thường ở giữa page)
+            driver.execute_script("window.scrollTo(0, 2500);")
+            wait_after_scroll(driver, timeout=1, verbose=verbose)
+
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            wait_for_dynamic_content_loaded(driver, timeout=2, verbose=verbose)
+            # Wait cho dynamic content (seller, price, sales_count, rating) load
+            # Tăng timeout lên 3s để đảm bảo seller và original_price được load
+            wait_for_dynamic_content_loaded(driver, timeout=3, verbose=verbose)
+            
+            # Thêm wait bổ sung sau khi scroll xong để đảm bảo dynamic content load đầy đủ
+            # Một số pages load chậm hơn → cần thêm 0.5-1s wait
+            time.sleep(0.8)  # Wait thêm để seller và price load đầy đủ
         except ImportError:
             # Fallback về time.sleep
             driver.execute_script("window.scrollTo(0, 500);")
             time.sleep(0.5)
             driver.execute_script("window.scrollTo(0, 1500);")
             time.sleep(0.5)
+            driver.execute_script("window.scrollTo(0, 2500);")  # Scroll đến seller section
+            time.sleep(1.0)  # Wait lâu hơn cho seller section
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
+            time.sleep(1.5)  # Wait cho dynamic content (seller, price)
         except Exception as scroll_error:
             if verbose:
                 print(f"[Selenium] Warning: Lỗi khi scroll: {scroll_error}")
@@ -642,19 +667,68 @@ def extract_product_detail(
                     pass
             break
 
-    # 4. Extract seller
-    seller_selectors = ['[data-view-id="pdp_seller_name"]', ".seller-name", '[class*="seller"]']
+    # 4. Extract seller (mở rộng selectors để lấy đầy đủ seller_name)
+    seller_selectors = [
+        '[data-view-id="pdp_seller_name"]',
+        '.SellerName__Name-sc-',  # Tiki specific class
+        '[class*="SellerName"]',
+        '[class*="seller-name"]',
+        '[class*="seller_info"]',
+        '[data-testid="seller-name"]',
+        '.seller-name',
+        '[class*="seller"]',
+        'a[href*="/seller/"]',  # Link to seller page
+        '[href*="seller_id"]',
+    ]
+    seller_name_found = False
     for selector in seller_selectors:
         seller_elem = soup.select_one(selector)
         if seller_elem:
-            product_data["seller"]["name"] = seller_elem.get_text(strip=True)
-            # Kiểm tra có phải official store không
-            if (
-                "official" in seller_elem.get_text(strip=True).lower()
-                or "tiki" in seller_elem.get_text(strip=True).lower()
-            ):
-                product_data["seller"]["is_official"] = True
-            break
+            seller_text = seller_elem.get_text(strip=True)
+            # Nếu là link, lấy text hoặc title attribute
+            if seller_elem.name == 'a':
+                seller_text = seller_elem.get_text(strip=True) or seller_elem.get('title', '').strip()
+            
+            if seller_text and len(seller_text) > 1:  # Tránh lấy text quá ngắn
+                product_data["seller"]["name"] = seller_text
+                seller_name_found = True
+                
+                # Kiểm tra có phải official store không
+                seller_text_lower = seller_text.lower()
+                if (
+                    "official" in seller_text_lower
+                    or "chính hãng" in seller_text_lower
+                    or "tiki" in seller_text_lower
+                    or "tiki trading" in seller_text_lower
+                ):
+                    product_data["seller"]["is_official"] = True
+                
+                # Extract seller_id từ href nếu có
+                if seller_elem.name == 'a':
+                    href = seller_elem.get('href', '')
+                    seller_id_match = re.search(r'seller[_-]?id[=:](\d+)|/seller/(\d+)', href, re.I)
+                    if seller_id_match:
+                        product_data["seller"]["seller_id"] = seller_id_match.group(1) or seller_id_match.group(2)
+                
+                break
+    
+    # Fallback: Tìm trong script tags (Tiki thường embed JSON data)
+    if not seller_name_found:
+        script_tags = soup.find_all('script', type='application/ld+json')
+        for script in script_tags:
+            try:
+                data = json.loads(script.string) if script.string else {}
+                # Tiki có thể lưu seller info trong structured data
+                if isinstance(data, dict):
+                    seller_info = data.get('brand') or data.get('seller') or data.get('manufacturer')
+                    if isinstance(seller_info, dict):
+                        seller_name = seller_info.get('name') or seller_info.get('@name')
+                        if seller_name:
+                            product_data["seller"]["name"] = seller_name
+                            seller_name_found = True
+                            break
+            except (json.JSONDecodeError, AttributeError):
+                continue
 
     # 5. Extract mô tả
     description_selectors = [
