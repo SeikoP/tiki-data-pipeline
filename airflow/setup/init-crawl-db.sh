@@ -86,8 +86,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         seller_is_official BOOLEAN DEFAULT FALSE,
         brand VARCHAR(255),
         stock_available BOOLEAN,
-        stock_quantity INTEGER,
-        stock_status VARCHAR(50),
         shipping JSONB,
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -103,21 +101,45 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
     -- BẢNG CRAWL_HISTORY (Lịch Sử Giá và Giảm Giá)
     -- Lưu lịch sử giá và các giá trị liên quan khi crawl lại
     -- Mỗi lần crawl sẽ tạo bản ghi mới để theo dõi thay đổi theo thời gian
+    -- Schema tối ưu với đầy đủ các trường cần thiết
     -- =====================================================
     CREATE TABLE IF NOT EXISTS crawl_history (
         id SERIAL PRIMARY KEY,
         product_id VARCHAR(255) NOT NULL,
-        price DECIMAL(12, 2),
+        
+        -- Price tracking
+        price DECIMAL(12, 2) NOT NULL,
         original_price DECIMAL(12, 2),
         discount_percent INTEGER,
         discount_amount DECIMAL(12, 2),
         price_change DECIMAL(12, 2),
-        crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        price_change_percent DECIMAL(5, 2),
+        previous_price DECIMAL(12, 2),
+        previous_original_price DECIMAL(12, 2),
+        previous_discount_percent INTEGER,
+        
+        -- Sales tracking
+        sales_count INTEGER,
+        sales_change INTEGER,
+        
+        -- Promotion tracking
+        is_flash_sale BOOLEAN DEFAULT FALSE,
+        
+        -- Metadata
+        crawl_type VARCHAR(20) DEFAULT 'price_change',
+        
+        -- Timestamps
+        crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     
     CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
     CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
-    CREATE INDEX IF NOT EXISTS idx_history_product_price ON crawl_history(product_id, crawled_at, price);
+    CREATE INDEX IF NOT EXISTS idx_history_product_latest ON crawl_history(product_id, crawled_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_history_crawl_type ON crawl_history(crawl_type);
+    CREATE INDEX IF NOT EXISTS idx_history_price_change ON crawl_history(price_change) WHERE price_change IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_history_flash_sale ON crawl_history(is_flash_sale) WHERE is_flash_sale = true;
+    CREATE INDEX IF NOT EXISTS idx_history_discount ON crawl_history(discount_percent) WHERE discount_percent > 0;
     
     -- =====================================================
     -- TRIGGERS

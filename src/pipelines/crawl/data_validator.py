@@ -20,7 +20,7 @@ except ImportError:
     # Fallback defaults if config not available
     DATA_QUALITY_CRITICAL_FIELDS = ["name", "price", "product_id"]
     DATA_QUALITY_IMPORTANT_FIELDS = ["seller_name", "brand", "category_id"]
-    DATA_QUALITY_OPTIONAL_FIELDS = ["rating_average", "sales_count", "stock_quantity"]
+    DATA_QUALITY_OPTIONAL_FIELDS = ["rating_average", "sales_count"]
     DATA_QUALITY_MIN_SCORE = 0.7
     PRODUCT_RETRY_MAX_ATTEMPTS = 2
 

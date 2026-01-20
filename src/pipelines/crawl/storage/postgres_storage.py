@@ -164,10 +164,10 @@ class PostgresStorage:
                     for row in rows:
                         cat_id = row[0]
                         if cat_id:
-                            # Normalize: ensure 'c' prefix if it looks like just numbers
-                            if str(cat_id).isdigit():
-                                cat_id = f"c{cat_id}"
-                            used_ids.add(cat_id)
+                            # Normalize using the same function as elsewhere for consistency
+                            normalized_id = normalize_category_id(cat_id)
+                            if normalized_id:
+                                used_ids.add(normalized_id)
         except Exception as e:
             print(f"⚠️  Error getting used category IDs: {e}")
         return used_ids
@@ -600,23 +600,179 @@ class PostgresStorage:
         if not categories:
             return 0
 
-        # Build URL -> category lookup for path building
+        # CRITICAL: Đảm bảo tất cả parent categories được include trong danh sách
+        # để có thể build path đầy đủ
+        url_to_cat = {cat.get("url"): cat for cat in categories}
+        all_urls = set(url_to_cat.keys())
+        
+        # Tìm tất cả parent URLs cần thiết (traverse đầy đủ lên đến root)
+        needed_parent_urls = set()
+        for cat in categories:
+            current = cat
+            visited = set()
+            depth = 0
+            while current and depth < 10:
+                parent_url = current.get("parent_url")
+                if not parent_url or parent_url in visited:
+                    break
+                visited.add(parent_url)
+                if parent_url not in all_urls:
+                    needed_parent_urls.add(parent_url)
+                # Tìm parent trong url_to_cat
+                if parent_url in url_to_cat:
+                    current = url_to_cat[parent_url]
+                else:
+                    break
+                depth += 1
+        
+        # Nếu có parent URLs cần thiết nhưng chưa có trong danh sách,
+        # thử load từ file JSON categories (nếu có)
+        if needed_parent_urls:
+            print(f"📂 Tìm thấy {len(needed_parent_urls)} parent URLs cần thiết nhưng chưa có trong danh sách")
+            print(f"   Các parent URLs: {list(needed_parent_urls)[:5]}...")
+            
+            # Thử load từ file JSON categories
+            json_paths = [
+                "/opt/airflow/data/raw/categories_recursive_optimized.json",
+                os.path.join(os.getcwd(), "data", "raw", "categories_recursive_optimized.json"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "raw", "categories_recursive_optimized.json"),
+            ]
+            
+            categories_from_json = {}
+            json_file_used = None
+            for json_path in json_paths:
+                if os.path.exists(json_path):
+                    try:
+                        with open(json_path, encoding="utf-8") as f:
+                            all_categories = json.load(f)
+                        # Build URL -> category lookup
+                        for cat_json in all_categories:
+                            url = cat_json.get("url")
+                            if url:
+                                categories_from_json[url] = cat_json
+                        json_file_used = json_path
+                        print(f"📂 Loaded {len(categories_from_json)} categories from JSON: {json_path}")
+                        break
+                    except Exception as e:
+                        print(f"⚠️  Could not load categories JSON from {json_path}: {e}")
+            
+            # Include missing parent categories từ JSON
+            if categories_from_json:
+                added_count = 0
+                for parent_url in needed_parent_urls:
+                    if parent_url in categories_from_json:
+                        parent_cat = categories_from_json[parent_url]
+                        if parent_url not in url_to_cat:
+                            categories.append(parent_cat)
+                            url_to_cat[parent_url] = parent_cat
+                            added_count += 1
+                            # Traverse tiếp để include parent của parent
+                            current = parent_cat
+                            depth = 0
+                            while current and depth < 5:
+                                grandparent_url = current.get("parent_url")
+                                if not grandparent_url or grandparent_url in url_to_cat:
+                                    break
+                                if grandparent_url in categories_from_json:
+                                    grandparent_cat = categories_from_json[grandparent_url]
+                                    categories.append(grandparent_cat)
+                                    url_to_cat[grandparent_url] = grandparent_cat
+                                    added_count += 1
+                                    current = grandparent_cat
+                                else:
+                                    break
+                                depth += 1
+                
+                if added_count > 0:
+                    print(f"✅ Đã thêm {added_count} parent categories từ file JSON vào danh sách")
+                    # Update all_urls sau khi thêm
+                    all_urls = set(url_to_cat.keys())
+        
+        # Build URL -> category lookup for path building (sau khi đã include parents)
         url_to_cat = {cat.get("url"): cat for cat in categories}
 
         # Find all parent URLs to determine is_leaf
         parent_urls = {cat.get("parent_url") for cat in categories if cat.get("parent_url")}
 
-        def build_category_path(cat: dict) -> list[str]:
+        # Cache để lưu parent categories đã query từ DB
+        # Cache này được share giữa tất cả các categories trong cùng một batch
+        db_parent_cache = {}
+
+        def build_category_path(cat: dict, cur=None) -> list[str]:
+            """Build category path đầy đủ bằng cách traverse lên parent.
+            
+            Logic:
+            1. Ưu tiên lấy từ url_to_cat (categories đang load trong batch hiện tại)
+            2. Nếu không có, query từ DB (và cache lại)
+            3. Query đệ quy lên đến root category (parent_url = NULL)
+            """
             path = []
             current = cat
             visited = set()
-            while current:
-                if current.get("url") in visited:
+            max_depth = 10  # Giới hạn độ sâu để tránh infinite loop
+            
+            depth = 0
+            while current and depth < max_depth:
+                url = current.get("url")
+                if url in visited:
+                    # Phát hiện circular reference, dừng lại
                     break
-                visited.add(current.get("url"))
-                path.insert(0, current.get("name", ""))
+                visited.add(url)
+                depth += 1
+                
+                # Thêm name vào đầu path
+                name = current.get("name", "")
+                if name:  # Chỉ thêm nếu name không rỗng
+                    path.insert(0, name)
+                
+                # Tìm parent
                 parent_url = current.get("parent_url")
-                current = url_to_cat.get(parent_url) if parent_url else None
+                if not parent_url:
+                    # Đã đến root category, dừng lại
+                    break
+                
+                # Ưu tiên 1: Lấy từ url_to_cat (categories đang load trong batch hiện tại)
+                if parent_url in url_to_cat:
+                    current = url_to_cat[parent_url]
+                    continue
+                
+                # Ưu tiên 2: Lấy từ cache (đã query từ DB trước đó trong cùng batch)
+                if parent_url in db_parent_cache:
+                    current = db_parent_cache[parent_url]
+                    continue
+                
+                # Ưu tiên 3: Query từ DB nếu có cursor
+                if cur is not None:
+                    try:
+                        cur.execute(
+                            "SELECT name, url, parent_url FROM categories WHERE url = %s",
+                            (parent_url,)
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            parent_cat = {
+                                "name": row[0],
+                                "url": row[1],
+                                "parent_url": row[2],
+                            }
+                            # Cache lại để dùng cho các categories khác
+                            db_parent_cache[parent_url] = parent_cat
+                            current = parent_cat
+                            continue
+                        else:
+                            # Không tìm thấy parent trong DB
+                            # Có thể parent chưa được load, nhưng vẫn tiếp tục với path hiện tại
+                            # (path đã có ít nhất category hiện tại)
+                            break
+                    except Exception as e:
+                        # Lỗi khi query, log nhưng không fail
+                        # Tiếp tục với path hiện tại
+                        print(f"⚠️  Warning: Error querying parent {parent_url}: {e}")
+                        break
+                else:
+                    # Không có cursor để query, dừng lại
+                    break
+            
             return path
 
         # Get used category IDs if filtering is enabled
@@ -645,7 +801,9 @@ class PostgresStorage:
                     # Check if this category has products
                     is_leaf = cat.get("url") not in parent_urls
                     if is_leaf and cat_id:
-                        if cat_id in used_category_ids or (cat_id and cat_id[1:] in used_category_ids):
+                        # FIX: Normalize both sides for comparison
+                        # used_category_ids already contains normalized IDs (c{id} format)
+                        if cat_id in used_category_ids:
                             # Add this leaf category
                             urls_to_keep.add(cat.get("url"))
                             
@@ -663,57 +821,147 @@ class PostgresStorage:
                 
                 print(f"📂 Keeping {len(urls_to_keep)} categories (leaves + parents)")
 
-        prepared_categories = []
-        for cat in categories:
-            # Extract and normalize category_id
-            cat_id = cat.get("category_id")
-            if not cat_id and cat.get("url"):
-                # Extract from URL
-                match = re.search(r"c?(\d+)", cat.get("url", ""))
-                if match:
-                    cat_id = match.group(1)
-            
-            # Normalize to 'c{id}' format
-            cat_id = normalize_category_id(cat_id)
+        # Build category paths với connection đến DB để query parent nếu cần
+        # Trước tiên, load tất cả parent categories từ DB vào url_to_cat để đảm bảo path đầy đủ
+        with self.get_connection() as conn:
+            with conn.cursor() as build_cur:
+                # Tìm tất cả parent URLs cần thiết (đệ quy lên đến root)
+                all_parent_urls_needed = set()
+                for cat in categories:
+                    current = cat
+                    visited = set()
+                    depth = 0
+                    while current and depth < 10:
+                        parent_url = current.get("parent_url")
+                        if not parent_url or parent_url in visited:
+                            break
+                        visited.add(parent_url)
+                        all_parent_urls_needed.add(parent_url)
+                        # Tìm parent của parent trong url_to_cat hoặc DB
+                        if parent_url in url_to_cat:
+                            current = url_to_cat[parent_url]
+                        else:
+                            # Cần query từ DB để tiếp tục traverse
+                            try:
+                                build_cur.execute(
+                                    "SELECT name, url, parent_url, category_id, image_url, level FROM categories WHERE url = %s",
+                                    (parent_url,)
+                                )
+                                row = build_cur.fetchone()
+                                if row:
+                                    current = {
+                                        "name": row[0],
+                                        "url": row[1],
+                                        "parent_url": row[2],
+                                        "category_id": row[3],
+                                        "image_url": row[4],
+                                        "level": row[5],
+                                    }
+                                    # Thêm vào url_to_cat và cache
+                                    url_to_cat[row[1]] = current
+                                    db_parent_cache[row[1]] = current
+                                else:
+                                    break
+                            except Exception:
+                                break
+                        depth += 1
+                
+                # Load tất cả parent categories từ DB nếu chưa có trong url_to_cat (batch query)
+                if all_parent_urls_needed:
+                    missing_parent_urls = [
+                        url for url in all_parent_urls_needed 
+                        if url not in url_to_cat
+                    ]
+                    
+                    if missing_parent_urls:
+                        # Query batch để load parent categories từ DB
+                        placeholders = ",".join(["%s"] * len(missing_parent_urls))
+                        try:
+                            build_cur.execute(
+                                f"""
+                                SELECT name, url, parent_url, category_id, image_url, level
+                                FROM categories 
+                                WHERE url IN ({placeholders})
+                                """,
+                                missing_parent_urls
+                            )
+                            loaded_count = 0
+                            for row in build_cur.fetchall():
+                                parent_cat = {
+                                    "name": row[0],
+                                    "url": row[1],
+                                    "parent_url": row[2],
+                                    "category_id": row[3],
+                                    "image_url": row[4],
+                                    "level": row[5],
+                                }
+                                # Thêm vào url_to_cat để dùng khi build path
+                                url_to_cat[row[1]] = parent_cat
+                                # Cache lại để dùng cho các categories khác
+                                db_parent_cache[row[1]] = parent_cat
+                                loaded_count += 1
+                            
+                            if loaded_count > 0:
+                                print(f"📂 Loaded {loaded_count} parent categories from DB for path building")
+                        except Exception as e:
+                            print(f"⚠️  Warning: Could not load all parent categories from DB: {e}")
+                
+                prepared_categories = []
+                for cat in categories:
+                    # Extract and normalize category_id
+                    cat_id = cat.get("category_id")
+                    if not cat_id and cat.get("url"):
+                        # Extract from URL
+                        match = re.search(r"c?(\d+)", cat.get("url", ""))
+                        if match:
+                            cat_id = match.group(1)
+                    
+                    # Normalize to 'c{id}' format
+                    cat_id = normalize_category_id(cat_id)
 
-            category_path = build_category_path(cat)
-            root_name = category_path[0] if category_path else ""
-            is_leaf = cat.get("url") not in parent_urls
+                    # Build category_path đầy đủ (có thể query parent từ DB nếu cần)
+                    category_path = build_category_path(cat, cur=build_cur)
+                    root_name = category_path[0] if category_path else ""
+                    is_leaf = cat.get("url") not in parent_urls
 
-            # Nếu only_leaf=True, chỉ lưu categories có is_leaf=True
-            if only_leaf and not is_leaf:
-                continue
+                    # Nếu only_leaf=True, chỉ lưu categories có is_leaf=True
+                    if only_leaf and not is_leaf:
+                        continue
 
-            # Nếu sync_with_products=True, chỉ lưu categories trong urls_to_keep
-            if sync_with_products:
-                if cat.get("url") not in urls_to_keep:
-                    continue
+                    # Nếu sync_with_products=True, chỉ lưu categories trong urls_to_keep
+                    if sync_with_products:
+                        if cat.get("url") not in urls_to_keep:
+                            continue
 
-            # Extract level_1 đến level_5 từ category_path để thể hiện rõ theo từng độ sâu
-            level_1 = category_path[0] if len(category_path) > 0 else None
-            level_2 = category_path[1] if len(category_path) > 1 else None
-            level_3 = category_path[2] if len(category_path) > 2 else None
-            level_4 = category_path[3] if len(category_path) > 3 else None
-            level_5 = category_path[4] if len(category_path) > 4 else None
+                    # Extract level_1 đến level_5 từ category_path để thể hiện rõ theo từng độ sâu
+                    level_1 = category_path[0] if len(category_path) > 0 else None
+                    level_2 = category_path[1] if len(category_path) > 1 else None
+                    level_3 = category_path[2] if len(category_path) > 2 else None
+                    level_4 = category_path[3] if len(category_path) > 3 else None
+                    level_5 = category_path[4] if len(category_path) > 4 else None
 
-            prepared_categories.append(
-                {
-                    "category_id": cat_id,
-                    "name": cat.get("name"),
-                    "url": cat.get("url"),
-                    "image_url": cat.get("image_url"),
-                    "parent_url": cat.get("parent_url"),
-                    "level": cat.get("level", 0),
-                    "category_path": category_path,
-                    "level_1": level_1,
-                    "level_2": level_2,
-                    "level_3": level_3,
-                    "level_4": level_4,
-                    "level_5": level_5,
-                    "root_category_name": root_name,
-                    "is_leaf": is_leaf,
-                }
-            )
+                    # Tính level từ độ dài category_path (đảm bảo chính xác)
+                    # Level bắt đầu từ 1 (level 1 = root category)
+                    calculated_level = len(category_path) if category_path else 0
+
+                    prepared_categories.append(
+                        {
+                            "category_id": cat_id,
+                            "name": cat.get("name"),
+                            "url": cat.get("url"),
+                            "image_url": cat.get("image_url"),
+                            "parent_url": cat.get("parent_url"),
+                            "level": calculated_level,  # Dùng level tính từ path thay vì từ data gốc
+                            "category_path": category_path,
+                            "level_1": level_1,
+                            "level_2": level_2,
+                            "level_3": level_3,
+                            "level_4": level_4,
+                            "level_5": level_5,
+                            "root_category_name": root_name,
+                            "is_leaf": is_leaf,
+                        }
+                    )
 
         columns = [
             "category_id",
@@ -1033,7 +1281,9 @@ class PostgresStorage:
         # Log crawl history for all saved products (for price tracking)
         if saved_count > 0:
             try:
-                self._log_batch_crawl_history(products[:saved_count])
+                # Use all products that were attempted (not just [:saved_count])
+                # This ensures we capture history for all products even if some failed
+                self._log_batch_crawl_history(products)
             except Exception as e:
                 import traceback
                 error_detail = traceback.format_exc()
@@ -1240,7 +1490,9 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
+                # CRITICAL: Ensure schema is up-to-date BEFORE any queries
                 self._ensure_history_schema(cur)
+                conn.commit()  # Commit schema changes first
 
                 # BATCH LOOKUP: Get all previous prices AND sales in one query
                 product_ids = [p.get("product_id") for p in valid_products]
@@ -1404,12 +1656,15 @@ class PostgresStorage:
                         
                         type_str = ", ".join(f"{k}: {v}" for k, v in type_counts.items())
                         print(f"📊 Crawl history: {len(records_to_insert)} records ({type_str})")
+                        conn.commit()  # Commit history inserts
                     except Exception as e:
                         import traceback
+                        error_trace = traceback.format_exc()
                         print(f"❌ Error inserting crawl history: {e}")
                         print(f"Error type: {type(e).__name__}")
-                        if "foreign key" in str(e).lower():
-                            print("💡 FK constraint error: ensure products exist before logging history")
+                        print(f"Error trace: {error_trace}")
+                        if "foreign key" in str(e).lower() or "does not exist" in str(e).lower():
+                            print("💡 FK constraint error or missing column: ensure products exist and schema is updated")
                             # Try to get which product IDs are missing
                             try:
                                 missing_ids = []
@@ -1421,10 +1676,15 @@ class PostgresStorage:
                                     if not cur.fetchone():
                                         missing_ids.append(r["product_id"])
                                 if missing_ids:
-                                    print(f"Missing product_ids: {missing_ids[:5]}")
-                            except Exception:
-                                pass
-                        raise  # Re-raise to caller
+                                    print(f"⚠️  Missing product_ids (first 5): {missing_ids[:5]}")
+                                else:
+                                    print("💡 All product_ids exist - likely a schema mismatch issue")
+                                    print("💡 Run _ensure_history_schema() to add missing columns")
+                            except Exception as inner_e:
+                                print(f"⚠️  Could not check missing products: {inner_e}")
+                        conn.rollback()  # Rollback on error
+                        # Don't re-raise - log the error but continue
+                        print("⚠️  Continuing without crawl history (will retry on next crawl)")
 
     def log_price_history(
         self,
@@ -1592,26 +1852,115 @@ class PostgresStorage:
             self._pool = None
             self._pool_stats["active_connections"] = 0
 
+    def cleanup_incomplete_products(
+        self, 
+        require_seller: bool = True, 
+        require_brand: bool = True
+    ) -> dict[str, int]:
+        """
+        Delete products with missing required fields (seller and/or brand).
+        Run this BEFORE each crawl to allow re-crawling of incomplete data.
+        
+        This prevents:
+        - Wasting resources crawling products that will be rejected anyway
+        - Storing incomplete products in database
+        - Having to clean up after load (reactive vs preventive)
+        
+        Args:
+            require_seller: If True, delete products where seller_name IS NULL or empty
+            require_brand: If True, delete products where brand IS NULL or empty
+        
+        Returns:
+            dict with keys: deleted_count, deleted_no_seller, deleted_no_brand, deleted_both
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Build WHERE clause based on requirements
+                conditions = []
+                if require_seller:
+                    conditions.append("(seller_name IS NULL OR seller_name = '')")
+                if require_brand:
+                    conditions.append("(brand IS NULL OR brand = '')")
+                
+                if not conditions:
+                    return {
+                        "deleted_count": 0,
+                        "deleted_no_seller": 0,
+                        "deleted_no_brand": 0,
+                        "deleted_both": 0
+                    }
+                
+                where_clause = " OR ".join(conditions)
+                
+                # Get counts before deletion for detailed reporting
+                # Only calculate stats if both requirements are enabled
+                deleted_no_seller = 0
+                deleted_no_brand = 0
+                deleted_both = 0
+                
+                if require_seller and require_brand:
+                    # Calculate detailed stats: missing seller only, missing brand only, missing both
+                    stats_query = """
+                        SELECT 
+                            COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND NOT (brand IS NULL OR brand = '')) as no_seller,
+                            COUNT(*) FILTER (WHERE NOT (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as no_brand,
+                            COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as both_missing
+                        FROM products
+                        WHERE (seller_name IS NULL OR seller_name = '') OR (brand IS NULL OR brand = '')
+                    """
+                    cur.execute(stats_query)
+                    stats_row = cur.fetchone()
+                    deleted_no_seller = stats_row[0] if stats_row else 0
+                    deleted_no_brand = stats_row[1] if stats_row else 0
+                    deleted_both = stats_row[2] if stats_row else 0
+                elif require_seller:
+                    # Only seller required - count all as no_seller
+                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    deleted_no_seller = cur.fetchone()[0] or 0
+                elif require_brand:
+                    # Only brand required - count all as no_brand
+                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    deleted_no_brand = cur.fetchone()[0] or 0
+                
+                # Delete products matching criteria
+                delete_query = f"""
+                    DELETE FROM products 
+                    WHERE {where_clause}
+                """
+                cur.execute(delete_query)
+                deleted_count = cur.rowcount
+                
+                if deleted_count > 0:
+                    reason_parts = []
+                    if require_seller:
+                        reason_parts.append(f"{deleted_no_seller} without seller")
+                    if require_brand:
+                        reason_parts.append(f"{deleted_no_brand} without brand")
+                    if require_seller and require_brand:
+                        reason_parts.append(f"{deleted_both} missing both")
+                    
+                    reason_str = ", ".join(reason_parts)
+                    print(f"🧹 Cleaned up {deleted_count} incomplete products ({reason_str})")
+                
+                return {
+                    "deleted_count": deleted_count,
+                    "deleted_no_seller": deleted_no_seller if require_seller else 0,
+                    "deleted_no_brand": deleted_no_brand if require_brand else 0,
+                    "deleted_both": deleted_both if (require_seller and require_brand) else 0
+                }
+    
     def cleanup_products_without_seller(self) -> int:
         """
+        DEPRECATED: Use cleanup_incomplete_products() instead.
+        
         Delete products where seller_name is NULL.
-        Run this before each crawl to allow re-crawling of incomplete data.
+        Kept for backward compatibility.
         
         Returns:
             Number of products deleted
         """
-        with self.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    DELETE FROM products 
-                    WHERE seller_name IS NULL
-                """)
-                deleted_count = cur.rowcount
-                
-                if deleted_count > 0:
-                    print(f"🧹 Cleaned up {deleted_count} products without seller information")
-                
-                return deleted_count
+        result = self.cleanup_incomplete_products(require_seller=True, require_brand=False)
+        return result["deleted_count"]
 
     def cleanup_orphan_categories(self) -> int:
         """
