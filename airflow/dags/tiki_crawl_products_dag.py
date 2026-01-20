@@ -930,9 +930,209 @@ def load_categories(**context) -> list[dict[str, Any]]:
         raise
 
 
+def fix_missing_parent_categories(**context) -> dict[str, Any]:
+    """
+    Fix missing parent categories và rebuild category_path đầy đủ.
+    Logic từ scripts/imp/fix_missing_parents.py
+    """
+    logger = get_logger(context)
+    
+    try:
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+        import json
+        import re
+        
+        logger.info("=" * 70)
+        logger.info("🔧 FIX MISSING PARENT CATEGORIES")
+        logger.info("=" * 70)
+        
+        # 1. Load file JSON categories
+        json_file = str(CATEGORIES_FILE)
+        if not os.path.exists(json_file):
+            logger.warning(f"⚠️  File categories không tồn tại: {json_file}, bỏ qua fix missing parents")
+            return {"status": "skipped", "message": "File not found", "fixed_count": 0}
+        
+        logger.info(f"📂 Đang đọc file: {json_file}")
+        with open(json_file, encoding="utf-8") as f:
+            categories = json.load(f)
+        
+        url_to_cat = {cat.get("url"): cat for cat in categories}
+        logger.info(f"📊 Loaded {len(categories)} categories từ file JSON")
+        
+        # 2. Tìm các parent categories còn thiếu trong DB
+        storage = PostgresStorage()
+        
+        with storage.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Lấy tất cả categories trong DB
+                cur.execute("SELECT url, parent_url FROM categories")
+                db_cats = cur.fetchall()
+                db_urls = {cat[0] for cat in db_cats}
+                
+                # Tìm các parent URLs cần thiết
+                missing_parents = set()
+                for db_cat in db_cats:
+                    parent_url = db_cat[1] if len(db_cat) > 1 else None
+                    if parent_url and parent_url not in db_urls and parent_url in url_to_cat:
+                        missing_parents.add(parent_url)
+                
+                if not missing_parents:
+                    logger.info("✅ Không có parent categories nào còn thiếu!")
+                    return {"status": "success", "fixed_count": 0}
+                
+                logger.info(f"🔍 Tìm thấy {len(missing_parents)} parent categories còn thiếu")
+                
+                # 3. Load các parent categories còn thiếu
+                def normalize_category_id(cat_id):
+                    if not cat_id:
+                        return None
+                    if isinstance(cat_id, int):
+                        return f"c{cat_id}"
+                    cat_id_str = str(cat_id).strip()
+                    if cat_id_str.startswith("c"):
+                        return cat_id_str
+                    return f"c{cat_id_str}"
+                
+                saved_count = 0
+                for url in missing_parents:
+                    cat = url_to_cat[url]
+                    
+                    # Extract category_id
+                    cat_id = cat.get("category_id")
+                    if not cat_id and url:
+                        match = re.search(r"c?(\d+)", url)
+                        if match:
+                            cat_id = match.group(1)
+                    cat_id = normalize_category_id(cat_id)
+                    
+                    # Build parent chain để có category_path
+                    path = []
+                    current = cat
+                    visited = set()
+                    depth = 0
+                    while current and depth < 10:
+                        if current.get("url") in visited:
+                            break
+                        visited.add(current.get("url"))
+                        name = current.get("name", "")
+                        if name:
+                            path.insert(0, name)
+                        parent_url = current.get("parent_url")
+                        if not parent_url:
+                            break
+                        if parent_url in url_to_cat:
+                            current = url_to_cat[parent_url]
+                        elif parent_url in db_urls:
+                            # Query từ DB
+                            cur.execute("SELECT name, url, parent_url FROM categories WHERE url = %s", (parent_url,))
+                            row = cur.fetchone()
+                            if row:
+                                current = {
+                                    "name": row[0],
+                                    "url": row[1],
+                                    "parent_url": row[2]
+                                }
+                            else:
+                                break
+                        else:
+                            break
+                        depth += 1
+                    
+                    # Insert vào DB
+                    level_1 = path[0] if len(path) > 0 else None
+                    level_2 = path[1] if len(path) > 1 else None
+                    level_3 = path[2] if len(path) > 2 else None
+                    level_4 = path[3] if len(path) > 3 else None
+                    level_5 = path[4] if len(path) > 4 else None
+                    calculated_level = len(path) if path else 0
+                    root_name = path[0] if path else None
+                    
+                    # Check if leaf
+                    parent_urls_in_db = {c[1] for c in db_cats if len(c) > 1 and c[1]}
+                    is_leaf = url not in parent_urls_in_db
+                    
+                    try:
+                        cur.execute("""
+                            INSERT INTO categories (
+                                category_id, name, url, image_url, parent_url, level,
+                                category_path, level_1, level_2, level_3, level_4, level_5,
+                                root_category_name, is_leaf
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (url) DO UPDATE SET
+                                category_path = EXCLUDED.category_path,
+                                level_1 = EXCLUDED.level_1,
+                                level_2 = EXCLUDED.level_2,
+                                level_3 = EXCLUDED.level_3,
+                                level_4 = EXCLUDED.level_4,
+                                level_5 = EXCLUDED.level_5,
+                                level = EXCLUDED.level,
+                                root_category_name = EXCLUDED.root_category_name,
+                                updated_at = CURRENT_TIMESTAMP
+                        """, (
+                            cat_id,
+                            cat.get("name"),
+                            url,
+                            cat.get("image_url"),
+                            cat.get("parent_url"),
+                            calculated_level,
+                            json.dumps(path, ensure_ascii=False),
+                            level_1,
+                            level_2,
+                            level_3,
+                            level_4,
+                            level_5,
+                            root_name,
+                            is_leaf
+                        ))
+                        saved_count += 1
+                        logger.info(f"   ✅ Đã load: {cat.get('name')}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️  Lỗi khi load {cat.get('name')}: {e}")
+                
+                conn.commit()
+                logger.info(f"✅ Đã load {saved_count} parent categories vào DB")
+        
+        # 4. Rebuild category_path cho tất cả categories (sau khi đóng connection)
+        if saved_count > 0:
+            logger.info("🔧 Đang rebuild category_path cho tất cả categories...")
+            
+            # Tạo storage mới để rebuild
+            storage_rebuild = PostgresStorage()
+            try:
+                with storage_rebuild.get_connection() as conn_rebuild:
+                    with conn_rebuild.cursor() as cur_rebuild:
+                        cur_rebuild.execute("SELECT url FROM categories")
+                        all_db_urls = [row[0] for row in cur_rebuild.fetchall()]
+                
+                categories_to_rebuild = []
+                for url in all_db_urls:
+                    if url in url_to_cat:
+                        categories_to_rebuild.append(url_to_cat[url])
+                
+                if categories_to_rebuild:
+                    # Rebuild paths bằng cách gọi save_categories lại
+                    # (sẽ tự động rebuild paths với logic đã được sửa)
+                    rebuild_count = storage_rebuild.save_categories(
+                        categories_to_rebuild,
+                        only_leaf=False,
+                        sync_with_products=False
+                    )
+                    logger.info(f"✅ Đã rebuild {rebuild_count} categories")
+            finally:
+                storage_rebuild.close()
+        
+        logger.info("=" * 70)
+        return {"status": "success", "fixed_count": saved_count}
+        
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi fix missing parent categories: {e}", exc_info=True)
+        return {"status": "error", "message": str(e), "fixed_count": 0}
+
+
 def load_categories_to_db_wrapper(**context):
     """
     Task wrapper to load categories from JSON file into PostgreSQL database.
+    Sau khi load, tự động fix missing parent categories và rebuild paths.
     """
     logger = get_logger(context)
 
@@ -948,12 +1148,174 @@ def load_categories_to_db_wrapper(**context):
 
         logger.info(f"🚀 Loading categories to DB from {json_file}")
         load_categories_db_func(json_file)
+        
+        # Sau khi load, fix missing parent categories
+        logger.info("🔧 Fixing missing parent categories...")
+        fix_result = fix_missing_parent_categories(**context)
+        
+        if fix_result.get("status") == "success":
+            fixed_count = fix_result.get("fixed_count", 0)
+            if fixed_count > 0:
+                logger.info(f"✅ Đã fix {fixed_count} missing parent categories")
+            else:
+                logger.info("✅ Không có parent categories nào cần fix")
+        else:
+            logger.warning(f"⚠️  Fix missing parents có vấn đề: {fix_result.get('message', 'Unknown error')}")
 
-        return {"status": "success"}
+        return {"status": "success", "fixed_parents": fix_result.get("fixed_count", 0)}
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi load categories vào DB: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
+
+def cleanup_incomplete_products_wrapper(**context):
+    """
+    Task wrapper to cleanup products with missing required fields (seller and/or brand).
+    Run this BEFORE crawling to allow re-crawling of incomplete data.
+    
+    This is a PREVENTIVE cleanup - better to clean before crawl than after load.
+    """
+    logger = get_logger(context)
+    
+    try:
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+        
+        logger.info("🧹 Starting cleanup of incomplete products (missing seller/brand)...")
+        storage = PostgresStorage()
+        
+        # Clean up products missing seller OR brand (or both)
+        # Both are required for quality data
+        result = storage.cleanup_incomplete_products(
+            require_seller=True, 
+            require_brand=True
+        )
+        
+        deleted_count = result["deleted_count"]
+        deleted_no_seller = result.get("deleted_no_seller", 0)
+        deleted_no_brand = result.get("deleted_no_brand", 0)
+        deleted_both = result.get("deleted_both", 0)
+        
+        logger.info("=" * 70)
+        logger.info(f"✅ Cleanup complete: {deleted_count} products deleted")
+        if deleted_count > 0:
+            logger.info(f"   - Missing seller only: {deleted_no_seller}")
+            logger.info(f"   - Missing brand only: {deleted_no_brand}")
+            logger.info(f"   - Missing both: {deleted_both}")
+        logger.info("💡 These products will be re-crawled in the next run")
+        logger.info("=" * 70)
+        
+        return {
+            "status": "success", 
+            "deleted_count": deleted_count,
+            "deleted_no_seller": deleted_no_seller,
+            "deleted_no_brand": deleted_no_brand,
+            "deleted_both": deleted_both
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
+        return {
+            "status": "error", 
+            "message": str(e), 
+            "deleted_count": 0,
+            "deleted_no_seller": 0,
+            "deleted_no_brand": 0,
+            "deleted_both": 0
+        }
+
+
+def cleanup_products_without_seller_wrapper(**context):
+    """
+    DEPRECATED: Use cleanup_incomplete_products_wrapper() instead.
+    Kept for backward compatibility.
+    """
+    logger = get_logger(context)
+    logger.warning("⚠️  Using deprecated cleanup_products_without_seller_wrapper. Use cleanup_incomplete_products_wrapper instead.")
+    
+    try:
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+        
+        storage = PostgresStorage()
+        deleted_count = storage.cleanup_products_without_seller()
+        
+        logger.info(f"✅ Cleanup complete: {deleted_count} products deleted")
+        return {"status": "success", "deleted_count": deleted_count}
+    
+    except Exception as e:
+        logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
+        return {"status": "error", "message": str(e), "deleted_count": 0}
+
+
+def cleanup_orphan_categories_wrapper(**context):
+    """
+    Task wrapper to cleanup categories that don't have any matching products.
+    Run this after loading categories to keep the table clean.
+    
+    Xóa:
+    1. Categories có product_count = 0 (hoặc NULL)
+    2. Leaf categories không có products trong bảng products
+    """
+    logger = get_logger(context)
+    
+    try:
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+        
+        logger.info("=" * 70)
+        logger.info("🧹 CLEANUP ORPHAN CATEGORIES")
+        logger.info("=" * 70)
+        
+        storage = PostgresStorage()
+        
+        # 1. Xóa categories có product_count = 0 hoặc NULL
+        with storage.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Xóa categories có product_count = 0 hoặc NULL
+                cur.execute("""
+                    DELETE FROM categories
+                    WHERE (product_count = 0 OR product_count IS NULL)
+                    AND is_leaf = true
+                """)
+                deleted_zero_count = cur.rowcount
+                
+                # 2. Xóa leaf categories không có products trong bảng products
+                cur.execute("""
+                    DELETE FROM categories
+                    WHERE is_leaf = true
+                    AND NOT EXISTS (
+                        SELECT 1 FROM products p 
+                        WHERE p.category_id = categories.category_id
+                    )
+                """)
+                deleted_no_products = cur.rowcount
+                
+                conn.commit()
+                
+                total_deleted = deleted_zero_count + deleted_no_products
+                
+                logger.info(f"📊 Cleanup results:")
+                logger.info(f"   - Categories với product_count = 0: {deleted_zero_count}")
+                logger.info(f"   - Categories không có products: {deleted_no_products}")
+                logger.info(f"   - Tổng cộng: {total_deleted} categories đã xóa")
+                logger.info("=" * 70)
+        
+        # Gọi cleanup_orphan_categories từ storage để đảm bảo consistency
+        # (nó sẽ xóa các categories không có products)
+        additional_deleted = storage.cleanup_orphan_categories()
+        
+        total_deleted = total_deleted + additional_deleted
+        
+        logger.info(f"✅ Cleanup complete: {total_deleted} orphan categories deleted")
+        return {
+            "status": "success", 
+            "deleted_count": total_deleted,
+            "deleted_zero_count": deleted_zero_count,
+            "deleted_no_products": deleted_no_products + additional_deleted
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
+        return {"status": "error", "message": str(e), "deleted_count": 0}
 
 
 def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
@@ -2452,28 +2814,37 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
             if redis_cache:
                 cached_detail = redis_cache.get_cached_product_detail(product_id)
                 if cached_detail:
-                    # Kiểm tra cache có đầy đủ không: cần có price và sales_count
                     has_price = cached_detail.get("price", {}).get("current_price")
                     has_sales_count = cached_detail.get("sales_count") is not None
+                    brand_value = cached_detail.get("brand")
+                    has_brand = bool(
+                        brand_value and (not isinstance(brand_value, str) or brand_value.strip())
+                    )
+                    seller_info = cached_detail.get("seller", {})
+                    seller_name = (
+                        seller_info.get("name") if isinstance(seller_info, dict) else None
+                    )
+                    has_seller = bool(
+                        seller_name and (not isinstance(seller_name, str) or seller_name.strip())
+                    )
 
-                    # Nếu đã có detail đầy đủ (có price và sales_count), dùng cache
-                    if has_price and has_sales_count:
+                    if has_price and has_sales_count and has_brand and has_seller:
                         logger.info("=" * 70)
                         logger.info(f"✅ SKIP CRAWL - Redis Cache Hit cho product {product_id}")
                         logger.info(f"   - Có price: {has_price}")
                         logger.info(f"   - Có sales_count: {has_sales_count}")
+                        logger.info(f"   - Có brand: {has_brand}")
+                        logger.info(f"   - Có seller: {has_seller}")
                         logger.info("   - Sử dụng cache, không cần crawl lại")
                         logger.info("=" * 70)
                         result["detail"] = cached_detail
                         result["status"] = "cached"
                         return result
-                elif has_price:
-                    # Cache có price nhưng thiếu sales_count → crawl lại để lấy sales_count
-                    logger.info(
-                        f"[Redis Cache] ⚠️  Cache thiếu sales_count cho product {product_id}, sẽ crawl lại"
-                    )
+                    if has_price or has_sales_count or has_brand or has_seller:
+                        logger.info(
+                            f"[Redis Cache] ⚠️  Cache thiếu dữ liệu cho product {product_id}, sẽ crawl lại"
+                        )
                 else:
-                    # Cache không đầy đủ → crawl lại
                     logger.info(
                         f"[Redis Cache] ⚠️  Cache không đầy đủ cho product {product_id}, sẽ crawl lại"
                     )
@@ -2488,16 +2859,29 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
                 try:
                     with open(cache_file, encoding="utf-8") as f:
                         cached_detail = json.load(f)
-                        # Kiểm tra cache có đầy đủ không: cần có price và sales_count
                         has_price = cached_detail.get("price", {}).get("current_price")
                         has_sales_count = cached_detail.get("sales_count") is not None
+                        brand_value = cached_detail.get("brand")
+                        has_brand = bool(
+                            brand_value
+                            and (not isinstance(brand_value, str) or brand_value.strip())
+                        )
+                        seller_info = cached_detail.get("seller", {})
+                        seller_name = (
+                            seller_info.get("name") if isinstance(seller_info, dict) else None
+                        )
+                        has_seller = bool(
+                            seller_name
+                            and (not isinstance(seller_name, str) or seller_name.strip())
+                        )
 
-                        # Nếu đã có detail đầy đủ (có price và sales_count), dùng cache
-                        if has_price and has_sales_count:
+                        if has_price and has_sales_count and has_brand and has_seller:
                             logger.info("=" * 70)
                             logger.info(f"✅ SKIP CRAWL - File Cache Hit cho product {product_id}")
                             logger.info(f"   - Có price: {has_price}")
                             logger.info(f"   - Có sales_count: {has_sales_count}")
+                            logger.info(f"   - Có brand: {has_brand}")
+                            logger.info(f"   - Có seller: {has_seller}")
                             logger.info("   - Sử dụng cache, không cần crawl lại")
                             logger.info("=" * 70)
                             result["detail"] = cached_detail
@@ -3449,6 +3833,19 @@ def merge_product_details(**context) -> dict[str, Any]:
                     # Thêm metadata
                     product_with_detail["detail_crawled_at"] = detail_result.get("crawled_at")
                     product_with_detail["detail_status"] = status
+                    detail_metadata = detail.get("_metadata")
+                    if detail_metadata:
+                        product_with_detail["_metadata"] = detail_metadata
+                        product_with_detail["_metadata"]["crawl_status"] = status
+                        if detail_result.get("crawled_at"):
+                            product_with_detail["_metadata"]["completed_at"] = detail_result.get(
+                                "crawled_at"
+                            )
+                    elif status or detail_result.get("crawled_at"):
+                        product_with_detail["_metadata"] = {
+                            "crawl_status": status,
+                            "completed_at": detail_result.get("crawled_at"),
+                        }
 
                     # CRITICAL: Lọc bỏ products có brand null/empty
                     # Brand thiếu thường dẫn đến nhiều trường khác cũng thiếu
@@ -4118,68 +4515,31 @@ def load_products(**context) -> dict[str, Any]:
                 # Khởi tạo biến để lưu số lượng products
                 count_before = None
                 count_after = None
-                deleted_no_brand_count = 0
+                deleted_no_brand_count = 0  # Cleanup đã được xử lý ở task cleanup_incomplete_products
 
-                # CRITICAL: Xóa products có brand hoặc seller null từ database trước khi load
-                # Products có brand/seller null thường thiếu nhiều trường khác và sẽ được crawl lại
+                # NOTE: Cleanup incomplete products (missing seller/brand) đã được xử lý TRƯỚC crawl
+                # (task cleanup_incomplete_products) để tránh lãng phí tài nguyên.
+                # Không cần cleanup lại ở đây nữa (preventive approach > reactive cleanup).
+                
+                # Kiểm tra số lượng products trong DB trước khi load (for stats)
                 try:
                     PostgresStorage = _import_postgres_storage()
-                    if PostgresStorage is None:
-                        raise ImportError("Không thể import PostgresStorage")
-                    storage = PostgresStorage(
-                        host=db_host,
-                        port=db_port,
-                        database=db_name,
-                        user=db_user,
-                        password=db_password,
-                    )
-
-                    logger.info("=" * 70)
-                    logger.info("🗑️  XÓA PRODUCTS CÓ BRAND HOẶC SELLER NULL KHỎI DATABASE")
-                    logger.info("=" * 70)
-
-                    with storage.get_connection() as conn:
-                        with conn.cursor() as cur:
-                            # Đếm số lượng trước khi xóa
-                            cur.execute(
-                                "SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';"
-                            )
-                            count_to_delete = cur.fetchone()[0]
-
-                            if count_to_delete > 0:
-                                logger.info(
-                                    f"🔍 Tìm thấy {count_to_delete} products có brand/seller null/empty"
-                                )
-
-                                # Xóa products có brand hoặc seller null/empty
-                                cur.execute(
-                                    "DELETE FROM products WHERE brand IS NULL OR brand = '' OR seller_name IS NULL OR seller_name = '';"
-                                )
-                                deleted_no_brand_count = cur.rowcount
-                                conn.commit()
-
-                                logger.info(
-                                    f"✅ Đã xóa {deleted_no_brand_count} products có brand/seller null/empty"
-                                )
-                                logger.info(
-                                    "💡 Những products này sẽ được crawl lại trong lần chạy tiếp theo"
-                                )
-                            else:
-                                logger.info(
-                                    "✓ Không có products nào có brand/seller null/empty cần xóa"
-                                )
-
-                    logger.info("=" * 70)
-
-                    # Kiểm tra số lượng products trong DB sau khi xóa
-                    with storage.get_connection() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("SELECT COUNT(*) FROM products;")
-                            count_before = cur.fetchone()[0]
-                    storage.close()
-                    logger.info(f"📊 Số products trong DB sau khi xóa: {count_before}")
+                    if PostgresStorage is not None:
+                        storage = PostgresStorage(
+                            host=db_host,
+                            port=db_port,
+                            database=db_name,
+                            user=db_user,
+                            password=db_password,
+                        )
+                        with storage.get_connection() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute("SELECT COUNT(*) FROM products;")
+                                count_before = cur.fetchone()[0]
+                        storage.close()
+                        logger.info(f"📊 Số products trong DB trước khi load: {count_before}")
                 except Exception as e:
-                    logger.warning(f"⚠️  Không thể xóa/kiểm tra products trong DB: {e}")
+                    logger.warning(f"⚠️  Không thể kiểm tra số products trong DB: {e}")
                     count_before = None
 
                 load_stats = loader.load_products(
@@ -4943,6 +5303,23 @@ def backup_database(**context) -> dict[str, Any]:
 # Tạo DAG duy nhất với schedule có thể config qua Variable
 with DAG(**DAG_CONFIG) as dag:
 
+    # ===== CLEANUP TASKS (RUN FIRST) =====
+    # These tasks clean up stale data before crawling starts
+    # PREVENTIVE cleanup: Better to clean before crawl than after load
+    task_cleanup_products = PythonOperator(
+        task_id="cleanup_incomplete_products",
+        python_callable=cleanup_incomplete_products_wrapper,
+        execution_timeout=timedelta(minutes=5),
+        pool="crawl_pool",
+    )
+    
+    task_cleanup_categories = PythonOperator(
+        task_id="cleanup_orphan_categories",
+        python_callable=cleanup_orphan_categories_wrapper,
+        execution_timeout=timedelta(minutes=5),
+        pool="crawl_pool",
+    )
+
     # TaskGroup: Load và Prepare
     with TaskGroup("load_and_prepare") as load_group:
         # (ĐÃ BỎ) extract_and_load_categories_to_db để giảm thời gian pipeline.
@@ -5543,12 +5920,7 @@ with DAG(**DAG_CONFIG) as dag:
             trigger_rule="all_done",
         )
 
-    # Định nghĩa dependencies
-    # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Transform -> Load -> Validate -> Aggregate
-
-    # Dependencies giữa các TaskGroup
-    # Load categories trước, sau đó prepare crawl kwargs
-    # Thêm task load categories to DB
+    # Task: Load categories to DB (runs after products are loaded)
     task_load_categories_db = PythonOperator(
         task_id="load_categories_to_db",
         python_callable=load_categories_to_db_wrapper,
@@ -5556,30 +5928,52 @@ with DAG(**DAG_CONFIG) as dag:
         pool="crawl_pool",
     )
 
-    # Flow update: Load JSON -> Load DB -> Prepare Batch -> Crawl...
-    task_load_categories >> task_load_categories_db >> task_prepare
+    # ===== OPTIMIZED DEPENDENCIES =====
+    # Tối ưu: Chạy song song các tasks không phụ thuộc nhau để giảm thời gian execution
+    
+    # Step 1: Cleanup incomplete products before crawling
+    # cleanup_categories sẽ chạy SAU khi load categories vào DB (Step 10)
+    # Chỉ cleanup products ở đây
+    task_cleanup_products >> task_load_categories
+    
+    # Step 2: Load categories and prepare for crawl
+    task_load_categories >> task_prepare
 
-    # Prepare crawl kwargs -> crawl category (dynamic mapping)
+    # Step 3: Prepare crawl kwargs -> crawl category (dynamic mapping)
     task_prepare >> task_crawl_category
 
-    # Crawl category -> merge products (merge chạy khi tất cả crawl tasks done)
+    # Step 4: Crawl category -> merge products (merge chạy khi tất cả crawl tasks done)
     task_crawl_category >> task_merge_products
 
-    # Merge -> save products
+    # Step 5: Merge -> save products
     task_merge_products >> task_save_products
 
-    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> validate -> aggregate and notify
+    # Step 6: Save products -> prepare detail -> crawl detail -> merge detail -> save detail
     task_save_products >> task_prepare_detail
-    # Dependencies trong detail group đã được định nghĩa ở dòng 1800
-    # Flow: save_products_with_detail -> transform -> load -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database -> discord_report
-
-    (
-        task_save_products_with_detail
-        >> task_enrich_category_path
-        >> task_transform_products
-        >> task_load_products
-        >> task_validate_data
-        >> task_aggregate_and_notify
-        >> task_cleanup_cache
-        >> task_backup_database
-    )
+    # Dependencies trong detail group đã được định nghĩa ở dòng 5471-5477
+    
+    # Step 7: After save_products_with_detail
+    # enrich_category_path nên chạy trước transform để transform có thể dùng category_path đã được enrich
+    task_save_products_with_detail >> task_enrich_category_path >> task_transform_products
+    
+    # Step 8: Transform -> Load
+    task_transform_products >> task_load_products
+    
+    # Step 9: After load_products - parallel processing
+    # load_categories_db có thể chạy ngay sau load_products (không cần wait enrich)
+    # enrich_category_path cũng có thể trigger load_categories_db nếu cần
+    task_load_products >> task_load_categories_db
+    
+    # Step 10: Cleanup orphan categories AFTER loading categories to DB
+    task_load_categories_db >> task_cleanup_categories
+    
+    # Step 11: Validate data (có thể chạy song song với cleanup_categories nếu không phụ thuộc)
+    # Nhưng để đảm bảo data consistency, validate sau cleanup
+    task_cleanup_categories >> task_validate_data
+    
+    # Step 12: Aggregate and notify
+    task_validate_data >> task_aggregate_and_notify
+    
+    # Step 13: Final tasks - chạy song song (cleanup_cache và backup_database không phụ thuộc nhau)
+    # Cả hai đều phụ thuộc vào aggregate_and_notify nhưng không cần nhau
+    task_aggregate_and_notify >> [task_cleanup_cache, task_backup_database]

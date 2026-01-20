@@ -130,7 +130,12 @@ def crawl_product_detail_with_selenium(
 
             # Set timeout cho page load
             driver.set_page_load_timeout(timeout)
-            driver.implicitly_wait(3)  # Reduced from 10s to 3s for faster element detection
+            # Tier 1: Moderate wait time increase for better data capture
+            try:
+                from .config import CRAWL_IMPLICIT_WAIT_NORMAL
+                driver.implicitly_wait(CRAWL_IMPLICIT_WAIT_NORMAL)  # 4s (increased from 3s)
+            except ImportError:
+                driver.implicitly_wait(4)  # Fallback: 4s
 
             if verbose:
                 print(f"[Selenium] Đang mở {url}... (attempt {attempt + 1}/{max_retries})")
@@ -176,12 +181,14 @@ def crawl_product_detail_with_selenium(
 
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 # Wait cho dynamic content (seller, price, sales_count, rating) load
-                # Tăng timeout lên 3s để đảm bảo seller và original_price được load
-                wait_for_dynamic_content_loaded(driver, timeout=3, verbose=verbose)
-
-                # Thêm wait bổ sung sau khi scroll xong để đảm bảo dynamic content load đầy đủ
-                # Một số pages load chậm hơn → cần thêm 0.5-1s wait
-                time.sleep(0.8)  # Wait thêm để seller và price load đầy đủ
+                # Tier 1: Increased timeout to ensure seller and original_price load
+                try:
+                    from .config import CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, CRAWL_POST_SCROLL_SLEEP_NORMAL
+                    wait_for_dynamic_content_loaded(driver, timeout=CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, verbose=verbose)  # 4s
+                    time.sleep(CRAWL_POST_SCROLL_SLEEP_NORMAL)  # 1.2s
+                except ImportError:
+                    wait_for_dynamic_content_loaded(driver, timeout=4, verbose=verbose)
+                    time.sleep(1.2)  # Fallback
             except ImportError:
                 # Fallback về time.sleep nếu module chưa có
                 # Scroll đến seller section và wait lâu hơn
@@ -312,6 +319,231 @@ def crawl_product_detail_with_selenium(
     )
 
 
+def crawl_product_with_retry(
+    url: str,
+    max_retries: int | None = None,
+    required_fields: list[str] | None = None,
+    verbose: bool = True,
+    use_redis_cache: bool = True,
+    use_rate_limiting: bool = True,
+) -> dict[str, Any] | None:
+    """
+    Crawl product with conditional retry for missing critical fields.
+
+    This function implements the Hybrid Approach:
+    - Tier 1: Normal crawl with moderate wait times
+    - Tier 2: Retry with increased wait times if important fields missing
+    - Tier 3: Accept or skip based on data quality after max retries
+
+    Args:
+        url: Product URL to crawl
+        max_retries: Maximum retry attempts (default: from config)
+        required_fields: Fields that must be present (default: from config)
+        verbose: Enable logging
+        use_redis_cache: Use Redis cache for HTML
+        use_rate_limiting: Use adaptive rate limiting
+
+    Returns:
+        Product data dict with metadata, or None if failed/skipped
+    """
+    import time
+    from datetime import datetime
+
+    # Import config and validator
+    try:
+        from .config import PRODUCT_RETRY_MAX_ATTEMPTS, PRODUCT_RETRY_DELAY_BASE
+        from .data_validator import enrich_product_metadata, validate_product_data
+    except ImportError:
+        # Fallback defaults
+        PRODUCT_RETRY_MAX_ATTEMPTS = 2
+        PRODUCT_RETRY_DELAY_BASE = 3
+
+        def validate_product_data(product, retry_count=0):
+            return "accept"
+
+        def enrich_product_metadata(product, retry_count=0, crawl_status="success"):
+            return product
+
+    if max_retries is None:
+        max_retries = PRODUCT_RETRY_MAX_ATTEMPTS
+
+    retry_count = 0
+    last_product = None
+    crawl_start_time = datetime.now()
+
+    for attempt in range(max_retries + 1):
+        try:
+            attempt_start_time = time.time()
+
+            if verbose:
+                tier = "Tier 1 (Normal)" if attempt == 0 else f"Tier 2 (Retry {attempt})"
+                print(f"\n[Retry Wrapper] {tier} - Crawling {url[:60]}...")
+
+            # Crawl HTML
+            if attempt == 0:
+                # Tier 1: Normal wait times
+                html = crawl_product_detail_with_selenium(
+                    url,
+                    save_html=False,
+                    verbose=verbose,
+                    max_retries=1,  # Internal retries
+                    timeout=120,
+                    use_redis_cache=use_redis_cache,
+                    use_rate_limiting=use_rate_limiting,
+                )
+            else:
+                # Tier 2: Increased wait times for retry
+                # Temporarily override config values
+                import sys
+
+                # Create temporary config module with increased wait times
+                if "pipelines.crawl.config" in sys.modules:
+                    config_module = sys.modules["pipelines.crawl.config"]
+                    # Save original values
+                    original_implicit = getattr(config_module, "CRAWL_IMPLICIT_WAIT_NORMAL", 4)
+                    original_dynamic = getattr(
+                        config_module, "CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL", 4
+                    )
+                    original_sleep = getattr(config_module, "CRAWL_POST_SCROLL_SLEEP_NORMAL", 1.2)
+
+                    # Set retry values (2x normal)
+                    config_module.CRAWL_IMPLICIT_WAIT_NORMAL = getattr(
+                        config_module, "CRAWL_IMPLICIT_WAIT_RETRY", 8
+                    )
+                    config_module.CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL = getattr(
+                        config_module, "CRAWL_DYNAMIC_CONTENT_WAIT_RETRY", 8
+                    )
+                    config_module.CRAWL_POST_SCROLL_SLEEP_NORMAL = getattr(
+                        config_module, "CRAWL_POST_SCROLL_SLEEP_RETRY", 2.4
+                    )
+
+                try:
+                    html = crawl_product_detail_with_selenium(
+                        url,
+                        save_html=False,
+                        verbose=verbose,
+                        max_retries=1,
+                        timeout=120,
+                        use_redis_cache=False,  # Don't use cache on retry
+                        use_rate_limiting=use_rate_limiting,
+                    )
+                finally:
+                    # Restore original values
+                    if "pipelines.crawl.config" in sys.modules:
+                        config_module.CRAWL_IMPLICIT_WAIT_NORMAL = original_implicit
+                        config_module.CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL = original_dynamic
+                        config_module.CRAWL_POST_SCROLL_SLEEP_NORMAL = original_sleep
+
+            if not html:
+                raise ValueError("Failed to get HTML content")
+
+            # Extract product data
+            product = extract_product_detail(html, url, verbose=verbose)
+
+            if not product:
+                raise ValueError("Failed to extract product data")
+
+            # Calculate crawl duration
+            crawl_duration_ms = int((time.time() - attempt_start_time) * 1000)
+
+            # Validate product data
+            action = validate_product_data(product, retry_count=retry_count)
+
+            if verbose:
+                print(f"[Retry Wrapper] Validation result: {action}")
+                if action == "retry":
+                    missing = product.get("_metadata", {}).get("missing_fields", [])
+                    print(f"[Retry Wrapper] Missing fields: {missing}")
+
+            if action == "accept":
+                # Enrich with metadata
+                product = enrich_product_metadata(
+                    product, retry_count=retry_count, crawl_status="success"
+                )
+                # Add timing metadata
+                if "_metadata" not in product:
+                    product["_metadata"] = {}
+                product["_metadata"]["crawl_duration_ms"] = crawl_duration_ms
+                product["_metadata"]["started_at"] = crawl_start_time.isoformat()
+                product["_metadata"]["completed_at"] = datetime.now().isoformat()
+
+                if verbose:
+                    score = product["_metadata"].get("data_completeness_score", 0)
+                    print(f"[Retry Wrapper] ✅ Accepted with score: {score}")
+
+                last_product = product
+                return product
+
+            elif action == "skip":
+                if verbose:
+                    print(f"[Retry Wrapper] ❌ Skipping product (missing critical fields)")
+                return None
+
+            elif action == "retry":
+                if retry_count < max_retries:
+                    retry_count += 1
+                    last_product = product
+
+                    # Wait before retry (exponential backoff)
+                    retry_delay = PRODUCT_RETRY_DELAY_BASE * (attempt + 1)
+                    if verbose:
+                        print(
+                            f"[Retry Wrapper] ⏳ Waiting {retry_delay}s before retry {retry_count}..."
+                        )
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    # Max retries reached - accept with partial data
+                    product = enrich_product_metadata(
+                        product, retry_count=retry_count, crawl_status="partial"
+                    )
+                    product["_metadata"]["crawl_duration_ms"] = crawl_duration_ms
+                    product["_metadata"]["started_at"] = crawl_start_time.isoformat()
+                    product["_metadata"]["completed_at"] = datetime.now().isoformat()
+
+                    if verbose:
+                        score = product["_metadata"].get("data_completeness_score", 0)
+                        print(
+                            f"[Retry Wrapper] ⚠️  Accepted with partial data after {max_retries} retries (score: {score})"
+                        )
+
+                    last_product = product
+                    return product
+
+        except Exception as e:
+            if verbose:
+                print(f"[Retry Wrapper] Error on attempt {attempt + 1}: {type(e).__name__}: {e}")
+
+            if attempt < max_retries:
+                retry_count += 1
+                retry_delay = PRODUCT_RETRY_DELAY_BASE * (attempt + 1)
+                if verbose:
+                    print(f"[Retry Wrapper] ⏳ Waiting {retry_delay}s before retry...")
+                time.sleep(retry_delay)
+                continue
+            else:
+                # Failed after all retries
+                if verbose:
+                    print(f"[Retry Wrapper] ❌ Failed after {max_retries + 1} attempts")
+
+                # Return last product with error metadata if available
+                if last_product:
+                    last_product = enrich_product_metadata(
+                        last_product, retry_count=retry_count, crawl_status="failed"
+                    )
+                    if "_metadata" not in last_product:
+                        last_product["_metadata"] = {}
+                    last_product["_metadata"]["error_message"] = str(e)
+                    last_product["_metadata"]["started_at"] = crawl_start_time.isoformat()
+                    last_product["_metadata"]["completed_at"] = datetime.now().isoformat()
+                    return last_product
+
+                return None
+
+    return None
+
+
+
 def crawl_product_detail_with_driver(
     driver: Any,
     url: str,
@@ -373,8 +605,12 @@ def crawl_product_detail_with_driver(
             time.sleep(0.7)  # Fixed delay fallback
 
     try:
-        driver.set_page_load_timeout(timeout)
-        driver.implicitly_wait(3)
+        # Tier 1: Moderate wait time increase
+        try:
+            from .config import CRAWL_IMPLICIT_WAIT_NORMAL
+            driver.implicitly_wait(CRAWL_IMPLICIT_WAIT_NORMAL)  # 4s
+        except ImportError:
+            driver.implicitly_wait(4)  # Fallback
         if verbose:
             print(f"[Selenium] Đang mở {url}... (reuse driver)")
         driver.get(url)
@@ -404,14 +640,15 @@ def crawl_product_detail_with_driver(
             driver.execute_script("window.scrollTo(0, 2500);")
             wait_after_scroll(driver, timeout=1, verbose=verbose)
 
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             # Wait cho dynamic content (seller, price, sales_count, rating) load
-            # Tăng timeout lên 3s để đảm bảo seller và original_price được load
-            wait_for_dynamic_content_loaded(driver, timeout=3, verbose=verbose)
-
-            # Thêm wait bổ sung sau khi scroll xong để đảm bảo dynamic content load đầy đủ
-            # Một số pages load chậm hơn → cần thêm 0.5-1s wait
-            time.sleep(0.8)  # Wait thêm để seller và price load đầy đủ
+            # Tier 1: Increased timeout to ensure seller and original_price load
+            try:
+                from .config import CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, CRAWL_POST_SCROLL_SLEEP_NORMAL
+                wait_for_dynamic_content_loaded(driver, timeout=CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, verbose=verbose)  # 4s
+                time.sleep(CRAWL_POST_SCROLL_SLEEP_NORMAL)  # 1.2s
+            except ImportError:
+                wait_for_dynamic_content_loaded(driver, timeout=4, verbose=verbose)
+                time.sleep(1.2)  # Fallback
         except ImportError:
             # Fallback về time.sleep
             driver.execute_script("window.scrollTo(0, 500);")

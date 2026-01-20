@@ -20,6 +20,40 @@ from psycopg2.pool import SimpleConnectionPool
 from ..validate_category_path import fix_products_category_paths
 
 
+def normalize_category_id(cat_id: str | None) -> str | None:
+    """
+    Normalize category ID to consistent format: 'c{id}'
+    
+    Args:
+        cat_id: Category ID in any format ('23570', 'c23570', etc.)
+    
+    Returns:
+        Normalized category ID ('c23570') or None
+    
+    Examples:
+        >>> normalize_category_id('23570')
+        'c23570'
+        >>> normalize_category_id('c23570')
+        'c23570'
+        >>> normalize_category_id(None)
+        None
+    """
+    if not cat_id:
+        return None
+    
+    # Convert to string and strip whitespace
+    cat_id_str = str(cat_id).strip()
+    
+    # Remove all 'c' prefixes and whitespace
+    clean_id = cat_id_str.replace('c', '').replace('C', '').strip()
+    
+    # Return with 'c' prefix if we have a valid ID
+    if clean_id and clean_id.isdigit():
+        return f"c{clean_id}"
+    
+    return None
+
+
 class PostgresStorage:
     """Class để lưu và truy vấn dữ liệu crawl từ PostgreSQL với connection pooling tối ưu"""
 
@@ -130,10 +164,10 @@ class PostgresStorage:
                     for row in rows:
                         cat_id = row[0]
                         if cat_id:
-                            # Normalize: ensure 'c' prefix if it looks like just numbers
-                            if str(cat_id).isdigit():
-                                cat_id = f"c{cat_id}"
-                            used_ids.add(cat_id)
+                            # Normalize using the same function as elsewhere for consistency
+                            normalized_id = normalize_category_id(cat_id)
+                            if normalized_id:
+                                used_ids.add(normalized_id)
         except Exception as e:
             print(f"⚠️  Error getting used category IDs: {e}")
         return used_ids
@@ -239,8 +273,12 @@ class PostgresStorage:
 
         Đã loại bỏ các trường: category_path, review_count, description, images,
         estimated_revenue, price_savings, price_category, value_score, sales_velocity,
-        specifications, popularity_score, discount_amount
+        specifications, popularity_score, discount_amount, stock_quantity, stock_status
+        
+        Đã thêm metadata columns: data_quality, last_crawl_status, retry_count
+        Đã thêm timestamp columns: last_crawled_at, last_crawl_attempt_at, first_seen_at
         """
+        # Step 1: Create table if not exists
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS products (
@@ -261,54 +299,174 @@ class PostgresStorage:
                 seller_is_official BOOLEAN,
                 brand VARCHAR(255),
                 stock_available BOOLEAN,
-                stock_quantity INTEGER,
-                stock_status VARCHAR(100),
                 shipping JSONB,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            -- Only essential index: category_id is used to join with categories table
-            CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
         """
         )
+        
+        # Step 2: Create index
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
+        """)
+        
+        # Step 3: Add metadata columns (for existing tables) - Run separately!
+        try:
+            cur.execute("""
+                ALTER TABLE products ADD COLUMN IF NOT EXISTS data_quality VARCHAR(50);
+                ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawl_status VARCHAR(50);
+                ALTER TABLE products ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+                ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawled_at TIMESTAMP;
+                ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawl_attempt_at TIMESTAMP;
+                ALTER TABLE products ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMP;
+            """)
+        except Exception as e:
+            print(f"⚠️  Note: Some ALTER TABLE statements for products may have been skipped: {e}")
+        
+        # Step 4: Create indexes for metadata columns
+        try:
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_products_data_quality ON products(data_quality);
+                CREATE INDEX IF NOT EXISTS idx_products_retry_count ON products(retry_count);
+                CREATE INDEX IF NOT EXISTS idx_products_last_crawled_at ON products(last_crawled_at);
+                CREATE INDEX IF NOT EXISTS idx_products_last_crawl_attempt_at ON products(last_crawl_attempt_at);
+            """)
+        except Exception as e:
+            print(f"⚠️  Note: Some index creation for products may have been skipped: {e}")
+        
+        # Step 5: Add foreign key constraint if not exists
+        cur.execute("""
+            SELECT constraint_name FROM information_schema.table_constraints
+            WHERE table_name = 'products'
+              AND constraint_type = 'FOREIGN KEY'
+              AND constraint_name = 'fk_products_category_id'
+        """)
+        
+        if not cur.fetchone():
+            try:
+                cur.execute("""
+                    ALTER TABLE products
+                    ADD CONSTRAINT fk_products_category_id
+                    FOREIGN KEY (category_id)
+                    REFERENCES categories(category_id)
+                    ON DELETE SET NULL
+                    ON UPDATE CASCADE
+                """)
+            except Exception:
+                # FK constraint may fail if there are orphan records
+                # This is expected and will be handled by migration script
+                pass
+
 
     def _ensure_history_schema(self, cur) -> None:
         """Đảm bảo bảng crawl_history và các index tồn tại.
 
-        Bảng này lưu lịch sử giá CHỈ KHI CÓ THAY ĐỔI (giá, discount, etc.)
-        để tiết kiệm dung lượng database.
-
-        Schema đã được tối ưu:
-        - Loại bỏ: crawl_type, status, started_at, completed_at (không cần thiết)
-        - Giữ lại: product_id, price, original_price, discount_percent, price_change, crawled_at
+        Bảng này lưu lịch sử crawl cho MỌI lần crawl (không chỉ khi có thay đổi giá).
+        MỖI LẦN CRAWL = 1 RECORD MỚI (không ghi đè) → Lịch sử đầy đủ
+        
+        Schema tối ưu - CHỈ GIỮ CORE FIELDS:
+        - Price tracking: price, original_price, discount_percent, price_change, previous_*
+        - Price analysis: discount_amount (tiền giảm), price_change_percent (% thay đổi)
+        - Sales tracking: sales_count, sales_change
+        - Promotion: is_flash_sale (đang khuyến mãi mạnh)
+        - Crawl type: 'price_change', 'no_change'
+        - Timestamps: crawled_at, updated_at
+        
+        Đã XÓA các fields không populate được:
+        - started_at, completed_at (không track được từ app)
+        - crawl_status, retry_count, error_message (job-level, không product-level)
+        - missing_fields, data_completeness_score (không cần trong history)
+        - crawl_duration_ms, page_load_time_ms (performance metrics không cần lưu)
         """
+        # Step 1: Create table if not exists
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS crawl_history (
                 id SERIAL PRIMARY KEY,
                 product_id VARCHAR(255) NOT NULL,
+                
+                -- Price tracking
                 price DECIMAL(12, 2) NOT NULL,
                 original_price DECIMAL(12, 2),
                 discount_percent INTEGER,
+                discount_amount DECIMAL(12, 2),
                 price_change DECIMAL(12, 2),
+                price_change_percent DECIMAL(5, 2),
                 previous_price DECIMAL(12, 2),
                 previous_original_price DECIMAL(12, 2),
                 previous_discount_percent INTEGER,
-                crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                
+                -- Sales tracking
+                sales_count INTEGER,
+                sales_change INTEGER,
+                
+                -- Promotion tracking
+                is_flash_sale BOOLEAN DEFAULT FALSE,
+                
+                -- Metadata
+                crawl_type VARCHAR(20) DEFAULT 'price_change',
+                
+                -- Timestamps
+                crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-
-            -- Optimized indexes for common queries
-            CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
-            CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
-            -- Composite index for getting latest price per product (most common query)
-            CREATE INDEX IF NOT EXISTS idx_history_product_latest ON crawl_history(product_id, crawled_at DESC);
-
-            -- Ensure new columns exist (migration for existing table)
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_price DECIMAL(12, 2);
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_original_price DECIMAL(12, 2);
-            ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_discount_percent INTEGER;
         """
         )
+
+        # Step 2: Create indexes (safe to run multiple times)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
+            CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
+            CREATE INDEX IF NOT EXISTS idx_history_product_latest ON crawl_history(product_id, crawled_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_history_crawl_type ON crawl_history(crawl_type);
+            CREATE INDEX IF NOT EXISTS idx_history_price_change ON crawl_history(price_change) WHERE price_change IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_history_flash_sale ON crawl_history(is_flash_sale) WHERE is_flash_sale = true;
+            CREATE INDEX IF NOT EXISTS idx_history_discount ON crawl_history(discount_percent) WHERE discount_percent > 0;
+        """)
+        
+        # Step 3: Add missing columns (for existing tables) - CRITICAL: Run separately!
+        # This ensures that if the table already existed before code update, it gets the new columns
+        try:
+            cur.execute("""
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_price DECIMAL(12, 2);
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_original_price DECIMAL(12, 2);
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_discount_percent INTEGER;
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_type VARCHAR(20) DEFAULT 'price_change';
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS sales_count INTEGER;
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS sales_change INTEGER;
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS discount_amount DECIMAL(12, 2);
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS price_change_percent DECIMAL(5, 2);
+                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS is_flash_sale BOOLEAN DEFAULT FALSE;
+            """)
+        except Exception as e:
+            # Log but don't fail - columns might already exist
+            print(f"⚠️  Note: Some ALTER TABLE statements may have been skipped: {e}")
+        
+        # Step 4: Add foreign key constraint if not exists
+        cur.execute("""
+            SELECT constraint_name FROM information_schema.table_constraints
+            WHERE table_name = 'crawl_history'
+              AND constraint_type = 'FOREIGN KEY'
+              AND constraint_name = 'fk_crawl_history_product_id'
+        """)
+        
+        if not cur.fetchone():
+            try:
+                cur.execute("""
+                    ALTER TABLE crawl_history
+                    ADD CONSTRAINT fk_crawl_history_product_id
+                    FOREIGN KEY (product_id)
+                    REFERENCES products(product_id)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
+                """)
+            except Exception:
+                # FK constraint may fail if there are orphan records
+                # This is expected and will be handled by migration script
+                pass
+
 
     def _write_dicts_to_csv_buffer(
         self, rows: list[dict[str, Any]], columns: list[str]
@@ -423,7 +581,7 @@ class PostgresStorage:
     def save_categories(
         self,
         categories: list[dict[str, Any]],
-        only_leaf: bool = True,
+        only_leaf: bool = False,  # Changed: Load ALL categories by default
         sync_with_products: bool = False,
     ) -> int:
         """
@@ -431,8 +589,8 @@ class PostgresStorage:
 
         Args:
             categories: Danh sách categories cần lưu
-            only_leaf: Nếu True, chỉ lưu categories có is_leaf = true (mặc định).
-                      Nếu False, lưu tất cả categories.
+            only_leaf: Nếu True, chỉ lưu categories có is_leaf = true.
+                      Nếu False (DEFAULT), lưu tất cả categories including parents.
             sync_with_products: Nếu True, chỉ lưu các categories có match với product
                       (category_id có trong bảng products).
 
@@ -442,85 +600,368 @@ class PostgresStorage:
         if not categories:
             return 0
 
-        # Build URL -> category lookup for path building
+        # CRITICAL: Đảm bảo tất cả parent categories được include trong danh sách
+        # để có thể build path đầy đủ
+        url_to_cat = {cat.get("url"): cat for cat in categories}
+        all_urls = set(url_to_cat.keys())
+        
+        # Tìm tất cả parent URLs cần thiết (traverse đầy đủ lên đến root)
+        needed_parent_urls = set()
+        for cat in categories:
+            current = cat
+            visited = set()
+            depth = 0
+            while current and depth < 10:
+                parent_url = current.get("parent_url")
+                if not parent_url or parent_url in visited:
+                    break
+                visited.add(parent_url)
+                if parent_url not in all_urls:
+                    needed_parent_urls.add(parent_url)
+                # Tìm parent trong url_to_cat
+                if parent_url in url_to_cat:
+                    current = url_to_cat[parent_url]
+                else:
+                    break
+                depth += 1
+        
+        # Nếu có parent URLs cần thiết nhưng chưa có trong danh sách,
+        # thử load từ file JSON categories (nếu có)
+        if needed_parent_urls:
+            print(f"📂 Tìm thấy {len(needed_parent_urls)} parent URLs cần thiết nhưng chưa có trong danh sách")
+            print(f"   Các parent URLs: {list(needed_parent_urls)[:5]}...")
+            
+            # Thử load từ file JSON categories
+            json_paths = [
+                "/opt/airflow/data/raw/categories_recursive_optimized.json",
+                os.path.join(os.getcwd(), "data", "raw", "categories_recursive_optimized.json"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "raw", "categories_recursive_optimized.json"),
+            ]
+            
+            categories_from_json = {}
+            json_file_used = None
+            for json_path in json_paths:
+                if os.path.exists(json_path):
+                    try:
+                        with open(json_path, encoding="utf-8") as f:
+                            all_categories = json.load(f)
+                        # Build URL -> category lookup
+                        for cat_json in all_categories:
+                            url = cat_json.get("url")
+                            if url:
+                                categories_from_json[url] = cat_json
+                        json_file_used = json_path
+                        print(f"📂 Loaded {len(categories_from_json)} categories from JSON: {json_path}")
+                        break
+                    except Exception as e:
+                        print(f"⚠️  Could not load categories JSON from {json_path}: {e}")
+            
+            # Include missing parent categories từ JSON
+            if categories_from_json:
+                added_count = 0
+                for parent_url in needed_parent_urls:
+                    if parent_url in categories_from_json:
+                        parent_cat = categories_from_json[parent_url]
+                        if parent_url not in url_to_cat:
+                            categories.append(parent_cat)
+                            url_to_cat[parent_url] = parent_cat
+                            added_count += 1
+                            # Traverse tiếp để include parent của parent
+                            current = parent_cat
+                            depth = 0
+                            while current and depth < 5:
+                                grandparent_url = current.get("parent_url")
+                                if not grandparent_url or grandparent_url in url_to_cat:
+                                    break
+                                if grandparent_url in categories_from_json:
+                                    grandparent_cat = categories_from_json[grandparent_url]
+                                    categories.append(grandparent_cat)
+                                    url_to_cat[grandparent_url] = grandparent_cat
+                                    added_count += 1
+                                    current = grandparent_cat
+                                else:
+                                    break
+                                depth += 1
+                
+                if added_count > 0:
+                    print(f"✅ Đã thêm {added_count} parent categories từ file JSON vào danh sách")
+                    # Update all_urls sau khi thêm
+                    all_urls = set(url_to_cat.keys())
+        
+        # Build URL -> category lookup for path building (sau khi đã include parents)
         url_to_cat = {cat.get("url"): cat for cat in categories}
 
         # Find all parent URLs to determine is_leaf
         parent_urls = {cat.get("parent_url") for cat in categories if cat.get("parent_url")}
 
-        def build_category_path(cat: dict) -> list[str]:
+        # Cache để lưu parent categories đã query từ DB
+        # Cache này được share giữa tất cả các categories trong cùng một batch
+        db_parent_cache = {}
+
+        def build_category_path(cat: dict, cur=None) -> list[str]:
+            """Build category path đầy đủ bằng cách traverse lên parent.
+            
+            Logic:
+            1. Ưu tiên lấy từ url_to_cat (categories đang load trong batch hiện tại)
+            2. Nếu không có, query từ DB (và cache lại)
+            3. Query đệ quy lên đến root category (parent_url = NULL)
+            """
             path = []
             current = cat
             visited = set()
-            while current:
-                if current.get("url") in visited:
+            max_depth = 10  # Giới hạn độ sâu để tránh infinite loop
+            
+            depth = 0
+            while current and depth < max_depth:
+                url = current.get("url")
+                if url in visited:
+                    # Phát hiện circular reference, dừng lại
                     break
-                visited.add(current.get("url"))
-                path.insert(0, current.get("name", ""))
+                visited.add(url)
+                depth += 1
+                
+                # Thêm name vào đầu path
+                name = current.get("name", "")
+                if name:  # Chỉ thêm nếu name không rỗng
+                    path.insert(0, name)
+                
+                # Tìm parent
                 parent_url = current.get("parent_url")
-                current = url_to_cat.get(parent_url) if parent_url else None
+                if not parent_url:
+                    # Đã đến root category, dừng lại
+                    break
+                
+                # Ưu tiên 1: Lấy từ url_to_cat (categories đang load trong batch hiện tại)
+                if parent_url in url_to_cat:
+                    current = url_to_cat[parent_url]
+                    continue
+                
+                # Ưu tiên 2: Lấy từ cache (đã query từ DB trước đó trong cùng batch)
+                if parent_url in db_parent_cache:
+                    current = db_parent_cache[parent_url]
+                    continue
+                
+                # Ưu tiên 3: Query từ DB nếu có cursor
+                if cur is not None:
+                    try:
+                        cur.execute(
+                            "SELECT name, url, parent_url FROM categories WHERE url = %s",
+                            (parent_url,)
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            parent_cat = {
+                                "name": row[0],
+                                "url": row[1],
+                                "parent_url": row[2],
+                            }
+                            # Cache lại để dùng cho các categories khác
+                            db_parent_cache[parent_url] = parent_cat
+                            current = parent_cat
+                            continue
+                        else:
+                            # Không tìm thấy parent trong DB
+                            # Có thể parent chưa được load, nhưng vẫn tiếp tục với path hiện tại
+                            # (path đã có ít nhất category hiện tại)
+                            break
+                    except Exception as e:
+                        # Lỗi khi query, log nhưng không fail
+                        # Tiếp tục với path hiện tại
+                        print(f"⚠️  Warning: Error querying parent {parent_url}: {e}")
+                        break
+                else:
+                    # Không có cursor để query, dừng lại
+                    break
+            
             return path
 
         # Get used category IDs if filtering is enabled
         used_category_ids = set()
+        urls_to_keep = set()  # URLs of categories to keep (including parents)
+        
         if sync_with_products:
             used_category_ids = self.get_used_category_ids()
             print(f"🔍 Found {len(used_category_ids)} active categories in products table")
+            
+            # IMPORTANT: If no products exist yet, disable filtering to load all categories
+            if not used_category_ids:
+                print("⚠️  No products found - loading ALL categories (will filter on next run)")
+                sync_with_products = False  # Disable filtering
+            else:
+                # Smart filtering: Find all leaf categories with products + their parent hierarchy
+                # Step 1: Find leaf categories that have products
+                for cat in categories:
+                    cat_id = cat.get("category_id")
+                    if not cat_id and cat.get("url"):
+                        match = re.search(r"c?(\d+)", cat.get("url", ""))
+                        if match:
+                            cat_id = match.group(1)
+                    cat_id = normalize_category_id(cat_id)
+                    
+                    # Check if this category has products
+                    is_leaf = cat.get("url") not in parent_urls
+                    if is_leaf and cat_id:
+                        # FIX: Normalize both sides for comparison
+                        # used_category_ids already contains normalized IDs (c{id} format)
+                        if cat_id in used_category_ids:
+                            # Add this leaf category
+                            urls_to_keep.add(cat.get("url"))
+                            
+                            # Step 2: Traverse up to collect ALL parent URLs
+                            current = cat
+                            visited = set()
+                            while current:
+                                url = current.get("url")
+                                if url in visited:
+                                    break
+                                visited.add(url)
+                                urls_to_keep.add(url)
+                                parent_url = current.get("parent_url")
+                                current = url_to_cat.get(parent_url) if parent_url else None
+                
+                print(f"📂 Keeping {len(urls_to_keep)} categories (leaves + parents)")
 
-        prepared_categories = []
-        for cat in categories:
-            # Extract category_id from URL if missing - ALWAYS include 'c' prefix for consistency
-            cat_id = cat.get("category_id")
-            if not cat_id and cat.get("url"):
-                match = re.search(r"(c\d+)", cat.get("url", ""))
-                if match:
-                    cat_id = match.group(1)  # Include 'c' prefix (e.g., 'c23570')
-            # Ensure existing category_id has 'c' prefix
-            elif cat_id and not cat_id.startswith("c"):
-                cat_id = f"c{cat_id}"
+        # Build category paths với connection đến DB để query parent nếu cần
+        # Trước tiên, load tất cả parent categories từ DB vào url_to_cat để đảm bảo path đầy đủ
+        with self.get_connection() as conn:
+            with conn.cursor() as build_cur:
+                # Tìm tất cả parent URLs cần thiết (đệ quy lên đến root)
+                all_parent_urls_needed = set()
+                for cat in categories:
+                    current = cat
+                    visited = set()
+                    depth = 0
+                    while current and depth < 10:
+                        parent_url = current.get("parent_url")
+                        if not parent_url or parent_url in visited:
+                            break
+                        visited.add(parent_url)
+                        all_parent_urls_needed.add(parent_url)
+                        # Tìm parent của parent trong url_to_cat hoặc DB
+                        if parent_url in url_to_cat:
+                            current = url_to_cat[parent_url]
+                        else:
+                            # Cần query từ DB để tiếp tục traverse
+                            try:
+                                build_cur.execute(
+                                    "SELECT name, url, parent_url, category_id, image_url, level FROM categories WHERE url = %s",
+                                    (parent_url,)
+                                )
+                                row = build_cur.fetchone()
+                                if row:
+                                    current = {
+                                        "name": row[0],
+                                        "url": row[1],
+                                        "parent_url": row[2],
+                                        "category_id": row[3],
+                                        "image_url": row[4],
+                                        "level": row[5],
+                                    }
+                                    # Thêm vào url_to_cat và cache
+                                    url_to_cat[row[1]] = current
+                                    db_parent_cache[row[1]] = current
+                                else:
+                                    break
+                            except Exception:
+                                break
+                        depth += 1
+                
+                # Load tất cả parent categories từ DB nếu chưa có trong url_to_cat (batch query)
+                if all_parent_urls_needed:
+                    missing_parent_urls = [
+                        url for url in all_parent_urls_needed 
+                        if url not in url_to_cat
+                    ]
+                    
+                    if missing_parent_urls:
+                        # Query batch để load parent categories từ DB
+                        placeholders = ",".join(["%s"] * len(missing_parent_urls))
+                        try:
+                            build_cur.execute(
+                                f"""
+                                SELECT name, url, parent_url, category_id, image_url, level
+                                FROM categories 
+                                WHERE url IN ({placeholders})
+                                """,
+                                missing_parent_urls
+                            )
+                            loaded_count = 0
+                            for row in build_cur.fetchall():
+                                parent_cat = {
+                                    "name": row[0],
+                                    "url": row[1],
+                                    "parent_url": row[2],
+                                    "category_id": row[3],
+                                    "image_url": row[4],
+                                    "level": row[5],
+                                }
+                                # Thêm vào url_to_cat để dùng khi build path
+                                url_to_cat[row[1]] = parent_cat
+                                # Cache lại để dùng cho các categories khác
+                                db_parent_cache[row[1]] = parent_cat
+                                loaded_count += 1
+                            
+                            if loaded_count > 0:
+                                print(f"📂 Loaded {loaded_count} parent categories from DB for path building")
+                        except Exception as e:
+                            print(f"⚠️  Warning: Could not load all parent categories from DB: {e}")
+                
+                prepared_categories = []
+                for cat in categories:
+                    # Extract and normalize category_id
+                    cat_id = cat.get("category_id")
+                    if not cat_id and cat.get("url"):
+                        # Extract from URL
+                        match = re.search(r"c?(\d+)", cat.get("url", ""))
+                        if match:
+                            cat_id = match.group(1)
+                    
+                    # Normalize to 'c{id}' format
+                    cat_id = normalize_category_id(cat_id)
 
-            category_path = build_category_path(cat)
-            root_name = category_path[0] if category_path else ""
-            is_leaf = cat.get("url") not in parent_urls
+                    # Build category_path đầy đủ (có thể query parent từ DB nếu cần)
+                    category_path = build_category_path(cat, cur=build_cur)
+                    root_name = category_path[0] if category_path else ""
+                    is_leaf = cat.get("url") not in parent_urls
 
-            # Nếu only_leaf=True, chỉ lưu categories có is_leaf=True
-            if only_leaf and not is_leaf:
-                continue
-
-            # Nếu sync_with_products=True, chỉ lưu categories có trong products table
-            if sync_with_products and is_leaf:
-                # Check normalized ID
-                if cat_id not in used_category_ids:
-                    # Try alternate format (without 'c' prefix) just in case
-                    raw_id = cat_id[1:] if cat_id.startswith("c") else cat_id
-                    if raw_id not in used_category_ids:
+                    # Nếu only_leaf=True, chỉ lưu categories có is_leaf=True
+                    if only_leaf and not is_leaf:
                         continue
 
-            # Extract level_1 đến level_5 từ category_path để thể hiện rõ theo từng độ sâu
-            level_1 = category_path[0] if len(category_path) > 0 else None
-            level_2 = category_path[1] if len(category_path) > 1 else None
-            level_3 = category_path[2] if len(category_path) > 2 else None
-            level_4 = category_path[3] if len(category_path) > 3 else None
-            level_5 = category_path[4] if len(category_path) > 4 else None
+                    # Nếu sync_with_products=True, chỉ lưu categories trong urls_to_keep
+                    if sync_with_products:
+                        if cat.get("url") not in urls_to_keep:
+                            continue
 
-            prepared_categories.append(
-                {
-                    "category_id": cat_id,
-                    "name": cat.get("name"),
-                    "url": cat.get("url"),
-                    "image_url": cat.get("image_url"),
-                    "parent_url": cat.get("parent_url"),
-                    "level": cat.get("level", 0),
-                    "category_path": category_path,
-                    "level_1": level_1,
-                    "level_2": level_2,
-                    "level_3": level_3,
-                    "level_4": level_4,
-                    "level_5": level_5,
-                    "root_category_name": root_name,
-                    "is_leaf": is_leaf,
-                }
-            )
+                    # Extract level_1 đến level_5 từ category_path để thể hiện rõ theo từng độ sâu
+                    level_1 = category_path[0] if len(category_path) > 0 else None
+                    level_2 = category_path[1] if len(category_path) > 1 else None
+                    level_3 = category_path[2] if len(category_path) > 2 else None
+                    level_4 = category_path[3] if len(category_path) > 3 else None
+                    level_5 = category_path[4] if len(category_path) > 4 else None
+
+                    # Tính level từ độ dài category_path (đảm bảo chính xác)
+                    # Level bắt đầu từ 1 (level 1 = root category)
+                    calculated_level = len(category_path) if category_path else 0
+
+                    prepared_categories.append(
+                        {
+                            "category_id": cat_id,
+                            "name": cat.get("name"),
+                            "url": cat.get("url"),
+                            "image_url": cat.get("image_url"),
+                            "parent_url": cat.get("parent_url"),
+                            "level": calculated_level,  # Dùng level tính từ path thay vì từ data gốc
+                            "category_path": category_path,
+                            "level_1": level_1,
+                            "level_2": level_2,
+                            "level_3": level_3,
+                            "level_4": level_4,
+                            "level_5": level_5,
+                            "root_category_name": root_name,
+                            "is_leaf": is_leaf,
+                        }
+                    )
 
         columns = [
             "category_id",
@@ -539,7 +980,37 @@ class PostgresStorage:
             "is_leaf",
         ]
 
-        csv_buffer = self._write_dicts_to_csv_buffer(prepared_categories, columns)
+        # Deduplicate by category_id to prevent UniqueViolation
+        # Keep the entry with the shortest URL (usually the canonical one)
+        unique_categories_map = {}
+        for cat in prepared_categories:
+            cat_id = cat.get("category_id")
+            if not cat_id:
+                continue
+                
+            if cat_id in unique_categories_map:
+                existing = unique_categories_map[cat_id]
+                # If current URL is shorter or looks "better", replace
+                # Also prefer non-empty names
+                curr_url_len = len(cat.get("url", ""))
+                exist_url_len = len(existing.get("url", ""))
+                
+                replace = False
+                if curr_url_len < exist_url_len:
+                    replace = True
+                elif curr_url_len == exist_url_len:
+                     # Tie-breaker: prefer longer name (more descriptive)
+                     if len(cat.get("name", "")) > len(existing.get("name", "")):
+                         replace = True
+                
+                if replace:
+                    unique_categories_map[cat_id] = cat
+            else:
+                unique_categories_map[cat_id] = cat
+        
+        final_categories = list(unique_categories_map.values())
+
+        csv_buffer = self._write_dicts_to_csv_buffer(final_categories, columns)
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
@@ -594,6 +1065,41 @@ class PostgresStorage:
 
                 return saved_count
 
+    def update_category_product_counts(self) -> int:
+        """
+        Cập nhật product_count cho tất cả categories từ bảng products thực tế.
+        
+        Phương pháp này đảm bảo:
+        - Giữ nguyên category hierarchy (tất cả parent categories)
+        - product_count chính xác dựa trên số products đã crawl
+        - Categories không có products sẽ có product_count = 0
+        
+        Returns:
+            Số lượng categories đã cập nhật
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Update product_count cho tất cả categories
+                cur.execute("""
+                    UPDATE categories c
+                    SET 
+                        product_count = COALESCE(
+                            (SELECT COUNT(*) 
+                             FROM products p 
+                             WHERE p.category_id = c.category_id),
+                            0
+                        ),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE c.is_leaf = true
+                """)
+                leaf_updated = cur.rowcount
+                
+                # Cũng có thể tính tổng product_count cho parent categories
+                # bằng cách sum product_count của các leaf categories con
+                # (optional - hiện tại chỉ update leaf categories)
+                
+                return leaf_updated
+
     def save_products(
         self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
     ) -> dict[str, Any]:
@@ -611,6 +1117,11 @@ class PostgresStorage:
         """
         if not products:
             return {"saved_count": 0, "inserted_count": 0, "updated_count": 0}
+
+        # Normalize category_id for all products
+        for product in products:
+            if product.get("category_id"):
+                product["category_id"] = normalize_category_id(product["category_id"])
 
         # Tự động fix category_path để đảm bảo parent category ở index 0
         try:
@@ -658,7 +1169,9 @@ class PostgresStorage:
                 for i in range(0, len(products), batch_size):
                     batch = products[i : i + batch_size]
                     try:
-                        # Chuẩn bị data cho batch insert (đã loại bỏ các trường: category_path, review_count, description, images, estimated_revenue, price_savings, price_category, value_score, sales_velocity, specifications, popularity_score, discount_amount)
+                        # Chuẩn bị data cho batch insert (core fields only)
+                        # Note: metadata columns (data_quality, last_crawl_status, retry_count)
+                        # are optional and may not exist in all DB setups
                         values = [
                             (
                                 product.get("product_id"),
@@ -676,11 +1189,9 @@ class PostgresStorage:
                                 product.get("seller_name"),
                                 product.get("seller_id"),
                                 product.get("seller_is_official"),
-                                # Brand and stock
+                                # Brand and stock (only stock_available)
                                 product.get("brand"),
                                 product.get("stock_available"),
-                                product.get("stock_quantity"),
-                                product.get("stock_status"),
                                 Json(product.get("shipping")) if product.get("shipping") else None,
                             )
                             for product in batch
@@ -696,7 +1207,7 @@ class PostgresStorage:
                             )
                             batch_updated = len(batch) - batch_inserted
 
-                            # Batch INSERT ... ON CONFLICT UPDATE (đã loại bỏ các trường đã xóa: specifications, popularity_score, discount_amount)
+                            # Batch INSERT ... ON CONFLICT UPDATE (core fields only)
                             execute_values(
                                 cur,
                                 """
@@ -704,7 +1215,7 @@ class PostgresStorage:
                                     (product_id, name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, stock_quantity, stock_status, shipping)
+                                     stock_available, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id)
                                 DO UPDATE SET
@@ -723,8 +1234,6 @@ class PostgresStorage:
                                     seller_is_official = EXCLUDED.seller_is_official,
                                     brand = EXCLUDED.brand,
                                     stock_available = EXCLUDED.stock_available,
-                                    stock_quantity = EXCLUDED.stock_quantity,
-                                    stock_status = EXCLUDED.stock_status,
                                     shipping = EXCLUDED.shipping,
                                     updated_at = CURRENT_TIMESTAMP
                                 """,
@@ -740,7 +1249,7 @@ class PostgresStorage:
                             inserted_count += batch_inserted
                             updated_count += batch_updated
                         else:
-                            # Batch INSERT, bỏ qua nếu đã tồn tại (đã loại bỏ các trường đã xóa: specifications, popularity_score, discount_amount)
+                            # Batch INSERT, bỏ qua nếu đã tồn tại
                             execute_values(
                                 cur,
                                 """
@@ -748,7 +1257,7 @@ class PostgresStorage:
                                     (product_id, name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, stock_quantity, stock_status, shipping)
+                                     stock_available, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id) DO NOTHING
                                 """,
@@ -772,9 +1281,18 @@ class PostgresStorage:
         # Log crawl history for all saved products (for price tracking)
         if saved_count > 0:
             try:
-                self._log_batch_crawl_history(products[:saved_count])
+                # Use all products that were attempted (not just [:saved_count])
+                # This ensures we capture history for all products even if some failed
+                self._log_batch_crawl_history(products)
             except Exception as e:
+                import traceback
+                error_detail = traceback.format_exc()
                 print(f"⚠️  Failed to log crawl history: {e}")
+                print(f"Error details: {error_detail}")
+                # Check if it's a FK constraint error
+                if "foreign key" in str(e).lower() or "fk_crawl_history" in str(e).lower():
+                    print("💡 Hint: Foreign key constraint issue - ensure products are committed before logging history")
+
 
             # Auto-sync: Ensure all categories from products exist in categories table
             try:
@@ -790,19 +1308,22 @@ class PostgresStorage:
 
     def _ensure_categories_from_products(self, products: list[dict[str, Any]]) -> int:
         """
-        Tự động tạo missing categories từ products.
+        Tự động tạo/update missing categories từ products với đầy đủ dữ liệu từ JSON file.
 
         Khi crawl products, category_id và category_url có thể chưa tồn tại trong bảng categories.
-        Method này sẽ tự động thêm các categories đó để đảm bảo data integrity.
+        Method này sẽ:
+        1. Load categories JSON file để lấy đầy đủ thông tin
+        2. Tìm categories cần thêm dựa trên products
+        3. Insert/Update với đầy đủ dữ liệu (name, levels, path, etc.)
 
         Returns:
-            Số categories mới được thêm
+            Số categories mới được thêm/update
         """
         if not products:
             return 0
 
-        # Collect unique category info from products
-        categories_to_add = {}
+        # Collect unique category URLs from products
+        product_category_urls = {}
         for p in products:
             cat_id = p.get("category_id")
             cat_url = p.get("category_url")
@@ -814,14 +1335,80 @@ class PostgresStorage:
             if not cat_id.startswith("c"):
                 cat_id = f"c{cat_id}"
 
-            if cat_url not in categories_to_add:
-                # Chỉ lưu category_id làm tên tạm.
-                # Tên đúng (tiếng Việt có dấu) sẽ được cập nhật khi task load categories chạy.
-                categories_to_add[cat_url] = {
+            if cat_url not in product_category_urls:
+                product_category_urls[cat_url] = cat_id
+
+        if not product_category_urls:
+            return 0
+
+        # Load categories JSON file to get full data
+        import json
+        import os
+        
+        json_paths = [
+            "/opt/airflow/data/raw/categories_recursive_optimized.json",
+            os.path.join(os.getcwd(), "data", "raw", "categories_recursive_optimized.json"),
+        ]
+        
+        categories_from_json = {}
+        for json_path in json_paths:
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, encoding="utf-8") as f:
+                        all_categories = json.load(f)
+                    # Build URL -> category lookup
+                    for cat in all_categories:
+                        url = cat.get("url")
+                        if url:
+                            categories_from_json[url] = cat
+                    print(f"📂 Loaded {len(categories_from_json)} categories from JSON for enrichment")
+                    break
+                except Exception as e:
+                    print(f"⚠️  Could not load categories JSON: {e}")
+        
+        # Find categories that exist in JSON and match product URLs
+        categories_to_add = []
+        for cat_url, cat_id in product_category_urls.items():
+            if cat_url in categories_from_json:
+                # Use full data from JSON
+                cat_data = categories_from_json[cat_url]
+                
+                # Build category_path if not present
+                category_path = cat_data.get("category_path", [])
+                if not category_path:
+                    # Try to build from breadcrumbs or parent chain
+                    category_path = [cat_data.get("name", cat_id)]
+                
+                categories_to_add.append({
                     "category_id": cat_id,
-                    "name": cat_id,  # Tạm dùng ID làm tên
+                    "name": cat_data.get("name", cat_id),
                     "url": cat_url,
-                }
+                    "image_url": cat_data.get("image_url"),
+                    "parent_url": cat_data.get("parent_url"),
+                    "level": cat_data.get("level", 0),
+                    "category_path": category_path,
+                    "level_1": category_path[0] if len(category_path) > 0 else None,
+                    "level_2": category_path[1] if len(category_path) > 1 else None,
+                    "level_3": category_path[2] if len(category_path) > 2 else None,
+                    "level_4": category_path[3] if len(category_path) > 3 else None,
+                    "level_5": category_path[4] if len(category_path) > 4 else None,
+                    "root_category_name": category_path[0] if category_path else None,
+                    "is_leaf": True,  # Categories from products are leaf categories
+                })
+            else:
+                # Fallback: category not in JSON, use minimal data but with useful name
+                # Extract name from URL slug
+                import re
+                slug_match = re.search(r"tiki\.vn/([^/]+)/c\d+", cat_url)
+                name_from_slug = slug_match.group(1).replace("-", " ").title() if slug_match else cat_id
+                
+                categories_to_add.append({
+                    "category_id": cat_id,
+                    "name": name_from_slug,
+                    "url": cat_url,
+                    "is_leaf": True,
+                })
+                print(f"⚠️  Category {cat_id} not found in JSON, using name from URL: {name_from_slug}")
 
         if not categories_to_add:
             return 0
@@ -831,34 +1418,66 @@ class PostgresStorage:
             with conn.cursor() as cur:
                 self._ensure_categories_schema(cur)
 
-                for cat_info in categories_to_add.values():
-                    # Insert only if not exists (by url)
+                for cat_info in categories_to_add:
+                    # Use INSERT ... ON CONFLICT DO UPDATE to update if exists
                     cur.execute(
                         """
-                        INSERT INTO categories (category_id, name, url, is_leaf, product_count)
-                        VALUES (%s, %s, %s, true, 0)
-                        ON CONFLICT (url) DO NOTHING
+                        INSERT INTO categories (
+                            category_id, name, url, image_url, parent_url, level,
+                            category_path, level_1, level_2, level_3, level_4, level_5,
+                            root_category_name, is_leaf, product_count
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
+                        ON CONFLICT (url) DO UPDATE SET
+                            name = COALESCE(NULLIF(EXCLUDED.name, categories.category_id), categories.name),
+                            image_url = COALESCE(EXCLUDED.image_url, categories.image_url),
+                            parent_url = COALESCE(EXCLUDED.parent_url, categories.parent_url),
+                            level = COALESCE(EXCLUDED.level, categories.level),
+                            category_path = COALESCE(EXCLUDED.category_path, categories.category_path),
+                            level_1 = COALESCE(EXCLUDED.level_1, categories.level_1),
+                            level_2 = COALESCE(EXCLUDED.level_2, categories.level_2),
+                            level_3 = COALESCE(EXCLUDED.level_3, categories.level_3),
+                            level_4 = COALESCE(EXCLUDED.level_4, categories.level_4),
+                            level_5 = COALESCE(EXCLUDED.level_5, categories.level_5),
+                            root_category_name = COALESCE(EXCLUDED.root_category_name, categories.root_category_name),
+                            updated_at = CURRENT_TIMESTAMP
                         """,
-                        (cat_info["category_id"], cat_info["name"], cat_info["url"]),
+                        (
+                            cat_info.get("category_id"),
+                            cat_info.get("name"),
+                            cat_info.get("url"),
+                            cat_info.get("image_url"),
+                            cat_info.get("parent_url"),
+                            cat_info.get("level"),
+                            Json(cat_info.get("category_path")) if cat_info.get("category_path") else None,
+                            cat_info.get("level_1"),
+                            cat_info.get("level_2"),
+                            cat_info.get("level_3"),
+                            cat_info.get("level_4"),
+                            cat_info.get("level_5"),
+                            cat_info.get("root_category_name"),
+                            cat_info.get("is_leaf", True),
+                        ),
                     )
                     if cur.rowcount > 0:
                         added_count += 1
 
         if added_count > 0:
-            print(f"📂 Auto-added {added_count} missing categories from products")
+            print(f"📂 Auto-added/updated {added_count} categories from products with full data")
 
         return added_count
 
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
-        Log price history for products CHỈ KHI CÓ THAY ĐỔI GIÁ.
-
+        Log crawl history for ALL products (không chỉ khi có thay đổi giá).
+        
         Tối ưu:
         - Sử dụng batch lookup để lấy giá cũ (thay vì query từng product)
-        - Chỉ INSERT khi giá thay đổi hoặc là lần crawl đầu tiên
-        - Tiết kiệm ~90% storage khi giá ổn định
-
-        Schema: (product_id, price, original_price, discount_percent, price_change, previous_*, crawled_at)
+        - INSERT cho mọi lần crawl với crawl_type: 'price_change', 'no_change', 'failed'
+        - Populate metadata fields từ _metadata
+        
+        Schema: (product_id, price, original_price, discount_percent, price_change, previous_*, 
+                 crawl_type, crawl_status, metadata, crawled_at)
         """
         if not products:
             return
@@ -871,16 +1490,18 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
+                # CRITICAL: Ensure schema is up-to-date BEFORE any queries
                 self._ensure_history_schema(cur)
+                conn.commit()  # Commit schema changes first
 
-                # BATCH LOOKUP: Get all previous prices in one query
+                # BATCH LOOKUP: Get all previous prices AND sales in one query
                 product_ids = [p.get("product_id") for p in valid_products]
 
-                # Use DISTINCT ON to get latest price per product efficiently
+                # Use DISTINCT ON to get latest data per product efficiently
                 cur.execute(
                     """
                     SELECT DISTINCT ON (product_id)
-                        product_id, price, original_price, discount_percent
+                        product_id, price, original_price, discount_percent, sales_count
                     FROM crawl_history
                     WHERE product_id = ANY(%s)
                     ORDER BY product_id, crawled_at DESC
@@ -888,13 +1509,18 @@ class PostgresStorage:
                     (product_ids,),
                 )
 
-                # Build lookup dict: product_id -> (price, original_price, discount_percent)
+                # Build lookup dict: product_id -> (price, original_price, discount_percent, sales_count)
                 previous_data = {
-                    row[0]: {"price": row[1], "original_price": row[2], "discount_percent": row[3]}
+                    row[0]: {
+                        "price": row[1], 
+                        "original_price": row[2], 
+                        "discount_percent": row[3],
+                        "sales_count": row[4]
+                    }
                     for row in cur.fetchall()
                 }
 
-                # Collect products that need history update
+                # Collect ALL products for history insert (not just changed ones)
                 records_to_insert = []
 
                 for p in valid_products:
@@ -902,23 +1528,21 @@ class PostgresStorage:
                     current_price = p.get("price")
                     current_original_price = p.get("original_price")
                     current_discount = p.get("discount_percent")
+                    current_sales = p.get("sales_count")  # NEW
 
                     prev = previous_data.get(product_id)
-
+                    
+                    # Determine crawl_type and price_change
                     if prev is None:
-                        # First time crawl - always insert
-                        records_to_insert.append(
-                            {
-                                "product_id": product_id,
-                                "price": current_price,
-                                "original_price": current_original_price,
-                                "discount_percent": current_discount,
-                                "price_change": None,
-                                "previous_price": None,
-                                "previous_original_price": None,
-                                "previous_discount_percent": None,
-                            }
-                        )
+                        # First time crawl
+                        crawl_type = "price_change"  # First crawl counts as change
+                        price_change = None
+                        price_change_percent = None  # FIX: Initialize to avoid NameError
+                        prev_price = None
+                        prev_original = None
+                        prev_discount = None
+                        prev_sales = None
+                        sales_change = None
                     else:
                         # Check if anything changed
                         prev_price = float(prev["price"]) if prev["price"] else None
@@ -926,64 +1550,141 @@ class PostgresStorage:
                             float(prev["original_price"]) if prev["original_price"] else None
                         )
                         prev_discount = prev["discount_percent"]
+                        prev_sales = prev.get("sales_count")
 
                         current_price_float = float(current_price) if current_price else None
                         current_original_float = (
                             float(current_original_price) if current_original_price else None
                         )
 
-                        # Only insert if price, original_price, or discount changed
+                        # Determine if price changed
                         price_changed = prev_price != current_price_float
                         original_changed = prev_original != current_original_float
                         discount_changed = prev_discount != current_discount
 
                         if price_changed or original_changed or discount_changed:
+                            crawl_type = "price_change"
                             price_change = None
+                            price_change_percent = None
                             if prev_price is not None and current_price_float is not None:
                                 price_change = current_price_float - prev_price
+                                # Calculate percentage change
+                                if prev_price > 0:
+                                    price_change_percent = round((price_change / prev_price) * 100, 2)
+                        else:
+                            crawl_type = "no_change"
+                            price_change = None
+                            price_change_percent = None
+                        
+                        # Calculate sales_change
+                        sales_change = None
+                        if prev_sales is not None and current_sales is not None:
+                            sales_change = current_sales - prev_sales
+                    
+                    # Calculate discount_amount (tiền giảm giá)
+                    discount_amount = None
+                    if current_original_price and current_price:
+                        discount_amount = float(current_original_price) - float(current_price)
+                    
+                    # Determine if flash sale (giảm >= 30% hoặc giảm >= 100k)
+                    is_flash_sale = False
+                    if current_discount and current_discount >= 30:
+                        is_flash_sale = True
+                    elif discount_amount and discount_amount >= 100000:
+                        is_flash_sale = True
 
-                            records_to_insert.append(
-                                {
-                                    "product_id": product_id,
-                                    "price": current_price,
-                                    "original_price": current_original_price,
-                                    "discount_percent": current_discount,
-                                    "price_change": price_change,
-                                    "previous_price": prev_price,
-                                    "previous_original_price": prev_original,
-                                    "previous_discount_percent": prev_discount,
-                                }
-                            )
+                    records_to_insert.append(
+                        {
+                            "product_id": product_id,
+                            "price": current_price,
+                            "original_price": current_original_price,
+                            "discount_percent": current_discount,
+                            "discount_amount": discount_amount,  # NEW
+                            "price_change": price_change,
+                            "price_change_percent": price_change_percent,  # NEW
+                            "previous_price": prev_price,
+                            "previous_original_price": prev_original,
+                            "previous_discount_percent": prev_discount,
+                            "sales_count": current_sales,
+                            "sales_change": sales_change,
+                            "is_flash_sale": is_flash_sale,  # NEW
+                            "crawl_type": crawl_type,
+                        }
+                    )
 
-                # Batch insert all changed records
+                # Batch insert ALL records (changed and unchanged)
                 if records_to_insert:
                     from psycopg2.extras import execute_values
 
-                    execute_values(
-                        cur,
-                        """
-                        INSERT INTO crawl_history
-                            (product_id, price, original_price, discount_percent, price_change,
-                             previous_price, previous_original_price, previous_discount_percent)
-                        VALUES %s
-                        """,
-                        [
-                            (
-                                r["product_id"],
-                                r["price"],
-                                r["original_price"],
-                                r["discount_percent"],
-                                r["price_change"],
-                                r["previous_price"],
-                                r["previous_original_price"],
-                                r["previous_discount_percent"],
-                            )
-                            for r in records_to_insert
-                        ],
-                    )
-                    print(
-                        f"📊 Price history: {len(records_to_insert)}/{len(valid_products)} products had changes"
-                    )
+                    try:
+                        execute_values(
+                            cur,
+                            """
+                            INSERT INTO crawl_history
+                                (product_id, price, original_price, discount_percent, discount_amount,
+                                 price_change, price_change_percent,
+                                 previous_price, previous_original_price, previous_discount_percent,
+                                 sales_count, sales_change, is_flash_sale, crawl_type)
+                            VALUES %s
+                            """,
+                            [
+                                (
+                                    r["product_id"],
+                                    r["price"],
+                                    r["original_price"],
+                                    r["discount_percent"],
+                                    r["discount_amount"],  # NEW
+                                    r["price_change"],
+                                    r["price_change_percent"],  # NEW
+                                    r["previous_price"],
+                                    r["previous_original_price"],
+                                    r["previous_discount_percent"],
+                                    r["sales_count"],
+                                    r["sales_change"],
+                                    r["is_flash_sale"],  # NEW
+                                    r["crawl_type"],
+                                )
+                                for r in records_to_insert
+                            ],
+                        )
+                        
+                        # Simple logging with crawl_type breakdown
+                        type_counts = {}
+                        for r in records_to_insert:
+                            ct = r.get("crawl_type", "unknown")
+                            type_counts[ct] = type_counts.get(ct, 0) + 1
+                        
+                        type_str = ", ".join(f"{k}: {v}" for k, v in type_counts.items())
+                        print(f"📊 Crawl history: {len(records_to_insert)} records ({type_str})")
+                        conn.commit()  # Commit history inserts
+                    except Exception as e:
+                        import traceback
+                        error_trace = traceback.format_exc()
+                        print(f"❌ Error inserting crawl history: {e}")
+                        print(f"Error type: {type(e).__name__}")
+                        print(f"Error trace: {error_trace}")
+                        if "foreign key" in str(e).lower() or "does not exist" in str(e).lower():
+                            print("💡 FK constraint error or missing column: ensure products exist and schema is updated")
+                            # Try to get which product IDs are missing
+                            try:
+                                missing_ids = []
+                                for r in records_to_insert[:10]:  # Check first 10
+                                    cur.execute(
+                                        "SELECT 1 FROM products WHERE product_id = %s",
+                                        (r["product_id"],)
+                                    )
+                                    if not cur.fetchone():
+                                        missing_ids.append(r["product_id"])
+                                if missing_ids:
+                                    print(f"⚠️  Missing product_ids (first 5): {missing_ids[:5]}")
+                                else:
+                                    print("💡 All product_ids exist - likely a schema mismatch issue")
+                                    print("💡 Run _ensure_history_schema() to add missing columns")
+                            except Exception as inner_e:
+                                print(f"⚠️  Could not check missing products: {inner_e}")
+                        conn.rollback()  # Rollback on error
+                        # Don't re-raise - log the error but continue
+                        print("⚠️  Continuing without crawl history (will retry on next crawl)")
 
     def log_price_history(
         self,
@@ -1151,6 +1852,144 @@ class PostgresStorage:
             self._pool = None
             self._pool_stats["active_connections"] = 0
 
+    def cleanup_incomplete_products(
+        self, 
+        require_seller: bool = True, 
+        require_brand: bool = True
+    ) -> dict[str, int]:
+        """
+        Delete products with missing required fields (seller and/or brand).
+        Run this BEFORE each crawl to allow re-crawling of incomplete data.
+        
+        This prevents:
+        - Wasting resources crawling products that will be rejected anyway
+        - Storing incomplete products in database
+        - Having to clean up after load (reactive vs preventive)
+        
+        Args:
+            require_seller: If True, delete products where seller_name IS NULL or empty
+            require_brand: If True, delete products where brand IS NULL or empty
+        
+        Returns:
+            dict with keys: deleted_count, deleted_no_seller, deleted_no_brand, deleted_both
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Build WHERE clause based on requirements
+                conditions = []
+                if require_seller:
+                    conditions.append("(seller_name IS NULL OR seller_name = '')")
+                if require_brand:
+                    conditions.append("(brand IS NULL OR brand = '')")
+                
+                if not conditions:
+                    return {
+                        "deleted_count": 0,
+                        "deleted_no_seller": 0,
+                        "deleted_no_brand": 0,
+                        "deleted_both": 0
+                    }
+                
+                where_clause = " OR ".join(conditions)
+                
+                # Get counts before deletion for detailed reporting
+                # Only calculate stats if both requirements are enabled
+                deleted_no_seller = 0
+                deleted_no_brand = 0
+                deleted_both = 0
+                
+                if require_seller and require_brand:
+                    # Calculate detailed stats: missing seller only, missing brand only, missing both
+                    stats_query = """
+                        SELECT 
+                            COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND NOT (brand IS NULL OR brand = '')) as no_seller,
+                            COUNT(*) FILTER (WHERE NOT (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as no_brand,
+                            COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as both_missing
+                        FROM products
+                        WHERE (seller_name IS NULL OR seller_name = '') OR (brand IS NULL OR brand = '')
+                    """
+                    cur.execute(stats_query)
+                    stats_row = cur.fetchone()
+                    deleted_no_seller = stats_row[0] if stats_row else 0
+                    deleted_no_brand = stats_row[1] if stats_row else 0
+                    deleted_both = stats_row[2] if stats_row else 0
+                elif require_seller:
+                    # Only seller required - count all as no_seller
+                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    deleted_no_seller = cur.fetchone()[0] or 0
+                elif require_brand:
+                    # Only brand required - count all as no_brand
+                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    deleted_no_brand = cur.fetchone()[0] or 0
+                
+                # Delete products matching criteria
+                delete_query = f"""
+                    DELETE FROM products 
+                    WHERE {where_clause}
+                """
+                cur.execute(delete_query)
+                deleted_count = cur.rowcount
+                
+                if deleted_count > 0:
+                    reason_parts = []
+                    if require_seller:
+                        reason_parts.append(f"{deleted_no_seller} without seller")
+                    if require_brand:
+                        reason_parts.append(f"{deleted_no_brand} without brand")
+                    if require_seller and require_brand:
+                        reason_parts.append(f"{deleted_both} missing both")
+                    
+                    reason_str = ", ".join(reason_parts)
+                    print(f"🧹 Cleaned up {deleted_count} incomplete products ({reason_str})")
+                
+                return {
+                    "deleted_count": deleted_count,
+                    "deleted_no_seller": deleted_no_seller if require_seller else 0,
+                    "deleted_no_brand": deleted_no_brand if require_brand else 0,
+                    "deleted_both": deleted_both if (require_seller and require_brand) else 0
+                }
+    
+    def cleanup_products_without_seller(self) -> int:
+        """
+        DEPRECATED: Use cleanup_incomplete_products() instead.
+        
+        Delete products where seller_name is NULL.
+        Kept for backward compatibility.
+        
+        Returns:
+            Number of products deleted
+        """
+        result = self.cleanup_incomplete_products(require_seller=True, require_brand=False)
+        return result["deleted_count"]
+
+    def cleanup_orphan_categories(self) -> int:
+        """
+        Remove categories that don't have any matching products.
+        This ensures categories table stays clean after product crawls.
+        
+        Only removes leaf categories (is_leaf = true) that have no products.
+        Parent categories are kept to maintain hierarchy.
+        
+        Returns:
+            Number of categories deleted
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM categories
+                    WHERE is_leaf = true
+                    AND NOT EXISTS (
+                        SELECT 1 FROM products p 
+                        WHERE p.category_id = categories.category_id
+                    )
+                """)
+                deleted_count = cur.rowcount
+                
+                if deleted_count > 0:
+                    print(f"🧹 Cleaned up {deleted_count} orphan categories")
+                
+                return deleted_count
+
     def _bulk_log_product_price_history(self, cur, products: list[dict[str, Any]]) -> None:
         """Bulk log crawl history CHỈ KHI CÓ THAY ĐỔI GIÁ.
 
@@ -1287,8 +2126,6 @@ class PostgresStorage:
             "seller_is_official",
             "brand",
             "stock_available",
-            "stock_quantity",
-            "stock_status",
             "shipping",
         ]
 
