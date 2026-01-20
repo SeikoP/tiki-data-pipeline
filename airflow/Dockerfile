@@ -7,7 +7,7 @@ USER root
 ENV TZ=Asia/Ho_Chi_Minh
 ENV AIRFLOW_HOME=/opt/airflow
 ENV PATH="/home/airflow/.local/bin:${PATH}"
-ENV PYTHONPATH="/opt/airflow:/opt/airflow/src:/opt/airflow/dags:/home/airflow/.local/lib/python3.12/site-packages:${PYTHONPATH}"
+ENV PYTHONPATH="/opt/airflow:/opt/airflow/src:/opt/airflow/dags:/home/airflow/.local/lib/python3.12/site-packages"
 
 # Cài đặt Chrome (minimal)
 RUN apt-get update && \

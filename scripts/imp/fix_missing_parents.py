@@ -9,6 +9,15 @@ import sys
 import json
 from pathlib import Path
 
+# Load .env file từ project root
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    print("⚠️  Cảnh báo: python-dotenv không được cài đặt")
+    print("   Cài đặt: pip install python-dotenv")
+    def load_dotenv(*args, **kwargs):
+        pass
+
 # Fix encoding cho Windows
 if sys.platform == 'win32':
     import codecs
@@ -20,6 +29,9 @@ if sys.platform == 'win32':
 script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent.parent
 src_path = project_root / "src"
+
+# Load .env file từ project root
+load_dotenv(project_root / ".env")
 
 # Thêm vào path với nhiều fallback
 paths_to_add = [
@@ -81,8 +93,13 @@ def get_db_connection():
     
     db_port = int(os.getenv("POSTGRES_PORT", "5432"))
     db_name = os.getenv("POSTGRES_DB", "tiki")
-    db_user = os.getenv("POSTGRES_USER", "bungmoto")
-    db_password = os.getenv("POSTGRES_PASSWORD", "0946932602a")
+    db_user = os.getenv("POSTGRES_USER", "")
+    db_password = os.getenv("POSTGRES_PASSWORD", "")
+    
+    if not db_user or not db_password:
+        print("❌ Lỗi: POSTGRES_USER và POSTGRES_PASSWORD phải được set trong environment")
+        print("   Vui lòng tạo file .env từ .env.example và điền thông tin database")
+        return None
     
     try:
         conn = psycopg2.connect(
@@ -286,8 +303,8 @@ def main():
                     host=os.getenv("POSTGRES_HOST", "localhost"),
                     port=int(os.getenv("POSTGRES_PORT", "5432")),
                     database=os.getenv("POSTGRES_DB", "tiki"),
-                    user=os.getenv("POSTGRES_USER", "bungmoto"),
-                    password=os.getenv("POSTGRES_PASSWORD", "0946932602a")
+                    user=os.getenv("POSTGRES_USER", ""),
+                    password=os.getenv("POSTGRES_PASSWORD", "")
                 )
                 saved_count = storage.save_categories(
                     categories_to_rebuild,
