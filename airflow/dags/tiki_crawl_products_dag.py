@@ -956,6 +956,50 @@ def load_categories_to_db_wrapper(**context):
         return {"status": "error", "message": str(e)}
 
 
+def cleanup_products_without_seller_wrapper(**context):
+    """
+    Task wrapper to cleanup products where seller_name is NULL.
+    Run this before crawling to allow re-crawling of incomplete data.
+    """
+    logger = get_logger(context)
+    
+    try:
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+        
+        logger.info("🧹 Starting cleanup of products without seller information...")
+        storage = PostgresStorage()
+        deleted_count = storage.cleanup_products_without_seller()
+        
+        logger.info(f"✅ Cleanup complete: {deleted_count} products deleted")
+        return {"status": "success", "deleted_count": deleted_count}
+    
+    except Exception as e:
+        logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
+        return {"status": "error", "message": str(e), "deleted_count": 0}
+
+
+def cleanup_orphan_categories_wrapper(**context):
+    """
+    Task wrapper to cleanup categories that don't have any matching products.
+    Run this after loading categories to keep the table clean.
+    """
+    logger = get_logger(context)
+    
+    try:
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+        
+        logger.info("🧹 Starting cleanup of orphan categories...")
+        storage = PostgresStorage()
+        deleted_count = storage.cleanup_orphan_categories()
+        
+        logger.info(f"✅ Cleanup complete: {deleted_count} orphan categories deleted")
+        return {"status": "success", "deleted_count": deleted_count}
+    
+    except Exception as e:
+        logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
+        return {"status": "error", "message": str(e), "deleted_count": 0}
+
+
 def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
     """
     Task 2: Crawl sản phẩm từ một danh mục (Dynamic Task Mapping)
@@ -1573,7 +1617,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         db_hits = 0  # Products đã có trong DB
 
         products_per_day = int(
-            get_variable("TIKI_PRODUCTS_PER_DAY", default="25")
+            get_variable("TIKI_PRODUCTS_PER_DAY", default="50")
         )  # Mặc định 280 products/ngày (~30 phút)
         max_products = int(
             get_variable("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
@@ -4978,6 +5022,22 @@ def backup_database(**context) -> dict[str, Any]:
 # Tạo DAG duy nhất với schedule có thể config qua Variable
 with DAG(**DAG_CONFIG) as dag:
 
+    # ===== CLEANUP TASKS (RUN FIRST) =====
+    # These tasks clean up stale data before crawling starts
+    task_cleanup_products = PythonOperator(
+        task_id="cleanup_products_without_seller",
+        python_callable=cleanup_products_without_seller_wrapper,
+        execution_timeout=timedelta(minutes=5),
+        pool="crawl_pool",
+    )
+    
+    task_cleanup_categories = PythonOperator(
+        task_id="cleanup_orphan_categories",
+        python_callable=cleanup_orphan_categories_wrapper,
+        execution_timeout=timedelta(minutes=5),
+        pool="crawl_pool",
+    )
+
     # TaskGroup: Load và Prepare
     with TaskGroup("load_and_prepare") as load_group:
         # (ĐÃ BỎ) extract_and_load_categories_to_db để giảm thời gian pipeline.
@@ -5578,12 +5638,7 @@ with DAG(**DAG_CONFIG) as dag:
             trigger_rule="all_done",
         )
 
-    # Định nghĩa dependencies
-    # Flow: Load -> Crawl Categories -> Merge & Save -> Prepare Detail -> Crawl Detail -> Merge & Save Detail -> Transform -> Load -> Validate -> Aggregate
-
-    # Dependencies giữa các TaskGroup
-    # Load categories trước, sau đó prepare crawl kwargs
-    # Thêm task load categories to DB
+    # Task: Load categories to DB (runs after products are loaded)
     task_load_categories_db = PythonOperator(
         task_id="load_categories_to_db",
         python_callable=load_categories_to_db_wrapper,
@@ -5591,7 +5646,13 @@ with DAG(**DAG_CONFIG) as dag:
         pool="crawl_pool",
     )
 
-    # Flow update: Load JSON -> Prepare Batch -> Crawl...
+    # Định nghĩa dependencies
+    # Flow: Cleanup Products -> Load Categories -> Crawl -> Save -> Load Categories to DB -> Cleanup Orphan Categories -> Validate -> Aggregate
+    
+    # Step 1: Cleanup stale products before crawling
+    task_cleanup_products >> task_load_categories
+    
+    # Step 2: Load categories and prepare for crawl
     task_load_categories >> task_prepare
 
     # Prepare crawl kwargs -> crawl category (dynamic mapping)
@@ -5603,10 +5664,10 @@ with DAG(**DAG_CONFIG) as dag:
     # Merge -> save products
     task_merge_products >> task_save_products
 
-    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> categories -> validate -> aggregate and notify
+    # Save products -> prepare detail -> crawl detail -> merge detail -> save detail -> transform -> load -> LOAD CATEGORIES -> CLEANUP CATEGORIES -> validate -> aggregate
     task_save_products >> task_prepare_detail
     # Dependencies trong detail group đã được định nghĩa ở dòng 1800
-    # Flow: save_products_with_detail -> transform -> load -> LOAD CATEGORIES -> validate -> aggregate_and_notify -> health_check -> cleanup_cache -> backup_database -> discord_report
+    # Flow: save_products_with_detail -> transform -> load -> LOAD CATEGORIES -> CLEANUP ORPHAN CATEGORIES -> validate -> aggregate_and_notify -> cleanup_cache -> backup_database
 
     (
         task_save_products_with_detail
@@ -5614,6 +5675,7 @@ with DAG(**DAG_CONFIG) as dag:
         >> task_transform_products
         >> task_load_products
         >> task_load_categories_db
+        >> task_cleanup_categories  # Clean up orphan categories AFTER loading categories to DB
         >> task_validate_data
         >> task_aggregate_and_notify
         >> task_cleanup_cache
