@@ -466,7 +466,13 @@ def main():
                     root_urls = config_data
                 elif isinstance(config_data, dict) and "root_urls" in config_data:
                     root_urls = config_data["root_urls"]
-                print(f"✅ Đã load {len(root_urls)} root categories từ {config_file}")
+                else:
+                    print(f"⚠️  Config file có cấu trúc không hợp lệ: {config_file}")
+                    root_urls = []
+                
+                # Chỉ print success message nếu thực sự load được URLs
+                if root_urls:
+                    print(f"✅ Đã load {len(root_urls)} root categories từ {config_file}")
         except Exception as e:
             print(f"⚠️  Không thể đọc config file: {e}")
 

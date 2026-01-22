@@ -1935,8 +1935,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         db_hits = 0  # Products đã có trong DB
 
         products_per_day = int(
-            get_variable("TIKI_PRODUCTS_PER_DAY", default="500")
-        )  # Mặc định 280 products/ngày (~30 phút)
+            get_variable("TIKI_PRODUCTS_PER_DAY", default="50")
+        )  # Mặc định 50 products/ngày để tránh quá tải server
         max_products = int(
             get_variable("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
         )  # 0 = không giới hạn
