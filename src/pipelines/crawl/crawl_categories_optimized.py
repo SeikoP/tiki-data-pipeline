@@ -429,10 +429,10 @@ def main():
     """Hàm main để crawl đệ quy với tối ưu"""
 
     # URL danh mục gốc
-    root_url = "https://tiki.vn/nha-cua-doi-song/c1883"
+    root_url = "https://tiki.vn/thoi-trang-nam/c915"
 
     # Độ sâu tối đa
-    max_level = 3
+    max_level = 4
 
     # Số thread song song (giới hạn để tránh quá tải server)
     max_workers = 3
