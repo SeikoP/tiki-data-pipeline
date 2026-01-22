@@ -243,13 +243,31 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
                 try:
                     # Tắt log của webdriver_manager để giảm noise
                     import logging
+                    import os
+                    import stat
 
                     from webdriver_manager.chrome import ChromeDriverManager
 
                     wdm_logger = logging.getLogger("WDM")
                     wdm_logger.setLevel(logging.WARNING)
 
-                    service = Service(ChromeDriverManager().install())
+                    # Install ChromeDriver
+                    driver_path = ChromeDriverManager().install()
+
+                    # QUAN TRỌNG: Set quyền thực thi cho ChromeDriver (fix lỗi status code 127)
+                    # Đặc biệt cần thiết trong WSL2/Linux
+                    try:
+                        os.chmod(
+                            driver_path,
+                            os.stat(driver_path).st_mode
+                            | stat.S_IEXEC
+                            | stat.S_IXGRP
+                            | stat.S_IXOTH,
+                        )
+                    except Exception:
+                        pass  # Nếu không set được quyền, vẫn thử tiếp
+
+                    service = Service(driver_path)
                     driver = webdriver.Chrome(service=service, options=chrome_options)
                 except Exception:
                     # Nếu webdriver-manager cũng fail, raise lỗi gốc

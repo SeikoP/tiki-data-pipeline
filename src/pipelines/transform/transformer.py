@@ -388,12 +388,12 @@ class DataTransformer:
     def _validate_seller_name(self, seller_name: str | None) -> str | None:
         """
         Validate và clean seller_name, trả về None nếu không hợp lệ.
-        
+
         Loại bỏ các giá trị rác dựa trên config (có thể mở rộng qua .env):
         - Patterns trong INVALID_SELLER_PATTERNS (default + extra từ env)
         - Chỉ số hoặc ký tự đặc biệt
         - Text quá ngắn hoặc quá dài
-        
+
         Config env variables:
         - INVALID_SELLER_PATTERNS_EXTRA: thêm patterns (comma-separated)
         - SELLER_NAME_MIN_LENGTH: độ dài tối thiểu (default: 2)
@@ -401,50 +401,61 @@ class DataTransformer:
         """
         if not seller_name:
             return None
-        
+
         seller_name = str(seller_name).strip()
-        
+
         # Import config với fallback values
         try:
             from pipelines.crawl.config import (
                 INVALID_SELLER_PATTERNS,
-                SELLER_NAME_MIN_LENGTH,
                 SELLER_NAME_MAX_LENGTH,
+                SELLER_NAME_MIN_LENGTH,
             )
         except ImportError:
             # Fallback nếu không import được config
             INVALID_SELLER_PATTERNS = [
-                "đã mua", "đã bán", "sold", "bought", "mua", "bán", "xem thêm", "more info", "chi tiết", "loading", "đang tải","Đã mua hàng"
+                "đã mua",
+                "đã bán",
+                "sold",
+                "bought",
+                "mua",
+                "bán",
+                "xem thêm",
+                "more info",
+                "chi tiết",
+                "loading",
+                "đang tải",
+                "Đã mua hàng",
             ]
             SELLER_NAME_MIN_LENGTH = 2
             SELLER_NAME_MAX_LENGTH = 100
-        
+
         # Kiểm tra độ dài
         if len(seller_name) < SELLER_NAME_MIN_LENGTH:
             return None
-        
+
         if len(seller_name) > SELLER_NAME_MAX_LENGTH:
             return None
-        
+
         seller_lower = seller_name.lower()
-        
+
         # Kiểm tra invalid patterns từ config
         for pattern in INVALID_SELLER_PATTERNS:
             if pattern in seller_lower:
                 return None
-        
+
         # Chỉ là số (không phải tên seller)
         if seller_name.isdigit():
             return None
-        
+
         # Chỉ là ký tự đặc biệt
-        if re.match(r'^[^\w]+$', seller_name):
+        if re.match(r"^[^\w]+$", seller_name):
             return None
-        
+
         # Bắt đầu bằng số + text (e.g., "1234 đã mua")
-        if re.match(r'^\d+\s+', seller_name):
+        if re.match(r"^\d+\s+", seller_name):
             return None
-        
+
         return seller_name
 
     def _parse_int(self, value: Any) -> int | None:

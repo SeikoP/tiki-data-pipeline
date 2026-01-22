@@ -133,6 +133,7 @@ def crawl_product_detail_with_selenium(
             # Tier 1: Moderate wait time increase for better data capture
             try:
                 from .config import CRAWL_IMPLICIT_WAIT_NORMAL
+
                 driver.implicitly_wait(CRAWL_IMPLICIT_WAIT_NORMAL)  # 4s (increased from 3s)
             except ImportError:
                 driver.implicitly_wait(4)  # Fallback: 4s
@@ -183,8 +184,14 @@ def crawl_product_detail_with_selenium(
                 # Wait cho dynamic content (seller, price, sales_count, rating) load
                 # Tier 1: Increased timeout to ensure seller and original_price load
                 try:
-                    from .config import CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, CRAWL_POST_SCROLL_SLEEP_NORMAL
-                    wait_for_dynamic_content_loaded(driver, timeout=CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, verbose=verbose)  # 4s
+                    from .config import (
+                        CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL,
+                        CRAWL_POST_SCROLL_SLEEP_NORMAL,
+                    )
+
+                    wait_for_dynamic_content_loaded(
+                        driver, timeout=CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, verbose=verbose
+                    )  # 4s
                     time.sleep(CRAWL_POST_SCROLL_SLEEP_NORMAL)  # 1.2s
                 except ImportError:
                     wait_for_dynamic_content_loaded(driver, timeout=4, verbose=verbose)
@@ -351,7 +358,7 @@ def crawl_product_with_retry(
 
     # Import config and validator
     try:
-        from .config import PRODUCT_RETRY_MAX_ATTEMPTS, PRODUCT_RETRY_DELAY_BASE
+        from .config import PRODUCT_RETRY_DELAY_BASE, PRODUCT_RETRY_MAX_ATTEMPTS
         from .data_validator import enrich_product_metadata, validate_product_data
     except ImportError:
         # Fallback defaults
@@ -476,7 +483,7 @@ def crawl_product_with_retry(
 
             elif action == "skip":
                 if verbose:
-                    print(f"[Retry Wrapper] ❌ Skipping product (missing critical fields)")
+                    print("[Retry Wrapper] ❌ Skipping product (missing critical fields)")
                 return None
 
             elif action == "retry":
@@ -543,7 +550,6 @@ def crawl_product_with_retry(
     return None
 
 
-
 def crawl_product_detail_with_driver(
     driver: Any,
     url: str,
@@ -608,6 +614,7 @@ def crawl_product_detail_with_driver(
         # Tier 1: Moderate wait time increase
         try:
             from .config import CRAWL_IMPLICIT_WAIT_NORMAL
+
             driver.implicitly_wait(CRAWL_IMPLICIT_WAIT_NORMAL)  # 4s
         except ImportError:
             driver.implicitly_wait(4)  # Fallback
@@ -643,8 +650,14 @@ def crawl_product_detail_with_driver(
             # Wait cho dynamic content (seller, price, sales_count, rating) load
             # Tier 1: Increased timeout to ensure seller and original_price load
             try:
-                from .config import CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, CRAWL_POST_SCROLL_SLEEP_NORMAL
-                wait_for_dynamic_content_loaded(driver, timeout=CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, verbose=verbose)  # 4s
+                from .config import (
+                    CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL,
+                    CRAWL_POST_SCROLL_SLEEP_NORMAL,
+                )
+
+                wait_for_dynamic_content_loaded(
+                    driver, timeout=CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, verbose=verbose
+                )  # 4s
                 time.sleep(CRAWL_POST_SCROLL_SLEEP_NORMAL)  # 1.2s
             except ImportError:
                 wait_for_dynamic_content_loaded(driver, timeout=4, verbose=verbose)

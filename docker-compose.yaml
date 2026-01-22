@@ -20,6 +20,8 @@ x-airflow-common:
     # LocalExecutor reads this config for Execution API (double underscore notation)
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
     # JWT secret for API authentication (must be same across all components)
+    # Generate: openssl rand -hex 32
+    # SECURITY: Must be set in .env file, no default value for production safety
     AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET}
     # Fernet key for Variable/Connection encryption (must be consistent across rebuilds)
     # Generate new key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -191,7 +193,7 @@ services:
         su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow db migrate"
         
         echo "Creating Admin User..."
-        su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow users create --username admin --password \"${_AIRFLOW_WWW_USER_PASSWORD}\" --firstname Admin --lastname User --role Admin --email admin@example.com" || true
+        su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow users create --username \"${_AIRFLOW_WWW_USER_USERNAME}\" --password \"${_AIRFLOW_WWW_USER_PASSWORD}\" --firstname Admin --lastname User --role Admin --email admin@example.com" || true
         
         echo "Configuring Pools and Variables..."
         if [ -f /opt/airflow/setup/init-airflow-config.sh ]; then
@@ -204,6 +206,8 @@ services:
         echo "Init Done."
     environment:
       <<: *airflow-common-env
+      # SECURITY: Username and password must be set in .env file
+      # Default values only for development - change in production!
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
     user: "0:0"

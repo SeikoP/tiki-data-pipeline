@@ -128,11 +128,15 @@ def crawl_single_category(
             try:
                 with open(cache_file, encoding="utf-8") as f:
                     cached_data = json.load(f)
+                cached_categories = cached_data.get("categories", [])
                 with stats_lock:
                     stats["total_crawled"] += 1
                     stats["total_success"] += 1
-                return True, cached_data.get("categories", []), None
-            except Exception:
+                    stats["total_categories"] += len(cached_categories)
+                return True, cached_categories, None
+            except Exception as e:
+                # Nếu cache file bị lỗi, tiếp tục crawl lại
+                print(f"  ⚠️  Cache file lỗi, sẽ crawl lại: {cache_file} - {str(e)}")
                 pass
 
     try:
@@ -191,9 +195,12 @@ def crawl_single_category(
 
     except Exception as e:
         error_msg = str(e)
+        error_type = type(e).__name__
         with stats_lock:
             stats["total_crawled"] += 1
             stats["total_failed"] += 1
+        # Log chi tiết hơn cho debugging
+        print(f"  ⚠️  Lỗi crawl {url}: [{error_type}] {error_msg}")
         return False, [], error_msg
 
 
@@ -266,11 +273,12 @@ def crawl_level_parallel(
                         print(f"\n  ❌ Lỗi crawl {url}: {error}")
                 except Exception as e:
                     error_msg = str(e)
+                    error_type = type(e).__name__
                     results[url] = (False, [], error_msg)
                     visited_urls.add(url)  # Đánh dấu đã thử crawl
                     with stats_lock:
                         stats["total_failed"] += 1
-                    print(f"\n  ❌ Exception khi crawl {url}: {error_msg}")
+                    print(f"\n  ❌ Exception khi crawl {url}: [{error_type}] {error_msg}")
 
                 pbar.update(1)
 
@@ -278,13 +286,13 @@ def crawl_level_parallel(
 
 
 def crawl_category_recursive_optimized(
-    root_url, max_level=3, max_workers=3, visited_urls=None, all_categories=None
+    root_urls, max_level=3, max_workers=3, visited_urls=None, all_categories=None
 ):
     """
     Crawl đệ quy các danh mục với tối ưu song song
 
     Args:
-        root_url: URL danh mục gốc
+        root_urls: URL danh mục gốc (str) hoặc danh sách các URL gốc (list[str])
         max_level: Độ sâu tối đa
         max_workers: Số thread tối đa cho mỗi level
         visited_urls: Set các URL đã crawl
@@ -294,6 +302,10 @@ def crawl_category_recursive_optimized(
         visited_urls = set()
     if all_categories is None:
         all_categories = []
+
+    # Hỗ trợ cả single URL và list URLs
+    if isinstance(root_urls, str):
+        root_urls = [root_urls]
 
     # Initialize driver pool for reuse
     driver_pool = None
@@ -319,28 +331,36 @@ def crawl_category_recursive_optimized(
         # Queue các URL cần crawl theo level
         # Format: {level: [(url, parent_url), ...]}
         queue = defaultdict(list)
-        queue[0] = [(root_url, None)]
+        queue[0] = [(url, None) for url in root_urls]
 
-        # QUAN TRỌNG: Thêm root category vào đầu kết quả (chỉ chạy 1 lần)
+        # QUAN TRỌNG: Thêm root categories vào đầu kết quả
         # Để đảm bảo category hierarchy đầy đủ (root -> children -> grandchildren)
         import re
 
-        match = re.search(r"/([^/]+)/(c\d+)", root_url)
-        if match:
-            root_slug = match.group(1)
-            root_cat_id = match.group(2)
-            root_name = root_slug.replace("-", " ").title()
+        # Đảm bảo không thêm trùng root category theo URL
+        existing_root_urls = {c["url"] for c in all_categories if c.get("url")}
+        for root_url in root_urls:
+            if root_url in existing_root_urls:
+                # Bỏ qua URL trùng, tránh thêm duplicate root category
+                continue
 
-            root_category = {
-                "name": root_name,
-                "slug": root_slug,
-                "url": root_url,
-                "image_url": "",
-                "parent_url": "",  # Root không có parent
-                "level": 0,
-            }
-            all_categories.append(root_category)
-            print(f"Da them root category: {root_name} ({root_cat_id})")
+            match = re.search(r"/([^/]+)/(c\d+)", root_url)
+            if match:
+                root_slug = match.group(1)
+                root_cat_id = match.group(2)
+                root_name = root_slug.replace("-", " ").title()
+
+                root_category = {
+                    "name": root_name,
+                    "slug": root_slug,
+                    "url": root_url,
+                    "image_url": "",
+                    "parent_url": "",  # Root không có parent
+                    "level": 0,
+                }
+                all_categories.append(root_category)
+                existing_root_urls.add(root_url)
+                print(f"✅ Đã thêm root category: {root_name} ({root_cat_id})")
 
         # Crawl từng level một
         for current_level in range(max_level + 1):
@@ -428,19 +448,64 @@ def print_stats():
 def main():
     """Hàm main để crawl đệ quy với tối ưu"""
 
-    # URL danh mục gốc
-    root_url = "https://tiki.vn/nha-cua-doi-song/c1883"
+    # Hỗ trợ nhiều root categories từ config file hoặc tham số
+    # Có thể cấu hình qua:
+    # 1. File JSON: data/raw/root_categories.json
+    # 2. Biến môi trường: TIKI_ROOT_CATEGORIES (comma-separated URLs)
+    # 3. Default: danh sách mặc định
+
+    root_urls = []
+
+    # Thử đọc từ file config
+    config_file = "data/raw/root_categories.json"
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, encoding="utf-8") as f:
+                config_data = json.load(f)
+                if isinstance(config_data, list):
+                    root_urls = config_data
+                elif isinstance(config_data, dict) and "root_urls" in config_data:
+                    root_urls = config_data["root_urls"]
+                else:
+                    print(f"⚠️  Config file có cấu trúc không hợp lệ: {config_file}")
+                    root_urls = []
+
+                # Chỉ print success message nếu thực sự load được URLs
+                if root_urls:
+                    print(f"✅ Đã load {len(root_urls)} root categories từ {config_file}")
+        except Exception as e:
+            print(f"⚠️  Không thể đọc config file: {e}")
+
+    # Thử đọc từ biến môi trường
+    if not root_urls:
+        env_urls = os.getenv("TIKI_ROOT_CATEGORIES", "")
+        if env_urls:
+            root_urls = [url.strip() for url in env_urls.split(",") if url.strip()]
+            print(f"✅ Đã load {len(root_urls)} root categories từ biến môi trường")
+
+    # Default: danh sách mặc định nếu không có config
+    if not root_urls:
+        root_urls = [
+            "https://tiki.vn/thoi-trang-nam/c915",
+            "https://tiki.vn/thoi-trang-nu/c931",
+            # Có thể thêm các root categories khác ở đây
+            # "https://tiki.vn/nha-cua-doi-song/c1883",
+            # "https://tiki.vn/dien-tu-dien-lanh/c4221",
+        ]
+        print("ℹ️  Sử dụng root categories mặc định")
 
     # Độ sâu tối đa
-    max_level = 3
+    max_level = int(os.getenv("TIKI_MAX_CATEGORY_LEVEL", "4"))
 
     # Số thread song song (giới hạn để tránh quá tải server)
-    max_workers = 3
+    max_workers = int(os.getenv("TIKI_CRAWL_MAX_WORKERS", "3"))
 
     print("=" * 70)
     print("🚀 CRAWL ĐỆ QUY CÁC DANH MỤC TIKI (TỐI ƯU)")
     print("=" * 70)
-    print(f"URL gốc: {root_url}")
+    print(f"Số root categories: {len(root_urls)}")
+    for i, url in enumerate(root_urls, 1):
+        print(f"  {i}. {url}")
     print(f"Độ sâu tối đa: {max_level}")
     print(f"Số thread song song: {max_workers}")
     print("Cache: data/raw/cache/")
@@ -459,7 +524,7 @@ def main():
 
     # Crawl đệ quy với tối ưu
     all_categories = crawl_category_recursive_optimized(
-        root_url, max_level=max_level, max_workers=max_workers
+        root_urls, max_level=max_level, max_workers=max_workers
     )
 
     # Loại bỏ trùng lặp theo URL (giữ lại bản đầu tiên)

@@ -25,9 +25,7 @@ except ImportError:
     PRODUCT_RETRY_MAX_ATTEMPTS = 2
 
 
-def get_missing_fields(
-    product: dict[str, Any], field_list: list[str] | None = None
-) -> list[str]:
+def get_missing_fields(product: dict[str, Any], field_list: list[str] | None = None) -> list[str]:
     """
     Get list of missing fields from product data.
 
@@ -41,12 +39,12 @@ def get_missing_fields(
     if field_list is None:
         field_list = DATA_QUALITY_IMPORTANT_FIELDS
 
-# Import seller validation patterns
+    # Import seller validation patterns
     try:
         from pipelines.crawl.config import (
             INVALID_SELLER_PATTERNS,
-            SELLER_NAME_MIN_LENGTH,
             SELLER_NAME_MAX_LENGTH,
+            SELLER_NAME_MIN_LENGTH,
         )
     except ImportError:
         INVALID_SELLER_PATTERNS = ["đã mua", "đã bán", "sold", "bought", "loading"]
@@ -56,32 +54,32 @@ def get_missing_fields(
     missing = []
     for field in field_list:
         value = product.get(field)
-        
+
         # 1. Basic check: None, empty string, empty collection
         if value is None or value == "" or value == [] or value == {}:
             missing.append(field)
             continue
-            
+
         # 2. Specific check for seller_name
         if field == "seller_name" and isinstance(value, str):
             value_lower = value.lower().strip()
-            
+
             # Check length constraints
             if len(value) < SELLER_NAME_MIN_LENGTH or len(value) > SELLER_NAME_MAX_LENGTH:
                 missing.append(field)
                 continue
-                
+
             # Check invalid patterns
             is_invalid = False
             for pattern in INVALID_SELLER_PATTERNS:
                 if pattern.lower() in value_lower:
                     is_invalid = True
                     break
-            
+
             if is_invalid:
                 missing.append(field)
                 continue
-                
+
             # Check if just numbers string
             if value.replace(".", "").replace(",", "").isdigit():
                 missing.append(field)
@@ -163,15 +161,15 @@ def validate_product_data(product: dict[str, Any], retry_count: int = 0) -> str:
         return "retry"
     else:
         # Exceeded max retries - check if we should accept partial data
-        
+
         # ENHANCEMENT: Skip logic for strict fields
         # Nếu vẫn thiếu seller_name hoặc brand sau khi retry -> SKIP để crawl lại lần sau
         # Yêu cầu này giúp đảm bảo dữ liệu seller/brand luôn đầy đủ
-        strict_fields = ["seller_name"] # Có thể thêm "brand" nếu muốn áp dụng giống nhau
+        strict_fields = ["seller_name"]  # Có thể thêm "brand" nếu muốn áp dụng giống nhau
         for field in strict_fields:
             if field in important_missing:
                 return "skip"
-        
+
         # Calculate completeness score to decide for other fields
         score = calculate_completeness_score(product)
         if score >= DATA_QUALITY_MIN_SCORE:

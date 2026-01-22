@@ -32,7 +32,9 @@ class DiscordNotifier:
         self.enabled = DISCORD_CONFIG.get("enabled", False)
 
         if not self.webhook_url:
-            logger.warning("⚠️  DISCORD_WEBHOOK_URL không được cấu hình trong environment variables")
+            logger.warning(
+                "⚠️  DISCORD_WEBHOOK_URL không được cấu hình trong environment variables"
+            )
         if not self.enabled:
             logger.warning("⚠️  DISCORD_ENABLED chưa được bật")
 
@@ -58,7 +60,9 @@ class DiscordNotifier:
             True nếu gửi thành công, False nếu có lỗi
         """
         if not self.enabled or not self.webhook_url:
-            logger.warning("⚠️  Discord không được bật hoặc thiếu webhook URL, bỏ qua gửi thông báo")
+            logger.warning(
+                "⚠️  Discord không được bật hoặc thiếu webhook URL, bỏ qua gửi thông báo"
+            )
             return False
 
         try:

@@ -164,6 +164,7 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
                     try:
                         # Tắt log của webdriver_manager để giảm noise
                         import logging
+                        import stat
 
                         from webdriver_manager.chrome import ChromeDriverManager
 
@@ -171,12 +172,61 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
                         wdm_logger.setLevel(logging.WARNING)
 
                         # Install với cache để tránh download lại
-                        service = Service(ChromeDriverManager().install())
+                        driver_path = ChromeDriverManager().install()
+
+                        # QUAN TRỌNG: Set quyền thực thi cho ChromeDriver (fix lỗi status code 127)
+                        # Đặc biệt cần thiết trong WSL2/Linux
+                        try:
+                            os.chmod(
+                                driver_path,
+                                os.stat(driver_path).st_mode | stat.S_IEXEC,
+                            )
+                        except Exception:
+                            pass  # Nếu không set được quyền, vẫn thử tiếp
+
+                        # Kiểm tra ChromeDriver có thể chạy được không (kiểm tra dependencies)
+                        try:
+                            import subprocess
+
+                            result = subprocess.run(
+                                [driver_path, "--version"],
+                                capture_output=True,
+                                timeout=5,
+                                text=True,
+                            )
+                            if result.returncode != 0:
+                                raise RuntimeError(
+                                    "ChromeDriver không thể chạy được. "
+                                    "Có thể thiếu dependencies (libnss3, libnspr4, etc.). "
+                                    "Chạy: bash scripts/install_chromedriver_dependencies.sh"
+                                )
+                        except (subprocess.TimeoutExpired, FileNotFoundError, RuntimeError):
+                            # Nếu kiểm tra fail, vẫn thử tiếp (có thể là vấn đề khác)
+                            pass
+                        except Exception:
+                            pass
+
+                        service = Service(driver_path)
                         driver = webdriver.Chrome(service=service, options=chrome_options)
                         driver_created.set()
                     except ImportError:
                         # Không có webdriver-manager, raise lỗi gốc
                         error_occurred[0] = e
+                        driver_created.set()
+                    except Exception as wdm_error:
+                        # Cải thiện error message cho lỗi status code 127 (thiếu dependencies)
+                        error_msg = str(wdm_error)
+                        if "127" in error_msg or "unexpectedly exited" in error_msg.lower():
+                            enhanced_error = RuntimeError(
+                                f"ChromeDriver không thể khởi động (status code 127). "
+                                f"Thiếu dependencies hệ thống (libnss3, libnspr4, etc.).\n"
+                                f"Giải pháp: Chạy script sau để cài đặt dependencies:\n"
+                                f"  bash scripts/install_chromedriver_dependencies.sh\n"
+                                f"Lỗi gốc: {error_msg}"
+                            )
+                            error_occurred[0] = enhanced_error
+                        else:
+                            error_occurred[0] = wdm_error
                         driver_created.set()
             except Exception as e:
                 error_occurred[0] = e
