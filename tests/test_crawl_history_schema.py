@@ -15,11 +15,11 @@ from pathlib import Path
 import pytest
 
 # Add src to path for imports
-src_path = Path(__file__).parent.parent.parent / "src"
+src_path = Path(__file__).parent.parent / "src"
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from pipelines.crawl.storage.postgres_storage import PostgresStorage
+from pipelines.crawl.storage.postgres_storage import PostgresStorage  # noqa: E402
 
 
 @pytest.fixture
@@ -42,14 +42,12 @@ def test_crawl_history_schema_exists(storage):
             storage._ensure_history_schema(cur)
 
             # Check table exists
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
+                    SELECT FROM information_schema.tables
                     WHERE table_name = 'crawl_history'
                 )
-            """
-            )
+            """)
             assert cur.fetchone()[0], "crawl_history table should exist"
 
 
@@ -73,13 +71,11 @@ def test_crawl_history_new_columns_exist(storage):
             storage._ensure_history_schema(cur)
 
             # Get all columns
-            cur.execute(
-                """
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
+            cur.execute("""
+                SELECT column_name, data_type
+                FROM information_schema.columns
                 WHERE table_name = 'crawl_history'
-            """
-            )
+            """)
             columns = {row[0]: row[1] for row in cur.fetchall()}
 
             # Check each new column exists
@@ -104,13 +100,11 @@ def test_crawl_history_indexes_exist(storage):
             storage._ensure_history_schema(cur)
 
             # Get all indexes
-            cur.execute(
-                """
-                SELECT indexname 
-                FROM pg_indexes 
+            cur.execute("""
+                SELECT indexname
+                FROM pg_indexes
                 WHERE tablename = 'crawl_history'
-            """
-            )
+            """)
             indexes = [row[0] for row in cur.fetchall()]
 
             # Check each index exists
@@ -128,13 +122,11 @@ def test_products_metadata_columns_exist(storage):
             storage._ensure_products_schema(cur)
 
             # Get all columns
-            cur.execute(
-                """
-                SELECT column_name 
-                FROM information_schema.columns 
+            cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
                 WHERE table_name = 'products'
-            """
-            )
+            """)
             columns = [row[0] for row in cur.fetchall()]
 
             # Check each new column exists
@@ -152,13 +144,11 @@ def test_products_metadata_indexes_exist(storage):
             storage._ensure_products_schema(cur)
 
             # Get all indexes
-            cur.execute(
-                """
-                SELECT indexname 
-                FROM pg_indexes 
+            cur.execute("""
+                SELECT indexname
+                FROM pg_indexes
                 WHERE tablename = 'products'
-            """
-            )
+            """)
             indexes = [row[0] for row in cur.fetchall()]
 
             # Check each index exists
@@ -174,13 +164,11 @@ def test_crawl_history_null_values_allowed(storage):
             storage._ensure_history_schema(cur)
 
             # Insert a minimal record (only required fields)
-            cur.execute(
-                """
+            cur.execute("""
                 INSERT INTO crawl_history (product_id, price)
                 VALUES ('test_product_null', 100.00)
                 RETURNING id
-            """
-            )
+            """)
             record_id = cur.fetchone()[0]
 
             # Verify record was inserted

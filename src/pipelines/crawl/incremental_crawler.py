@@ -89,17 +89,17 @@ def get_products_to_crawl(
             rows = cur.fetchall()
 
             # Convert to list of dicts
-            products = []
-            for row in rows:
-                products.append(
-                    {
-                        "product_id": row[0],
-                        "name": row[1],
-                        "url": row[2],
-                        "category_id": row[3],
-                        "last_crawled_at": row[4],
-                    }
-                )
+            # Convert to list of dicts
+            products = [
+                {
+                    "product_id": row[0],
+                    "name": row[1],
+                    "url": row[2],
+                    "category_id": row[3],
+                    "last_crawled_at": row[4],
+                }
+                for row in rows
+            ]
 
             return products
 

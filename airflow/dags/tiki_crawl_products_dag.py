@@ -1109,10 +1109,9 @@ def fix_missing_parent_categories(**context) -> dict[str, Any]:
                         cur_rebuild.execute("SELECT url FROM categories")
                         all_db_urls = [row[0] for row in cur_rebuild.fetchall()]
 
-                categories_to_rebuild = []
-                for url in all_db_urls:
-                    if url in url_to_cat:
-                        categories_to_rebuild.append(url_to_cat[url])
+                categories_to_rebuild = [
+                    url_to_cat[url] for url in all_db_urls if url in url_to_cat
+                ]
 
                 if categories_to_rebuild:
                     # Rebuild paths bằng cách gọi save_categories lại

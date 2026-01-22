@@ -6,7 +6,7 @@ Tests end-to-end retry flow with validation and metadata tracking.
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -53,9 +53,7 @@ def test_retry_logic_complete_data_first_attempt(mock_html_complete):
         mock_crawl.return_value = mock_html_complete
 
         # Mock extract_product_detail to return complete product
-        with patch(
-            "pipelines.crawl.crawl_products_detail.extract_product_detail"
-        ) as mock_extract:
+        with patch("pipelines.crawl.crawl_products_detail.extract_product_detail") as mock_extract:
             mock_extract.return_value = {
                 "name": "Test Product",
                 "price": {"current_price": 100000},
@@ -66,9 +64,7 @@ def test_retry_logic_complete_data_first_attempt(mock_html_complete):
             }
 
             # Call retry wrapper
-            result = crawl_product_with_retry(
-                url="https://tiki.vn/test-product", verbose=False
-            )
+            result = crawl_product_with_retry(url="https://tiki.vn/test-product", verbose=False)
 
             # Should accept on first attempt
             assert result is not None
@@ -123,9 +119,7 @@ def test_retry_logic_missing_seller_triggers_retry(mock_html_missing_seller, moc
                     "brand": "Test Brand",
                 }
 
-        with patch(
-            "pipelines.crawl.crawl_products_detail.extract_product_detail"
-        ) as mock_extract:
+        with patch("pipelines.crawl.crawl_products_detail.extract_product_detail") as mock_extract:
             mock_extract.side_effect = mock_extract_side_effect
 
             result = crawl_product_with_retry(
@@ -148,9 +142,7 @@ def test_retry_logic_accepts_partial_after_max_retries(mock_html_missing_seller)
         # Always return incomplete data
         mock_crawl.return_value = mock_html_missing_seller
 
-        with patch(
-            "pipelines.crawl.crawl_products_detail.extract_product_detail"
-        ) as mock_extract:
+        with patch("pipelines.crawl.crawl_products_detail.extract_product_detail") as mock_extract:
             # Always return incomplete product
             mock_extract.return_value = {
                 "name": "Test Product",
@@ -182,11 +174,12 @@ def test_retry_logic_handles_permanent_failures():
         "_metadata": {},
     }
 
-    with patch(
-        "pipelines.crawl.crawl_products_detail.crawl_product_detail_with_selenium"
-    ) as mock_crawl, patch(
-        "pipelines.crawl.crawl_products_detail.extract_product_detail"
-    ) as mock_extract:
+    with (
+        patch(
+            "pipelines.crawl.crawl_products_detail.crawl_product_detail_with_selenium"
+        ) as mock_crawl,
+        patch("pipelines.crawl.crawl_products_detail.extract_product_detail") as mock_extract,
+    ):
         # First attempt: crawl succeeds; subsequent attempts: crawl fails
         mock_crawl.side_effect = [
             "<html><body>Valid</body></html>",
@@ -201,9 +194,7 @@ def test_retry_logic_handles_permanent_failures():
         }
         mock_extract.side_effect = [
             extracted_product,
-            AssertionError(
-                "extract_product_detail should not be called after the first attempt"
-            ),
+            AssertionError("extract_product_detail should not be called after the first attempt"),
         ]
 
         result = crawl_product_with_retry(original_product, max_retries=2)
@@ -233,9 +224,7 @@ def test_retry_logic_skips_missing_critical_fields():
     ) as mock_crawl:
         mock_crawl.return_value = "<html><body>Invalid</body></html>"
 
-        with patch(
-            "pipelines.crawl.crawl_products_detail.extract_product_detail"
-        ) as mock_extract:
+        with patch("pipelines.crawl.crawl_products_detail.extract_product_detail") as mock_extract:
             # Return product missing critical fields
             mock_extract.return_value = {
                 "seller": {"name": "Test Seller"},
@@ -243,9 +232,7 @@ def test_retry_logic_skips_missing_critical_fields():
                 # Missing name, price, product_id
             }
 
-            result = crawl_product_with_retry(
-                url="https://tiki.vn/test-product", verbose=False
-            )
+            result = crawl_product_with_retry(url="https://tiki.vn/test-product", verbose=False)
 
             # Should skip
             assert result is None
@@ -260,9 +247,7 @@ def test_retry_logic_metadata_tracking():
     ) as mock_crawl:
         mock_crawl.return_value = "<html>test</html>"
 
-        with patch(
-            "pipelines.crawl.crawl_products_detail.extract_product_detail"
-        ) as mock_extract:
+        with patch("pipelines.crawl.crawl_products_detail.extract_product_detail") as mock_extract:
             mock_extract.return_value = {
                 "name": "Test Product",
                 "price": {"current_price": 100000},
@@ -271,9 +256,7 @@ def test_retry_logic_metadata_tracking():
                 "brand": "Test Brand",
             }
 
-            result = crawl_product_with_retry(
-                url="https://tiki.vn/test-product", verbose=False
-            )
+            result = crawl_product_with_retry(url="https://tiki.vn/test-product", verbose=False)
 
             # Check metadata structure
             assert "_metadata" in result

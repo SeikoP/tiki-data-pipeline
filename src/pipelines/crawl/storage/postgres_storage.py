@@ -515,14 +515,9 @@ class PostgresStorage:
             CREATE TEMP TABLE IF NOT EXISTS {staging} (
                 LIKE {target} INCLUDING DEFAULTS
             ) ON COMMIT DROP
-        """).format(
-            staging=sql.Identifier(staging_table),
-            target=sql.Identifier(target_table)
-        ))
-        
-        cur.execute(sql.SQL("TRUNCATE {staging}").format(
-            staging=sql.Identifier(staging_table)
-        ))
+        """).format(staging=sql.Identifier(staging_table), target=sql.Identifier(target_table)))
+
+        cur.execute(sql.SQL("TRUNCATE {staging}").format(staging=sql.Identifier(staging_table)))
 
         # 2. Bulk Copy vào staging
         col_names = sql.SQL(",").join(map(sql.Identifier, columns))
@@ -881,7 +876,9 @@ class PostgresStorage:
                             FROM categories
                             WHERE url IN ({placeholders})
                         """).format(
-                            placeholders=sql.SQL(",").join([sql.Placeholder()] * len(missing_parent_urls))
+                            placeholders=sql.SQL(",").join(
+                                [sql.Placeholder()] * len(missing_parent_urls)
+                            )
                         )
                         try:
                             build_cur.execute(query, missing_parent_urls)

@@ -6,6 +6,14 @@ param(
     [string]$Command = "help"
 )
 
+# Auto-detect python3 on Linux if python is not available
+if ($IsLinux -and $null -eq (Get-Command "python" -ErrorAction SilentlyContinue)) {
+    if (Get-Command "python3" -ErrorAction SilentlyContinue) {
+        Write-Host "⚠️  'python' command not found, aliasing to 'python3'" -ForegroundColor Yellow
+        New-Alias -Name python -Value python3 -Force -Scope Script
+    }
+}
+
 # Force Python to use UTF-8 for I/O to avoid 'charmap' codec errors on Windows
 $env:PYTHONIOENCODING = "utf-8"
 
