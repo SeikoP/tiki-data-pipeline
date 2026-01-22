@@ -20,7 +20,8 @@ x-airflow-common:
     # LocalExecutor reads this config for Execution API (double underscore notation)
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
     # JWT secret for API authentication (must be same across all components)
-    AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET}
+    # Generate: openssl rand -hex 32
+    AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET:-default_jwt_secret_change_in_production}
     # Fernet key for Variable/Connection encryption (must be consistent across rebuilds)
     # Generate new key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     # If not set in .env, will use empty string (Airflow will generate one, but it won't persist across restarts)
@@ -205,7 +206,7 @@ services:
     environment:
       <<: *airflow-common-env
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
     user: "0:0"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
