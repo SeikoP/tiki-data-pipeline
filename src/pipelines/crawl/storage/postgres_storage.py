@@ -510,12 +510,19 @@ class PostgresStorage:
             do_nothing: If True, do nothing on conflict instead of update
         """
         # 1. Tạo staging table
+        # 1. Tạo staging table
         cur.execute(sql.SQL("""
             CREATE TEMP TABLE IF NOT EXISTS {staging} (
                 LIKE {target} INCLUDING DEFAULTS
-            ) ON COMMIT DROP;
-            TRUNCATE {staging};
-        """).format(staging=sql.Identifier(staging_table), target=sql.Identifier(target_table)))
+            ) ON COMMIT DROP
+        """).format(
+            staging=sql.Identifier(staging_table),
+            target=sql.Identifier(target_table)
+        ))
+        
+        cur.execute(sql.SQL("TRUNCATE {staging}").format(
+            staging=sql.Identifier(staging_table)
+        ))
 
         # 2. Bulk Copy vào staging
         col_names = sql.SQL(",").join(map(sql.Identifier, columns))
@@ -868,16 +875,16 @@ class PostgresStorage:
 
                     if missing_parent_urls:
                         # Query batch để load parent categories từ DB
-                        placeholders = ",".join(["%s"] * len(missing_parent_urls))
+                        # Query batch để load parent categories từ DB
+                        query = sql.SQL("""
+                            SELECT name, url, parent_url, category_id, image_url, level
+                            FROM categories
+                            WHERE url IN ({placeholders})
+                        """).format(
+                            placeholders=sql.SQL(",").join([sql.Placeholder()] * len(missing_parent_urls))
+                        )
                         try:
-                            build_cur.execute(
-                                f"""
-                                SELECT name, url, parent_url, category_id, image_url, level
-                                FROM categories
-                                WHERE url IN ({placeholders})
-                                """,
-                                missing_parent_urls,
-                            )
+                            build_cur.execute(query, missing_parent_urls)
                             loaded_count = 0
                             for row in build_cur.fetchall():
                                 parent_cat = {

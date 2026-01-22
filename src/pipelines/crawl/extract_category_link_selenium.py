@@ -70,7 +70,7 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
             try:
                 os.chmod(
                     driver_path,
-                    os.stat(driver_path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH,
+                    os.stat(driver_path).st_mode | stat.S_IEXEC,
                 )
             except Exception:
                 pass  # Nếu không set được quyền, vẫn thử tiếp
