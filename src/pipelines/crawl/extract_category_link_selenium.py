@@ -59,12 +59,61 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
     # Sử dụng webdriver-manager nếu có
     if HAS_WEBDRIVER_MANAGER:
         try:
-            service = Service(ChromeDriverManager().install())
+            import os
+            import stat
+            
+            # Install ChromeDriver
+            driver_path = ChromeDriverManager().install()
+            
+            # QUAN TRỌNG: Set quyền thực thi cho ChromeDriver (fix lỗi status code 127)
+            # Đặc biệt cần thiết trong WSL2/Linux
+            try:
+                os.chmod(driver_path, os.stat(driver_path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+            except Exception:
+                pass  # Nếu không set được quyền, vẫn thử tiếp
+            
+            # Kiểm tra ChromeDriver có thể chạy được không
+            try:
+                import subprocess
+                result = subprocess.run(
+                    [driver_path, "--version"],
+                    capture_output=True,
+                    timeout=5,
+                    text=True
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"ChromeDriver không thể chạy được. "
+                        f"Có thể thiếu dependencies (libnss3, libnspr4, etc.). "
+                        f"Chạy: bash scripts/install_chromedriver_dependencies.sh"
+                    )
+            except Exception:
+                pass  # Nếu kiểm tra fail, vẫn thử tiếp
+            
+            service = Service(driver_path)
             driver = webdriver.Chrome(service=service, options=chrome_options)
         except Exception as e:
+            error_msg = str(e)
+            if "127" in error_msg or "unexpectedly exited" in error_msg.lower():
+                enhanced_error = RuntimeError(
+                    f"ChromeDriver không thể khởi động (status code 127). "
+                    f"Thiếu dependencies hệ thống (libnss3, libnspr4, etc.).\n"
+                    f"Giải pháp: Chạy script sau để cài đặt dependencies:\n"
+                    f"  bash scripts/install_chromedriver_dependencies.sh\n"
+                    f"Lỗi gốc: {error_msg}"
+                )
+                if verbose:
+                    print(f"[Selenium] {enhanced_error}")
+                raise enhanced_error from e
+            
             if verbose:
                 print(f"[Selenium] Không thể dùng webdriver-manager: {e}, thử Chrome mặc định")
-            driver = webdriver.Chrome(options=chrome_options)
+            try:
+                driver = webdriver.Chrome(options=chrome_options)
+            except Exception as e2:
+                if verbose:
+                    print(f"[Selenium] Lỗi khi tạo Chrome driver: {e2}")
+                raise
     else:
         driver = webdriver.Chrome(options=chrome_options)
 
