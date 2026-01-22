@@ -337,7 +337,13 @@ def crawl_category_recursive_optimized(
         # Để đảm bảo category hierarchy đầy đủ (root -> children -> grandchildren)
         import re
 
+        # Đảm bảo không thêm trùng root category theo URL
+        existing_root_urls = {c["url"] for c in all_categories if c.get("url")}
         for root_url in root_urls:
+            if root_url in existing_root_urls:
+                # Bỏ qua URL trùng, tránh thêm duplicate root category
+                continue
+
             match = re.search(r"/([^/]+)/(c\d+)", root_url)
             if match:
                 root_slug = match.group(1)
@@ -353,6 +359,7 @@ def crawl_category_recursive_optimized(
                     "level": 0,
                 }
                 all_categories.append(root_category)
+                existing_root_urls.add(root_url)
                 print(f"✅ Đã thêm root category: {root_name} ({root_cat_id})")
 
         # Crawl từng level một
