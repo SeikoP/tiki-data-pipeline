@@ -264,6 +264,10 @@ Tên rút gọn:
                 timeout=60,
             )
 
+            if response.status_code == 429:
+                logger.warning("⚠️  Groq AI Rate Limit (429) hit. Please check your plan limits.")
+                return ""
+
             response.raise_for_status()
             result = response.json()
 

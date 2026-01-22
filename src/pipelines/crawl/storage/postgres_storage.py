@@ -281,7 +281,9 @@ class PostgresStorage:
             CREATE TABLE IF NOT EXISTS products (
                 id SERIAL PRIMARY KEY,
                 product_id VARCHAR(255) UNIQUE,
+                product_id VARCHAR(255) UNIQUE,
                 name VARCHAR(1000),
+                short_name VARCHAR(255),
                 url TEXT,
                 image_url TEXT,
                 category_url TEXT,
@@ -316,6 +318,7 @@ class PostgresStorage:
                 ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawled_at TIMESTAMP;
                 ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawl_attempt_at TIMESTAMP;
                 ALTER TABLE products ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMP;
+                ALTER TABLE products ADD COLUMN IF NOT EXISTS short_name VARCHAR(255);
             """)
         except Exception as e:
             print(f"⚠️  Note: Some ALTER TABLE statements for products may have been skipped: {e}")
@@ -567,7 +570,7 @@ class PostgresStorage:
     def save_categories(
         self,
         categories: list[dict[str, Any]],
-        only_leaf: bool = False,  # Changed: Load ALL categories by default
+        only_leaf: bool = True,  # Changed: Start defaulting to True to prevent redundant data
         sync_with_products: bool = False,
     ) -> int:
         """
@@ -1140,6 +1143,7 @@ class PostgresStorage:
                             (
                                 product.get("product_id"),
                                 product.get("name"),
+                                product.get("short_name"),
                                 product.get("url"),
                                 product.get("image_url"),
                                 product.get("category_url"),
@@ -1176,7 +1180,7 @@ class PostgresStorage:
                                 cur,
                                 """
                                 INSERT INTO products
-                                    (product_id, name, url, image_url, category_url, category_id, sales_count,
+                                    (product_id, name, short_name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average,
                                      seller_name, seller_id, seller_is_official, brand,
                                      stock_available, shipping)
@@ -1184,6 +1188,7 @@ class PostgresStorage:
                                 ON CONFLICT (product_id)
                                 DO UPDATE SET
                                     name = EXCLUDED.name,
+                                    short_name = EXCLUDED.short_name,
                                     url = EXCLUDED.url,
                                     image_url = EXCLUDED.image_url,
                                     category_url = EXCLUDED.category_url,
@@ -1575,25 +1580,39 @@ class PostgresStorage:
                         is_flash_sale = True
                     elif discount_amount and discount_amount >= 100000:
                         is_flash_sale = True
-
-                    records_to_insert.append(
-                        {
-                            "product_id": product_id,
-                            "price": current_price,
-                            "original_price": current_original_price,
-                            "discount_percent": current_discount,
-                            "discount_amount": discount_amount,  # NEW
-                            "price_change": price_change,
-                            "price_change_percent": price_change_percent,  # NEW
-                            "previous_price": prev_price,
-                            "previous_original_price": prev_original,
-                            "previous_discount_percent": prev_discount,
-                            "sales_count": current_sales,
-                            "sales_change": sales_change,
-                            "is_flash_sale": is_flash_sale,  # NEW
-                            "crawl_type": crawl_type,
-                        }
-                    )
+                    
+                    # DECISION: Should we log this record?
+                    # Log if:
+                    # 1. First time crawl (prev is None -> crawl_type='price_change')
+                    # 2. Price/Discount changed (crawl_type='price_change')
+                    # 3. Sales changed (sales_change != 0)
+                    should_log = False
+                    
+                    if crawl_type == 'price_change':
+                        should_log = True
+                    elif sales_change and sales_change != 0:
+                        should_log = True
+                        crawl_type = 'sales_change' # Update type for clarity
+                    
+                    if should_log:
+                        records_to_insert.append(
+                            {
+                                "product_id": product_id,
+                                "price": current_price,
+                                "original_price": current_original_price,
+                                "discount_percent": current_discount,
+                                "discount_amount": discount_amount,
+                                "price_change": price_change,
+                                "price_change_percent": price_change_percent,
+                                "previous_price": prev_price,
+                                "previous_original_price": prev_original,
+                                "previous_discount_percent": prev_discount,
+                                "sales_count": current_sales,
+                                "sales_change": sales_change,
+                                "is_flash_sale": is_flash_sale,
+                                "crawl_type": crawl_type,
+                            }
+                        )
 
                 # Batch insert ALL records (changed and unchanged)
                 if records_to_insert:
@@ -1674,84 +1693,7 @@ class PostgresStorage:
                         # Don't re-raise - log the error but continue
                         print("⚠️  Continuing without crawl history (will retry on next crawl)")
 
-    def log_price_history(
-        self,
-        product_id: str,
-        price: float,
-        original_price: float | None = None,
-        discount_percent: int | None = None,
-    ) -> int | None:
-        """
-        Log single product price to history CHỈ KHI CÓ THAY ĐỔI.
 
-        Args:
-            product_id: Product ID
-            price: Current product price
-            original_price: Original price before discount
-            discount_percent: Discount percentage
-
-        Returns:
-            ID of the new history record, or None if no change
-        """
-        with self.get_connection() as conn:
-            with conn.cursor() as cur:
-                self._ensure_history_schema(cur)
-                # Get previous data
-                cur.execute(
-                    """
-                    SELECT price, original_price, discount_percent FROM crawl_history
-                    WHERE product_id = %s
-                    ORDER BY crawled_at DESC LIMIT 1
-                """,
-                    (product_id,),
-                )
-
-                row = cur.fetchone()
-
-                if row:
-                    prev_price, prev_original, prev_discount = row
-                    # Check if anything changed
-                    price_changed = (float(prev_price) if prev_price else None) != (
-                        float(price) if price else None
-                    )
-                    original_changed = (float(prev_original) if prev_original else None) != (
-                        float(original_price) if original_price else None
-                    )
-                    discount_changed = prev_discount != discount_percent
-
-                    if not (price_changed or original_changed or discount_changed):
-                        return None  # No change, skip insert
-
-                    # Calculate price change
-                    price_change = None
-                    if prev_price is not None:
-                        price_change = float(price) - float(prev_price)
-                else:
-                    price_change = None  # First record
-                    prev_price, prev_original, prev_discount = None, None, None
-
-                cur.execute(
-                    """
-                    INSERT INTO crawl_history (
-                        product_id, price, original_price, discount_percent, price_change,
-                        previous_price, previous_original_price, previous_discount_percent
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                """,
-                    (
-                        product_id,
-                        price,
-                        original_price,
-                        discount_percent,
-                        price_change,
-                        prev_price,
-                        prev_original,
-                        prev_discount,
-                    ),
-                )
-
-                return cur.fetchone()[0]
 
     def update_category_product_counts(self) -> int:
         """
@@ -1972,114 +1914,7 @@ class PostgresStorage:
 
                 return deleted_count
 
-    def _bulk_log_product_price_history(self, cur, products: list[dict[str, Any]]) -> None:
-        """Bulk log crawl history CHỈ KHI CÓ THAY ĐỔI GIÁ.
 
-        Tối ưu:
-        - Batch lookup previous prices
-        - Chỉ insert khi có thay đổi
-        - Sử dụng execute_values thay vì COPY (để có thể filter)
-        """
-        if not products:
-            return
-
-        # Filter products with valid data
-        valid_products = [p for p in products if p.get("product_id") and p.get("price") is not None]
-
-        if not valid_products:
-            return
-
-        # BATCH LOOKUP: Get all previous prices in one query
-        product_ids = [p.get("product_id") for p in valid_products]
-
-        cur.execute(
-            """
-            SELECT DISTINCT ON (product_id)
-                product_id, price, original_price, discount_percent
-            FROM crawl_history
-            WHERE product_id = ANY(%s)
-            ORDER BY product_id, crawled_at DESC
-            """,
-            (product_ids,),
-        )
-
-        previous_data = {
-            row[0]: {"price": row[1], "original_price": row[2], "discount_percent": row[3]}
-            for row in cur.fetchall()
-        }
-
-        # Collect records with changes
-        records_to_insert = []
-
-        for p in valid_products:
-            product_id = p.get("product_id")
-            current_price = p.get("price")
-            current_original_price = p.get("original_price")
-            current_discount = p.get("discount_percent")
-
-            prev = previous_data.get(product_id)
-
-            if prev is None:
-                # First time - always insert
-                records_to_insert.append(
-                    (
-                        product_id,
-                        current_price,
-                        current_original_price,
-                        current_discount,
-                        None,  # price_change
-                        None,  # previous_price
-                        None,  # previous_original_price
-                        None,  # previous_discount_percent
-                    )
-                )
-            else:
-                prev_price = float(prev["price"]) if prev["price"] else None
-                prev_original = float(prev["original_price"]) if prev["original_price"] else None
-                prev_discount = prev["discount_percent"]
-
-                current_price_float = float(current_price) if current_price else None
-                current_original_float = (
-                    float(current_original_price) if current_original_price else None
-                )
-
-                price_changed = prev_price != current_price_float
-                original_changed = prev_original != current_original_float
-                discount_changed = prev_discount != current_discount
-
-                if price_changed or original_changed or discount_changed:
-                    price_change = None
-                    if prev_price is not None and current_price_float is not None:
-                        price_change = current_price_float - prev_price
-
-                    records_to_insert.append(
-                        (
-                            product_id,
-                            current_price,
-                            current_original_price,
-                            current_discount,
-                            price_change,
-                            prev_price,
-                            prev_original,
-                            prev_discount,
-                        )
-                    )
-
-        # Batch insert changed records
-        if records_to_insert:
-            execute_values(
-                cur,
-                """
-                INSERT INTO crawl_history
-                    (product_id, price, original_price, discount_percent, price_change,
-                     previous_price, previous_original_price, previous_discount_percent)
-                VALUES %s
-                """,
-                records_to_insert,
-            )
-            print(
-                f"📊 Bulk price history: {len(records_to_insert)}/{len(valid_products)} products had changes"
-            )
 
     def _save_products_bulk_copy(
         self, products: list[dict[str, Any]], upsert: bool
@@ -2094,6 +1929,7 @@ class PostgresStorage:
         columns = [
             "product_id",
             "name",
+            "short_name",
             "url",
             "image_url",
             "category_url",
@@ -2133,7 +1969,8 @@ class PostgresStorage:
                 )
 
                 try:
-                    self._bulk_log_product_price_history(cur, products)
+                    # Use the robust batch history logging method
+                    self._log_batch_crawl_history(products)
                 except Exception as e:
                     print(f"⚠️  Failed to log bulk history: {e}")
 

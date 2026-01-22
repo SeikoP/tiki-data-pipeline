@@ -360,6 +360,10 @@ class DataTransformer:
         if not product.get("url"):
             return False, "Missing url"
 
+        # CRITICAL: Validate seller_name (Task: Xóa seller_name null trước khi load db)
+        if not product.get("seller_name"):
+            return False, "Missing or invalid seller_name"
+
         # Validate product_id format (chỉ số)
         product_id = str(product["product_id"]).strip()
         if not product_id.isdigit():
@@ -530,14 +534,31 @@ class DataTransformer:
                     continue
         return None
 
-    def _get_short_name(self, name: str) -> str | None:
-        """Get shortened name using AI"""
+    def _get_short_name(self, name: str) -> str:
+        """Get shortened name using AI with local fallback if needed"""
         if not name:
-            return None
-        
+            return ""
+
+        # 1. Try AI shortening if enabled
         if self.ai_summarizer:
-            return self.ai_summarizer.shorten_product_name(name)
-        return None
+            try:
+                short_name = self.ai_summarizer.shorten_product_name(name)
+                # Ensure we got a valid, different name
+                if short_name and short_name != name:
+                    return short_name
+            except Exception as e:
+                logger.warning(f"⚠️  AI shortening failed, using fallback: {e}")
+
+        # 2. Local Fallback: Truncate if too long (max ~80 chars for DB/display)
+        if len(name) > 80:
+            # Try to cut at space
+            truncated = name[:77]
+            last_space = truncated.rfind(" ")
+            if last_space > 40:
+                truncated = name[:last_space]
+            return truncated + "..."
+
+        return name
 
     def get_stats(self) -> dict[str, Any]:
         """Lấy thống kê transform"""
