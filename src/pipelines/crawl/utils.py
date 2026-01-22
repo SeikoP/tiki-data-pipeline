@@ -642,8 +642,10 @@ class RateLimiter:
 # Default paths
 DEFAULT_DATA_DIR = Path("data/raw")
 DEFAULT_CACHE_DIR = DEFAULT_DATA_DIR / "cache"
+DEFAULT_CATEGORY_CACHE_DIR = DEFAULT_CACHE_DIR / "categories"
+DEFAULT_PRODUCT_LIST_CACHE_DIR = DEFAULT_CACHE_DIR / "products"
+DEFAULT_DETAIL_CACHE_DIR = DEFAULT_CACHE_DIR / "details"
 DEFAULT_PRODUCTS_DIR = DEFAULT_DATA_DIR / "products"
-DEFAULT_DETAIL_CACHE_DIR = DEFAULT_PRODUCTS_DIR / "detail" / "cache"
 
 # Default user agent
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

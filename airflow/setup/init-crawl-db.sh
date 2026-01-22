@@ -72,6 +72,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         id SERIAL PRIMARY KEY,
         product_id VARCHAR(255) UNIQUE NOT NULL,
         name VARCHAR(1000) NOT NULL,
+        short_name VARCHAR(255),
         url TEXT NOT NULL,
         image_url TEXT,
         category_url TEXT,

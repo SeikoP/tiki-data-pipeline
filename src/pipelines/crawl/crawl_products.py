@@ -17,6 +17,8 @@ try:
     from .utils import (
         DEFAULT_CACHE_DIR,
         DEFAULT_DATA_DIR,
+        DEFAULT_PRODUCT_LIST_CACHE_DIR,
+        DEFAULT_PRODUCTS_DIR,
         RateLimiter,
         atomic_write_json,
         ensure_dir,
@@ -52,6 +54,8 @@ except ImportError:
             RateLimiter = utils_module.RateLimiter
             DEFAULT_DATA_DIR = utils_module.DEFAULT_DATA_DIR
             DEFAULT_CACHE_DIR = utils_module.DEFAULT_CACHE_DIR
+            DEFAULT_PRODUCT_LIST_CACHE_DIR = utils_module.DEFAULT_PRODUCT_LIST_CACHE_DIR
+            DEFAULT_PRODUCTS_DIR = utils_module.DEFAULT_PRODUCTS_DIR
         else:
             raise ImportError(f"Không thể load utils từ {utils_path}") from None
     else:
@@ -147,11 +151,9 @@ def _check_selenium_available():
 
 
 # Tạo thư mục output
-os.makedirs("data/demo/products", exist_ok=True)
-os.makedirs("data/demo/products/cache", exist_ok=True)
-# Giữ thư mục cũ để tương thích
-os.makedirs("data/raw/products", exist_ok=True)
-os.makedirs("data/raw/products/cache", exist_ok=True)
+# Tạo thư mục output
+os.makedirs(DEFAULT_PRODUCTS_DIR, exist_ok=True)
+os.makedirs(DEFAULT_PRODUCT_LIST_CACHE_DIR, exist_ok=True)
 
 # Thread-safe locks và stats
 stats_lock = Lock()
@@ -738,7 +740,7 @@ def crawl_category_products(
     category_url,
     max_pages=None,
     use_selenium=False,
-    cache_dir="data/demo/products/cache",
+    cache_dir=DEFAULT_PRODUCT_LIST_CACHE_DIR,
     use_redis_cache=True,
     use_rate_limiting=True,
 ):
@@ -1067,7 +1069,7 @@ def crawl_products_from_categories(
 
     # Lưu kết quả
     if not output_file:
-        output_file = "data/demo/products/products.json"
+        output_file = DEFAULT_PRODUCTS_DIR / "products.json"
 
     print(f"\n💾 Đang lưu kết quả vào: {output_file}")
     print("📝 Lưu ý: Crawl thông tin cơ bản (ID, tên, URL, hình, số lượng bán)")
@@ -1111,7 +1113,7 @@ def crawl_products_from_categories(
 def main():
     """Hàm main"""
     categories_file = "data/raw/categories_recursive_optimized.json"
-    output_file = "data/demo/products/products.json"
+    output_file = DEFAULT_PRODUCTS_DIR / "products.json"
 
     # Tùy chọn
     max_categories = 10  # None để crawl tất cả

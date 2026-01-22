@@ -224,7 +224,7 @@ class MultiLevelCache:
 
                     cache_dir = DEFAULT_CACHE_DIR
                 except ImportError:
-                    # Fallback
+                    # Fallback to a safe relative path if utils cannot be imported
                     from pathlib import Path
 
                     cache_dir = Path("data/raw/cache")
