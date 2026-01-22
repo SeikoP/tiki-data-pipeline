@@ -61,35 +61,36 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
         try:
             import os
             import stat
-            
+
             # Install ChromeDriver
             driver_path = ChromeDriverManager().install()
-            
+
             # QUAN TRỌNG: Set quyền thực thi cho ChromeDriver (fix lỗi status code 127)
             # Đặc biệt cần thiết trong WSL2/Linux
             try:
-                os.chmod(driver_path, os.stat(driver_path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+                os.chmod(
+                    driver_path,
+                    os.stat(driver_path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH,
+                )
             except Exception:
                 pass  # Nếu không set được quyền, vẫn thử tiếp
-            
+
             # Kiểm tra ChromeDriver có thể chạy được không
             try:
                 import subprocess
+
                 result = subprocess.run(
-                    [driver_path, "--version"],
-                    capture_output=True,
-                    timeout=5,
-                    text=True
+                    [driver_path, "--version"], capture_output=True, timeout=5, text=True
                 )
                 if result.returncode != 0:
                     raise RuntimeError(
-                        f"ChromeDriver không thể chạy được. "
-                        f"Có thể thiếu dependencies (libnss3, libnspr4, etc.). "
-                        f"Chạy: bash scripts/install_chromedriver_dependencies.sh"
+                        "ChromeDriver không thể chạy được. "
+                        "Có thể thiếu dependencies (libnss3, libnspr4, etc.). "
+                        "Chạy: bash scripts/install_chromedriver_dependencies.sh"
                     )
             except Exception:
                 pass  # Nếu kiểm tra fail, vẫn thử tiếp
-            
+
             service = Service(driver_path)
             driver = webdriver.Chrome(service=service, options=chrome_options)
         except Exception as e:
@@ -105,7 +106,7 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
                 if verbose:
                     print(f"[Selenium] {enhanced_error}")
                 raise enhanced_error from e
-            
+
             if verbose:
                 print(f"[Selenium] Không thể dùng webdriver-manager: {e}, thử Chrome mặc định")
             try:

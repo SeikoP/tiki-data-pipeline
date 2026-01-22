@@ -267,8 +267,7 @@ Data JSON:
             cur = conn.cursor(cursor_factory=RealDictCursor)
 
             # Lấy thống kê tổng quan
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT
                     COUNT(*) as total_products,
                     COUNT(CASE WHEN sales_count IS NOT NULL AND sales_count > 0 THEN 1 END) as with_sales,
@@ -276,13 +275,11 @@ Data JSON:
                     MAX(discount_percent) as max_discount,
                     MIN(discount_percent) as min_discount
                 FROM products
-            """
-            )
+            """)
             stats = cur.fetchone()
 
             # Lấy top 5 sản phẩm giảm giá cao
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT
                     product_id,
                     name,
@@ -296,8 +293,7 @@ Data JSON:
                     AND name IS NOT NULL
                 ORDER BY discount_percent DESC
                 LIMIT 5
-            """
-            )
+            """)
             discount_products = cur.fetchall()
 
             # Xây dựng báo cáo

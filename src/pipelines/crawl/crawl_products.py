@@ -253,14 +253,20 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
 
                     # Install ChromeDriver
                     driver_path = ChromeDriverManager().install()
-                    
+
                     # QUAN TRỌNG: Set quyền thực thi cho ChromeDriver (fix lỗi status code 127)
                     # Đặc biệt cần thiết trong WSL2/Linux
                     try:
-                        os.chmod(driver_path, os.stat(driver_path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+                        os.chmod(
+                            driver_path,
+                            os.stat(driver_path).st_mode
+                            | stat.S_IEXEC
+                            | stat.S_IXGRP
+                            | stat.S_IXOTH,
+                        )
                     except Exception:
                         pass  # Nếu không set được quyền, vẫn thử tiếp
-                    
+
                     service = Service(driver_path)
                     driver = webdriver.Chrome(service=service, options=chrome_options)
                 except Exception:

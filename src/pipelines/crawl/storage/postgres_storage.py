@@ -23,13 +23,13 @@ from ..validate_category_path import fix_products_category_paths
 def normalize_category_id(cat_id: str | None) -> str | None:
     """
     Normalize category ID to consistent format: 'c{id}'
-    
+
     Args:
         cat_id: Category ID in any format ('23570', 'c23570', etc.)
-    
+
     Returns:
         Normalized category ID ('c23570') or None
-    
+
     Examples:
         >>> normalize_category_id('23570')
         'c23570'
@@ -40,17 +40,17 @@ def normalize_category_id(cat_id: str | None) -> str | None:
     """
     if not cat_id:
         return None
-    
+
     # Convert to string and strip whitespace
     cat_id_str = str(cat_id).strip()
-    
+
     # Remove all 'c' prefixes and whitespace
-    clean_id = cat_id_str.replace('c', '').replace('C', '').strip()
-    
+    clean_id = cat_id_str.replace("c", "").replace("C", "").strip()
+
     # Return with 'c' prefix if we have a valid ID
     if clean_id and clean_id.isdigit():
         return f"c{clean_id}"
-    
+
     return None
 
 
@@ -241,8 +241,7 @@ class PostgresStorage:
         Lưu ý: Bảng này chỉ lưu các category có is_leaf = true.
         category_path được mở rộng với các trường level_1 đến level_5 để thể hiện rõ theo từng độ sâu.
         """
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS categories (
                 id SERIAL PRIMARY KEY,
                 category_id VARCHAR(255) UNIQUE,
@@ -265,8 +264,7 @@ class PostgresStorage:
             );
             -- Only essential index: level_2 is used for category filtering queries
             CREATE INDEX IF NOT EXISTS idx_cat_level2 ON categories(level_2);
-        """
-        )
+        """)
 
     def _ensure_products_schema(self, cur) -> None:
         """Đảm bảo bảng products và các index tồn tại.
@@ -274,13 +272,12 @@ class PostgresStorage:
         Đã loại bỏ các trường: category_path, review_count, description, images,
         estimated_revenue, price_savings, price_category, value_score, sales_velocity,
         specifications, popularity_score, discount_amount, stock_quantity, stock_status
-        
+
         Đã thêm metadata columns: data_quality, last_crawl_status, retry_count
         Đã thêm timestamp columns: last_crawled_at, last_crawl_attempt_at, first_seen_at
         """
         # Step 1: Create table if not exists
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS products (
                 id SERIAL PRIMARY KEY,
                 product_id VARCHAR(255) UNIQUE,
@@ -303,14 +300,13 @@ class PostgresStorage:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """
-        )
-        
+        """)
+
         # Step 2: Create index
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
         """)
-        
+
         # Step 3: Add metadata columns (for existing tables) - Run separately!
         try:
             cur.execute("""
@@ -323,7 +319,7 @@ class PostgresStorage:
             """)
         except Exception as e:
             print(f"⚠️  Note: Some ALTER TABLE statements for products may have been skipped: {e}")
-        
+
         # Step 4: Create indexes for metadata columns
         try:
             cur.execute("""
@@ -334,7 +330,7 @@ class PostgresStorage:
             """)
         except Exception as e:
             print(f"⚠️  Note: Some index creation for products may have been skipped: {e}")
-        
+
         # Step 5: Add foreign key constraint if not exists
         cur.execute("""
             SELECT constraint_name FROM information_schema.table_constraints
@@ -342,7 +338,7 @@ class PostgresStorage:
               AND constraint_type = 'FOREIGN KEY'
               AND constraint_name = 'fk_products_category_id'
         """)
-        
+
         if not cur.fetchone():
             try:
                 cur.execute("""
@@ -358,13 +354,12 @@ class PostgresStorage:
                 # This is expected and will be handled by migration script
                 pass
 
-
     def _ensure_history_schema(self, cur) -> None:
         """Đảm bảo bảng crawl_history và các index tồn tại.
 
         Bảng này lưu lịch sử crawl cho MỌI lần crawl (không chỉ khi có thay đổi giá).
         MỖI LẦN CRAWL = 1 RECORD MỚI (không ghi đè) → Lịch sử đầy đủ
-        
+
         Schema tối ưu - CHỈ GIỮ CORE FIELDS:
         - Price tracking: price, original_price, discount_percent, price_change, previous_*
         - Price analysis: discount_amount (tiền giảm), price_change_percent (% thay đổi)
@@ -372,7 +367,7 @@ class PostgresStorage:
         - Promotion: is_flash_sale (đang khuyến mãi mạnh)
         - Crawl type: 'price_change', 'no_change'
         - Timestamps: crawled_at, updated_at
-        
+
         Đã XÓA các fields không populate được:
         - started_at, completed_at (không track được từ app)
         - crawl_status, retry_count, error_message (job-level, không product-level)
@@ -380,12 +375,11 @@ class PostgresStorage:
         - crawl_duration_ms, page_load_time_ms (performance metrics không cần lưu)
         """
         # Step 1: Create table if not exists
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS crawl_history (
                 id SERIAL PRIMARY KEY,
                 product_id VARCHAR(255) NOT NULL,
-                
+
                 -- Price tracking
                 price DECIMAL(12, 2) NOT NULL,
                 original_price DECIMAL(12, 2),
@@ -396,23 +390,22 @@ class PostgresStorage:
                 previous_price DECIMAL(12, 2),
                 previous_original_price DECIMAL(12, 2),
                 previous_discount_percent INTEGER,
-                
+
                 -- Sales tracking
                 sales_count INTEGER,
                 sales_change INTEGER,
-                
+
                 -- Promotion tracking
                 is_flash_sale BOOLEAN DEFAULT FALSE,
-                
+
                 -- Metadata
                 crawl_type VARCHAR(20) DEFAULT 'price_change',
-                
+
                 -- Timestamps
                 crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """
-        )
+        """)
 
         # Step 2: Create indexes (safe to run multiple times)
         cur.execute("""
@@ -424,7 +417,7 @@ class PostgresStorage:
             CREATE INDEX IF NOT EXISTS idx_history_flash_sale ON crawl_history(is_flash_sale) WHERE is_flash_sale = true;
             CREATE INDEX IF NOT EXISTS idx_history_discount ON crawl_history(discount_percent) WHERE discount_percent > 0;
         """)
-        
+
         # Step 3: Add missing columns (for existing tables) - CRITICAL: Run separately!
         # This ensures that if the table already existed before code update, it gets the new columns
         try:
@@ -443,7 +436,7 @@ class PostgresStorage:
         except Exception as e:
             # Log but don't fail - columns might already exist
             print(f"⚠️  Note: Some ALTER TABLE statements may have been skipped: {e}")
-        
+
         # Step 4: Add foreign key constraint if not exists
         cur.execute("""
             SELECT constraint_name FROM information_schema.table_constraints
@@ -451,7 +444,7 @@ class PostgresStorage:
               AND constraint_type = 'FOREIGN KEY'
               AND constraint_name = 'fk_crawl_history_product_id'
         """)
-        
+
         if not cur.fetchone():
             try:
                 cur.execute("""
@@ -466,7 +459,6 @@ class PostgresStorage:
                 # FK constraint may fail if there are orphan records
                 # This is expected and will be handled by migration script
                 pass
-
 
     def _write_dicts_to_csv_buffer(
         self, rows: list[dict[str, Any]], columns: list[str]
@@ -518,16 +510,12 @@ class PostgresStorage:
             do_nothing: If True, do nothing on conflict instead of update
         """
         # 1. Tạo staging table
-        cur.execute(
-            sql.SQL(
-                """
+        cur.execute(sql.SQL("""
             CREATE TEMP TABLE IF NOT EXISTS {staging} (
                 LIKE {target} INCLUDING DEFAULTS
             ) ON COMMIT DROP;
             TRUNCATE {staging};
-        """
-            ).format(staging=sql.Identifier(staging_table), target=sql.Identifier(target_table))
-        )
+        """).format(staging=sql.Identifier(staging_table), target=sql.Identifier(target_table)))
 
         # 2. Bulk Copy vào staging
         col_names = sql.SQL(",").join(map(sql.Identifier, columns))
@@ -538,13 +526,11 @@ class PostgresStorage:
 
         # 3. Merge vào target table
         if do_nothing:
-            merge_query = sql.SQL(
-                """
+            merge_query = sql.SQL("""
                 INSERT INTO {target} ({cols})
                 SELECT {cols} FROM {staging}
                 ON CONFLICT ({conflict}) DO NOTHING;
-            """
-            ).format(
+            """).format(
                 target=sql.Identifier(target_table),
                 staging=sql.Identifier(staging_table),
                 cols=col_names,
@@ -560,14 +546,12 @@ class PostgresStorage:
                 for col in update_cols
             )
 
-            merge_query = sql.SQL(
-                """
+            merge_query = sql.SQL("""
                 INSERT INTO {target} ({cols})
                 SELECT {cols} FROM {staging}
                 ON CONFLICT ({conflict}) DO UPDATE SET
                     {update_clause};
-            """
-            ).format(
+            """).format(
                 target=sql.Identifier(target_table),
                 staging=sql.Identifier(staging_table),
                 cols=col_names,
@@ -604,7 +588,7 @@ class PostgresStorage:
         # để có thể build path đầy đủ
         url_to_cat = {cat.get("url"): cat for cat in categories}
         all_urls = set(url_to_cat.keys())
-        
+
         # Tìm tất cả parent URLs cần thiết (traverse đầy đủ lên đến root)
         needed_parent_urls = set()
         for cat in categories:
@@ -624,22 +608,31 @@ class PostgresStorage:
                 else:
                     break
                 depth += 1
-        
+
         # Nếu có parent URLs cần thiết nhưng chưa có trong danh sách,
         # thử load từ file JSON categories (nếu có)
         if needed_parent_urls:
-            print(f"📂 Tìm thấy {len(needed_parent_urls)} parent URLs cần thiết nhưng chưa có trong danh sách")
+            print(
+                f"📂 Tìm thấy {len(needed_parent_urls)} parent URLs cần thiết nhưng chưa có trong danh sách"
+            )
             print(f"   Các parent URLs: {list(needed_parent_urls)[:5]}...")
-            
+
             # Thử load từ file JSON categories
             json_paths = [
                 "/opt/airflow/data/raw/categories_recursive_optimized.json",
                 os.path.join(os.getcwd(), "data", "raw", "categories_recursive_optimized.json"),
-                os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "raw", "categories_recursive_optimized.json"),
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "..",
+                    "..",
+                    "data",
+                    "raw",
+                    "categories_recursive_optimized.json",
+                ),
             ]
-            
+
             categories_from_json = {}
-            json_file_used = None
             for json_path in json_paths:
                 if os.path.exists(json_path):
                     try:
@@ -650,12 +643,13 @@ class PostgresStorage:
                             url = cat_json.get("url")
                             if url:
                                 categories_from_json[url] = cat_json
-                        json_file_used = json_path
-                        print(f"📂 Loaded {len(categories_from_json)} categories from JSON: {json_path}")
+                        print(
+                            f"📂 Loaded {len(categories_from_json)} categories from JSON: {json_path}"
+                        )
                         break
                     except Exception as e:
                         print(f"⚠️  Could not load categories JSON from {json_path}: {e}")
-            
+
             # Include missing parent categories từ JSON
             if categories_from_json:
                 added_count = 0
@@ -682,12 +676,12 @@ class PostgresStorage:
                                 else:
                                     break
                                 depth += 1
-                
+
                 if added_count > 0:
                     print(f"✅ Đã thêm {added_count} parent categories từ file JSON vào danh sách")
                     # Update all_urls sau khi thêm
                     all_urls = set(url_to_cat.keys())
-        
+
         # Build URL -> category lookup for path building (sau khi đã include parents)
         url_to_cat = {cat.get("url"): cat for cat in categories}
 
@@ -700,7 +694,7 @@ class PostgresStorage:
 
         def build_category_path(cat: dict, cur=None) -> list[str]:
             """Build category path đầy đủ bằng cách traverse lên parent.
-            
+
             Logic:
             1. Ưu tiên lấy từ url_to_cat (categories đang load trong batch hiện tại)
             2. Nếu không có, query từ DB (và cache lại)
@@ -710,7 +704,7 @@ class PostgresStorage:
             current = cat
             visited = set()
             max_depth = 10  # Giới hạn độ sâu để tránh infinite loop
-            
+
             depth = 0
             while current and depth < max_depth:
                 url = current.get("url")
@@ -719,34 +713,34 @@ class PostgresStorage:
                     break
                 visited.add(url)
                 depth += 1
-                
+
                 # Thêm name vào đầu path
                 name = current.get("name", "")
                 if name:  # Chỉ thêm nếu name không rỗng
                     path.insert(0, name)
-                
+
                 # Tìm parent
                 parent_url = current.get("parent_url")
                 if not parent_url:
                     # Đã đến root category, dừng lại
                     break
-                
+
                 # Ưu tiên 1: Lấy từ url_to_cat (categories đang load trong batch hiện tại)
                 if parent_url in url_to_cat:
                     current = url_to_cat[parent_url]
                     continue
-                
+
                 # Ưu tiên 2: Lấy từ cache (đã query từ DB trước đó trong cùng batch)
                 if parent_url in db_parent_cache:
                     current = db_parent_cache[parent_url]
                     continue
-                
+
                 # Ưu tiên 3: Query từ DB nếu có cursor
                 if cur is not None:
                     try:
                         cur.execute(
                             "SELECT name, url, parent_url FROM categories WHERE url = %s",
-                            (parent_url,)
+                            (parent_url,),
                         )
                         row = cur.fetchone()
                         if row:
@@ -772,17 +766,17 @@ class PostgresStorage:
                 else:
                     # Không có cursor để query, dừng lại
                     break
-            
+
             return path
 
         # Get used category IDs if filtering is enabled
         used_category_ids = set()
         urls_to_keep = set()  # URLs of categories to keep (including parents)
-        
+
         if sync_with_products:
             used_category_ids = self.get_used_category_ids()
             print(f"🔍 Found {len(used_category_ids)} active categories in products table")
-            
+
             # IMPORTANT: If no products exist yet, disable filtering to load all categories
             if not used_category_ids:
                 print("⚠️  No products found - loading ALL categories (will filter on next run)")
@@ -797,7 +791,7 @@ class PostgresStorage:
                         if match:
                             cat_id = match.group(1)
                     cat_id = normalize_category_id(cat_id)
-                    
+
                     # Check if this category has products
                     is_leaf = cat.get("url") not in parent_urls
                     if is_leaf and cat_id:
@@ -806,7 +800,7 @@ class PostgresStorage:
                         if cat_id in used_category_ids:
                             # Add this leaf category
                             urls_to_keep.add(cat.get("url"))
-                            
+
                             # Step 2: Traverse up to collect ALL parent URLs
                             current = cat
                             visited = set()
@@ -818,7 +812,7 @@ class PostgresStorage:
                                 urls_to_keep.add(url)
                                 parent_url = current.get("parent_url")
                                 current = url_to_cat.get(parent_url) if parent_url else None
-                
+
                 print(f"📂 Keeping {len(urls_to_keep)} categories (leaves + parents)")
 
         # Build category paths với connection đến DB để query parent nếu cần
@@ -845,7 +839,7 @@ class PostgresStorage:
                             try:
                                 build_cur.execute(
                                     "SELECT name, url, parent_url, category_id, image_url, level FROM categories WHERE url = %s",
-                                    (parent_url,)
+                                    (parent_url,),
                                 )
                                 row = build_cur.fetchone()
                                 if row:
@@ -865,14 +859,13 @@ class PostgresStorage:
                             except Exception:
                                 break
                         depth += 1
-                
+
                 # Load tất cả parent categories từ DB nếu chưa có trong url_to_cat (batch query)
                 if all_parent_urls_needed:
                     missing_parent_urls = [
-                        url for url in all_parent_urls_needed 
-                        if url not in url_to_cat
+                        url for url in all_parent_urls_needed if url not in url_to_cat
                     ]
-                    
+
                     if missing_parent_urls:
                         # Query batch để load parent categories từ DB
                         placeholders = ",".join(["%s"] * len(missing_parent_urls))
@@ -880,10 +873,10 @@ class PostgresStorage:
                             build_cur.execute(
                                 f"""
                                 SELECT name, url, parent_url, category_id, image_url, level
-                                FROM categories 
+                                FROM categories
                                 WHERE url IN ({placeholders})
                                 """,
-                                missing_parent_urls
+                                missing_parent_urls,
                             )
                             loaded_count = 0
                             for row in build_cur.fetchall():
@@ -900,12 +893,14 @@ class PostgresStorage:
                                 # Cache lại để dùng cho các categories khác
                                 db_parent_cache[row[1]] = parent_cat
                                 loaded_count += 1
-                            
+
                             if loaded_count > 0:
-                                print(f"📂 Loaded {loaded_count} parent categories from DB for path building")
+                                print(
+                                    f"📂 Loaded {loaded_count} parent categories from DB for path building"
+                                )
                         except Exception as e:
                             print(f"⚠️  Warning: Could not load all parent categories from DB: {e}")
-                
+
                 prepared_categories = []
                 for cat in categories:
                     # Extract and normalize category_id
@@ -915,7 +910,7 @@ class PostgresStorage:
                         match = re.search(r"c?(\d+)", cat.get("url", ""))
                         if match:
                             cat_id = match.group(1)
-                    
+
                     # Normalize to 'c{id}' format
                     cat_id = normalize_category_id(cat_id)
 
@@ -987,27 +982,27 @@ class PostgresStorage:
             cat_id = cat.get("category_id")
             if not cat_id:
                 continue
-                
+
             if cat_id in unique_categories_map:
                 existing = unique_categories_map[cat_id]
                 # If current URL is shorter or looks "better", replace
                 # Also prefer non-empty names
                 curr_url_len = len(cat.get("url", ""))
                 exist_url_len = len(existing.get("url", ""))
-                
+
                 replace = False
                 if curr_url_len < exist_url_len:
                     replace = True
                 elif curr_url_len == exist_url_len:
-                     # Tie-breaker: prefer longer name (more descriptive)
-                     if len(cat.get("name", "")) > len(existing.get("name", "")):
-                         replace = True
-                
+                    # Tie-breaker: prefer longer name (more descriptive)
+                    if len(cat.get("name", "")) > len(existing.get("name", "")):
+                        replace = True
+
                 if replace:
                     unique_categories_map[cat_id] = cat
             else:
                 unique_categories_map[cat_id] = cat
-        
+
         final_categories = list(unique_categories_map.values())
 
         csv_buffer = self._write_dicts_to_csv_buffer(final_categories, columns)
@@ -1064,41 +1059,6 @@ class PostgresStorage:
                     print(f"📂 Auto-added {len(missing_parents)} missing parent categories")
 
                 return saved_count
-
-    def update_category_product_counts(self) -> int:
-        """
-        Cập nhật product_count cho tất cả categories từ bảng products thực tế.
-        
-        Phương pháp này đảm bảo:
-        - Giữ nguyên category hierarchy (tất cả parent categories)
-        - product_count chính xác dựa trên số products đã crawl
-        - Categories không có products sẽ có product_count = 0
-        
-        Returns:
-            Số lượng categories đã cập nhật
-        """
-        with self.get_connection() as conn:
-            with conn.cursor() as cur:
-                # Update product_count cho tất cả categories
-                cur.execute("""
-                    UPDATE categories c
-                    SET 
-                        product_count = COALESCE(
-                            (SELECT COUNT(*) 
-                             FROM products p 
-                             WHERE p.category_id = c.category_id),
-                            0
-                        ),
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE c.is_leaf = true
-                """)
-                leaf_updated = cur.rowcount
-                
-                # Cũng có thể tính tổng product_count cho parent categories
-                # bằng cách sum product_count của các leaf categories con
-                # (optional - hiện tại chỉ update leaf categories)
-                
-                return leaf_updated
 
     def save_products(
         self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
@@ -1286,13 +1246,15 @@ class PostgresStorage:
                 self._log_batch_crawl_history(products)
             except Exception as e:
                 import traceback
+
                 error_detail = traceback.format_exc()
                 print(f"⚠️  Failed to log crawl history: {e}")
                 print(f"Error details: {error_detail}")
                 # Check if it's a FK constraint error
                 if "foreign key" in str(e).lower() or "fk_crawl_history" in str(e).lower():
-                    print("💡 Hint: Foreign key constraint issue - ensure products are committed before logging history")
-
+                    print(
+                        "💡 Hint: Foreign key constraint issue - ensure products are committed before logging history"
+                    )
 
             # Auto-sync: Ensure all categories from products exist in categories table
             try:
@@ -1344,12 +1306,12 @@ class PostgresStorage:
         # Load categories JSON file to get full data
         import json
         import os
-        
+
         json_paths = [
             "/opt/airflow/data/raw/categories_recursive_optimized.json",
             os.path.join(os.getcwd(), "data", "raw", "categories_recursive_optimized.json"),
         ]
-        
+
         categories_from_json = {}
         for json_path in json_paths:
             if os.path.exists(json_path):
@@ -1361,54 +1323,65 @@ class PostgresStorage:
                         url = cat.get("url")
                         if url:
                             categories_from_json[url] = cat
-                    print(f"📂 Loaded {len(categories_from_json)} categories from JSON for enrichment")
+                    print(
+                        f"📂 Loaded {len(categories_from_json)} categories from JSON for enrichment"
+                    )
                     break
                 except Exception as e:
                     print(f"⚠️  Could not load categories JSON: {e}")
-        
+
         # Find categories that exist in JSON and match product URLs
         categories_to_add = []
         for cat_url, cat_id in product_category_urls.items():
             if cat_url in categories_from_json:
                 # Use full data from JSON
                 cat_data = categories_from_json[cat_url]
-                
+
                 # Build category_path if not present
                 category_path = cat_data.get("category_path", [])
                 if not category_path:
                     # Try to build from breadcrumbs or parent chain
                     category_path = [cat_data.get("name", cat_id)]
-                
-                categories_to_add.append({
-                    "category_id": cat_id,
-                    "name": cat_data.get("name", cat_id),
-                    "url": cat_url,
-                    "image_url": cat_data.get("image_url"),
-                    "parent_url": cat_data.get("parent_url"),
-                    "level": cat_data.get("level", 0),
-                    "category_path": category_path,
-                    "level_1": category_path[0] if len(category_path) > 0 else None,
-                    "level_2": category_path[1] if len(category_path) > 1 else None,
-                    "level_3": category_path[2] if len(category_path) > 2 else None,
-                    "level_4": category_path[3] if len(category_path) > 3 else None,
-                    "level_5": category_path[4] if len(category_path) > 4 else None,
-                    "root_category_name": category_path[0] if category_path else None,
-                    "is_leaf": True,  # Categories from products are leaf categories
-                })
+
+                categories_to_add.append(
+                    {
+                        "category_id": cat_id,
+                        "name": cat_data.get("name", cat_id),
+                        "url": cat_url,
+                        "image_url": cat_data.get("image_url"),
+                        "parent_url": cat_data.get("parent_url"),
+                        "level": cat_data.get("level", 0),
+                        "category_path": category_path,
+                        "level_1": category_path[0] if len(category_path) > 0 else None,
+                        "level_2": category_path[1] if len(category_path) > 1 else None,
+                        "level_3": category_path[2] if len(category_path) > 2 else None,
+                        "level_4": category_path[3] if len(category_path) > 3 else None,
+                        "level_5": category_path[4] if len(category_path) > 4 else None,
+                        "root_category_name": category_path[0] if category_path else None,
+                        "is_leaf": True,  # Categories from products are leaf categories
+                    }
+                )
             else:
                 # Fallback: category not in JSON, use minimal data but with useful name
                 # Extract name from URL slug
                 import re
+
                 slug_match = re.search(r"tiki\.vn/([^/]+)/c\d+", cat_url)
-                name_from_slug = slug_match.group(1).replace("-", " ").title() if slug_match else cat_id
-                
-                categories_to_add.append({
-                    "category_id": cat_id,
-                    "name": name_from_slug,
-                    "url": cat_url,
-                    "is_leaf": True,
-                })
-                print(f"⚠️  Category {cat_id} not found in JSON, using name from URL: {name_from_slug}")
+                name_from_slug = (
+                    slug_match.group(1).replace("-", " ").title() if slug_match else cat_id
+                )
+
+                categories_to_add.append(
+                    {
+                        "category_id": cat_id,
+                        "name": name_from_slug,
+                        "url": cat_url,
+                        "is_leaf": True,
+                    }
+                )
+                print(
+                    f"⚠️  Category {cat_id} not found in JSON, using name from URL: {name_from_slug}"
+                )
 
         if not categories_to_add:
             return 0
@@ -1449,7 +1422,11 @@ class PostgresStorage:
                             cat_info.get("image_url"),
                             cat_info.get("parent_url"),
                             cat_info.get("level"),
-                            Json(cat_info.get("category_path")) if cat_info.get("category_path") else None,
+                            (
+                                Json(cat_info.get("category_path"))
+                                if cat_info.get("category_path")
+                                else None
+                            ),
                             cat_info.get("level_1"),
                             cat_info.get("level_2"),
                             cat_info.get("level_3"),
@@ -1470,13 +1447,13 @@ class PostgresStorage:
     def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
         """
         Log crawl history for ALL products (không chỉ khi có thay đổi giá).
-        
+
         Tối ưu:
         - Sử dụng batch lookup để lấy giá cũ (thay vì query từng product)
         - INSERT cho mọi lần crawl với crawl_type: 'price_change', 'no_change', 'failed'
         - Populate metadata fields từ _metadata
-        
-        Schema: (product_id, price, original_price, discount_percent, price_change, previous_*, 
+
+        Schema: (product_id, price, original_price, discount_percent, price_change, previous_*,
                  crawl_type, crawl_status, metadata, crawled_at)
         """
         if not products:
@@ -1512,10 +1489,10 @@ class PostgresStorage:
                 # Build lookup dict: product_id -> (price, original_price, discount_percent, sales_count)
                 previous_data = {
                     row[0]: {
-                        "price": row[1], 
-                        "original_price": row[2], 
+                        "price": row[1],
+                        "original_price": row[2],
                         "discount_percent": row[3],
-                        "sales_count": row[4]
+                        "sales_count": row[4],
                     }
                     for row in cur.fetchall()
                 }
@@ -1531,7 +1508,7 @@ class PostgresStorage:
                     current_sales = p.get("sales_count")  # NEW
 
                     prev = previous_data.get(product_id)
-                    
+
                     # Determine crawl_type and price_change
                     if prev is None:
                         # First time crawl
@@ -1570,22 +1547,24 @@ class PostgresStorage:
                                 price_change = current_price_float - prev_price
                                 # Calculate percentage change
                                 if prev_price > 0:
-                                    price_change_percent = round((price_change / prev_price) * 100, 2)
+                                    price_change_percent = round(
+                                        (price_change / prev_price) * 100, 2
+                                    )
                         else:
                             crawl_type = "no_change"
                             price_change = None
                             price_change_percent = None
-                        
+
                         # Calculate sales_change
                         sales_change = None
                         if prev_sales is not None and current_sales is not None:
                             sales_change = current_sales - prev_sales
-                    
+
                     # Calculate discount_amount (tiền giảm giá)
                     discount_amount = None
                     if current_original_price and current_price:
                         discount_amount = float(current_original_price) - float(current_price)
-                    
+
                     # Determine if flash sale (giảm >= 30% hoặc giảm >= 100k)
                     is_flash_sale = False
                     if current_discount and current_discount >= 30:
@@ -1647,38 +1626,43 @@ class PostgresStorage:
                                 for r in records_to_insert
                             ],
                         )
-                        
+
                         # Simple logging with crawl_type breakdown
                         type_counts = {}
                         for r in records_to_insert:
                             ct = r.get("crawl_type", "unknown")
                             type_counts[ct] = type_counts.get(ct, 0) + 1
-                        
+
                         type_str = ", ".join(f"{k}: {v}" for k, v in type_counts.items())
                         print(f"📊 Crawl history: {len(records_to_insert)} records ({type_str})")
                         conn.commit()  # Commit history inserts
                     except Exception as e:
                         import traceback
+
                         error_trace = traceback.format_exc()
                         print(f"❌ Error inserting crawl history: {e}")
                         print(f"Error type: {type(e).__name__}")
                         print(f"Error trace: {error_trace}")
                         if "foreign key" in str(e).lower() or "does not exist" in str(e).lower():
-                            print("💡 FK constraint error or missing column: ensure products exist and schema is updated")
+                            print(
+                                "💡 FK constraint error or missing column: ensure products exist and schema is updated"
+                            )
                             # Try to get which product IDs are missing
                             try:
                                 missing_ids = []
                                 for r in records_to_insert[:10]:  # Check first 10
                                     cur.execute(
                                         "SELECT 1 FROM products WHERE product_id = %s",
-                                        (r["product_id"],)
+                                        (r["product_id"],),
                                     )
                                     if not cur.fetchone():
                                         missing_ids.append(r["product_id"])
                                 if missing_ids:
                                     print(f"⚠️  Missing product_ids (first 5): {missing_ids[:5]}")
                                 else:
-                                    print("💡 All product_ids exist - likely a schema mismatch issue")
+                                    print(
+                                        "💡 All product_ids exist - likely a schema mismatch issue"
+                                    )
                                     print("💡 Run _ensure_history_schema() to add missing columns")
                             except Exception as inner_e:
                                 print(f"⚠️  Could not check missing products: {inner_e}")
@@ -1777,8 +1761,7 @@ class PostgresStorage:
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 # Match products với categories theo cả category_url và category_id
-                cur.execute(
-                    """
+                cur.execute("""
                     UPDATE categories c
                     SET product_count = COALESCE((
                         SELECT COUNT(DISTINCT p.id)
@@ -1788,8 +1771,7 @@ class PostgresStorage:
                     ), 0),
                     updated_at = CURRENT_TIMESTAMP
                     WHERE c.is_leaf = TRUE
-                """
-                )
+                """)
                 return cur.rowcount
 
     def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
@@ -1814,16 +1796,14 @@ class PostgresStorage:
         """Lấy thống kê tổng quan về products (Category stats removed)"""
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
+                cur.execute("""
                     SELECT
                         0 as total_categories,
                         (SELECT COUNT(*) FROM products) as total_products,
                         (SELECT COUNT(DISTINCT category_url) FROM products) as categories_with_products,
                         (SELECT AVG(sales_count) FROM products WHERE sales_count IS NOT NULL) as avg_sales_count,
                         (SELECT MAX(crawled_at) FROM products) as last_crawl_time
-                    """
-                )
+                    """)
                 row = cur.fetchone()
                 return {
                     "total_categories": 0,
@@ -1853,23 +1833,21 @@ class PostgresStorage:
             self._pool_stats["active_connections"] = 0
 
     def cleanup_incomplete_products(
-        self, 
-        require_seller: bool = True, 
-        require_brand: bool = True
+        self, require_seller: bool = True, require_brand: bool = True
     ) -> dict[str, int]:
         """
         Delete products with missing required fields (seller and/or brand).
         Run this BEFORE each crawl to allow re-crawling of incomplete data.
-        
+
         This prevents:
         - Wasting resources crawling products that will be rejected anyway
         - Storing incomplete products in database
         - Having to clean up after load (reactive vs preventive)
-        
+
         Args:
             require_seller: If True, delete products where seller_name IS NULL or empty
             require_brand: If True, delete products where brand IS NULL or empty
-        
+
         Returns:
             dict with keys: deleted_count, deleted_no_seller, deleted_no_brand, deleted_both
         """
@@ -1881,27 +1859,27 @@ class PostgresStorage:
                     conditions.append("(seller_name IS NULL OR seller_name = '')")
                 if require_brand:
                     conditions.append("(brand IS NULL OR brand = '')")
-                
+
                 if not conditions:
                     return {
                         "deleted_count": 0,
                         "deleted_no_seller": 0,
                         "deleted_no_brand": 0,
-                        "deleted_both": 0
+                        "deleted_both": 0,
                     }
-                
+
                 where_clause = " OR ".join(conditions)
-                
+
                 # Get counts before deletion for detailed reporting
                 # Only calculate stats if both requirements are enabled
                 deleted_no_seller = 0
                 deleted_no_brand = 0
                 deleted_both = 0
-                
+
                 if require_seller and require_brand:
                     # Calculate detailed stats: missing seller only, missing brand only, missing both
                     stats_query = """
-                        SELECT 
+                        SELECT
                             COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND NOT (brand IS NULL OR brand = '')) as no_seller,
                             COUNT(*) FILTER (WHERE NOT (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as no_brand,
                             COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as both_missing
@@ -1921,15 +1899,15 @@ class PostgresStorage:
                     # Only brand required - count all as no_brand
                     cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
                     deleted_no_brand = cur.fetchone()[0] or 0
-                
+
                 # Delete products matching criteria
                 delete_query = f"""
-                    DELETE FROM products 
+                    DELETE FROM products
                     WHERE {where_clause}
                 """
                 cur.execute(delete_query)
                 deleted_count = cur.rowcount
-                
+
                 if deleted_count > 0:
                     reason_parts = []
                     if require_seller:
@@ -1938,24 +1916,24 @@ class PostgresStorage:
                         reason_parts.append(f"{deleted_no_brand} without brand")
                     if require_seller and require_brand:
                         reason_parts.append(f"{deleted_both} missing both")
-                    
+
                     reason_str = ", ".join(reason_parts)
                     print(f"🧹 Cleaned up {deleted_count} incomplete products ({reason_str})")
-                
+
                 return {
                     "deleted_count": deleted_count,
                     "deleted_no_seller": deleted_no_seller if require_seller else 0,
                     "deleted_no_brand": deleted_no_brand if require_brand else 0,
-                    "deleted_both": deleted_both if (require_seller and require_brand) else 0
+                    "deleted_both": deleted_both if (require_seller and require_brand) else 0,
                 }
-    
+
     def cleanup_products_without_seller(self) -> int:
         """
         DEPRECATED: Use cleanup_incomplete_products() instead.
-        
+
         Delete products where seller_name is NULL.
         Kept for backward compatibility.
-        
+
         Returns:
             Number of products deleted
         """
@@ -1966,10 +1944,10 @@ class PostgresStorage:
         """
         Remove categories that don't have any matching products.
         This ensures categories table stays clean after product crawls.
-        
+
         Only removes leaf categories (is_leaf = true) that have no products.
         Parent categories are kept to maintain hierarchy.
-        
+
         Returns:
             Number of categories deleted
         """
@@ -1979,15 +1957,15 @@ class PostgresStorage:
                     DELETE FROM categories
                     WHERE is_leaf = true
                     AND NOT EXISTS (
-                        SELECT 1 FROM products p 
+                        SELECT 1 FROM products p
                         WHERE p.category_id = categories.category_id
                     )
                 """)
                 deleted_count = cur.rowcount
-                
+
                 if deleted_count > 0:
                     print(f"🧹 Cleaned up {deleted_count} orphan categories")
-                
+
                 return deleted_count
 
     def _bulk_log_product_price_history(self, cur, products: list[dict[str, Any]]) -> None:

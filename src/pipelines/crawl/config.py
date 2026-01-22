@@ -87,15 +87,15 @@ CRAWL_POST_SCROLL_SLEEP_RETRY = 2.4  # seconds (2x normal)
 # Default invalid patterns for seller_name (lowercase)
 # These values will cause seller_name to be set to NULL and trigger retry
 INVALID_SELLER_PATTERNS_DEFAULT = [
-    "đã mua",           # "Đã mua hàng", "xxx đã mua"
-    "đã bán",           # "Đã bán xxx"
-    "sold",             # "xxx sold"
-    "bought",           # "xxx bought"
-    "xem thêm",         # "Xem thêm"
-    "more info",        # "More info"
-    "chi tiết",         # "Chi tiết"
-    "loading",          # Loading placeholder
-    "đang tải",         # Đang tải\
+    "đã mua",  # "Đã mua hàng", "xxx đã mua"
+    "đã bán",  # "Đã bán xxx"
+    "sold",  # "xxx sold"
+    "bought",  # "xxx bought"
+    "xem thêm",  # "Xem thêm"
+    "more info",  # "More info"
+    "chi tiết",  # "Chi tiết"
+    "loading",  # Loading placeholder
+    "đang tải",  # Đang tải\
     "Đã mua hàng",
 ]
 
@@ -112,4 +112,3 @@ INVALID_SELLER_PATTERNS = INVALID_SELLER_PATTERNS_DEFAULT + INVALID_SELLER_PATTE
 # Minimum/Maximum length for valid seller name
 SELLER_NAME_MIN_LENGTH = int(os.getenv("SELLER_NAME_MIN_LENGTH", "2"))
 SELLER_NAME_MAX_LENGTH = int(os.getenv("SELLER_NAME_MAX_LENGTH", "100"))
-

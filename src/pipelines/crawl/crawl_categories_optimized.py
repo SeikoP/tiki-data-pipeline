@@ -469,7 +469,7 @@ def main():
                 else:
                     print(f"⚠️  Config file có cấu trúc không hợp lệ: {config_file}")
                     root_urls = []
-                
+
                 # Chỉ print success message nếu thực sự load được URLs
                 if root_urls:
                     print(f"✅ Đã load {len(root_urls)} root categories từ {config_file}")

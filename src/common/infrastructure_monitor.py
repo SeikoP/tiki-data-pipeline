@@ -54,37 +54,30 @@ def get_postgres_stats(conn_string: str) -> dict[str, Any]:
         stats = {}
 
         # Database size
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT pg_database_size(current_database()) as size
-        """
-        )
+        """)
         stats["db_size_bytes"] = cursor.fetchone()[0]
         stats["db_size_mb"] = stats["db_size_bytes"] / 1024 / 1024
 
         # Connection count
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT count(*) FROM pg_stat_activity
             WHERE datname = current_database()
-        """
-        )
+        """)
         stats["active_connections"] = cursor.fetchone()[0]
 
         # Cache hit ratio
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT
                 sum(heap_blks_hit) / nullif(sum(heap_blks_hit) + sum(heap_blks_read), 0) * 100 as cache_hit_ratio
             FROM pg_statio_user_tables
-        """
-        )
+        """)
         result = cursor.fetchone()
         stats["cache_hit_ratio"] = float(result[0]) if result[0] else 0.0
 
         # Transaction stats
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT
                 xact_commit,
                 xact_rollback,
@@ -97,8 +90,7 @@ def get_postgres_stats(conn_string: str) -> dict[str, Any]:
                 tup_deleted
             FROM pg_stat_database
             WHERE datname = current_database()
-        """
-        )
+        """)
         row = cursor.fetchone()
         if row:
             stats.update(

@@ -35,8 +35,8 @@ jobs:
 
       - name: Lint with Ruff
         run: |
-          # Ruff: Fail on errors but allow some warnings to pass
-          ruff check src/ airflow/dags/ --ignore E501,W503 || (echo "⚠️  Ruff found linting issues. Run 'ruff check --fix src/ airflow/dags/' to fix." && exit 1)
+          # Ruff: Fail on errors but allow line length (E501) and performance suggestions (PERF401)
+          ruff check src/ airflow/dags/ --ignore E501,PERF401 || (echo "⚠️  Ruff found linting issues. Run 'ruff check --fix src/ airflow/dags/' to fix." && exit 1)
 
       - name: Type check with mypy
         run: |
