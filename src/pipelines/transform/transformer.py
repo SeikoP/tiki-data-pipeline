@@ -38,6 +38,29 @@ class DataTransformer:
             "errors": [],
         }
 
+        # Initialize AI Summarizer for name shortening
+        try:
+            from src.common.ai.summarizer import AISummarizer
+            self.ai_summarizer = AISummarizer()
+        except ImportError:
+            # Fallback for relative import if src is not in path
+            try:
+                from ..common.ai.summarizer import AISummarizer
+                self.ai_summarizer = AISummarizer()
+            except ImportError:
+                # Try absolute path from project root
+                try:
+                    import sys
+                    from pathlib import Path
+                    root_path = Path(__file__).resolve().parent.parent.parent.parent
+                    if str(root_path) not in sys.path:
+                        sys.path.append(str(root_path))
+                    from src.common.ai.summarizer import AISummarizer
+                    self.ai_summarizer = AISummarizer()
+                except Exception as e:
+                    logger.warning(f"Could not import AISummarizer: {e}")
+                    self.ai_summarizer = None
+
     def transform_products(
         self, products: list[dict[str, Any]], validate: bool = True
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -222,6 +245,7 @@ class DataTransformer:
         db_product = {
             "product_id": product.get("product_id"),
             "name": product.get("name"),
+            "short_name": self._get_short_name(product.get("name")),
             "url": product.get("url"),
             "image_url": product.get("image_url"),
             "category_url": product.get("category_url"),
@@ -504,6 +528,15 @@ class DataTransformer:
                     return datetime.strptime(value, fmt)
                 except ValueError:
                     continue
+        return None
+
+    def _get_short_name(self, name: str) -> str | None:
+        """Get shortened name using AI"""
+        if not name:
+            return None
+        
+        if self.ai_summarizer:
+            return self.ai_summarizer.shorten_product_name(name)
         return None
 
     def get_stats(self) -> dict[str, Any]:

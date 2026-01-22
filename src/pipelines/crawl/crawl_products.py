@@ -738,7 +738,7 @@ def crawl_category_products(
     category_url,
     max_pages=None,
     use_selenium=False,
-    cache_dir="data/demo/products/cache",
+    cache_dir="data/raw/cache/products",
     use_redis_cache=True,
     use_rate_limiting=True,
 ):

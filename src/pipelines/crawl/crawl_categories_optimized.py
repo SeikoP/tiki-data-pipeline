@@ -102,7 +102,7 @@ stats = {
 
 
 def crawl_single_category(
-    url, parent_url, level, max_level, visited_urls, cache_dir="data/raw/cache", driver_pool=None
+    url, parent_url, level, max_level, visited_urls, cache_dir="data/raw/cache/categories", driver_pool=None
 ):
     """
     Crawl một danh mục đơn lẻ (thread-safe)
@@ -247,7 +247,7 @@ def crawl_level_parallel(
                     level,
                     max_level,
                     visited_urls,
-                    "data/raw/cache",
+                    "data/raw/cache/categories",
                     driver_pool,
                 )
                 future_to_url[future] = (url, parent_url)
@@ -508,7 +508,7 @@ def main():
         print(f"  {i}. {url}")
     print(f"Độ sâu tối đa: {max_level}")
     print(f"Số thread song song: {max_workers}")
-    print("Cache: data/raw/cache/")
+    print("Cache: data/raw/cache/categories/")
     print("=" * 70)
 
     # Reset stats

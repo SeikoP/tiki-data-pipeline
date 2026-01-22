@@ -69,7 +69,7 @@ def crawl_single_category_with_pool(
     driver_pool: Any = None,
     max_pages: int = 20,
     use_selenium: bool = False,
-    cache_dir: str = "data/raw/cache",
+    cache_dir: str = "data/raw/cache/products",
     use_redis_cache: bool = True,
     use_rate_limiting: bool = True,
     verbose: bool = False,

@@ -162,6 +162,66 @@ Data JSON:
 
         return prompt
 
+    def shorten_product_name(self, product_name: str) -> str:
+        """
+        Rút gọn tên sản phẩm sử dụng AI
+
+        Args:
+            product_name: Tên sản phẩm gốc
+
+        Returns:
+            Tên sản phẩm đã được rút gọn
+        """
+        if not self.enabled or not self.api_key:
+            return product_name
+
+        if not product_name or len(product_name) < 50:
+            return product_name
+
+        try:
+            prompt = f"""
+Bạn là trợ lý AI chuyên chuẩn hóa và rút gọn tên sản phẩm thương mại điện tử.
+
+Tên gốc: "{product_name}"
+
+Nhiệm vụ:
+- Tạo một tên sản phẩm ngắn gọn, rõ nghĩa, phù hợp để hiển thị trên sàn TMĐT.
+
+Quy tắc bắt buộc:
+1. Giữ lại theo thứ tự ưu tiên:
+   - Loại sản phẩm chính (ví dụ: Bikini, Áo bikini, Quần bơi, Đồ bơi, Bộ bà ba, Đồ lam…)
+   - Đối tượng hoặc giới tính (nữ, nam, bé gái) nếu có
+   - Đặc điểm quan trọng nhất (1 mảnh / 2 mảnh / liền thân / tay dài / lưng cao…)
+   - Chất liệu hoặc họa tiết nổi bật (thun lạnh, len, lụa, hoa nhí…)
+   - Thương hiệu hoặc dòng sản phẩm nếu có
+
+2. Loại bỏ hoàn toàn:
+   - Từ marketing, cảm xúc: sexy, quyến rũ, cao cấp, siêu đẹp, gợi cảm…
+   - Mô tả dư thừa, hashtag, ký tự trang trí
+   - Mã sản phẩm, quà tặng, thông tin bán hàng
+
+3. Độ dài tối đa: 10–15 từ.
+
+4. Không tự suy diễn thông tin không có trong tên gốc.
+
+5. Trả về CHỈ tên đã rút gọn, không kèm giải thích, không xuống dòng.
+
+6. Giữ nguyên ngôn ngữ gốc (Việt/Anh), viết hoa chữ cái đầu mỗi cụm chính.
+
+Tên rút gọn:
+"""
+
+            # Increase max_tokens to accommodate reasoning steps used by some models
+            response = self._call_groq_api(prompt, max_tokens=1000)
+            if response:
+                cleaned_name = response.strip().strip('"').strip("'")
+                return cleaned_name
+            return product_name
+
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi rút gọn tên sản phẩm: {e}")
+            return product_name
+
     def _call_groq_api(self, prompt: str, max_tokens: int = 2000) -> str:
         """Gọi Groq API để tổng hợp"""
         try:
@@ -183,7 +243,7 @@ Data JSON:
                     f"ℹ️  Model {model} đã deprecated, tự động chuyển sang {deprecated_models[model]}"
                 )
                 model = deprecated_models[model]
-
+            
             payload = {
                 "model": model,
                 "messages": [
