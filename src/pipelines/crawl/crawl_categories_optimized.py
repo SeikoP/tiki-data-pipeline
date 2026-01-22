@@ -474,6 +474,7 @@ def main():
     if not root_urls:
         root_urls = [
             "https://tiki.vn/thoi-trang-nam/c915",
+            "https://tiki.vn/thoi-trang-nu/c931",
             # Có thể thêm các root categories khác ở đây
             # "https://tiki.vn/nha-cua-doi-song/c1883",
             # "https://tiki.vn/dien-tu-dien-lanh/c4221",
