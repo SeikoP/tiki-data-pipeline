@@ -192,7 +192,7 @@ services:
         su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow db migrate"
         
         echo "Creating Admin User..."
-        su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow users create --username admin --password \"${_AIRFLOW_WWW_USER_PASSWORD}\" --firstname Admin --lastname User --role Admin --email admin@example.com" || true
+        su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow users create --username \"${_AIRFLOW_WWW_USER_USERNAME}\" --password \"${_AIRFLOW_WWW_USER_PASSWORD}\" --firstname Admin --lastname User --role Admin --email admin@example.com" || true
         
         echo "Configuring Pools and Variables..."
         if [ -f /opt/airflow/setup/init-airflow-config.sh ]; then
