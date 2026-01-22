@@ -1586,20 +1586,20 @@ class PostgresStorage:
                         is_flash_sale = True
                     elif discount_amount and discount_amount >= 100000:
                         is_flash_sale = True
-                    
+
                     # DECISION: Should we log this record?
                     # Log if:
                     # 1. First time crawl (prev is None -> crawl_type='price_change')
                     # 2. Price/Discount changed (crawl_type='price_change')
                     # 3. Sales changed (sales_change != 0)
                     should_log = False
-                    
-                    if crawl_type == 'price_change':
+
+                    if crawl_type == "price_change":
                         should_log = True
                     elif sales_change and sales_change != 0:
                         should_log = True
-                        crawl_type = 'sales_change' # Update type for clarity
-                    
+                        crawl_type = "sales_change"  # Update type for clarity
+
                     if should_log:
                         records_to_insert.append(
                             {
@@ -1699,8 +1699,6 @@ class PostgresStorage:
                         # Don't re-raise - log the error but continue
                         print("⚠️  Continuing without crawl history (will retry on next crawl)")
 
-
-
     def update_category_product_counts(self) -> int:
         """
         Update product_count for all categories based on actual products in DB.
@@ -1728,9 +1726,9 @@ class PostgresStorage:
 
     def cleanup_redundant_categories(self, cur=None) -> int:
         """
-        Xóa các categories không phải là leaf (có categories con) 
+        Xóa các categories không phải là leaf (có categories con)
         hoặc các categories không có sản phẩm nếu cần thiết.
-        
+
         Method này đảm bảo bảng categories chỉ chứa dữ liệu 'leaf' thực sự.
         """
         query = """
@@ -1742,7 +1740,7 @@ class PostgresStorage:
             )
             OR is_leaf = FALSE
         """
-        
+
         if cur:
             cur.execute(query)
             count = cur.rowcount
@@ -1937,13 +1935,11 @@ class PostgresStorage:
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 # 1. Create archive table if not exists
-                cur.execute(
-                    """
+                cur.execute("""
                     CREATE TABLE IF NOT EXISTS crawl_history_archive (
                         LIKE crawl_history INCLUDING ALL
                     );
-                    """
-                )
+                    """)
 
                 # 2. Archive records
                 cur.execute(
@@ -1966,11 +1962,11 @@ class PostgresStorage:
 
                 conn.commit()
 
-                # 4. Vacuum (cannot be inside a transaction block in some versions, 
+                # 4. Vacuum (cannot be inside a transaction block in some versions,
                 # but with autocommit=True it works. SimpleConnectionPool usually uses autocommit=False)
-                # We'll skip VACUUM here to avoid transaction issues in Airflow tasks, 
+                # We'll skip VACUUM here to avoid transaction issues in Airflow tasks,
                 # as VACUUM is often managed by Autovacuum anyway.
-        
+
         return result
 
     def cleanup_products_without_seller(self) -> int:
@@ -2013,8 +2009,6 @@ class PostgresStorage:
                     print(f"🧹 Cleaned up {deleted_count} orphan categories")
 
                 return deleted_count
-
-
 
     def _save_products_bulk_copy(
         self, products: list[dict[str, Any]], upsert: bool

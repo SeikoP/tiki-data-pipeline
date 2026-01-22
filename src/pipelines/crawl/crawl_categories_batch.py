@@ -5,8 +5,8 @@ Optimized for parallel category crawling with driver reuse
 
 import logging
 from datetime import datetime
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 try:
     from utils import DEFAULT_PRODUCT_LIST_CACHE_DIR

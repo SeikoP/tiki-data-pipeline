@@ -6,8 +6,8 @@ import sys
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
 from pathlib import Path
+from threading import Lock
 
 # Try importing constants from utils
 try:
@@ -114,7 +114,13 @@ stats = {
 
 
 def crawl_single_category(
-    url, parent_url, level, max_level, visited_urls, cache_dir=DEFAULT_CATEGORY_CACHE_DIR, driver_pool=None
+    url,
+    parent_url,
+    level,
+    max_level,
+    visited_urls,
+    cache_dir=DEFAULT_CATEGORY_CACHE_DIR,
+    driver_pool=None,
 ):
     """
     Crawl một danh mục đơn lẻ (thread-safe)

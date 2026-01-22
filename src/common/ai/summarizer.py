@@ -243,7 +243,7 @@ Tên rút gọn:
                     f"ℹ️  Model {model} đã deprecated, tự động chuyển sang {deprecated_models[model]}"
                 )
                 model = deprecated_models[model]
-            
+
             payload = {
                 "model": model,
                 "messages": [

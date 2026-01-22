@@ -1319,7 +1319,6 @@ def cleanup_orphan_categories_wrapper(**context):
             "deleted_no_products": deleted_no_products + additional_deleted,
         }
 
-
     except Exception as e:
         logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
         return {"status": "error", "message": str(e), "deleted_count": 0}
@@ -1383,7 +1382,11 @@ def reconcile_categories_wrapper(**context):
         updated_counts = storage.update_category_product_counts()
 
         logger.info(f"✅ Reconciled: updated {updated_names} names, {updated_counts} counts")
-        return {"status": "success", "updated_names": updated_names, "updated_counts": updated_counts}
+        return {
+            "status": "success",
+            "updated_names": updated_names,
+            "updated_counts": updated_counts,
+        }
 
     except Exception as e:
         logger.error(f"❌ Error during category reconciliation: {e}", exc_info=True)
@@ -1407,13 +1410,13 @@ def cleanup_old_history_wrapper(**context):
         logger.info(f"🧹 Cleaning history (Archive: {archive_months}m, Delete: {delete_months}m)")
         result = storage.cleanup_old_history(archive_months, delete_months)
 
-        logger.info(f"✅ Done: Archived {result['archived_count']}, Deleted {result['deleted_count']}")
+        logger.info(
+            f"✅ Done: Archived {result['archived_count']}, Deleted {result['deleted_count']}"
+        )
         return result
     except Exception as e:
         logger.error(f"❌ Error during history cleanup: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
-
-
 
 
 def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
@@ -5418,7 +5421,7 @@ with DAG(**DAG_CONFIG) as dag:
             execution_timeout=timedelta(minutes=5),
             pool="crawl_pool",
         )
-        
+
         task_cleanup_products >> task_load_categories
 
     # TaskGroup: Crawl Categories (Dynamic Task Mapping)
@@ -5428,6 +5431,7 @@ with DAG(**DAG_CONFIG) as dag:
         def prepare_crawl_kwargs(**context):
             """Helper function để prepare op_kwargs cho Dynamic Task Mapping"""
             import logging
+
             logger = logging.getLogger("airflow.task")
             ti = context["ti"]
             categories = ti.xcom_pull(task_ids="pre_crawl.load_categories")
@@ -5439,6 +5443,7 @@ with DAG(**DAG_CONFIG) as dag:
         def prepare_category_batch_kwargs(**context):
             """Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing"""
             import logging
+
             logger = logging.getLogger("airflow.task")
             ti = context["ti"]
             categories = ti.xcom_pull(task_ids="pre_crawl.load_categories")
@@ -5446,8 +5451,12 @@ with DAG(**DAG_CONFIG) as dag:
                 logger.error("❌ Không thể lấy categories từ XCom!")
                 return []
             batch_size = int(get_variable("TIKI_CATEGORY_BATCH_SIZE", default="10"))
-            batches = [categories[i : i + batch_size] for i in range(0, len(categories), batch_size)]
-            return [{"category_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)]
+            batches = [
+                categories[i : i + batch_size] for i in range(0, len(categories), batch_size)
+            ]
+            return [
+                {"category_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
+            ]
 
         if crawl_category_batch is not None:
             task_prepare = PythonOperator(
@@ -5497,17 +5506,26 @@ with DAG(**DAG_CONFIG) as dag:
 
     # TaskGroup: Crawl Product Details (Dynamic Task Mapping)
     with TaskGroup("crawl_product_details") as detail_group:
+
         def prepare_detail_kwargs(**context):
             """Helper function để prepare op_kwargs cho Dynamic Task Mapping detail"""
             import logging
+
             logger = logging.getLogger("airflow.task")
             ti = context["ti"]
-            products_to_crawl = ti.xcom_pull(task_ids="crawl_product_details.prepare_products_for_detail")
+            products_to_crawl = ti.xcom_pull(
+                task_ids="crawl_product_details.prepare_products_for_detail"
+            )
             if not products_to_crawl:
                 return []
-            batch_size = 15 # Optimized batch size
-            batches = [products_to_crawl[i : i + batch_size] for i in range(0, len(products_to_crawl), batch_size)]
-            return [{"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)]
+            batch_size = 15  # Optimized batch size
+            batches = [
+                products_to_crawl[i : i + batch_size]
+                for i in range(0, len(products_to_crawl), batch_size)
+            ]
+            return [
+                {"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
+            ]
 
         task_prepare_detail = PythonOperator(
             task_id="prepare_products_for_detail",
@@ -5545,7 +5563,13 @@ with DAG(**DAG_CONFIG) as dag:
             pool="crawl_pool",
         )
 
-        task_prepare_detail >> task_prepare_detail_kwargs >> task_crawl_product_detail >> task_merge_product_details >> task_save_products_with_detail
+        (
+            task_prepare_detail
+            >> task_prepare_detail_kwargs
+            >> task_crawl_product_detail
+            >> task_merge_product_details
+            >> task_save_products_with_detail
+        )
 
     # TaskGroup: Transform and Load
     with TaskGroup("transform_and_load") as transform_load_group:
@@ -5641,8 +5665,23 @@ with DAG(**DAG_CONFIG) as dag:
 
         # Maintenance dependencies
         task_load_categories_db >> task_reconcile >> [task_cleanup_orphans, task_cleanup_redundant]
-        [task_cleanup_orphans, task_cleanup_redundant] >> task_validate_data >> task_aggregate_and_notify
-        task_aggregate_and_notify >> [task_cleanup_cache, task_backup_database, task_cleanup_history]
+        (
+            [task_cleanup_orphans, task_cleanup_redundant]
+            >> task_validate_data
+            >> task_aggregate_and_notify
+        )
+        task_aggregate_and_notify >> [
+            task_cleanup_cache,
+            task_backup_database,
+            task_cleanup_history,
+        ]
 
     # ===== FINAL DAG DEPENDENCIES =====
-    pre_crawl_group >> crawl_group >> process_group >> detail_group >> transform_load_group >> maintenance_group
+    (
+        pre_crawl_group
+        >> crawl_group
+        >> process_group
+        >> detail_group
+        >> transform_load_group
+        >> maintenance_group
+    )

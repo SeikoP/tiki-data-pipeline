@@ -41,21 +41,25 @@ class DataTransformer:
         # Initialize AI Summarizer for name shortening
         try:
             from src.common.ai.summarizer import AISummarizer
+
             self.ai_summarizer = AISummarizer()
         except ImportError:
             # Fallback for relative import if src is not in path
             try:
                 from ..common.ai.summarizer import AISummarizer
+
                 self.ai_summarizer = AISummarizer()
             except ImportError:
                 # Try absolute path from project root
                 try:
                     import sys
                     from pathlib import Path
+
                     root_path = Path(__file__).resolve().parent.parent.parent.parent
                     if str(root_path) not in sys.path:
                         sys.path.append(str(root_path))
                     from src.common.ai.summarizer import AISummarizer
+
                     self.ai_summarizer = AISummarizer()
                 except Exception as e:
                     logger.warning(f"Could not import AISummarizer: {e}")
