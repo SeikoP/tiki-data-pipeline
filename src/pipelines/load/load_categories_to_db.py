@@ -145,8 +145,8 @@ def load_categories(json_file_path: str):
         # Load categories với đầy đủ parent hierarchy
         saved_count = storage.save_categories(
             categories_to_load,
-            only_leaf=False,  # Load cả parents để đảm bảo path đầy đủ
-            sync_with_products=False,  # Đã filter ở trên rồi
+            only_leaf=True,  # Changed: strictly load only leaf categories
+            sync_with_products=False,  # Already filtered above
         )
 
         print(

@@ -1045,25 +1045,31 @@ class PostgresStorage:
 
                 # Auto-add missing parent categories (root categories)
                 # Tìm các parent_url không có trong data và tự động thêm
-                missing_parents = parent_urls - set(url_to_cat.keys())
-                if missing_parents:
-                    for parent_url in missing_parents:
-                        if not parent_url:
-                            continue
-                        # Extract category_id from URL
-                        match = re.search(r"(c\d+)", parent_url)
-                        cat_id = match.group(1) if match else None
+                # ONLY if only_leaf is False (we want parents in that case)
+                if not only_leaf:
+                    missing_parents = parent_urls - set(url_to_cat.keys())
+                    if missing_parents:
+                        for parent_url in missing_parents:
+                            if not parent_url:
+                                continue
+                            # Extract category_id from URL
+                            match = re.search(r"(c\d+)", parent_url)
+                            cat_id = match.group(1) if match else None
 
-                        if cat_id:
-                            cur.execute(
-                                """
-                                INSERT INTO categories (category_id, name, url, parent_url, level, is_leaf, product_count)
-                                VALUES (%s, %s, %s, NULL, 0, false, 0)
-                                ON CONFLICT (url) DO NOTHING
-                                """,
-                                (cat_id, cat_id, parent_url),  # Tạm dùng ID làm tên
-                            )
-                    print(f"📂 Auto-added {len(missing_parents)} missing parent categories")
+                            if cat_id:
+                                cur.execute(
+                                    """
+                                    INSERT INTO categories (category_id, name, url, parent_url, level, is_leaf, product_count)
+                                    VALUES (%s, %s, %s, NULL, 0, false, 0)
+                                    ON CONFLICT (url) DO NOTHING
+                                    """,
+                                    (cat_id, cat_id, parent_url),  # Tạm dùng ID làm tên
+                                )
+                        print(f"📂 Auto-added {len(missing_parents)} missing parent categories")
+
+                # CRITICAL: If only_leaf=True, ensure NO non-leaf categories remain
+                if only_leaf:
+                    self.cleanup_redundant_categories(cur)
 
                 return saved_count
 
@@ -1720,6 +1726,38 @@ class PostgresStorage:
                 """)
                 return cur.rowcount
 
+    def cleanup_redundant_categories(self, cur=None) -> int:
+        """
+        Xóa các categories không phải là leaf (có categories con) 
+        hoặc các categories không có sản phẩm nếu cần thiết.
+        
+        Method này đảm bảo bảng categories chỉ chứa dữ liệu 'leaf' thực sự.
+        """
+        query = """
+            DELETE FROM categories
+            WHERE url IN (
+                SELECT DISTINCT parent_url 
+                FROM categories 
+                WHERE parent_url IS NOT NULL
+            )
+            OR is_leaf = FALSE
+        """
+        
+        if cur:
+            cur.execute(query)
+            count = cur.rowcount
+            if count > 0:
+                print(f"🧹 Cleanup: Removed {count} non-leaf categories from DB")
+            return count
+        else:
+            with self.get_connection() as conn:
+                with conn.cursor() as standalone_cur:
+                    standalone_cur.execute(query)
+                    count = standalone_cur.rowcount
+                    if count > 0:
+                        print(f"🧹 Cleanup: Removed {count} non-leaf categories from DB")
+                    return count
+
     def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
         """Lấy danh sách products theo category_url"""
         with self.get_connection() as conn:
@@ -1872,6 +1910,68 @@ class PostgresStorage:
                     "deleted_no_brand": deleted_no_brand if require_brand else 0,
                     "deleted_both": deleted_both if (require_seller and require_brand) else 0,
                 }
+
+    def cleanup_old_history(
+        self, archive_months: int = 6, delete_months: int = 12
+    ) -> dict[str, Any]:
+        """
+        Cleanup old crawl history records:
+        - Archive records older than `archive_months`
+        - Delete records older than `delete_months`
+        - Vacuum table to reclaim space
+
+        Returns:
+            Dict with statistics on archived and deleted records
+        """
+        from datetime import datetime, timedelta
+
+        archive_date = datetime.now() - timedelta(days=archive_months * 30)
+        delete_date = datetime.now() - timedelta(days=delete_months * 30)
+
+        result = {
+            "archived_count": 0,
+            "deleted_count": 0,
+            "status": "success",
+        }
+
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                # 1. Create archive table if not exists
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS crawl_history_archive (
+                        LIKE crawl_history INCLUDING ALL
+                    );
+                    """
+                )
+
+                # 2. Archive records
+                cur.execute(
+                    """
+                    INSERT INTO crawl_history_archive
+                    SELECT * FROM crawl_history
+                    WHERE crawled_at >= %s AND crawled_at < %s
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (delete_date, archive_date),
+                )
+                result["archived_count"] = cur.rowcount
+
+                # 3. Delete old records
+                cur.execute(
+                    "DELETE FROM crawl_history WHERE crawled_at < %s",
+                    (delete_date,),
+                )
+                result["deleted_count"] = cur.rowcount
+
+                conn.commit()
+
+                # 4. Vacuum (cannot be inside a transaction block in some versions, 
+                # but with autocommit=True it works. SimpleConnectionPool usually uses autocommit=False)
+                # We'll skip VACUUM here to avoid transaction issues in Airflow tasks, 
+                # as VACUUM is often managed by Autovacuum anyway.
+        
+        return result
 
     def cleanup_products_without_seller(self) -> int:
         """

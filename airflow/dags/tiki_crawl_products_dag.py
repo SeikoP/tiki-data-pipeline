@@ -1319,9 +1319,101 @@ def cleanup_orphan_categories_wrapper(**context):
             "deleted_no_products": deleted_no_products + additional_deleted,
         }
 
+
     except Exception as e:
         logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
         return {"status": "error", "message": str(e), "deleted_count": 0}
+
+
+def cleanup_redundant_categories_wrapper(**context):
+    """
+    Task wrapper to remove non-leaf categories.
+    """
+    logger = get_logger(context)
+    try:
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
+        storage = PostgresStorage()
+        removed = storage.cleanup_redundant_categories()
+        logger.info(f"✅ Removed {removed} non-leaf categories")
+        return {"status": "success", "removed": removed}
+    except Exception as e:
+        logger.error(f"❌ Error during redundant category cleanup: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+def reconcile_categories_wrapper(**context):
+    """
+    Task wrapper to reconcile categories from JSON.
+    Updates names, removes orphans, and updates product counts.
+    """
+    logger = get_logger(context)
+    try:
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
+        storage = PostgresStorage()
+        json_path = str(CATEGORIES_FILE)
+
+        if not os.path.exists(json_path):
+            logger.warning(f"⚠️  File {json_path} not found, skipping name updates")
+            return {"status": "skipped", "message": "File not found"}
+
+        with open(json_path, "r", encoding="utf-8") as f:
+            categories_data = json.load(f)
+
+        id_to_name = {
+            cat.get("category_id"): cat.get("name")
+            for cat in categories_data
+            if cat.get("category_id") and cat.get("name")
+        }
+
+        updated_names = 0
+        with storage.get_connection() as conn:
+            with conn.cursor() as cur:
+                # 1. Update names
+                for cat_id, name in id_to_name.items():
+                    cur.execute(
+                        "UPDATE categories SET name = %s WHERE category_id = %s AND name = category_id",
+                        (name, cat_id),
+                    )
+                    updated_names += cur.rowcount
+                conn.commit()
+
+        # 2. Update product counts (already available in storage)
+        updated_counts = storage.update_category_product_counts()
+
+        logger.info(f"✅ Reconciled: updated {updated_names} names, {updated_counts} counts")
+        return {"status": "success", "updated_names": updated_names, "updated_counts": updated_counts}
+
+    except Exception as e:
+        logger.error(f"❌ Error during category reconciliation: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+def cleanup_old_history_wrapper(**context):
+    """
+    Task wrapper to archive and delete old crawl history.
+    """
+    logger = get_logger(context)
+    try:
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
+        storage = PostgresStorage()
+
+        # Config via variables
+        archive_months = int(get_variable("HISTORY_ARCHIVE_MONTHS", "6"))
+        delete_months = int(get_variable("HISTORY_DELETE_MONTHS", "12"))
+
+        logger.info(f"🧹 Cleaning history (Archive: {archive_months}m, Delete: {delete_months}m)")
+        result = storage.cleanup_old_history(archive_months, delete_months)
+
+        logger.info(f"✅ Done: Archived {result['archived_count']}, Deleted {result['deleted_count']}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Error during history cleanup: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
 
 
 def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
@@ -5311,33 +5403,23 @@ def backup_database(**context) -> dict[str, Any]:
 # Tạo DAG duy nhất với schedule có thể config qua Variable
 with DAG(**DAG_CONFIG) as dag:
 
-    # ===== CLEANUP TASKS (RUN FIRST) =====
-    # These tasks clean up stale data before crawling starts
-    # PREVENTIVE cleanup: Better to clean before crawl than after load
-    task_cleanup_products = PythonOperator(
-        task_id="cleanup_incomplete_products",
-        python_callable=cleanup_incomplete_products_wrapper,
-        execution_timeout=timedelta(minutes=5),
-        pool="crawl_pool",
-    )
+    # ===== STEP 1: PRE-CRAWL CLEANUP & LOAD =====
+    with TaskGroup("pre_crawl") as pre_crawl_group:
+        task_cleanup_products = PythonOperator(
+            task_id="cleanup_incomplete_products",
+            python_callable=cleanup_incomplete_products_wrapper,
+            execution_timeout=timedelta(minutes=5),
+            pool="crawl_pool",
+        )
 
-    task_cleanup_categories = PythonOperator(
-        task_id="cleanup_orphan_categories",
-        python_callable=cleanup_orphan_categories_wrapper,
-        execution_timeout=timedelta(minutes=5),
-        pool="crawl_pool",
-    )
-
-    # TaskGroup: Load và Prepare
-    with TaskGroup("load_and_prepare") as load_group:
-        # (ĐÃ BỎ) extract_and_load_categories_to_db để giảm thời gian pipeline.
-        # Task: Load danh sách categories từ file để crawl
         task_load_categories = PythonOperator(
             task_id="load_categories",
             python_callable=load_categories,
-            execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
+            execution_timeout=timedelta(minutes=5),
             pool="crawl_pool",
         )
+        
+        task_cleanup_products >> task_load_categories
 
     # TaskGroup: Crawl Categories (Dynamic Task Mapping)
     with TaskGroup("crawl_categories") as crawl_group:
@@ -5346,186 +5428,51 @@ with DAG(**DAG_CONFIG) as dag:
         def prepare_crawl_kwargs(**context):
             """Helper function để prepare op_kwargs cho Dynamic Task Mapping"""
             import logging
-
             logger = logging.getLogger("airflow.task")
-
             ti = context["ti"]
-
-            # Thử nhiều cách lấy categories từ XCom
-            categories = None
-
-            # Cách 1: Lấy từ task_id với TaskGroup prefix
-            try:
-                categories = ti.xcom_pull(task_ids="load_and_prepare.load_categories")
-                logger.info(
-                    f"Lấy categories từ 'load_and_prepare.load_categories': {len(categories) if categories else 0} items"
-                )
-            except Exception as e:
-                logger.warning(f"Không lấy được từ 'load_and_prepare.load_categories': {e}")
-
-            # Cách 2: Thử không có prefix
-            if not categories:
-                try:
-                    categories = ti.xcom_pull(task_ids="load_categories")
-                    logger.info(
-                        f"Lấy categories từ 'load_categories': {len(categories) if categories else 0} items"
-                    )
-                except Exception as e:
-                    logger.warning(f"Không lấy được từ 'load_categories': {e}")
-
-            # Cách 3: Thử lấy từ upstream task (Airflow 3.x compatible)
-            if not categories:
-                try:
-                    # Airflow 3.x: Dùng dag_run.get_task_instance() thay vì TaskInstance constructor
-                    dag_run = context["dag_run"]
-                    # Thử lấy từ task trong TaskGroup
-                    upstream_ti = dag_run.get_task_instance(
-                        task_id="load_and_prepare.load_categories"
-                    )
-                    if upstream_ti:
-                        categories = upstream_ti.xcom_pull(key="return_value")
-                        logger.info(
-                            f"Lấy categories từ dag_run.get_task_instance(): {len(categories) if categories else 0} items"
-                        )
-                except Exception as e:
-                    logger.warning(f"Không lấy được từ dag_run.get_task_instance(): {e}")
-
+            categories = ti.xcom_pull(task_ids="pre_crawl.load_categories")
             if not categories:
                 logger.error("❌ Không thể lấy categories từ XCom!")
                 return []
-
-            if not isinstance(categories, list):
-                logger.error(f"❌ Categories không phải list: {type(categories)}")
-                return []
-
-            logger.info(
-                f"✅ Đã lấy {len(categories)} categories, tạo {len(categories)} tasks cho Dynamic Task Mapping"
-            )
-
-            # Trả về list các dict để expand
             return [{"category": cat} for cat in categories]
 
         def prepare_category_batch_kwargs(**context):
-            """
-            Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing
-
-            Chia categories thành batches để giảm số lượng Airflow tasks và tận dụng driver pooling
-            """
+            """Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing"""
             import logging
-
             logger = logging.getLogger("airflow.task")
-
             ti = context["ti"]
-
-            # Lấy categories từ XCom (same logic as prepare_crawl_kwargs)
-            categories = None
-
-            try:
-                categories = ti.xcom_pull(task_ids="load_and_prepare.load_categories")
-                logger.info(
-                    f"Lấy categories từ 'load_and_prepare.load_categories': {len(categories) if categories else 0} items"
-                )
-            except Exception as e:
-                logger.warning(f"Không lấy được từ 'load_and_prepare.load_categories': {e}")
-
-            if not categories:
-                try:
-                    categories = ti.xcom_pull(task_ids="load_categories")
-                    logger.info(
-                        f"Lấy categories từ 'load_categories': {len(categories) if categories else 0} items"
-                    )
-                except Exception as e:
-                    logger.warning(f"Không lấy được từ 'load_categories': {e}")
-
-            if not categories:
-                try:
-                    # Airflow 3.x: Dùng dag_run.get_task_instance() thay vì TaskInstance constructor
-                    dag_run = context["dag_run"]
-                    # Thử lấy từ task trong TaskGroup
-                    upstream_ti = dag_run.get_task_instance(
-                        task_id="load_and_prepare.load_categories"
-                    )
-                    if upstream_ti:
-                        categories = upstream_ti.xcom_pull(key="return_value")
-                        logger.info(
-                            f"Lấy categories từ dag_run.get_task_instance(): {len(categories) if categories else 0} items"
-                        )
-                except Exception as e:
-                    logger.warning(f"Không lấy được từ dag_run.get_task_instance(): {e}")
-
+            categories = ti.xcom_pull(task_ids="pre_crawl.load_categories")
             if not categories:
                 logger.error("❌ Không thể lấy categories từ XCom!")
                 return []
-
-            if not isinstance(categories, list):
-                logger.error(f"❌ Categories không phải list: {type(categories)}")
-                return []
-
-            logger.info(f"✅ Đã lấy {len(categories)} categories")
-
-            # Batch Processing: Chia categories thành batches
             batch_size = int(get_variable("TIKI_CATEGORY_BATCH_SIZE", default="10"))
-            batches = []
-            for i in range(0, len(categories), batch_size):
-                batch = categories[i : i + batch_size]
-                batches.append(batch)
+            batches = [categories[i : i + batch_size] for i in range(0, len(categories), batch_size)]
+            return [{"category_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)]
 
-            logger.info(
-                f"📦 Đã chia thành {len(batches)} batches (mỗi batch {batch_size} categories)"
-            )
-            logger.info(f"   - Batch đầu tiên: {len(batches[0]) if batches else 0} categories")
-            logger.info(f"   - Batch cuối cùng: {len(batches[-1]) if batches else 0} categories")
-
-            # Trả về list các dict để expand (mỗi dict là 1 batch)
-            op_kwargs_list = [
-                {"category_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
-            ]
-
-            logger.info(
-                f"🔢 Tạo {len(op_kwargs_list)} op_kwargs cho Dynamic Task Mapping (batches)"
-            )
-            if op_kwargs_list:
-                logger.info("📋 Sample batches (first 2):")
-                for _i, kwargs in enumerate(op_kwargs_list[:2]):
-                    batch = kwargs.get("category_batch", [])
-                    batch_idx = kwargs.get("batch_index", -1)
-                    category_names = [c.get("name", "Unknown") for c in batch[:3]]
-                    logger.info(
-                        f"  Batch {batch_idx}: {len(batch)} categories - {category_names}..."
-                    )
-
-            return op_kwargs_list
-
-        # Chỉ tạo task prepare phù hợp với mode đang dùng (batch hoặc single-category)
-        # Để tránh task bị skip vì chỉ 1 trong 2 task prepare được dùng
         if crawl_category_batch is not None:
-            # Batch processing mode (PRODUCTION: Khuyến nghị dùng mode này)
             task_prepare = PythonOperator(
                 task_id="prepare_batch_kwargs",
                 python_callable=prepare_category_batch_kwargs,
                 execution_timeout=timedelta(minutes=1),
             )
-
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_category_batch,
-                execution_timeout=timedelta(minutes=12),  # Tối ưu: giảm từ 15 -> 12 phút
+                execution_timeout=timedelta(minutes=12),
                 pool="crawl_pool",
-                retries=1,  # Retry 1 lần
-                retry_delay=timedelta(seconds=15),  # Tối ưu: thêm delay ngắn
+                retries=1,
+                retry_delay=timedelta(seconds=15),
             ).expand(op_kwargs=task_prepare.output)
         else:
-            # Fallback: single-category processing
             task_prepare = PythonOperator(
                 task_id="prepare_crawl_kwargs",
                 python_callable=prepare_crawl_kwargs,
                 execution_timeout=timedelta(minutes=1),
             )
-
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_single_category,
-                execution_timeout=timedelta(minutes=10),  # Timeout 10 phút mỗi category
+                execution_timeout=timedelta(minutes=10),
                 pool="crawl_pool",
                 retries=1,
             ).expand(op_kwargs=task_prepare.output)
@@ -5535,170 +5482,32 @@ with DAG(**DAG_CONFIG) as dag:
         task_merge_products = PythonOperator(
             task_id="merge_products",
             python_callable=merge_products,
-            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=30),
             pool="crawl_pool",
-            trigger_rule="all_done",  # QUAN TRỌNG: Chạy khi tất cả upstream tasks done (success hoặc failed)
+            trigger_rule="all_done",
         )
 
         task_save_products = PythonOperator(
             task_id="save_products",
             python_callable=save_products,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=10),
             pool="crawl_pool",
         )
+        task_merge_products >> task_save_products
 
     # TaskGroup: Crawl Product Details (Dynamic Task Mapping)
     with TaskGroup("crawl_product_details") as detail_group:
-
         def prepare_detail_kwargs(**context):
             """Helper function để prepare op_kwargs cho Dynamic Task Mapping detail"""
             import logging
-
             logger = logging.getLogger("airflow.task")
-
             ti = context["ti"]
-
-            # Lấy products từ prepare_products_for_detail
-            # Task này nằm trong TaskGroup 'crawl_product_details', nên task_id đầy đủ là 'crawl_product_details.prepare_products_for_detail'
-            products_to_crawl = None
-
-            # Lấy từ upstream task (prepare_products_for_detail) - cách đáng tin cậy nhất
-            # Thử lấy upstream_task_ids từ nhiều nguồn khác nhau (tương thích với các phiên bản Airflow)
-            upstream_task_ids = []
-            try:
-                task_instance = context.get("task_instance")
-                if task_instance:
-                    # Thử với RuntimeTaskInstance (Airflow SDK mới)
-                    if hasattr(task_instance, "upstream_task_ids"):
-                        upstream_task_ids = list(task_instance.upstream_task_ids)
-                    # Thử với ti.task (cách khác)
-                    elif hasattr(ti, "task") and hasattr(ti.task, "upstream_task_ids"):
-                        upstream_task_ids = list(ti.task.upstream_task_ids)
-            except (AttributeError, TypeError) as e:
-                logger.debug(f"   Không thể lấy upstream_task_ids: {e}")
-
-            if upstream_task_ids:
-                logger.info(f"🔍 Upstream tasks: {upstream_task_ids}")
-                # Thử lấy từ tất cả upstream tasks
-                for task_id in upstream_task_ids:
-                    try:
-                        products_to_crawl = ti.xcom_pull(task_ids=task_id)
-                        if products_to_crawl:
-                            logger.debug(f"XCom from upstream: {task_id}")
-                            break
-                    except Exception as e:
-                        logger.debug(f"   Không lấy được từ {task_id}: {e}")
-                        continue
-
-            # Nếu vẫn không lấy được, thử các cách khác
+            products_to_crawl = ti.xcom_pull(task_ids="crawl_product_details.prepare_products_for_detail")
             if not products_to_crawl:
-                try:
-                    # Thử với task_id đầy đủ (có TaskGroup prefix)
-                    products_to_crawl = ti.xcom_pull(
-                        task_ids="crawl_product_details.prepare_products_for_detail"
-                    )
-                    logger.info(
-                        "✅ Lấy XCom từ task_id: crawl_product_details.prepare_products_for_detail"
-                    )
-                except Exception as e1:
-                    logger.warning(f"⚠️  Không lấy được với task_id đầy đủ: {e1}")
-                    try:
-                        # Thử với task_id không có prefix (fallback)
-                        products_to_crawl = ti.xcom_pull(task_ids="prepare_products_for_detail")
-                        logger.debug("XCom from prepare_products_for_detail")
-                    except Exception as e2:
-                        logger.error(f"❌ Không thể lấy XCom với cả 2 cách: {e1}, {e2}")
-
-            if not products_to_crawl:
-                logger.error("❌ Không thể lấy products từ XCom!")
-                try:
-                    task_instance = context.get("task_instance")
-                    upstream_info = []
-                    if task_instance:
-                        if hasattr(task_instance, "upstream_task_ids"):
-                            upstream_info = list(task_instance.upstream_task_ids)
-                        elif hasattr(ti, "task") and hasattr(ti.task, "upstream_task_ids"):
-                            upstream_info = list(ti.task.upstream_task_ids)
-                    logger.error(f"   Upstream tasks: {upstream_info}")
-                except Exception as e:
-                    logger.error(f"   Không thể lấy thông tin upstream tasks: {e}")
                 return []
-
-            if not isinstance(products_to_crawl, list):
-                logger.error(f"❌ Products không phải list: {type(products_to_crawl)}")
-                logger.error(f"   Value: {products_to_crawl}")
-                return []
-
-            logger.info(f"✅ Retrieved {len(products_to_crawl)} products for detail crawl")
-
-            # Dynamic Batch Sizing: Tính optimal batch size dựa trên số lượng products và available workers
-            def calculate_optimal_batch_size(
-                product_count: int,
-                available_workers: int = 12,  # Default Airflow worker concurrency
-                target_batch_time: int = 45,  # Target: mỗi batch xử lý trong 45-60 giây
-                min_batch: int = 5,
-                max_batch: int = 20,
-            ) -> int:
-                """Tính optimal batch size dựa trên context"""
-                # Ước tính: mỗi product mất ~3-5s để crawl
-                avg_product_time = 4.0  # seconds
-
-                # Tính products per batch để đạt target time
-                products_per_batch = target_batch_time / avg_product_time
-
-                # Điều chỉnh dựa trên số lượng products và workers
-                # Nếu có nhiều products, có thể tăng batch size
-                if product_count > 1000:
-                    products_per_batch *= 1.2
-                elif product_count < 100:
-                    products_per_batch *= 0.8
-
-                # Đảm bảo trong khoảng min-max
-                optimal = max(min_batch, min(max_batch, int(products_per_batch)))
-
-                logger.info(
-                    f"🔢 Dynamic batch sizing: {product_count} products, "
-                    f"{available_workers} workers → optimal batch size: {optimal}"
-                )
-                return optimal
-
-            # Lấy batch size từ config hoặc tính dynamic
-            try:
-                from pipelines.crawl.config import PRODUCT_BATCH_SIZE
-
-                base_batch_size = PRODUCT_BATCH_SIZE
-            except Exception:
-                base_batch_size = 12  # Default fallback
-
-            # Tính optimal batch size
-            optimal_batch_size = calculate_optimal_batch_size(
-                len(products_to_crawl),
-                available_workers=12,  # Có thể lấy từ Airflow Variable nếu cần
-            )
-
-            # Dùng giá trị lớn hơn giữa config và optimal để đảm bảo hiệu quả
-            batch_size = max(base_batch_size, optimal_batch_size)
-
-            # Batch Processing: Chia products thành batches
-            batches = []
-            for i in range(0, len(products_to_crawl), batch_size):
-                batch = products_to_crawl[i : i + batch_size]
-                batches.append(batch)
-
-            logger.info(
-                f"📦 Đã chia thành {len(batches)} batches (mỗi batch {batch_size} products)"
-            )
-            logger.info(f"   - Batch đầu tiên: {len(batches[0]) if batches else 0} products")
-            logger.info(f"   - Batch cuối cùng: {len(batches[-1]) if batches else 0} products")
-
-            # Trả về list các dict để expand (mỗi dict là 1 batch)
-            op_kwargs_list = [
-                {"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
-            ]
-
-            logger.info(f"🔢 Created {len(op_kwargs_list)} batches for Dynamic Task Mapping")
-
-            return op_kwargs_list
+            batch_size = 15 # Optimized batch size
+            batches = [products_to_crawl[i : i + batch_size] for i in range(0, len(products_to_crawl), batch_size)]
+            return [{"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)]
 
         task_prepare_detail = PythonOperator(
             task_id="prepare_products_for_detail",
@@ -5712,160 +5521,34 @@ with DAG(**DAG_CONFIG) as dag:
             execution_timeout=timedelta(minutes=1),
         )
 
-        # Dynamic Task Mapping cho crawl detail (Batch Processing)
         task_crawl_product_detail = PythonOperator.partial(
             task_id="crawl_product_detail",
-            python_callable=crawl_product_batch,  # Dùng batch function thay vì single
-            execution_timeout=timedelta(minutes=15),  # Tối ưu: giảm từ 20 -> 15 phút (nhanh hơn)
+            python_callable=crawl_product_batch,
+            execution_timeout=timedelta(minutes=15),
             pool="crawl_pool",
-            retries=1,  # Tối ưu: giảm từ 2 -> 1 (nhanh hơn)
-            retry_delay=timedelta(seconds=30),  # Tối ưu: giảm từ 2 phút -> 30 giây
+            retries=1,
+            retry_delay=timedelta(seconds=30),
         ).expand(op_kwargs=task_prepare_detail_kwargs.output)
 
         task_merge_product_details = PythonOperator(
             task_id="merge_product_details",
             python_callable=merge_product_details,
-            execution_timeout=timedelta(minutes=30),  # Tối ưu: giảm từ 60 -> 30 phút
+            execution_timeout=timedelta(minutes=30),
             pool="crawl_pool",
-            trigger_rule="all_done",  # Chạy khi tất cả upstream tasks done
-            # Tăng heartbeat interval để tránh timeout khi xử lý nhiều dữ liệu
+            trigger_rule="all_done",
         )
 
         task_save_products_with_detail = PythonOperator(
             task_id="save_products_with_detail",
             python_callable=save_products_with_detail,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=10),
             pool="crawl_pool",
         )
 
-        # Dependencies trong detail group
-        (
-            task_prepare_detail
-            >> task_prepare_detail_kwargs
-            >> task_crawl_product_detail
-            >> task_merge_product_details
-            >> task_save_products_with_detail
-        )
+        task_prepare_detail >> task_prepare_detail_kwargs >> task_crawl_product_detail >> task_merge_product_details >> task_save_products_with_detail
 
-    # TaskGroup: Enrich Category Path (thêm category_path cho products thiếu, dựa vào categories file)
-    with TaskGroup("enrich_category_path") as enrich_group:
-
-        def enrich_category_path_task(**context):
-            """Bổ sung category_path cho products có category_id nhưng chưa có breadcrumb.
-
-            Luồng:
-            1. Đọc file sản phẩm chi tiết (products_with_detail.json)
-            2. Đọc categories từ file (categories_recursive_optimized.json) - đã có category_id và category_path
-            3. Xây dựng lookup map: category_id -> category_path
-            4. Với mỗi product: nếu có category_id nhưng chưa có category_path, tìm từ lookup map
-            5. Ghi lại file
-            """
-            logger = get_logger(context)
-            logger.info("=" * 70)
-            logger.info("🧩 TASK: Enrich Category Path")
-            logger.info("=" * 70)
-
-            ti = context["ti"]
-
-            # Bước 1: Lấy file sản phẩm chi tiết
-            output_file = None
-            try:
-                output_file = ti.xcom_pull(
-                    task_ids="crawl_product_details.save_products_with_detail"
-                )
-            except Exception:
-                pass
-            if not output_file:
-                output_file = str(OUTPUT_FILE_WITH_DETAIL)
-
-            if not os.path.exists(output_file):
-                raise FileNotFoundError(f"Không tìm thấy file detail: {output_file}")
-
-            logger.info(f"📂 Đang đọc file detail: {output_file}")
-            with open(output_file, encoding="utf-8") as f:
-                data = json.load(f)
-            products = data.get("products", [])
-            logger.info(f"📊 Số products trước enrich: {len(products)}")
-
-            # Bước 2: Đọc categories từ file
-            category_path_lookup: dict[str, list] = {}  # category_id -> category_path
-
-            if CATEGORIES_FILE.exists():
-                try:
-                    logger.info(f"📖 Đọc categories từ file: {CATEGORIES_FILE}")
-                    with open(CATEGORIES_FILE, encoding="utf-8") as cf:
-                        raw_categories = json.load(cf)
-
-                    for cat in raw_categories:
-                        cat_id = cat.get("category_id")
-                        cat_path = cat.get("category_path")
-
-                        # Chỉ thêm vào lookup nếu có category_id và category_path
-                        if cat_id and cat_path:
-                            category_path_lookup[cat_id] = cat_path
-
-                    logger.info(f"✅ Loaded {len(category_path_lookup)} category_path từ file")
-                except Exception as fe:
-                    logger.warning(f"⚠️ Lỗi đọc file categories: {fe}")
-            else:
-                logger.warning(f"⚠️ File categories không tồn tại: {CATEGORIES_FILE}")
-
-            # Debug logging for lookup
-            if DEBUG_ENRICH_CATEGORY_PATH and category_path_lookup:
-                sample_keys = list(category_path_lookup.keys())[:5]
-                logger.debug(f"🔍 [DEBUG] Sample category_path_lookup keys: {sample_keys}")
-
-                sample_product_ids = [
-                    p.get("category_id") for p in products[:5] if p.get("category_id")
-                ]
-                logger.debug(f"🔍 [DEBUG] Sample product category_ids: {sample_product_ids}")
-
-            # Bước 3: Enrich category_path cho products
-            enriched = 0
-            without_category_id = 0
-            debug_missing_ids = set()
-
-            for p in products:
-                # Nếu product có category_id nhưng chưa có category_path
-                if p.get("category_id") and not p.get("category_path"):
-                    cat_id = str(p["category_id"]).strip()
-
-                    # Tìm category_path từ lookup map
-                    if cat_id in category_path_lookup:
-                        p["category_path"] = category_path_lookup[cat_id]
-                        enriched += 1
-                    else:
-                        # Log: category_id không tìm thấy trong file categories
-                        without_category_id += 1
-                        if DEBUG_ENRICH_CATEGORY_PATH and len(debug_missing_ids) < 10:
-                            debug_missing_ids.add(cat_id)
-
-            if DEBUG_ENRICH_CATEGORY_PATH and debug_missing_ids:
-                logger.debug(f"⚠️ [DEBUG] Sample missing IDs in lookup: {list(debug_missing_ids)}")
-
-            # Bước 4: Report
-            if enriched > 0:
-                logger.info(f"✅ Enriched category_path cho {enriched} products")
-            if without_category_id > 0:
-                logger.warning(
-                    f"⚠️ {without_category_id} products có category_id nhưng không tìm thấy trong categories"
-                )
-
-            # Check: Số products có category_path
-            products_with_path = sum(1 for p in products if p.get("category_path"))
-            logger.info(f"📊 Tổng products có category_path: {products_with_path}/{len(products)}")
-
-            # Bước 5: Ghi lại file (in-place update)
-            data["products"] = products
-            atomic_write_file(output_file, data, **context)
-            logger.info(f"💾 Đã cập nhật file với category_path enrich: {output_file}")
-
-            return {
-                "file": output_file,
-                "enriched_count": enriched,
-                "products_with_path": products_with_path,
-            }
-
+    # TaskGroup: Transform and Load
+    with TaskGroup("transform_and_load") as transform_load_group:
         task_enrich_category_path = PythonOperator(
             task_id="enrich_products_category_path",
             python_callable=enrich_category_path_task,
@@ -5873,51 +5556,79 @@ with DAG(**DAG_CONFIG) as dag:
             pool="crawl_pool",
         )
 
-    # TaskGroup: Transform and Load
-    with TaskGroup("transform_and_load") as transform_load_group:
         task_transform_products = PythonOperator(
             task_id="transform_products",
             python_callable=transform_products,
-            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=30),
             pool="crawl_pool",
         )
 
         task_load_products = PythonOperator(
             task_id="load_products",
             python_callable=load_products,
-            execution_timeout=timedelta(minutes=30),  # Timeout 30 phút
+            execution_timeout=timedelta(minutes=30),
+            pool="crawl_pool",
+        )
+        task_enrich_category_path >> task_transform_products >> task_load_products
+
+    # TaskGroup: Maintenance and Reports
+    with TaskGroup("maintenance_and_reports") as maintenance_group:
+        task_load_categories_db = PythonOperator(
+            task_id="load_categories_to_db",
+            python_callable=load_categories_to_db_wrapper,
+            execution_timeout=timedelta(minutes=5),
             pool="crawl_pool",
         )
 
-        # Dependencies trong transform_load group
-        task_transform_products >> task_load_products
+        task_reconcile = PythonOperator(
+            task_id="reconcile_categories",
+            python_callable=reconcile_categories_wrapper,
+            execution_timeout=timedelta(minutes=10),
+            pool="crawl_pool",
+        )
 
-    # TaskGroup: Validate
-    with TaskGroup("validate") as validate_group:
+        task_cleanup_orphans = PythonOperator(
+            task_id="cleanup_orphan_categories",
+            python_callable=cleanup_orphan_categories_wrapper,
+            execution_timeout=timedelta(minutes=5),
+            pool="crawl_pool",
+        )
+
+        task_cleanup_redundant = PythonOperator(
+            task_id="cleanup_redundant_categories",
+            python_callable=cleanup_redundant_categories_wrapper,
+            execution_timeout=timedelta(minutes=5),
+            pool="crawl_pool",
+        )
+
+        task_cleanup_history = PythonOperator(
+            task_id="cleanup_old_history",
+            python_callable=cleanup_old_history_wrapper,
+            execution_timeout=timedelta(minutes=5),
+            pool="crawl_pool",
+        )
+
         task_validate_data = PythonOperator(
             task_id="validate_data",
             python_callable=validate_data,
-            execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
+            execution_timeout=timedelta(minutes=5),
             pool="crawl_pool",
         )
 
-    # TaskGroup: Aggregate and Notify
-    with TaskGroup("aggregate_and_notify") as aggregate_group:
         task_aggregate_and_notify = PythonOperator(
             task_id="aggregate_and_notify",
             python_callable=aggregate_and_notify,
-            execution_timeout=timedelta(minutes=10),  # Timeout 10 phút
+            execution_timeout=timedelta(minutes=10),
             pool="crawl_pool",
-            trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
+            trigger_rule="all_done",
         )
 
-        # Cleanup Cache task (no TaskGroup to allow direct reference)
         task_cleanup_cache = PythonOperator(
             task_id="cleanup_redis_cache",
             python_callable=cleanup_redis_cache,
-            execution_timeout=timedelta(minutes=5),  # Timeout 5 phút
+            execution_timeout=timedelta(minutes=5),
             pool="crawl_pool",
-            trigger_rule="all_done",  # Chạy ngay cả khi có task upstream fail
+            trigger_rule="all_done",
         )
 
         task_backup_database = PythonOperator(
@@ -5928,60 +5639,10 @@ with DAG(**DAG_CONFIG) as dag:
             trigger_rule="all_done",
         )
 
-    # Task: Load categories to DB (runs after products are loaded)
-    task_load_categories_db = PythonOperator(
-        task_id="load_categories_to_db",
-        python_callable=load_categories_to_db_wrapper,
-        execution_timeout=timedelta(minutes=5),
-        pool="crawl_pool",
-    )
+        # Maintenance dependencies
+        task_load_categories_db >> task_reconcile >> [task_cleanup_orphans, task_cleanup_redundant]
+        [task_cleanup_orphans, task_cleanup_redundant] >> task_validate_data >> task_aggregate_and_notify
+        task_aggregate_and_notify >> [task_cleanup_cache, task_backup_database, task_cleanup_history]
 
-    # ===== OPTIMIZED DEPENDENCIES =====
-    # Tối ưu: Chạy song song các tasks không phụ thuộc nhau để giảm thời gian execution
-
-    # Step 1: Cleanup incomplete products before crawling
-    # cleanup_categories sẽ chạy SAU khi load categories vào DB (Step 10)
-    # Chỉ cleanup products ở đây
-    task_cleanup_products >> task_load_categories
-
-    # Step 2: Load categories and prepare for crawl
-    task_load_categories >> task_prepare
-
-    # Step 3: Prepare crawl kwargs -> crawl category (dynamic mapping)
-    task_prepare >> task_crawl_category
-
-    # Step 4: Crawl category -> merge products (merge chạy khi tất cả crawl tasks done)
-    task_crawl_category >> task_merge_products
-
-    # Step 5: Merge -> save products
-    task_merge_products >> task_save_products
-
-    # Step 6: Save products -> prepare detail -> crawl detail -> merge detail -> save detail
-    task_save_products >> task_prepare_detail
-    # Dependencies trong detail group đã được định nghĩa ở dòng 5471-5477
-
-    # Step 7: After save_products_with_detail
-    # enrich_category_path nên chạy trước transform để transform có thể dùng category_path đã được enrich
-    task_save_products_with_detail >> task_enrich_category_path >> task_transform_products
-
-    # Step 8: Transform -> Load
-    task_transform_products >> task_load_products
-
-    # Step 9: After load_products - parallel processing
-    # load_categories_db có thể chạy ngay sau load_products (không cần wait enrich)
-    # enrich_category_path cũng có thể trigger load_categories_db nếu cần
-    task_load_products >> task_load_categories_db
-
-    # Step 10: Cleanup orphan categories AFTER loading categories to DB
-    task_load_categories_db >> task_cleanup_categories
-
-    # Step 11: Validate data (có thể chạy song song với cleanup_categories nếu không phụ thuộc)
-    # Nhưng để đảm bảo data consistency, validate sau cleanup
-    task_cleanup_categories >> task_validate_data
-
-    # Step 12: Aggregate and notify
-    task_validate_data >> task_aggregate_and_notify
-
-    # Step 13: Final tasks - chạy song song (cleanup_cache và backup_database không phụ thuộc nhau)
-    # Cả hai đều phụ thuộc vào aggregate_and_notify nhưng không cần nhau
-    task_aggregate_and_notify >> [task_cleanup_cache, task_backup_database]
+    # ===== FINAL DAG DEPENDENCIES =====
+    pre_crawl_group >> crawl_group >> process_group >> detail_group >> transform_load_group >> maintenance_group
