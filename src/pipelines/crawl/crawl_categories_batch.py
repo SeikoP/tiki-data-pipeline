@@ -6,6 +6,15 @@ Optimized for parallel category crawling with driver reuse
 import logging
 from datetime import datetime
 from typing import Any
+from pathlib import Path
+
+try:
+    from utils import DEFAULT_PRODUCT_LIST_CACHE_DIR
+except ImportError:
+    try:
+        from src.pipelines.crawl.utils import DEFAULT_PRODUCT_LIST_CACHE_DIR
+    except ImportError:
+        DEFAULT_PRODUCT_LIST_CACHE_DIR = Path("data/raw/cache/products")
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +78,7 @@ def crawl_single_category_with_pool(
     driver_pool: Any = None,
     max_pages: int = 20,
     use_selenium: bool = False,
-    cache_dir: str = "data/raw/cache/products",
+    cache_dir: str = DEFAULT_PRODUCT_LIST_CACHE_DIR,
     use_redis_cache: bool = True,
     use_rate_limiting: bool = True,
     verbose: bool = False,

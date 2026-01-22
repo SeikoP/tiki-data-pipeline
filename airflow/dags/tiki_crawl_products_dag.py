@@ -596,8 +596,11 @@ for data_dir in possible_data_dirs:
         break
 
 if not DATA_DIR:
-    # Fallback: dùng đường dẫn tương đối
-    DATA_DIR = Path(__file__).parent.parent.parent / "data"
+    # Fallback: dùng đường dẫn tương đối hoặc AIRFLOW_HOME
+    if os.getenv("AIRFLOW_HOME"):
+        DATA_DIR = Path(os.getenv("AIRFLOW_HOME")) / "data"
+    else:
+        DATA_DIR = Path(__file__).parent.parent.parent / "data"
 
 CATEGORIES_FILE = DATA_DIR / "raw" / "categories_recursive_optimized.json"
 CATEGORIES_TREE_FILE = DATA_DIR / "raw" / "categories_tree.json"

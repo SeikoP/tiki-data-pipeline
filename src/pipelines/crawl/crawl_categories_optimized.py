@@ -7,6 +7,18 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from pathlib import Path
+
+# Try importing constants from utils
+try:
+    from utils import DEFAULT_CATEGORY_CACHE_DIR, DEFAULT_DATA_DIR
+except ImportError:
+    try:
+        from src.pipelines.crawl.utils import DEFAULT_CATEGORY_CACHE_DIR, DEFAULT_DATA_DIR
+    except ImportError:
+        # Fallback constants if imports fail
+        DEFAULT_DATA_DIR = Path("data/raw")
+        DEFAULT_CATEGORY_CACHE_DIR = DEFAULT_DATA_DIR / "cache" / "categories"
 
 spec = importlib.util.spec_from_file_location(
     "extract_category_link_selenium",
@@ -87,7 +99,7 @@ except ImportError:
 
 
 # Tạo thư mục output nếu chưa có
-os.makedirs("data/raw", exist_ok=True)
+os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
 
 # Thread-safe locks và counters
 stats_lock = Lock()
@@ -102,7 +114,7 @@ stats = {
 
 
 def crawl_single_category(
-    url, parent_url, level, max_level, visited_urls, cache_dir="data/raw/cache/categories", driver_pool=None
+    url, parent_url, level, max_level, visited_urls, cache_dir=DEFAULT_CATEGORY_CACHE_DIR, driver_pool=None
 ):
     """
     Crawl một danh mục đơn lẻ (thread-safe)
@@ -247,7 +259,7 @@ def crawl_level_parallel(
                     level,
                     max_level,
                     visited_urls,
-                    "data/raw/cache/categories",
+                    DEFAULT_CATEGORY_CACHE_DIR,
                     driver_pool,
                 )
                 future_to_url[future] = (url, parent_url)
@@ -508,7 +520,7 @@ def main():
         print(f"  {i}. {url}")
     print(f"Độ sâu tối đa: {max_level}")
     print(f"Số thread song song: {max_workers}")
-    print("Cache: data/raw/cache/categories/")
+    print(f"Cache: {DEFAULT_CATEGORY_CACHE_DIR}")
     print("=" * 70)
 
     # Reset stats
