@@ -557,9 +557,7 @@ if schedule_mode == "scheduled":
     dag_tags = ["tiki", "crawl", "products", "data-pipeline", "scheduled"]
 else:
     dag_schedule = None  # Chỉ chạy khi trigger thủ công
-    dag_description = (
-        "Crawl sản phẩm Tiki với Dynamic Task Mapping (Chạy thủ công - Test mode)"
-    )
+    dag_description = "Crawl sản phẩm Tiki với Dynamic Task Mapping (Chạy thủ công - Test mode)"
     dag_tags = ["tiki", "crawl", "products", "data-pipeline", "manual"]
 
 # Cấu hình DAG schedule
@@ -1196,9 +1194,7 @@ def cleanup_incomplete_products_wrapper(**context):
         # Both are required for quality data
         # require_rating=True to satisfy user request for deleting null ratings
         stats = storage.cleanup_incomplete_products(
-            require_seller=True,
-            require_brand=True,
-            require_rating=True
+            require_seller=True, require_brand=True, require_rating=True
         )
 
         deleted_count = stats["deleted_count"]
@@ -1233,8 +1229,6 @@ def cleanup_incomplete_products_wrapper(**context):
             "deleted_no_brand": 0,
             "deleted_both": 0,
         }
-
-
 
 
 def cleanup_orphan_categories_wrapper(**context):
@@ -1341,7 +1335,7 @@ def reconcile_categories_wrapper(**context):
             logger.warning(f"⚠️  File {json_path} not found, skipping name updates")
             return {"status": "skipped", "message": "File not found"}
 
-        with open(json_path, "r", encoding="utf-8") as f:
+        with open(json_path, encoding="utf-8") as f:
             categories_data = json.load(f)
 
         id_to_name = {
@@ -5507,7 +5501,7 @@ with DAG(**DAG_CONFIG) as dag:
             """Helper function để prepare op_kwargs cho Dynamic Task Mapping detail"""
             import logging
 
-            logger = logging.getLogger("airflow.task")
+            logging.getLogger("airflow.task")
             ti = context["ti"]
             products_to_crawl = ti.xcom_pull(
                 task_ids="crawl_product_details.prepare_products_for_detail"

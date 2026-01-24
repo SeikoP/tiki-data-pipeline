@@ -6,11 +6,16 @@ param(
     [string]$Command = "help"
 )
 
-# Auto-detect python3 on Linux if python is not available
-if ($IsLinux -and $null -eq (Get-Command "python" -ErrorAction SilentlyContinue)) {
-    if (Get-Command "python3" -ErrorAction SilentlyContinue) {
-        Write-Host "⚠️  'python' command not found, aliasing to 'python3'" -ForegroundColor Yellow
-        New-Alias -Name python -Value python3 -Force -Scope Script
+# Auto-detect local .venv or python3 on Linux
+if ($IsLinux) {
+    if (Test-Path "./.venv/bin/python") {
+        Write-Host "✅ Using local virtual environment (.venv)" -ForegroundColor Green
+        New-Alias -Name python -Value "./.venv/bin/python" -Force -Scope Script
+    } elseif ($null -eq (Get-Command "python" -ErrorAction SilentlyContinue)) {
+        if (Get-Command "python3" -ErrorAction SilentlyContinue) {
+            Write-Host "⚠️  'python' not found, aliasing to 'python3'" -ForegroundColor Yellow
+            New-Alias -Name python -Value "python3" -Force -Scope Script
+        }
     }
 }
 

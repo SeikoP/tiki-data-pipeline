@@ -1734,8 +1734,8 @@ class PostgresStorage:
         query = """
             DELETE FROM categories
             WHERE url IN (
-                SELECT DISTINCT parent_url 
-                FROM categories 
+                SELECT DISTINCT parent_url
+                FROM categories
                 WHERE parent_url IS NOT NULL
             )
             OR is_leaf = FALSE

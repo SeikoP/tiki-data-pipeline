@@ -555,8 +555,8 @@ class DataTransformer:
         # 2. Regex cleaning for SKUs and codes (e.g., CV0016, CV123, SKU-99, MS123)
         sku_patterns = [
             r"\b[A-Za-z]{2,}\d{3,}\b",  # CV0016, SP1234
-            r"\b[A-Za-z]+\-\d+\b",      # SKU-123, MS-001
-            r"\bMS\s*\d+\b",            # MS 123
+            r"\b[A-Za-z]+\-\d+\b",  # SKU-123, MS-001
+            r"\bMS\s*\d+\b",  # MS 123
             r"\bMã\s*(?:số)?\s*\d+\b",  # Mã số 123
         ]
 
@@ -565,11 +565,31 @@ class DataTransformer:
 
         # 3. Marketing fluff and subjective adjectives
         fluff_keywords = [
-            "sang chảnh", "siêu xinh", "trẻ trung", "thoáng mát", "cực đẹp",
-            "chất lượng", "cao cấp", "gợi cảm", "quyến rũ", "sexy", "hot hot",
-            "mẫu mới nhất", "new design", "hot trend", "giá rẻ", "siêu rẻ",
-            "vải mềm", "co giãn", "thiết kế", "chất mềm", "mới nhất", "siêu đẹp",
-            "hot", "giá sốc", "giá tốt"
+            "sang chảnh",
+            "siêu xinh",
+            "trẻ trung",
+            "thoáng mát",
+            "cực đẹp",
+            "chất lượng",
+            "cao cấp",
+            "gợi cảm",
+            "quyến rũ",
+            "sexy",
+            "hot hot",
+            "mẫu mới nhất",
+            "new design",
+            "hot trend",
+            "giá rẻ",
+            "siêu rẻ",
+            "vải mềm",
+            "co giãn",
+            "thiết kế",
+            "chất mềm",
+            "mới nhất",
+            "siêu đẹp",
+            "hot",
+            "giá sốc",
+            "giá tốt",
         ]
 
         # Build regex for fluff (word boundaries)
