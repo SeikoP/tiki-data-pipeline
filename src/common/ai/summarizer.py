@@ -189,24 +189,25 @@ Nhiệm vụ:
 
 Quy tắc bắt buộc:
 1. Giữ lại theo thứ tự ưu tiên:
-   - Loại sản phẩm chính (ví dụ: Bikini, Áo bikini, Quần bơi, Đồ bơi, Bộ bà ba, Đồ lam…)
-   - Đối tượng hoặc giới tính (nữ, nam, bé gái) nếu có
-   - Đặc điểm quan trọng nhất (1 mảnh / 2 mảnh / liền thân / tay dài / lưng cao…)
-   - Chất liệu hoặc họa tiết nổi bật (thun lạnh, len, lụa, hoa nhí…)
-   - Thương hiệu hoặc dòng sản phẩm nếu có
+   - Loại sản phẩm chính (ví dụ: Chân váy, Bikini, Áo khoác, Đồ bơi...)
+   - Đối tượng (nữ, nam, bé gái)
+   - Đặc điểm quan trọng (2 mảnh, tay dài, buộc dây...)
+   - Thương hiệu (nếu có và nổi tiếng)
 
 2. Loại bỏ hoàn toàn:
-   - Từ marketing, cảm xúc: sexy, quyến rũ, cao cấp, siêu đẹp, gợi cảm…
-   - Mô tả dư thừa, hashtag, ký tự trang trí
-   - Mã sản phẩm, quà tặng, thông tin bán hàng
+   - Marketing fluff & Tính từ chủ quan: sang chảnh, siêu xinh, trẻ trung, thoáng mát, cực đẹp, gợi cảm, quyến rũ, cao cấp...
+   - SKU/Mã sản phẩm: CV0016, MS123, SP99...
+   - Ký tự đặc biệt, hashtag, thông tin bán hàng (free ship, giá rẻ...).
 
-3. Độ dài tối đa: 10–15 từ.
+3. Ví dụ mẫu:
+   - "Chân Váy CV0016" -> "Chân váy"
+   - "Bikini 2 Mảnh Buộc Dây Sang Chảnh" -> "Bikini 2 mảnh buộc dây"
+   - "Áo Khoác Nữ Trẻ Trung Thoáng Mát" -> "Áo khoác nữ"
+   - "Bộ Đồ Bơi Nữ 1 Mảnh Sexy Quyến Rũ" -> "Bộ đồ bơi nữ 1 mảnh"
 
-4. Không tự suy diễn thông tin không có trong tên gốc.
-
-5. Trả về CHỈ tên đã rút gọn, không kèm giải thích, không xuống dòng.
-
-6. Giữ nguyên ngôn ngữ gốc (Việt/Anh), viết hoa chữ cái đầu mỗi cụm chính.
+4. Độ dài tối đa: 8–12 từ.
+5. Trả về CHỈ tên đã rút gọn, không kèm giải thích.
+6. Giữ nguyên ngôn ngữ gốc, viết hoa chữ cái đầu mỗi cụm chính.
 
 Tên rút gọn:
 """
@@ -243,7 +244,7 @@ Tên rút gọn:
                     f"ℹ️  Model {model} đã deprecated, tự động chuyển sang {deprecated_models[model]}"
                 )
                 model = deprecated_models[model]
-            
+
             payload = {
                 "model": model,
                 "messages": [
@@ -263,6 +264,10 @@ Tên rút gọn:
                 json=payload,
                 timeout=60,
             )
+
+            if response.status_code == 429:
+                logger.warning("⚠️  Groq AI Rate Limit (429) hit. Please check your plan limits.")
+                return ""
 
             response.raise_for_status()
             result = response.json()

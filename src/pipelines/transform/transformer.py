@@ -41,21 +41,25 @@ class DataTransformer:
         # Initialize AI Summarizer for name shortening
         try:
             from src.common.ai.summarizer import AISummarizer
+
             self.ai_summarizer = AISummarizer()
         except ImportError:
             # Fallback for relative import if src is not in path
             try:
                 from ..common.ai.summarizer import AISummarizer
+
                 self.ai_summarizer = AISummarizer()
             except ImportError:
                 # Try absolute path from project root
                 try:
                     import sys
                     from pathlib import Path
+
                     root_path = Path(__file__).resolve().parent.parent.parent.parent
                     if str(root_path) not in sys.path:
                         sys.path.append(str(root_path))
                     from src.common.ai.summarizer import AISummarizer
+
                     self.ai_summarizer = AISummarizer()
                 except Exception as e:
                     logger.warning(f"Could not import AISummarizer: {e}")
@@ -360,6 +364,10 @@ class DataTransformer:
         if not product.get("url"):
             return False, "Missing url"
 
+        # CRITICAL: Validate seller_name (Task: Xóa seller_name null trước khi load db)
+        if not product.get("seller_name"):
+            return False, "Missing or invalid seller_name"
+
         # Validate product_id format (chỉ số)
         product_id = str(product["product_id"]).strip()
         if not product_id.isdigit():
@@ -530,14 +538,115 @@ class DataTransformer:
                     continue
         return None
 
-    def _get_short_name(self, name: str) -> str | None:
-        """Get shortened name using AI"""
+    def _clean_name_heuristics(self, name: str) -> str:
+        """
+        Apply heuristic rules to clean product names:
+        - Remove SKU codes
+        - Remove marketing fluff and subjective adjectives
+        - Remove special characters
+        - Normalize phrases
+        """
         if not name:
-            return None
-        
+            return ""
+
+        # 1. Remove hashtags (e.g., #jean) - do this early
+        cleaned = re.sub(r"#\w+\b", "", name)
+
+        # 2. Regex cleaning for SKUs and codes (e.g., CV0016, CV123, SKU-99, MS123)
+        sku_patterns = [
+            r"\b[A-Za-z]{2,}\d{3,}\b",  # CV0016, SP1234
+            r"\b[A-Za-z]+\-\d+\b",  # SKU-123, MS-001
+            r"\bMS\s*\d+\b",  # MS 123
+            r"\bMã\s*(?:số)?\s*\d+\b",  # Mã số 123
+        ]
+
+        for pattern in sku_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+        # 3. Marketing fluff and subjective adjectives
+        fluff_keywords = [
+            "sang chảnh",
+            "siêu xinh",
+            "trẻ trung",
+            "thoáng mát",
+            "cực đẹp",
+            "chất lượng",
+            "cao cấp",
+            "gợi cảm",
+            "quyến rũ",
+            "sexy",
+            "hot hot",
+            "mẫu mới nhất",
+            "new design",
+            "hot trend",
+            "giá rẻ",
+            "siêu rẻ",
+            "vải mềm",
+            "co giãn",
+            "thiết kế",
+            "chất mềm",
+            "mới nhất",
+            "siêu đẹp",
+            "hot",
+            "giá sốc",
+            "giá tốt",
+        ]
+
+        # Build regex for fluff (word boundaries)
+        fluff_pattern = r"\b(" + "|".join(re.escape(k) for k in fluff_keywords) + r")\b"
+        cleaned = re.sub(fluff_pattern, "", cleaned, flags=re.IGNORECASE)
+
+        # 4. Remove years (e.g., 2024, 2023) if they appear to be part of title fluff
+        cleaned = re.sub(r"\b202\d\b", "", cleaned)
+
+        # 5. Specialized symbols and brackets (remove content inside brackets if short like [HOT])
+        cleaned = re.sub(r"\[[^\]]{1,10}\]", " ", cleaned)
+
+        # 6. General special characters and repetitive symbols
+        cleaned = re.sub(r"[\[\]\(\)\-\#\|/\\\{\}]", " ", cleaned)
+        cleaned = re.sub(r"[\!\*\+\=~…\.\,]", " ", cleaned)
+
+        # 7. Normalize spacing and capitalization
+        cleaned = " ".join(cleaned.split())
+
+        if cleaned:
+            # Convert to sentence case as per user examples
+            cleaned = cleaned.lower()
+            cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
+
+        return cleaned
+
+    def _get_short_name(self, name: str) -> str:
+        """Get shortened name using AI with local fallback if needed"""
+        if not name:
+            return ""
+
+        # Apply heuristic cleaning first to remove fluff and SKUs
+        cleaned_name = self._clean_name_heuristics(name)
+        if not cleaned_name:
+            cleaned_name = name
+
+        # 1. Try AI shortening if enabled
         if self.ai_summarizer:
-            return self.ai_summarizer.shorten_product_name(name)
-        return None
+            try:
+                # Pass already cleaned name to AI to focus on core attributes
+                short_name = self.ai_summarizer.shorten_product_name(cleaned_name)
+                # Ensure we got a valid, different name
+                if short_name and short_name != cleaned_name:
+                    return short_name
+            except Exception as e:
+                logger.warning(f"⚠️  AI shortening failed, using fallback: {e}")
+
+        # 2. Local Fallback: Use heuristic cleaned name, truncate if still too long
+        if len(cleaned_name) > 80:
+            # Try to cut at space
+            truncated = cleaned_name[:77]
+            last_space = truncated.rfind(" ")
+            if last_space > 40:
+                truncated = cleaned_name[:last_space]
+            return truncated + "..."
+
+        return cleaned_name
 
     def get_stats(self) -> dict[str, Any]:
         """Lấy thống kê transform"""

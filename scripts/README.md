@@ -1,9 +1,9 @@
 # Scripts Directory
 
-**Last Updated:** November 19, 2025  
+**Last Updated:** January 24, 2026  
 **Status:** ✅ Cleaned & Organized  
-**Active Scripts:** 15 files  
-**Archived Scripts:** 14 files (moved to `scripts/archive/`)
+**Active Scripts:** 18 files  
+**Archived Scripts:** 35 files (moved to `scripts/archive/`)
 
 ---
 
@@ -52,15 +52,11 @@ scripts/
 
 ### **Database Management**
 
-#### `backup-postgres.ps1` / `backup-postgres.sh`
+#### `backup-postgres.ps1`
 **Purpose:** Backup PostgreSQL database  
 **Usage:**
 ```bash
-# PowerShell
 .\scripts\backup-postgres.ps1
-
-# Bash
-./scripts/backup-postgres.sh
 ```
 **Output:** `backups/postgres/<timestamp>.sql`
 
@@ -148,15 +144,11 @@ python scripts/setup_crawl_optimization.py
 
 ### **Docker Management**
 
-#### `docker-cleanup.ps1` / `docker-cleanup.sh`
+#### `docker-cleanup.ps1`
 **Purpose:** Clean up Docker resources (containers, volumes, networks)  
 **Usage:**
 ```bash
-# PowerShell
 .\scripts\docker-cleanup.ps1
-
-# Bash
-./scripts/docker-cleanup.sh
 ```
 **Cleans:**
 - Stopped containers

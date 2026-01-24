@@ -282,6 +282,7 @@ class PostgresStorage:
                 id SERIAL PRIMARY KEY,
                 product_id VARCHAR(255) UNIQUE,
                 name VARCHAR(1000),
+                short_name VARCHAR(255),
                 url TEXT,
                 image_url TEXT,
                 category_url TEXT,
@@ -316,6 +317,7 @@ class PostgresStorage:
                 ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawled_at TIMESTAMP;
                 ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawl_attempt_at TIMESTAMP;
                 ALTER TABLE products ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMP;
+                ALTER TABLE products ADD COLUMN IF NOT EXISTS short_name VARCHAR(255);
             """)
         except Exception as e:
             print(f"⚠️  Note: Some ALTER TABLE statements for products may have been skipped: {e}")
@@ -567,7 +569,7 @@ class PostgresStorage:
     def save_categories(
         self,
         categories: list[dict[str, Any]],
-        only_leaf: bool = False,  # Changed: Load ALL categories by default
+        only_leaf: bool = True,  # Changed: Start defaulting to True to prevent redundant data
         sync_with_products: bool = False,
     ) -> int:
         """
@@ -1042,25 +1044,31 @@ class PostgresStorage:
 
                 # Auto-add missing parent categories (root categories)
                 # Tìm các parent_url không có trong data và tự động thêm
-                missing_parents = parent_urls - set(url_to_cat.keys())
-                if missing_parents:
-                    for parent_url in missing_parents:
-                        if not parent_url:
-                            continue
-                        # Extract category_id from URL
-                        match = re.search(r"(c\d+)", parent_url)
-                        cat_id = match.group(1) if match else None
+                # ONLY if only_leaf is False (we want parents in that case)
+                if not only_leaf:
+                    missing_parents = parent_urls - set(url_to_cat.keys())
+                    if missing_parents:
+                        for parent_url in missing_parents:
+                            if not parent_url:
+                                continue
+                            # Extract category_id from URL
+                            match = re.search(r"(c\d+)", parent_url)
+                            cat_id = match.group(1) if match else None
 
-                        if cat_id:
-                            cur.execute(
-                                """
-                                INSERT INTO categories (category_id, name, url, parent_url, level, is_leaf, product_count)
-                                VALUES (%s, %s, %s, NULL, 0, false, 0)
-                                ON CONFLICT (url) DO NOTHING
-                                """,
-                                (cat_id, cat_id, parent_url),  # Tạm dùng ID làm tên
-                            )
-                    print(f"📂 Auto-added {len(missing_parents)} missing parent categories")
+                            if cat_id:
+                                cur.execute(
+                                    """
+                                    INSERT INTO categories (category_id, name, url, parent_url, level, is_leaf, product_count)
+                                    VALUES (%s, %s, %s, NULL, 0, false, 0)
+                                    ON CONFLICT (url) DO NOTHING
+                                    """,
+                                    (cat_id, cat_id, parent_url),  # Tạm dùng ID làm tên
+                                )
+                        print(f"📂 Auto-added {len(missing_parents)} missing parent categories")
+
+                # CRITICAL: If only_leaf=True, ensure NO non-leaf categories remain
+                if only_leaf:
+                    self.cleanup_redundant_categories(cur)
 
                 return saved_count
 
@@ -1093,6 +1101,13 @@ class PostgresStorage:
         except Exception as e:
             # Log nhưng không fail nếu fix có lỗi
             print(f"⚠️  Warning: Could not auto-fix category_path: {e}")
+
+        # Auto-sync: Ensure all categories from products exist in categories table BEFORE saving products
+        # This prevents Foreign Key constraint violations (Referential Integrity)
+        try:
+            self._ensure_categories_from_products(products)
+        except Exception as e:
+            print(f"⚠️  Failed to pre-sync missing categories: {e}")
 
         # Tối ưu: Sử dụng Bulk COPY cho batch lớn (>200 items)
         if len(products) >= 200:
@@ -1140,6 +1155,7 @@ class PostgresStorage:
                             (
                                 product.get("product_id"),
                                 product.get("name"),
+                                product.get("short_name"),
                                 product.get("url"),
                                 product.get("image_url"),
                                 product.get("category_url"),
@@ -1176,7 +1192,7 @@ class PostgresStorage:
                                 cur,
                                 """
                                 INSERT INTO products
-                                    (product_id, name, url, image_url, category_url, category_id, sales_count,
+                                    (product_id, name, short_name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average,
                                      seller_name, seller_id, seller_is_official, brand,
                                      stock_available, shipping)
@@ -1184,6 +1200,7 @@ class PostgresStorage:
                                 ON CONFLICT (product_id)
                                 DO UPDATE SET
                                     name = EXCLUDED.name,
+                                    short_name = EXCLUDED.short_name,
                                     url = EXCLUDED.url,
                                     image_url = EXCLUDED.image_url,
                                     category_url = EXCLUDED.category_url,
@@ -1230,41 +1247,35 @@ class PostgresStorage:
 
                         saved_count += len(batch)
                     except Exception as e:
-                        print(f"⚠️  Lỗi khi lưu batch products: {e}")
-                        # Thử lưu từng product một nếu batch fail
-                        for product in batch:
-                            try:
-                                result = self.save_products([product], upsert=upsert, batch_size=1)
-                                # result is always a dict now
-                                saved_count += 1
-                                inserted_count += result.get("inserted_count", 0)
-                                updated_count += result.get("updated_count", 0)
-                            except Exception:
-                                continue
+                        if batch_size > 1:
+                            print(
+                                f"⚠️  Lỗi khi lưu batch products ({len(batch)} items): {e}. Thử lưu từng product..."
+                            )
+                            # Thử lưu từng product một nếu batch fail
+                            for product in batch:
+                                try:
+                                    # Gọi lại chính nó nhưng với batch_size=1 để kích hoạt fallback logic này
+                                    # Hoặc gọi thẳng logic insert đơn lẻ bên dưới
+                                    single_result = self.save_products(
+                                        [product], upsert=upsert, batch_size=1
+                                    )
+                                    saved_count += single_result.get("saved_count", 0)
+                                    inserted_count += single_result.get("inserted_count", 0)
+                                    updated_count += single_result.get("updated_count", 0)
+                                except Exception as inner_e:
+                                    print(
+                                        f"❌ Failed to save single product {product.get('product_id')}: {inner_e}"
+                                    )
+                                    continue
+                        else:
+                            # Nếu batch_size đã là 1 mà vẫn lỗi -> re-raise để log
+                            raise e
 
-        # Log crawl history for all saved products (for price tracking)
-        if saved_count > 0:
             try:
-                # Use all products that were attempted (not just [:saved_count])
-                # This ensures we capture history for all products even if some failed
+                # Use the robust batch history logging method
                 self._log_batch_crawl_history(products)
             except Exception as e:
-                import traceback
-
-                error_detail = traceback.format_exc()
                 print(f"⚠️  Failed to log crawl history: {e}")
-                print(f"Error details: {error_detail}")
-                # Check if it's a FK constraint error
-                if "foreign key" in str(e).lower() or "fk_crawl_history" in str(e).lower():
-                    print(
-                        "💡 Hint: Foreign key constraint issue - ensure products are committed before logging history"
-                    )
-
-            # Auto-sync: Ensure all categories from products exist in categories table
-            try:
-                self._ensure_categories_from_products(products[:saved_count])
-            except Exception as e:
-                print(f"⚠️  Failed to sync missing categories: {e}")
 
         return {
             "saved_count": saved_count,
@@ -1297,9 +1308,8 @@ class PostgresStorage:
             if not cat_id or not cat_url:
                 continue
 
-            # Ensure category_id has 'c' prefix
-            if not cat_id.startswith("c"):
-                cat_id = f"c{cat_id}"
+            # Normalize category_id using the standardized function
+            cat_id = normalize_category_id(cat_id)
 
             if cat_url not in product_category_urls:
                 product_category_urls[cat_url] = cat_id
@@ -1576,24 +1586,38 @@ class PostgresStorage:
                     elif discount_amount and discount_amount >= 100000:
                         is_flash_sale = True
 
-                    records_to_insert.append(
-                        {
-                            "product_id": product_id,
-                            "price": current_price,
-                            "original_price": current_original_price,
-                            "discount_percent": current_discount,
-                            "discount_amount": discount_amount,  # NEW
-                            "price_change": price_change,
-                            "price_change_percent": price_change_percent,  # NEW
-                            "previous_price": prev_price,
-                            "previous_original_price": prev_original,
-                            "previous_discount_percent": prev_discount,
-                            "sales_count": current_sales,
-                            "sales_change": sales_change,
-                            "is_flash_sale": is_flash_sale,  # NEW
-                            "crawl_type": crawl_type,
-                        }
-                    )
+                    # DECISION: Should we log this record?
+                    # Log if:
+                    # 1. First time crawl (prev is None -> crawl_type='price_change')
+                    # 2. Price/Discount changed (crawl_type='price_change')
+                    # 3. Sales changed (sales_change != 0)
+                    should_log = False
+
+                    if crawl_type == "price_change":
+                        should_log = True
+                    elif sales_change and sales_change != 0:
+                        should_log = True
+                        crawl_type = "sales_change"  # Update type for clarity
+
+                    if should_log:
+                        records_to_insert.append(
+                            {
+                                "product_id": product_id,
+                                "price": current_price,
+                                "original_price": current_original_price,
+                                "discount_percent": current_discount,
+                                "discount_amount": discount_amount,
+                                "price_change": price_change,
+                                "price_change_percent": price_change_percent,
+                                "previous_price": prev_price,
+                                "previous_original_price": prev_original,
+                                "previous_discount_percent": prev_discount,
+                                "sales_count": current_sales,
+                                "sales_change": sales_change,
+                                "is_flash_sale": is_flash_sale,
+                                "crawl_type": crawl_type,
+                            }
+                        )
 
                 # Batch insert ALL records (changed and unchanged)
                 if records_to_insert:
@@ -1674,85 +1698,6 @@ class PostgresStorage:
                         # Don't re-raise - log the error but continue
                         print("⚠️  Continuing without crawl history (will retry on next crawl)")
 
-    def log_price_history(
-        self,
-        product_id: str,
-        price: float,
-        original_price: float | None = None,
-        discount_percent: int | None = None,
-    ) -> int | None:
-        """
-        Log single product price to history CHỈ KHI CÓ THAY ĐỔI.
-
-        Args:
-            product_id: Product ID
-            price: Current product price
-            original_price: Original price before discount
-            discount_percent: Discount percentage
-
-        Returns:
-            ID of the new history record, or None if no change
-        """
-        with self.get_connection() as conn:
-            with conn.cursor() as cur:
-                self._ensure_history_schema(cur)
-                # Get previous data
-                cur.execute(
-                    """
-                    SELECT price, original_price, discount_percent FROM crawl_history
-                    WHERE product_id = %s
-                    ORDER BY crawled_at DESC LIMIT 1
-                """,
-                    (product_id,),
-                )
-
-                row = cur.fetchone()
-
-                if row:
-                    prev_price, prev_original, prev_discount = row
-                    # Check if anything changed
-                    price_changed = (float(prev_price) if prev_price else None) != (
-                        float(price) if price else None
-                    )
-                    original_changed = (float(prev_original) if prev_original else None) != (
-                        float(original_price) if original_price else None
-                    )
-                    discount_changed = prev_discount != discount_percent
-
-                    if not (price_changed or original_changed or discount_changed):
-                        return None  # No change, skip insert
-
-                    # Calculate price change
-                    price_change = None
-                    if prev_price is not None:
-                        price_change = float(price) - float(prev_price)
-                else:
-                    price_change = None  # First record
-                    prev_price, prev_original, prev_discount = None, None, None
-
-                cur.execute(
-                    """
-                    INSERT INTO crawl_history (
-                        product_id, price, original_price, discount_percent, price_change,
-                        previous_price, previous_original_price, previous_discount_percent
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                """,
-                    (
-                        product_id,
-                        price,
-                        original_price,
-                        discount_percent,
-                        price_change,
-                        prev_price,
-                        prev_original,
-                        prev_discount,
-                    ),
-                )
-
-                return cur.fetchone()[0]
-
     def update_category_product_counts(self) -> int:
         """
         Update product_count for all categories based on actual products in DB.
@@ -1777,6 +1722,66 @@ class PostgresStorage:
                     WHERE c.is_leaf = TRUE
                 """)
                 return cur.rowcount
+
+    def cleanup_redundant_categories(self, cur=None, dry_run: bool = False) -> int:
+        """
+        Xóa các categories không phải là leaf (có categories con)
+        hoặc các categories không có sản phẩm nếu cần thiết.
+
+        Method này đảm bảo bảng categories chỉ chứa dữ liệu 'leaf' thực sự.
+
+        Args:
+            cur: Database cursor
+            dry_run: Nếu True, chỉ in ra số lượng sẽ xóa mà không thực hiện.
+        """
+        select_query = """
+            SELECT count(*) FROM categories
+            WHERE url IN (
+                SELECT DISTINCT parent_url
+                FROM categories
+                WHERE parent_url IS NOT NULL
+            )
+            OR is_leaf = FALSE
+        """
+
+        delete_query = """
+            DELETE FROM categories
+            WHERE url IN (
+                SELECT DISTINCT parent_url
+                FROM categories
+                WHERE parent_url IS NOT NULL
+            )
+            OR is_leaf = FALSE
+        """
+
+        if cur:
+            if dry_run:
+                cur.execute(select_query)
+                count = cur.fetchone()[0]
+                print(f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
+                return 0
+
+            cur.execute(delete_query)
+            count = cur.rowcount
+            if count > 0:
+                print(f"🧹 Cleanup: Removed {count} non-leaf categories from DB")
+            return count
+        else:
+            with self.get_connection() as conn:
+                with conn.cursor() as standalone_cur:
+                    if dry_run:
+                        standalone_cur.execute(select_query)
+                        count = standalone_cur.fetchone()[0]
+                        print(
+                            f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB"
+                        )
+                        return 0
+
+                    standalone_cur.execute(delete_query)
+                    count = standalone_cur.rowcount
+                    if count > 0:
+                        print(f"🧹 Cleanup: Removed {count} non-leaf categories from DB")
+                    return count
 
     def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
         """Lấy danh sách products theo category_url"""
@@ -1837,20 +1842,19 @@ class PostgresStorage:
             self._pool_stats["active_connections"] = 0
 
     def cleanup_incomplete_products(
-        self, require_seller: bool = True, require_brand: bool = True
+        self,
+        require_seller: bool = True,
+        require_brand: bool = True,
+        require_rating: bool = False,
     ) -> dict[str, int]:
         """
-        Delete products with missing required fields (seller and/or brand).
+        Delete products with missing required fields (seller, brand, and/or rating).
         Run this BEFORE each crawl to allow re-crawling of incomplete data.
-
-        This prevents:
-        - Wasting resources crawling products that will be rejected anyway
-        - Storing incomplete products in database
-        - Having to clean up after load (reactive vs preventive)
 
         Args:
             require_seller: If True, delete products where seller_name IS NULL or empty
             require_brand: If True, delete products where brand IS NULL or empty
+            require_rating: If True, delete products where rating_average IS NULL
 
         Returns:
             dict with keys: deleted_count, deleted_no_seller, deleted_no_brand, deleted_both
@@ -1863,12 +1867,15 @@ class PostgresStorage:
                     conditions.append("(seller_name IS NULL OR seller_name = '')")
                 if require_brand:
                     conditions.append("(brand IS NULL OR brand = '')")
+                if require_rating:
+                    conditions.append("rating_average IS NULL")
 
                 if not conditions:
                     return {
                         "deleted_count": 0,
                         "deleted_no_seller": 0,
                         "deleted_no_brand": 0,
+                        "deleted_no_rating": 0,
                         "deleted_both": 0,
                     }
 
@@ -1878,23 +1885,26 @@ class PostgresStorage:
                 # Only calculate stats if both requirements are enabled
                 deleted_no_seller = 0
                 deleted_no_brand = 0
+                deleted_no_rating = 0
                 deleted_both = 0
 
                 if require_seller and require_brand:
-                    # Calculate detailed stats: missing seller only, missing brand only, missing both
-                    stats_query = """
+                    # Calculate detailed stats: missing seller only, missing brand only, missing both, missing rating
+                    stats_query = f"""
                         SELECT
                             COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND NOT (brand IS NULL OR brand = '')) as no_seller,
                             COUNT(*) FILTER (WHERE NOT (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as no_brand,
-                            COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as both_missing
+                            COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as both_missing,
+                            COUNT(*) FILTER (WHERE rating_average IS NULL) as no_rating
                         FROM products
-                        WHERE (seller_name IS NULL OR seller_name = '') OR (brand IS NULL OR brand = '')
+                        WHERE {where_clause}
                     """
                     cur.execute(stats_query)
                     stats_row = cur.fetchone()
                     deleted_no_seller = stats_row[0] if stats_row else 0
                     deleted_no_brand = stats_row[1] if stats_row else 0
                     deleted_both = stats_row[2] if stats_row else 0
+                    deleted_no_rating = stats_row[3] if stats_row and require_rating else 0
                 elif require_seller:
                     # Only seller required - count all as no_seller
                     cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
@@ -1903,6 +1913,10 @@ class PostgresStorage:
                     # Only brand required - count all as no_brand
                     cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
                     deleted_no_brand = cur.fetchone()[0] or 0
+                elif require_rating:
+                    # Only rating required - count all as no_rating
+                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    deleted_no_rating = cur.fetchone()[0] or 0
 
                 # Delete products matching criteria
                 delete_query = f"""
@@ -1918,8 +1932,10 @@ class PostgresStorage:
                         reason_parts.append(f"{deleted_no_seller} without seller")
                     if require_brand:
                         reason_parts.append(f"{deleted_no_brand} without brand")
+                    if require_rating:
+                        reason_parts.append(f"{deleted_no_rating} without rating")
                     if require_seller and require_brand:
-                        reason_parts.append(f"{deleted_both} missing both")
+                        reason_parts.append(f"{deleted_both} missing both/multiple")
 
                     reason_str = ", ".join(reason_parts)
                     print(f"🧹 Cleaned up {deleted_count} incomplete products ({reason_str})")
@@ -1928,8 +1944,69 @@ class PostgresStorage:
                     "deleted_count": deleted_count,
                     "deleted_no_seller": deleted_no_seller if require_seller else 0,
                     "deleted_no_brand": deleted_no_brand if require_brand else 0,
+                    "deleted_no_rating": deleted_no_rating if require_rating else 0,
                     "deleted_both": deleted_both if (require_seller and require_brand) else 0,
                 }
+
+    def cleanup_old_history(
+        self, archive_months: int = 6, delete_months: int = 12
+    ) -> dict[str, Any]:
+        """
+        Cleanup old crawl history records:
+        - Archive records older than `archive_months`
+        - Delete records older than `delete_months`
+        - Vacuum table to reclaim space
+
+        Returns:
+            Dict with statistics on archived and deleted records
+        """
+        from datetime import datetime, timedelta
+
+        archive_date = datetime.now() - timedelta(days=archive_months * 30)
+        delete_date = datetime.now() - timedelta(days=delete_months * 30)
+
+        result = {
+            "archived_count": 0,
+            "deleted_count": 0,
+            "status": "success",
+        }
+
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                # 1. Create archive table if not exists
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS crawl_history_archive (
+                        LIKE crawl_history INCLUDING ALL
+                    );
+                    """)
+
+                # 2. Archive records
+                cur.execute(
+                    """
+                    INSERT INTO crawl_history_archive
+                    SELECT * FROM crawl_history
+                    WHERE crawled_at >= %s AND crawled_at < %s
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (delete_date, archive_date),
+                )
+                result["archived_count"] = cur.rowcount
+
+                # 3. Delete old records
+                cur.execute(
+                    "DELETE FROM crawl_history WHERE crawled_at < %s",
+                    (delete_date,),
+                )
+                result["deleted_count"] = cur.rowcount
+
+                conn.commit()
+
+                # 4. Vacuum (cannot be inside a transaction block in some versions,
+                # but with autocommit=True it works. SimpleConnectionPool usually uses autocommit=False)
+                # We'll skip VACUUM here to avoid transaction issues in Airflow tasks,
+                # as VACUUM is often managed by Autovacuum anyway.
+
+        return result
 
     def cleanup_products_without_seller(self) -> int:
         """
@@ -1972,115 +2049,6 @@ class PostgresStorage:
 
                 return deleted_count
 
-    def _bulk_log_product_price_history(self, cur, products: list[dict[str, Any]]) -> None:
-        """Bulk log crawl history CHỈ KHI CÓ THAY ĐỔI GIÁ.
-
-        Tối ưu:
-        - Batch lookup previous prices
-        - Chỉ insert khi có thay đổi
-        - Sử dụng execute_values thay vì COPY (để có thể filter)
-        """
-        if not products:
-            return
-
-        # Filter products with valid data
-        valid_products = [p for p in products if p.get("product_id") and p.get("price") is not None]
-
-        if not valid_products:
-            return
-
-        # BATCH LOOKUP: Get all previous prices in one query
-        product_ids = [p.get("product_id") for p in valid_products]
-
-        cur.execute(
-            """
-            SELECT DISTINCT ON (product_id)
-                product_id, price, original_price, discount_percent
-            FROM crawl_history
-            WHERE product_id = ANY(%s)
-            ORDER BY product_id, crawled_at DESC
-            """,
-            (product_ids,),
-        )
-
-        previous_data = {
-            row[0]: {"price": row[1], "original_price": row[2], "discount_percent": row[3]}
-            for row in cur.fetchall()
-        }
-
-        # Collect records with changes
-        records_to_insert = []
-
-        for p in valid_products:
-            product_id = p.get("product_id")
-            current_price = p.get("price")
-            current_original_price = p.get("original_price")
-            current_discount = p.get("discount_percent")
-
-            prev = previous_data.get(product_id)
-
-            if prev is None:
-                # First time - always insert
-                records_to_insert.append(
-                    (
-                        product_id,
-                        current_price,
-                        current_original_price,
-                        current_discount,
-                        None,  # price_change
-                        None,  # previous_price
-                        None,  # previous_original_price
-                        None,  # previous_discount_percent
-                    )
-                )
-            else:
-                prev_price = float(prev["price"]) if prev["price"] else None
-                prev_original = float(prev["original_price"]) if prev["original_price"] else None
-                prev_discount = prev["discount_percent"]
-
-                current_price_float = float(current_price) if current_price else None
-                current_original_float = (
-                    float(current_original_price) if current_original_price else None
-                )
-
-                price_changed = prev_price != current_price_float
-                original_changed = prev_original != current_original_float
-                discount_changed = prev_discount != current_discount
-
-                if price_changed or original_changed or discount_changed:
-                    price_change = None
-                    if prev_price is not None and current_price_float is not None:
-                        price_change = current_price_float - prev_price
-
-                    records_to_insert.append(
-                        (
-                            product_id,
-                            current_price,
-                            current_original_price,
-                            current_discount,
-                            price_change,
-                            prev_price,
-                            prev_original,
-                            prev_discount,
-                        )
-                    )
-
-        # Batch insert changed records
-        if records_to_insert:
-            execute_values(
-                cur,
-                """
-                INSERT INTO crawl_history
-                    (product_id, price, original_price, discount_percent, price_change,
-                     previous_price, previous_original_price, previous_discount_percent)
-                VALUES %s
-                """,
-                records_to_insert,
-            )
-            print(
-                f"📊 Bulk price history: {len(records_to_insert)}/{len(valid_products)} products had changes"
-            )
-
     def _save_products_bulk_copy(
         self, products: list[dict[str, Any]], upsert: bool
     ) -> dict[str, Any]:
@@ -2094,6 +2062,7 @@ class PostgresStorage:
         columns = [
             "product_id",
             "name",
+            "short_name",
             "url",
             "image_url",
             "category_url",
@@ -2133,7 +2102,8 @@ class PostgresStorage:
                 )
 
                 try:
-                    self._bulk_log_product_price_history(cur, products)
+                    # Use the robust batch history logging method
+                    self._log_batch_crawl_history(products)
                 except Exception as e:
                     print(f"⚠️  Failed to log bulk history: {e}")
 
