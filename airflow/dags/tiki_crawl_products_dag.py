@@ -127,6 +127,21 @@ def get_variable(key: str, default: Any = None) -> Any:
         return default
 
 
+def get_int_variable(key: str, default: int) -> int:
+    """Safely parse Airflow variable as integer with fallback and warning"""
+    raw_value = get_variable(key, default=str(default))
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        logging.warning(
+            "Invalid integer value for Airflow variable %s=%r, falling back to default %r",
+            key,
+            raw_value,
+            default,
+        )
+        return default
+
+
 # ========== LOAD CATEGORY HIERARCHY MAP FOR AUTO-PARENT-DETECTION ==========
 # Cache hierarchy map globally to avoid reloading in every task
 _hierarchy_map_cache = None
@@ -545,7 +560,7 @@ DEFAULT_ARGS = {
 # Cấu hình DAG - Có thể chuyển đổi giữa tự động và thủ công qua Variable
 # Đọc cấu hình từ Airflow Variable/Env
 schedule_mode = get_variable("TIKI_DAG_SCHEDULE_MODE", default="manual")
-schedule_hours = int(get_variable("TIKI_DAG_SCHEDULE_HOURS", default="1"))
+schedule_hours = get_int_variable("TIKI_DAG_SCHEDULE_HOURS", default=1)
 
 # Xác định schedule dựa trên mode
 if schedule_mode == "scheduled":
@@ -624,8 +639,8 @@ write_lock = Lock()
 # Khởi tạo resilience patterns
 # Circuit breaker cho Tiki API
 tiki_circuit_breaker = CircuitBreaker(
-    failure_threshold=int(get_variable("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default="5")),
-    recovery_timeout=int(get_variable("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default="60")),
+    failure_threshold=get_int_variable("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default=5),
+    recovery_timeout=get_int_variable("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default=60),
     expected_exception=Exception,
     name="tiki_api",
 )
@@ -648,8 +663,8 @@ except Exception:
 service_health = get_service_health()
 tiki_degradation = service_health.register_service(
     name="tiki",
-    failure_threshold=int(get_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default="3")),
-    recovery_threshold=int(get_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default="5")),
+    failure_threshold=get_int_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default=3),
+    recovery_threshold=get_int_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default=5),
 )
 
 # Import modules cho AI summarization và Discord notification
@@ -906,8 +921,8 @@ def load_categories(**context) -> list[dict[str, Any]]:
         # Lọc danh mục nếu cần (ví dụ: chỉ lấy level 2-4)
         # Có thể cấu hình qua Airflow Variable
         try:
-            min_level = int(get_variable("TIKI_MIN_CATEGORY_LEVEL", default="2"))
-            max_level = int(get_variable("TIKI_MAX_CATEGORY_LEVEL", default="4"))
+            min_level = get_int_variable("TIKI_MIN_CATEGORY_LEVEL", default=2)
+            max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
             categories = [
                 cat for cat in categories if min_level <= cat.get("level", 0) <= max_level
             ]
@@ -917,7 +932,7 @@ def load_categories(**context) -> list[dict[str, Any]]:
 
         # Giới hạn số danh mục nếu cần (để test)
         try:
-            max_categories = int(get_variable("TIKI_MAX_CATEGORIES", default="0"))
+            max_categories = get_int_variable("TIKI_MAX_CATEGORIES", default=0)
             if max_categories > 0:
                 categories = categories[:max_categories]
                 logger.info(f"✓ Giới hạn: {max_categories} danh mục")
@@ -2025,9 +2040,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         already_crawled = 0
         db_hits = 0  # Products đã có trong DB
 
-        products_per_day = int(
-            get_variable("TIKI_PRODUCTS_PER_DAY", default="500")
-        )  # Mặc định 50 products/ngày để tránh quá tải server
+        products_per_day = get_int_variable("TIKI_PRODUCTS_PER_DAY", default=500)
+        # Mặc định giới hạn số products/ngày để tránh quá tải server
         max_products = int(
             get_variable("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
         )  # 0 = không giới hạn

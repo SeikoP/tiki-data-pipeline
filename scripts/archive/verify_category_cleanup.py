@@ -4,7 +4,7 @@ import sys
 import logging
 
 # Add src to path relative to this file so it is independent of the current working directory
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.join(PROJECT_ROOT, "src"))
 
 from pipelines.crawl.storage.postgres_storage import PostgresStorage

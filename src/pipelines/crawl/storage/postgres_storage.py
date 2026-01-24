@@ -281,7 +281,6 @@ class PostgresStorage:
             CREATE TABLE IF NOT EXISTS products (
                 id SERIAL PRIMARY KEY,
                 product_id VARCHAR(255) UNIQUE,
-                product_id VARCHAR(255) UNIQUE,
                 name VARCHAR(1000),
                 short_name VARCHAR(255),
                 url TEXT,
@@ -1724,14 +1723,28 @@ class PostgresStorage:
                 """)
                 return cur.rowcount
 
-    def cleanup_redundant_categories(self, cur=None) -> int:
+    def cleanup_redundant_categories(self, cur=None, dry_run: bool = False) -> int:
         """
         Xóa các categories không phải là leaf (có categories con)
         hoặc các categories không có sản phẩm nếu cần thiết.
 
         Method này đảm bảo bảng categories chỉ chứa dữ liệu 'leaf' thực sự.
+
+        Args:
+            cur: Database cursor
+            dry_run: Nếu True, chỉ in ra số lượng sẽ xóa mà không thực hiện.
         """
-        query = """
+        select_query = """
+            SELECT count(*) FROM categories
+            WHERE url IN (
+                SELECT DISTINCT parent_url
+                FROM categories
+                WHERE parent_url IS NOT NULL
+            )
+            OR is_leaf = FALSE
+        """
+        
+        delete_query = """
             DELETE FROM categories
             WHERE url IN (
                 SELECT DISTINCT parent_url
@@ -1742,7 +1755,13 @@ class PostgresStorage:
         """
 
         if cur:
-            cur.execute(query)
+            if dry_run:
+                cur.execute(select_query)
+                count = cur.fetchone()[0]
+                print(f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
+                return 0
+            
+            cur.execute(delete_query)
             count = cur.rowcount
             if count > 0:
                 print(f"🧹 Cleanup: Removed {count} non-leaf categories from DB")
@@ -1750,7 +1769,13 @@ class PostgresStorage:
         else:
             with self.get_connection() as conn:
                 with conn.cursor() as standalone_cur:
-                    standalone_cur.execute(query)
+                    if dry_run:
+                        standalone_cur.execute(select_query)
+                        count = standalone_cur.fetchone()[0]
+                        print(f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
+                        return 0
+                        
+                    standalone_cur.execute(delete_query)
                     count = standalone_cur.rowcount
                     if count > 0:
                         print(f"🧹 Cleanup: Removed {count} non-leaf categories from DB")
@@ -1862,20 +1887,22 @@ class PostgresStorage:
                 deleted_both = 0
 
                 if require_seller and require_brand:
-                    # Calculate detailed stats: missing seller only, missing brand only, missing both
-                    stats_query = """
+                    # Calculate detailed stats: missing seller only, missing brand only, missing both, missing rating
+                    stats_query = f"""
                         SELECT
                             COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND NOT (brand IS NULL OR brand = '')) as no_seller,
                             COUNT(*) FILTER (WHERE NOT (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as no_brand,
-                            COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as both_missing
+                            COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as both_missing,
+                            COUNT(*) FILTER (WHERE rating_average IS NULL) as no_rating
                         FROM products
-                        WHERE (seller_name IS NULL OR seller_name = '') OR (brand IS NULL OR brand = '')
+                        WHERE {where_clause}
                     """
                     cur.execute(stats_query)
                     stats_row = cur.fetchone()
                     deleted_no_seller = stats_row[0] if stats_row else 0
                     deleted_no_brand = stats_row[1] if stats_row else 0
                     deleted_both = stats_row[2] if stats_row else 0
+                    deleted_no_rating = stats_row[3] if stats_row and require_rating else 0
                 elif require_seller:
                     # Only seller required - count all as no_seller
                     cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
@@ -1884,6 +1911,10 @@ class PostgresStorage:
                     # Only brand required - count all as no_brand
                     cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
                     deleted_no_brand = cur.fetchone()[0] or 0
+                elif require_rating:
+                    # Only rating required - count all as no_rating
+                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    deleted_no_rating = cur.fetchone()[0] or 0
 
                 # Delete products matching criteria
                 delete_query = f"""
