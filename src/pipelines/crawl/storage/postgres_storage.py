@@ -1102,6 +1102,13 @@ class PostgresStorage:
             # Log nhưng không fail nếu fix có lỗi
             print(f"⚠️  Warning: Could not auto-fix category_path: {e}")
 
+        # Auto-sync: Ensure all categories from products exist in categories table BEFORE saving products
+        # This prevents Foreign Key constraint violations (Referential Integrity)
+        try:
+            self._ensure_categories_from_products(products)
+        except Exception as e:
+            print(f"⚠️  Failed to pre-sync missing categories: {e}")
+
         # Tối ưu: Sử dụng Bulk COPY cho batch lớn (>200 items)
         if len(products) >= 200:
             try:
@@ -1240,41 +1247,35 @@ class PostgresStorage:
 
                         saved_count += len(batch)
                     except Exception as e:
-                        print(f"⚠️  Lỗi khi lưu batch products: {e}")
-                        # Thử lưu từng product một nếu batch fail
-                        for product in batch:
-                            try:
-                                result = self.save_products([product], upsert=upsert, batch_size=1)
-                                # result is always a dict now
-                                saved_count += 1
-                                inserted_count += result.get("inserted_count", 0)
-                                updated_count += result.get("updated_count", 0)
-                            except Exception:
-                                continue
+                        if batch_size > 1:
+                            print(
+                                f"⚠️  Lỗi khi lưu batch products ({len(batch)} items): {e}. Thử lưu từng product..."
+                            )
+                            # Thử lưu từng product một nếu batch fail
+                            for product in batch:
+                                try:
+                                    # Gọi lại chính nó nhưng với batch_size=1 để kích hoạt fallback logic này
+                                    # Hoặc gọi thẳng logic insert đơn lẻ bên dưới
+                                    single_result = self.save_products(
+                                        [product], upsert=upsert, batch_size=1
+                                    )
+                                    saved_count += single_result.get("saved_count", 0)
+                                    inserted_count += single_result.get("inserted_count", 0)
+                                    updated_count += single_result.get("updated_count", 0)
+                                except Exception as inner_e:
+                                    print(
+                                        f"❌ Failed to save single product {product.get('product_id')}: {inner_e}"
+                                    )
+                                    continue
+                        else:
+                            # Nếu batch_size đã là 1 mà vẫn lỗi -> re-raise để log
+                            raise e
 
-        # Log crawl history for all saved products (for price tracking)
-        if saved_count > 0:
             try:
-                # Use all products that were attempted (not just [:saved_count])
-                # This ensures we capture history for all products even if some failed
+                # Use the robust batch history logging method
                 self._log_batch_crawl_history(products)
             except Exception as e:
-                import traceback
-
-                error_detail = traceback.format_exc()
                 print(f"⚠️  Failed to log crawl history: {e}")
-                print(f"Error details: {error_detail}")
-                # Check if it's a FK constraint error
-                if "foreign key" in str(e).lower() or "fk_crawl_history" in str(e).lower():
-                    print(
-                        "💡 Hint: Foreign key constraint issue - ensure products are committed before logging history"
-                    )
-
-            # Auto-sync: Ensure all categories from products exist in categories table
-            try:
-                self._ensure_categories_from_products(products[:saved_count])
-            except Exception as e:
-                print(f"⚠️  Failed to sync missing categories: {e}")
 
         return {
             "saved_count": saved_count,
@@ -1307,9 +1308,8 @@ class PostgresStorage:
             if not cat_id or not cat_url:
                 continue
 
-            # Ensure category_id has 'c' prefix
-            if not cat_id.startswith("c"):
-                cat_id = f"c{cat_id}"
+            # Normalize category_id using the standardized function
+            cat_id = normalize_category_id(cat_id)
 
             if cat_url not in product_category_urls:
                 product_category_urls[cat_url] = cat_id
@@ -1743,7 +1743,7 @@ class PostgresStorage:
             )
             OR is_leaf = FALSE
         """
-        
+
         delete_query = """
             DELETE FROM categories
             WHERE url IN (
@@ -1760,7 +1760,7 @@ class PostgresStorage:
                 count = cur.fetchone()[0]
                 print(f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
                 return 0
-            
+
             cur.execute(delete_query)
             count = cur.rowcount
             if count > 0:
@@ -1772,9 +1772,11 @@ class PostgresStorage:
                     if dry_run:
                         standalone_cur.execute(select_query)
                         count = standalone_cur.fetchone()[0]
-                        print(f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
+                        print(
+                            f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB"
+                        )
                         return 0
-                        
+
                     standalone_cur.execute(delete_query)
                     count = standalone_cur.rowcount
                     if count > 0:

@@ -338,18 +338,27 @@ function Invoke-CILocal {
     Write-Host "========================================" -ForegroundColor Cyan
     
     $jobs = @()
-    $jobs += Start-Job -ScriptBlock { Invoke-FormatCheck }
-    $jobs += Start-Job -ScriptBlock { Invoke-Lint }
-    $jobs += Start-Job -ScriptBlock { Invoke-PerfCheck }
-    $jobs += Start-Job -ScriptBlock { Invoke-TypeCheck }
-    $jobs += Start-Job -ScriptBlock { Invoke-SecurityCheck }
+    $jobs += Start-Job -ScriptBlock { pwsh ./scripts/ci.ps1 format-check }
+    $jobs += Start-Job -ScriptBlock { pwsh ./scripts/ci.ps1 lint }
+    $jobs += Start-Job -ScriptBlock { pwsh ./scripts/ci.ps1 perf-check }
+    $jobs += Start-Job -ScriptBlock { pwsh ./scripts/ci.ps1 type-check }
+    $jobs += Start-Job -ScriptBlock { pwsh ./scripts/ci.ps1 security-check }
     
     Write-Host "Waiting for tasks to complete..." -ForegroundColor Yellow
     $results = Wait-Job $jobs
-    Receive-Job $results
     
-    if (($results | Where-Object { $_.State -ne "Completed" }) -or ($LASTEXITCODE -ne 0)) {
-        Write-Host "❌ Some checks failed!" -ForegroundColor Red
+    $failedCount = 0
+    foreach ($job in $results) {
+        $jobName = $job.Command
+        Receive-Job $job
+        if ($job.State -ne "Completed") {
+            Write-Host "❌ Job $jobName failed to complete!" -ForegroundColor Red
+            $failedCount++
+        }
+    }
+    
+    if ($failedCount -gt 0) {
+        Write-Host "❌ $failedCount checks failed!" -ForegroundColor Red
         exit 1
     }
     
@@ -364,8 +373,8 @@ function Invoke-CIFast {
     Write-Host "`n⚡ Running fast CI checks (Parallel)..." -ForegroundColor Cyan
     
     $jobs = @()
-    $jobs += Start-Job -ScriptBlock { Invoke-FormatCheck }
-    $jobs += Start-Job -ScriptBlock { Invoke-Lint }
+    $jobs += Start-Job -ScriptBlock { pwsh ./scripts/ci.ps1 format-check }
+    $jobs += Start-Job -ScriptBlock { pwsh ./scripts/ci.ps1 lint }
     
     Wait-Job $jobs | Receive-Job
     Invoke-ValidateDags
