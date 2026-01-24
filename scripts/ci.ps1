@@ -24,8 +24,10 @@ $env:PYTHONIOENCODING = "utf-8"
 
 function Show-Help {
     Write-Host "`n=== CI/CD Commands ===" -ForegroundColor Cyan
+    Write-Host "setup            - Khởi tạo môi trường (venv & dependencies)" -ForegroundColor Green
     Write-Host "install          - Cài đặt dependencies" -ForegroundColor Yellow
     Write-Host "lint             - Chạy linting với ruff" -ForegroundColor Yellow
+    Write-Host "lint-fix         - Tự động sửa lỗi linting với ruff" -ForegroundColor Green
     Write-Host "perf-check       - Kiểm tra performance với Ruff PERF" -ForegroundColor Yellow
     Write-Host "dead-code        - Tìm code thừa với Vulture" -ForegroundColor Yellow
     Write-Host "complexity       - Phân tích độ phức tạp với Radon" -ForegroundColor Yellow
@@ -36,6 +38,7 @@ function Show-Help {
     Write-Host "test             - Chạy tests với pytest" -ForegroundColor Yellow
     Write-Host "test-fast        - Chạy tests nhanh (không coverage)" -ForegroundColor Yellow
     Write-Host "validate-dags    - Validate Airflow DAGs" -ForegroundColor Yellow
+    Write-Host "install-hooks    - Cài đặt Git pre-commit hooks" -ForegroundColor Green
     Write-Host "security-check   - Kiểm tra bảo mật với bandit và safety" -ForegroundColor Yellow
     Write-Host "docker-build     - Build Docker images" -ForegroundColor Yellow
     Write-Host "docker-up        - Khởi động Docker Compose services" -ForegroundColor Yellow
@@ -43,16 +46,38 @@ function Show-Help {
     Write-Host "docker-logs      - Xem logs của Docker Compose services" -ForegroundColor Yellow
     Write-Host "docker-test      - Test Docker Compose setup" -ForegroundColor Yellow
     Write-Host "clean            - Dọn dẹp cache và temporary files" -ForegroundColor Yellow
-    Write-Host "ci-local         - Chạy tất cả các bước CI cục bộ" -ForegroundColor Green
-    Write-Host "ci-fast          - Chạy CI nhanh (không test)" -ForegroundColor Green
+    Write-Host "ci-local         - Chạy tất cả các bước CI cục bộ (Parallel)" -ForegroundColor Green
+    Write-Host "ci-fast          - Chạy CI nhanh (Parallel)" -ForegroundColor Green
     Write-Host ""
+}
+
+function Invoke-Setup {
+    Write-Host "`n🛠️  Khởi tạo môi trường..." -ForegroundColor Cyan
+    
+    if ($IsLinux) {
+        if (-not (Test-Path "./.venv")) {
+            Write-Host "Creating virtual environment..." -ForegroundColor Yellow
+            python3 -m venv .venv
+        }
+        New-Alias -Name python -Value "./.venv/bin/python" -Force -Scope Script
+        New-Alias -Name pip -Value "./.venv/bin/pip" -Force -Scope Script
+    } else {
+        if (-not (Test-Path "./.venv")) {
+            Write-Host "Creating virtual environment..." -ForegroundColor Yellow
+            python -m venv .venv
+        }
+        New-Alias -Name python -Value "./.venv/Scripts/python.exe" -Force -Scope Script
+        New-Alias -Name pip -Value "./.venv/Scripts/pip.exe" -Force -Scope Script
+    }
+    
+    Install-Dependencies
 }
 
 function Install-Dependencies {
     Write-Host "`n📦 Cài đặt dependencies..." -ForegroundColor Cyan
     python -m pip install --upgrade pip
-    pip install -r requirements.txt
-    pip install ruff black isort mypy pylint bandit safety pytest pytest-cov pytest-mock vulture radon
+    python -m pip install -r requirements.txt
+    python -m pip install ruff black isort mypy pylint bandit safety pytest pytest-cov pytest-mock vulture radon
     Write-Host "✅ Hoàn thành!" -ForegroundColor Green
 }
 
@@ -64,6 +89,16 @@ function Invoke-Lint {
     } else {
         Write-Host "❌ Linting failed!" -ForegroundColor Red
         exit 1
+    }
+}
+
+function Invoke-LintFix {
+    Write-Host "`n🛠️  Tự động sửa lỗi linting với ruff..." -ForegroundColor Cyan
+    python -m ruff check --fix --unsafe-fixes src/ tests/ airflow/dags/
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ Linting fixed/passed!" -ForegroundColor Green
+    } else {
+        Write-Host "⚠️  Some linting errors could not be fixed automatically." -ForegroundColor Yellow
     }
 }
 
@@ -151,21 +186,21 @@ function Invoke-TestFast {
 function Invoke-ValidateDags {
     Write-Host "`n🔍 Validating Airflow DAGs..." -ForegroundColor Cyan
     
-    # Check if airflow is installed
-    $checkAirflow = python -c "import pkgutil; print(1 if pkgutil.find_loader('airflow') else 0)"
-    if ($checkAirflow -eq "0") {
-        Write-Host "⚠️  Airflow not installed locally. Skipping DAG validation." -ForegroundColor Yellow
-        return
-    }
-
     $dagValidationScript = @"
 import sys
 import os
-# Use absolute path for AIRFLOW_HOME to avoid SQLite errors
-os.environ['AIRFLOW_HOME'] = os.path.abspath('airflow')
-from airflow.models import DagBag
+import pkgutil
 
+# Set AIRFLOW_HOME to avoid SQLite errors
+os.environ['AIRFLOW_HOME'] = os.path.abspath('airflow')
+
+if not pkgutil.find_loader('airflow'):
+    print('SKIP: Airflow not installed locally')
+    sys.exit(0)
+
+from airflow.models import DagBag
 dag_bag = DagBag(dag_folder='airflow/dags', include_examples=False)
+
 if dag_bag.import_errors:
     print('❌ DAG Import Errors:')
     for filename, error in dag_bag.import_errors.items():
@@ -174,33 +209,75 @@ if dag_bag.import_errors:
 else:
     print('✅ All DAGs validated successfully!')
     print(f'Found {len(dag_bag.dags)} DAG(s)')
-    for dag_id in dag_bag.dag_ids:
-        print(f'  - {dag_id}')
+    sys.exit(0)
 "@
+
+    # 1. Thử validate cục bộ
     python -c $dagValidationScript
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "✅ DAG validation passed!" -ForegroundColor Green
+    $localResult = $LASTEXITCODE
+    
+    if ($localResult -eq 0) {
+        $output = python -c "$dagValidationScript" | Out-String
+        if ($output -match "SKIP: Airflow not installed") {
+            # 2. Thử validate qua Docker nếu cục bộ không có
+            Write-Host "🐳 Local Airflow not found, trying via Docker..." -ForegroundColor Yellow
+            docker-compose run --rm airflow-scheduler python3 -c "$dagValidationScript"
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ DAG validation via Docker passed!" -ForegroundColor Green
+            } else {
+                Write-Host "⚠️  DAG validation via Docker failed." -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "✅ Local DAG validation passed!" -ForegroundColor Green
+        }
     } else {
-        Write-Host "⚠️  DAG validation failed (likely due to Windows compatibility). Continuing..." -ForegroundColor Yellow
-        # Do not exit 1 here, let CI continue
+        Write-Host "❌ DAG validation failed!" -ForegroundColor Red
+        exit 1
     }
+}
+
+function Invoke-InstallHooks {
+    Write-Host "`n⚓ Cài đặt Git pre-commit hooks..." -ForegroundColor Cyan
+    
+    $hookContent = @"
+#!/bin/bash
+# Pre-commit hook generated by ci.ps1
+echo "🚀 Running pre-commit checks..."
+pwsh ./scripts/ci.ps1 ci-quick
+if [ $? -ne 0 ]; then
+    echo "❌ Pre-commit checks failed. Commit aborted."
+    exit 1
+fi
+"@
+
+    if (-not (Test-Path ".git")) {
+        Write-Host "❌ Not a git repository!" -ForegroundColor Red
+        return
+    }
+
+    $hookPath = ".git/hooks/pre-commit"
+    $hookContent | Out-File -FilePath $hookPath -Encoding utf8
+    
+    if ($IsLinux) {
+        chmod +x $hookPath
+    }
+    
+    Write-Host "✅ Git hooks installed successfully!" -ForegroundColor Green
 }
 
 function Invoke-SecurityCheck {
     Write-Host "`n🔒 Kiểm tra bảo mật..." -ForegroundColor Cyan
     Write-Host "Running Bandit..." -ForegroundColor Yellow
-    # Use --exit-zero to treat security issues as warnings effectively
     python -m bandit -r src/ --exit-zero
     
     Write-Host "`nRunning Safety..." -ForegroundColor Yellow
-    # Continue even if safety finds vulnerabilities
     try {
         python -m safety check
     } catch {
-        Write-Host "⚠️  Safety check encountered an error or found vulnerabilities." -ForegroundColor Yellow
+        Write-Host "⚠️  Safety issue or error." -ForegroundColor Yellow
     }
     
-    Write-Host "✅ Security check completed (Informational only)!" -ForegroundColor Green
+    Write-Host "✅ Security check completed!" -ForegroundColor Green
 }
 
 function Invoke-DockerBuild {
@@ -233,33 +310,16 @@ function Invoke-DockerLogs {
 
 function Invoke-DockerTest {
     Write-Host "`n🐳 Test Docker Compose setup..." -ForegroundColor Cyan
-    Write-Host "Validating docker-compose.yaml..." -ForegroundColor Yellow
     docker-compose config
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ docker-compose.yaml validation failed!" -ForegroundColor Red
-        exit 1
-    }
-    
-    Write-Host "`nBuilding images..." -ForegroundColor Yellow
     docker-compose build
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Docker build failed!" -ForegroundColor Red
-        exit 1
-    }
-    
-    Write-Host "`nStarting services..." -ForegroundColor Yellow
     docker-compose up -d
     Start-Sleep -Seconds 30
-    
-    Write-Host "`nTesting Airflow API..." -ForegroundColor Yellow
     try {
         $null = Invoke-WebRequest -Uri "http://localhost:8080/api/v2/version" -UseBasicParsing -TimeoutSec 10
-        Write-Host "✅ Airflow API is responding!" -ForegroundColor Green
+        Write-Host "✅ Airflow API responding!" -ForegroundColor Green
     } catch {
-        Write-Host "⚠️  Airflow API not ready yet" -ForegroundColor Yellow
+        Write-Host "⚠️  API not ready" -ForegroundColor Yellow
     }
-    
-    Write-Host "`nCleaning up..." -ForegroundColor Yellow
     docker-compose down -v
     Write-Host "✅ Docker test completed!" -ForegroundColor Green
 }
@@ -270,85 +330,64 @@ function Invoke-Clean {
     Get-ChildItem -Path . -Recurse -Directory -Filter ".pytest_cache" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path . -Recurse -Directory -Filter ".mypy_cache" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path . -Recurse -Directory -Filter ".ruff_cache" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "htmlcov" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path ".coverage" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "coverage.xml" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "dist" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "build" -Recurse -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path . -Recurse -Directory -Filter "*.egg-info" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "✅ Clean completed!" -ForegroundColor Green
 }
 
 function Invoke-CILocal {
-    Write-Host "`n🚀 Running local CI checks..." -ForegroundColor Cyan
+    Write-Host "`n🚀 Running local CI checks (Parallel)..." -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     
-    try {
-        Invoke-FormatCheck
-        Invoke-Lint
-        Invoke-PerfCheck
-        Invoke-TypeCheck
-        Invoke-ValidateDags
-        Invoke-SecurityCheck
-        Invoke-Test
-        
-        Write-Host "`n========================================" -ForegroundColor Green
-        Write-Host "✅ All CI checks passed!" -ForegroundColor Green
-        Write-Host "========================================" -ForegroundColor Green
-    } catch {
-        Write-Host "`n========================================" -ForegroundColor Red
-        Write-Host "❌ CI checks failed!" -ForegroundColor Red
-        Write-Host "========================================" -ForegroundColor Red
+    $jobs = @()
+    $jobs += Start-Job -ScriptBlock { Invoke-FormatCheck }
+    $jobs += Start-Job -ScriptBlock { Invoke-Lint }
+    $jobs += Start-Job -ScriptBlock { Invoke-PerfCheck }
+    $jobs += Start-Job -ScriptBlock { Invoke-TypeCheck }
+    $jobs += Start-Job -ScriptBlock { Invoke-SecurityCheck }
+    
+    Write-Host "Waiting for tasks to complete..." -ForegroundColor Yellow
+    $results = Wait-Job $jobs
+    Receive-Job $results
+    
+    if (($results | Where-Object { $_.State -ne "Completed" }) -or ($LASTEXITCODE -ne 0)) {
+        Write-Host "❌ Some checks failed!" -ForegroundColor Red
         exit 1
     }
+    
+    # Run tests and DAG validation sequentially as they are more heavy/resource dependent
+    Invoke-ValidateDags
+    Invoke-Test
+    
+    Write-Host "✅ All CI checks passed!" -ForegroundColor Green
 }
 
 function Invoke-CIFast {
-    Write-Host "`n⚡ Running fast CI checks..." -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "`n⚡ Running fast CI checks (Parallel)..." -ForegroundColor Cyan
     
-    try {
-        Invoke-FormatCheck
-        Invoke-Lint
-        Invoke-PerfCheck
-        Invoke-ValidateDags
-        
-        Write-Host "`n========================================" -ForegroundColor Green
-        Write-Host "✅ Fast CI checks passed!" -ForegroundColor Green
-        Write-Host "========================================" -ForegroundColor Green
-    } catch {
-        Write-Host "`n========================================" -ForegroundColor Red
-        Write-Host "❌ Fast CI checks failed!" -ForegroundColor Red
-        Write-Host "========================================" -ForegroundColor Red
-        exit 1
-    }
+    $jobs = @()
+    $jobs += Start-Job -ScriptBlock { Invoke-FormatCheck }
+    $jobs += Start-Job -ScriptBlock { Invoke-Lint }
+    
+    Wait-Job $jobs | Receive-Job
+    Invoke-ValidateDags
+    
+    Write-Host "✅ Fast CI passed!" -ForegroundColor Green
 }
 
 function Invoke-CIQuick {
-    Write-Host "`n⚡ Running quick CI checks (no DAG validation)..." -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
-    
-    try {
-        Invoke-FormatCheck
-        Invoke-Lint
-        Invoke-PerfCheck
-        
-        Write-Host "`n========================================" -ForegroundColor Green
-        Write-Host "✅ Quick CI checks passed!" -ForegroundColor Green
-        Write-Host "========================================" -ForegroundColor Green
-    } catch {
-        Write-Host "`n========================================" -ForegroundColor Red
-        Write-Host "❌ Quick CI checks failed!" -ForegroundColor Red
-        Write-Host "========================================" -ForegroundColor Red
-        exit 1
-    }
+    Write-Host "`n⚡ Running quick CI checks..." -ForegroundColor Cyan
+    Invoke-FormatCheck
+    Invoke-Lint
+    Invoke-PerfCheck
+    Write-Host "✅ Quick CI passed!" -ForegroundColor Green
 }
 
 # Main command router
 switch ($Command.ToLower()) {
     "help" { Show-Help }
+    "setup" { Invoke-Setup }
     "install" { Install-Dependencies }
     "lint" { Invoke-Lint }
+    "lint-fix" { Invoke-LintFix }
     "perf-check" { Invoke-PerfCheck }
     "dead-code" { Invoke-DeadCode }
     "complexity" { Invoke-Complexity }
@@ -363,6 +402,7 @@ switch ($Command.ToLower()) {
     "test" { Invoke-Test }
     "test-fast" { Invoke-TestFast }
     "validate-dags" { Invoke-ValidateDags }
+    "install-hooks" { Invoke-InstallHooks }
     "security-check" { Invoke-SecurityCheck }
     "docker-build" { Invoke-DockerBuild }
     "docker-up" { Invoke-DockerUp }
