@@ -1815,20 +1815,19 @@ class PostgresStorage:
             self._pool_stats["active_connections"] = 0
 
     def cleanup_incomplete_products(
-        self, require_seller: bool = True, require_brand: bool = True
+        self,
+        require_seller: bool = True,
+        require_brand: bool = True,
+        require_rating: bool = False,
     ) -> dict[str, int]:
         """
-        Delete products with missing required fields (seller and/or brand).
+        Delete products with missing required fields (seller, brand, and/or rating).
         Run this BEFORE each crawl to allow re-crawling of incomplete data.
-
-        This prevents:
-        - Wasting resources crawling products that will be rejected anyway
-        - Storing incomplete products in database
-        - Having to clean up after load (reactive vs preventive)
 
         Args:
             require_seller: If True, delete products where seller_name IS NULL or empty
             require_brand: If True, delete products where brand IS NULL or empty
+            require_rating: If True, delete products where rating_average IS NULL
 
         Returns:
             dict with keys: deleted_count, deleted_no_seller, deleted_no_brand, deleted_both
@@ -1841,12 +1840,15 @@ class PostgresStorage:
                     conditions.append("(seller_name IS NULL OR seller_name = '')")
                 if require_brand:
                     conditions.append("(brand IS NULL OR brand = '')")
+                if require_rating:
+                    conditions.append("rating_average IS NULL")
 
                 if not conditions:
                     return {
                         "deleted_count": 0,
                         "deleted_no_seller": 0,
                         "deleted_no_brand": 0,
+                        "deleted_no_rating": 0,
                         "deleted_both": 0,
                     }
 
@@ -1856,6 +1858,7 @@ class PostgresStorage:
                 # Only calculate stats if both requirements are enabled
                 deleted_no_seller = 0
                 deleted_no_brand = 0
+                deleted_no_rating = 0
                 deleted_both = 0
 
                 if require_seller and require_brand:
@@ -1896,8 +1899,10 @@ class PostgresStorage:
                         reason_parts.append(f"{deleted_no_seller} without seller")
                     if require_brand:
                         reason_parts.append(f"{deleted_no_brand} without brand")
+                    if require_rating:
+                        reason_parts.append(f"{deleted_no_rating} without rating")
                     if require_seller and require_brand:
-                        reason_parts.append(f"{deleted_both} missing both")
+                        reason_parts.append(f"{deleted_both} missing both/multiple")
 
                     reason_str = ", ".join(reason_parts)
                     print(f"🧹 Cleaned up {deleted_count} incomplete products ({reason_str})")
@@ -1906,6 +1911,7 @@ class PostgresStorage:
                     "deleted_count": deleted_count,
                     "deleted_no_seller": deleted_no_seller if require_seller else 0,
                     "deleted_no_brand": deleted_no_brand if require_brand else 0,
+                    "deleted_no_rating": deleted_no_rating if require_rating else 0,
                     "deleted_both": deleted_both if (require_seller and require_brand) else 0,
                 }
 

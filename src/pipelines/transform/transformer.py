@@ -538,31 +538,95 @@ class DataTransformer:
                     continue
         return None
 
+    def _clean_name_heuristics(self, name: str) -> str:
+        """
+        Apply heuristic rules to clean product names:
+        - Remove SKU codes
+        - Remove marketing fluff and subjective adjectives
+        - Remove special characters
+        - Normalize phrases
+        """
+        if not name:
+            return ""
+
+        # 1. Remove hashtags (e.g., #jean) - do this early
+        cleaned = re.sub(r"#\w+\b", "", name)
+
+        # 2. Regex cleaning for SKUs and codes (e.g., CV0016, CV123, SKU-99, MS123)
+        sku_patterns = [
+            r"\b[A-Za-z]{2,}\d{3,}\b",  # CV0016, SP1234
+            r"\b[A-Za-z]+\-\d+\b",      # SKU-123, MS-001
+            r"\bMS\s*\d+\b",            # MS 123
+            r"\bMã\s*(?:số)?\s*\d+\b",  # Mã số 123
+        ]
+
+        for pattern in sku_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+        # 3. Marketing fluff and subjective adjectives
+        fluff_keywords = [
+            "sang chảnh", "siêu xinh", "trẻ trung", "thoáng mát", "cực đẹp",
+            "chất lượng", "cao cấp", "gợi cảm", "quyến rũ", "sexy", "hot hot",
+            "mẫu mới nhất", "new design", "hot trend", "giá rẻ", "siêu rẻ",
+            "vải mềm", "co giãn", "thiết kế", "chất mềm", "mới nhất", "siêu đẹp",
+            "hot", "giá sốc", "giá tốt"
+        ]
+
+        # Build regex for fluff (word boundaries)
+        fluff_pattern = r"\b(" + "|".join(re.escape(k) for k in fluff_keywords) + r")\b"
+        cleaned = re.sub(fluff_pattern, "", cleaned, flags=re.IGNORECASE)
+
+        # 4. Remove years (e.g., 2024, 2023) if they appear to be part of title fluff
+        cleaned = re.sub(r"\b202\d\b", "", cleaned)
+
+        # 5. Specialized symbols and brackets (remove content inside brackets if short like [HOT])
+        cleaned = re.sub(r"\[[^\]]{1,10}\]", " ", cleaned)
+
+        # 6. General special characters and repetitive symbols
+        cleaned = re.sub(r"[\[\]\(\)\-\#\|/\\\{\}]", " ", cleaned)
+        cleaned = re.sub(r"[\!\*\+\=~…\.\,]", " ", cleaned)
+
+        # 7. Normalize spacing and capitalization
+        cleaned = " ".join(cleaned.split())
+
+        if cleaned:
+            # Convert to sentence case as per user examples
+            cleaned = cleaned.lower()
+            cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
+
+        return cleaned
+
     def _get_short_name(self, name: str) -> str:
         """Get shortened name using AI with local fallback if needed"""
         if not name:
             return ""
 
+        # Apply heuristic cleaning first to remove fluff and SKUs
+        cleaned_name = self._clean_name_heuristics(name)
+        if not cleaned_name:
+            cleaned_name = name
+
         # 1. Try AI shortening if enabled
         if self.ai_summarizer:
             try:
-                short_name = self.ai_summarizer.shorten_product_name(name)
+                # Pass already cleaned name to AI to focus on core attributes
+                short_name = self.ai_summarizer.shorten_product_name(cleaned_name)
                 # Ensure we got a valid, different name
-                if short_name and short_name != name:
+                if short_name and short_name != cleaned_name:
                     return short_name
             except Exception as e:
                 logger.warning(f"⚠️  AI shortening failed, using fallback: {e}")
 
-        # 2. Local Fallback: Truncate if too long (max ~80 chars for DB/display)
-        if len(name) > 80:
+        # 2. Local Fallback: Use heuristic cleaned name, truncate if still too long
+        if len(cleaned_name) > 80:
             # Try to cut at space
-            truncated = name[:77]
+            truncated = cleaned_name[:77]
             last_space = truncated.rfind(" ")
             if last_space > 40:
-                truncated = name[:last_space]
+                truncated = cleaned_name[:last_space]
             return truncated + "..."
 
-        return name
+        return cleaned_name
 
     def get_stats(self) -> dict[str, Any]:
         """Lấy thống kê transform"""

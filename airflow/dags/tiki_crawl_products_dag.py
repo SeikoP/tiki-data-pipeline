@@ -543,21 +543,22 @@ DEFAULT_ARGS = {
 }
 
 # Cấu hình DAG - Có thể chuyển đổi giữa tự động và thủ công qua Variable
-# Đọc schedule mode từ Airflow Variable (mặc định: 'manual' để test)
-# Có thể set Variable 'TIKI_DAG_SCHEDULE_MODE' = 'scheduled' để chạy tự động
+# Đọc cấu hình từ Airflow Variable/Env
 schedule_mode = get_variable("TIKI_DAG_SCHEDULE_MODE", default="manual")
+schedule_hours = int(get_variable("TIKI_DAG_SCHEDULE_HOURS", default="1"))
 
 # Xác định schedule dựa trên mode
 if schedule_mode == "scheduled":
-    dag_schedule = timedelta(days=1)  # Chạy tự động hàng ngày
+    # Sử dụng timedelta để đảm bảo khoảng cách giữa các lần chạy
+    dag_schedule = timedelta(hours=schedule_hours)
     dag_description = (
-        "Crawl sản phẩm Tiki với Dynamic Task Mapping và tối ưu hóa (Tự động chạy hàng ngày)"
+        f"Crawl sản phẩm Tiki với Dynamic Task Mapping (Tự động chạy: mỗi {schedule_hours} giờ)"
     )
     dag_tags = ["tiki", "crawl", "products", "data-pipeline", "scheduled"]
 else:
     dag_schedule = None  # Chỉ chạy khi trigger thủ công
     dag_description = (
-        "Crawl sản phẩm Tiki với Dynamic Task Mapping và tối ưu hóa (Chạy thủ công - Test mode)"
+        "Crawl sản phẩm Tiki với Dynamic Task Mapping (Chạy thủ công - Test mode)"
     )
     dag_tags = ["tiki", "crawl", "products", "data-pipeline", "manual"]
 
@@ -1193,12 +1194,17 @@ def cleanup_incomplete_products_wrapper(**context):
 
         # Clean up products missing seller OR brand (or both)
         # Both are required for quality data
-        result = storage.cleanup_incomplete_products(require_seller=True, require_brand=True)
+        # require_rating=True to satisfy user request for deleting null ratings
+        stats = storage.cleanup_incomplete_products(
+            require_seller=True,
+            require_brand=True,
+            require_rating=True
+        )
 
-        deleted_count = result["deleted_count"]
-        deleted_no_seller = result.get("deleted_no_seller", 0)
-        deleted_no_brand = result.get("deleted_no_brand", 0)
-        deleted_both = result.get("deleted_both", 0)
+        deleted_count = stats["deleted_count"]
+        deleted_no_seller = stats.get("deleted_no_seller", 0)
+        deleted_no_brand = stats.get("deleted_no_brand", 0)
+        deleted_both = stats.get("deleted_both", 0)
 
         logger.info("=" * 70)
         logger.info(f"✅ Cleanup complete: {deleted_count} products deleted")
@@ -1229,28 +1235,6 @@ def cleanup_incomplete_products_wrapper(**context):
         }
 
 
-def cleanup_products_without_seller_wrapper(**context):
-    """
-    DEPRECATED: Use cleanup_incomplete_products_wrapper() instead.
-    Kept for backward compatibility.
-    """
-    logger = get_logger(context)
-    logger.warning(
-        "⚠️  Using deprecated cleanup_products_without_seller_wrapper. Use cleanup_incomplete_products_wrapper instead."
-    )
-
-    try:
-        from pipelines.crawl.storage.postgres_storage import PostgresStorage
-
-        storage = PostgresStorage()
-        deleted_count = storage.cleanup_products_without_seller()
-
-        logger.info(f"✅ Cleanup complete: {deleted_count} products deleted")
-        return {"status": "success", "deleted_count": deleted_count}
-
-    except Exception as e:
-        logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
-        return {"status": "error", "message": str(e), "deleted_count": 0}
 
 
 def cleanup_orphan_categories_wrapper(**context):
@@ -1639,14 +1623,24 @@ def merge_products(**context) -> dict[str, Any]:
         # Thử nhiều cách để lấy categories
         categories = None
 
-        # Cách 1: Lấy từ task_id với TaskGroup prefix
+        # Cách 1: Lấy từ task_id với TaskGroup prefix (pre_crawl.load_categories)
         try:
-            categories = ti.xcom_pull(task_ids="load_and_prepare.load_categories")
+            categories = ti.xcom_pull(task_ids="pre_crawl.load_categories")
             logger.info(
-                f"Lấy categories từ 'load_and_prepare.load_categories': {len(categories) if categories else 0} items"
+                f"Lấy categories từ 'pre_crawl.load_categories': {len(categories) if categories else 0} items"
             )
         except Exception as e:
-            logger.warning(f"Không lấy được từ 'load_and_prepare.load_categories': {e}")
+            logger.warning(f"Không lấy được từ 'pre_crawl.load_categories': {e}")
+
+        # Fallback: Các check cũ để tương thích ngược
+        if not categories:
+            try:
+                categories = ti.xcom_pull(task_ids="load_and_prepare.load_categories")
+                logger.info(
+                    f"Lấy categories từ 'load_and_prepare.load_categories': {len(categories) if categories else 0} items"
+                )
+            except Exception:
+                pass
 
         # Cách 2: Thử không có prefix
         if not categories:
@@ -2038,7 +2032,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         db_hits = 0  # Products đã có trong DB
 
         products_per_day = int(
-            get_variable("TIKI_PRODUCTS_PER_DAY", default="50")
+            get_variable("TIKI_PRODUCTS_PER_DAY", default="500")
         )  # Mặc định 50 products/ngày để tránh quá tải server
         max_products = int(
             get_variable("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
@@ -5422,7 +5416,9 @@ with DAG(**DAG_CONFIG) as dag:
             pool="crawl_pool",
         )
 
-        task_cleanup_products >> task_load_categories
+        # Tối ưu: Cho phép chạy song song vì task_cleanup_products và task_load_categories độc lập
+        # Không còn sử dụng task_cleanup_products >> task_load_categories
+        pass
 
     # TaskGroup: Crawl Categories (Dynamic Task Mapping)
     with TaskGroup("crawl_categories") as crawl_group:
@@ -5573,12 +5569,7 @@ with DAG(**DAG_CONFIG) as dag:
 
     # TaskGroup: Transform and Load
     with TaskGroup("transform_and_load") as transform_load_group:
-        task_enrich_category_path = PythonOperator(
-            task_id="enrich_products_category_path",
-            python_callable=enrich_category_path_task,
-            execution_timeout=timedelta(minutes=10),
-            pool="crawl_pool",
-        )
+        # task_enrich_category_path removed as it was undefined and redundant
 
         task_transform_products = PythonOperator(
             task_id="transform_products",
@@ -5593,7 +5584,7 @@ with DAG(**DAG_CONFIG) as dag:
             execution_timeout=timedelta(minutes=30),
             pool="crawl_pool",
         )
-        task_enrich_category_path >> task_transform_products >> task_load_products
+        task_transform_products >> task_load_products
 
     # TaskGroup: Maintenance and Reports
     with TaskGroup("maintenance_and_reports") as maintenance_group:
@@ -5664,13 +5655,17 @@ with DAG(**DAG_CONFIG) as dag:
         )
 
         # Maintenance dependencies
+        # Tối ưu: Cho phép chạy các tác vụ bảo trì song song sau khi dữ liệu đã ổn định
         task_load_categories_db >> task_reconcile >> [task_cleanup_orphans, task_cleanup_redundant]
         (
             [task_cleanup_orphans, task_cleanup_redundant]
             >> task_validate_data
             >> task_aggregate_and_notify
         )
-        task_aggregate_and_notify >> [
+
+        # Tối ưu: Các task maintenance không cần đợi group thông báo hoàn tất nếu không phụ thuộc dữ liệu summary
+        # Chúng có thể chạy song song ngay sau khi validate_data xong
+        task_validate_data >> [
             task_cleanup_cache,
             task_backup_database,
             task_cleanup_history,
