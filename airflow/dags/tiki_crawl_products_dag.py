@@ -2093,14 +2093,20 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     logger.info(
                         f"🔍 Đang kiểm tra {len(product_ids_to_check)} products trong database..."
                     )
+                    
+                    # Cấu hình thời gian relaxation (mặc định 7 ngày)
+                    cache_relax_days = get_int_variable("TIKI_CACHE_RELAX_DAYS", default=7)
+                    
                     logger.info(
-                        "   (chỉ skip products có price, sales_count VÀ brand - detail đầy đủ)"
+                        f"   - Luôn skip: products có FULL detail (price, sales, brand, seller)"
                     )
+                    logger.info(
+                        f"   - Cũng skip: products có price/sales và được crawl trong {cache_relax_days} ngày qua"
+                    )
+                    
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
                             # Chia nhỏ query nếu có quá nhiều product_ids
-                            # Chỉ lấy products có price, sales_count VÀ brand (detail đầy đủ)
-                            # Products không có brand sẽ được crawl lại
                             for i in range(0, len(product_ids_to_check), 1000):
                                 batch_ids = product_ids_to_check[i : i + 1000]
                                 placeholders = ",".join(["%s"] * len(batch_ids))
@@ -2111,21 +2117,20 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                                     WHERE product_id IN ({placeholders})
                                       AND price IS NOT NULL
                                       AND sales_count IS NOT NULL
-                                      AND brand IS NOT NULL
-                                      AND brand != ''
-                                      AND seller_name IS NOT NULL
-                                      AND seller_name != ''
+                                      AND (
+                                        (brand IS NOT NULL AND brand != '' AND seller_name IS NOT NULL AND seller_name != '')
+                                        OR (updated_at > NOW() - INTERVAL '{cache_relax_days} days')
+                                      )
                                     """,
                                     batch_ids,
                                 )
                                 existing_product_ids_in_db.update(row[0] for row in cur.fetchall())
 
                     logger.info(
-                        f"✅ Tìm thấy {len(existing_product_ids_in_db)} products đã có detail đầy đủ trong database"
+                        f"✅ Tìm thấy {len(existing_product_ids_in_db)} products đã có detail đủ hoặc mới crawl gần đây"
                     )
-                    logger.info("   (có price, sales_count VÀ brand - sẽ skip crawl lại)")
                     logger.info(
-                        "   💡 Products không có brand sẽ được crawl lại để lấy đầy đủ thông tin"
+                        f"   (sẽ skip crawl lại để tối ưu throughput)"
                     )
                     storage.close()
         except Exception as e:

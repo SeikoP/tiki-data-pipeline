@@ -1100,7 +1100,7 @@ class PostgresStorage:
         updated_count = 0
 
         # Lấy danh sách product_id đã có trong DB (để phân biệt INSERT vs UPDATE)
-        existing_product_ids: set[str] = set()
+        existing_products_info: dict[str, dict[str, Any]] = {}
         if upsert:
             try:
                 with self.get_connection() as conn:
@@ -1112,10 +1112,14 @@ class PostgresStorage:
                                 batch_ids = product_ids[i : i + 1000]
                                 placeholders = ",".join(["%s"] * len(batch_ids))
                                 cur.execute(
-                                    f"SELECT product_id FROM products WHERE product_id IN ({placeholders})",
+                                    f"SELECT product_id, brand, seller_name FROM products WHERE product_id IN ({placeholders})",
                                     batch_ids,
                                 )
-                                existing_product_ids.update(row[0] for row in cur.fetchall())
+                                for row in cur.fetchall():
+                                    existing_products_info[row[0]] = {
+                                        "brand": row[1],
+                                        "seller_name": row[2],
+                                    }
             except Exception as e:
                 # Nếu không lấy được, tiếp tục với upsert bình thường
                 print(f"⚠️  Không thể lấy danh sách products đã có: {e}")
@@ -1161,7 +1165,7 @@ class PostgresStorage:
                                 1
                                 for p in batch
                                 if p.get("product_id")
-                                and p.get("product_id") not in existing_product_ids
+                                and p.get("product_id") not in existing_products_info
                             )
                             batch_updated = len(batch) - batch_inserted
 
@@ -1177,33 +1181,36 @@ class PostgresStorage:
                                 VALUES %s
                                 ON CONFLICT (product_id)
                                 DO UPDATE SET
-                                    name = EXCLUDED.name,
-                                    short_name = EXCLUDED.short_name,
-                                    url = EXCLUDED.url,
-                                    image_url = EXCLUDED.image_url,
-                                    category_url = EXCLUDED.category_url,
-                                    category_id = EXCLUDED.category_id,
-                                    sales_count = EXCLUDED.sales_count,
-                                    price = EXCLUDED.price,
-                                    original_price = EXCLUDED.original_price,
-                                    discount_percent = EXCLUDED.discount_percent,
-                                    rating_average = EXCLUDED.rating_average,
-                                    seller_name = EXCLUDED.seller_name,
-                                    seller_id = EXCLUDED.seller_id,
-                                    seller_is_official = EXCLUDED.seller_is_official,
-                                    brand = EXCLUDED.brand,
-                                    stock_available = EXCLUDED.stock_available,
-                                    shipping = EXCLUDED.shipping,
+                                    name = COALESCE(NULLIF(EXCLUDED.name, ''), products.name),
+                                    short_name = COALESCE(NULLIF(EXCLUDED.short_name, ''), products.short_name),
+                                    url = COALESCE(NULLIF(EXCLUDED.url, ''), products.url),
+                                    image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url),
+                                    category_url = COALESCE(NULLIF(EXCLUDED.category_url, ''), products.category_url),
+                                    category_id = COALESCE(NULLIF(EXCLUDED.category_id, ''), products.category_id),
+                                    sales_count = COALESCE(EXCLUDED.sales_count, products.sales_count),
+                                    price = COALESCE(EXCLUDED.price, products.price),
+                                    original_price = COALESCE(EXCLUDED.original_price, products.original_price),
+                                    discount_percent = COALESCE(EXCLUDED.discount_percent, products.discount_percent),
+                                    rating_average = COALESCE(EXCLUDED.rating_average, products.rating_average),
+                                    seller_name = COALESCE(NULLIF(EXCLUDED.seller_name, ''), products.seller_name),
+                                    seller_id = COALESCE(NULLIF(EXCLUDED.seller_id, ''), products.seller_id),
+                                    seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
+                                    brand = COALESCE(NULLIF(EXCLUDED.brand, ''), products.brand),
+                                    stock_available = COALESCE(EXCLUDED.stock_available, products.stock_available),
+                                    shipping = COALESCE(EXCLUDED.shipping, products.shipping),
                                     updated_at = CURRENT_TIMESTAMP
                                 """,
                                 values,
                             )
 
-                            # Cập nhật existing_product_ids sau khi insert
+                            # Cập nhật existing_products_info sau khi insert
                             for product in batch:
                                 product_id = product.get("product_id")
-                                if product_id:
-                                    existing_product_ids.add(product_id)
+                                if product_id and product_id not in existing_products_info:
+                                    existing_products_info[product_id] = {
+                                        "brand": product.get("brand"),
+                                        "seller_name": product.get("seller_name"),
+                                    }
 
                             inserted_count += batch_inserted
                             updated_count += batch_updated
@@ -1250,7 +1257,7 @@ class PostgresStorage:
 
         try:
             # Use the robust batch history logging method - OUTSIDE of the main products transaction
-            self._log_batch_crawl_history(products)
+            self._log_batch_crawl_history(products, previous_state=existing_products_info)
         except Exception as e:
             print(f"⚠️  Failed to log crawl history: {e}")
 
@@ -1435,17 +1442,20 @@ class PostgresStorage:
 
         return added_count
 
-    def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
+    def _log_batch_crawl_history(
+        self, products: list[dict[str, Any]], previous_state: dict[str, dict[str, Any]] | None = None
+    ) -> None:
         """
         Log crawl history for ALL products (không chỉ khi có thay đổi giá).
 
         Tối ưu:
         - Sử dụng batch lookup để lấy giá cũ (thay vì query từng product)
-        - INSERT cho mọi lần crawl với crawl_type: 'price_change', 'no_change', 'failed'
+        - INSERT cho mọi lần crawl với crawl_type: 'price_change', 'no_change', 'data_improvement'
         - Populate metadata fields từ _metadata
 
-        Schema: (product_id, price, original_price, discount_percent, price_change, previous_*,
-                 crawl_type, crawl_status, metadata, crawled_at)
+        Args:
+            products: List các product đã crawl
+            previous_state: Dict chứa thông tin brand/seller cũ từ bảng products (để detect data improvement)
         """
         if not products:
             return
@@ -1568,13 +1578,33 @@ class PostgresStorage:
                     # 1. First time crawl (prev is None -> crawl_type='price_change')
                     # 2. Price/Discount changed (crawl_type='price_change')
                     # 3. Sales changed (sales_change != 0)
+                    # 4. Data Quality improved (brand/seller was NULL but now has value)
                     should_log = False
+
+                    # Check for data improvement
+                    data_improved = False
+                    if previous_state and product_id in previous_state:
+                        old_brand = previous_state[product_id].get("brand")
+                        old_seller = previous_state[product_id].get("seller_name")
+                        
+                        new_brand = p.get("brand")
+                        new_seller = p.get("seller_name")
+                        
+                        # Detect improvement: was NULL/empty but now has content
+                        brand_found = not old_brand and new_brand
+                        seller_found = not old_seller and new_seller
+                        
+                        if brand_found or seller_found:
+                            data_improved = True
 
                     if crawl_type == "price_change":
                         should_log = True
                     elif sales_change and sales_change != 0:
                         should_log = True
                         crawl_type = "sales_change"  # Update type for clarity
+                    elif data_improved:
+                        should_log = True
+                        crawl_type = "data_improvement"
 
                     if should_log:
                         records_to_insert.append(
