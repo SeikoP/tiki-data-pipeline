@@ -61,6 +61,7 @@ x-airflow-common:
     - ./src:/opt/airflow/src
     - ./data:/opt/airflow/data
     - ./scripts:/opt/airflow/scripts
+    - ./airflow/passwords.json:/opt/airflow/simple_auth_manager_passwords.json.generated
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     postgres:
@@ -191,10 +192,12 @@ services:
         echo "Initializing Airflow DB..."
         su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow db migrate"
         
-        echo "Creating Admin User..."
-        su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow users create --username \"${_AIRFLOW_WWW_USER_USERNAME}\" --password \"${_AIRFLOW_WWW_USER_PASSWORD}\" --firstname Admin --lastname User --role Admin --email admin@example.com" || true
+        echo "Creating Simple Auth Manager Password File..."
+        # Create the passwords.json file for Airflow 3.0 Simple Auth Manager
+        # Using jq if available, otherwise simple echo
+        su -s /bin/bash airflow -c "echo '{\"\${_AIRFLOW_WWW_USER_USERNAME:-admin}\": \"\${_AIRFLOW_WWW_USER_PASSWORD}\"}' > /opt/airflow/simple_auth_manager_passwords.json.generated"
         
-        echo "Configuring Pools and Variables..."
+        echo "Updating Pools and Variables..."
         if [ -f /opt/airflow/setup/init-airflow-config.sh ]; then
           chmod +x /opt/airflow/setup/init-airflow-config.sh
           su -s /bin/bash airflow -c "cd /opt/airflow && /opt/airflow/setup/init-airflow-config.sh"
