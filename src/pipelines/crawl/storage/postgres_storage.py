@@ -108,6 +108,7 @@ class PostgresStorage:
             "keepalives_interval": keepalives_interval,
             "keepalives_count": keepalives_count,
         }
+        self._schemas_ensured = set()
 
     def _get_pool(self) -> SimpleConnectionPool:
         """Lấy hoặc tạo connection pool với retry logic"""
@@ -236,11 +237,9 @@ class PostgresStorage:
                         pass
 
     def _ensure_categories_schema(self, cur) -> None:
-        """Đảm bảo bảng categories và các index tồn tại.
-
-        Lưu ý: Bảng này chỉ lưu các category có is_leaf = true.
-        category_path được mở rộng với các trường level_1 đến level_5 để thể hiện rõ theo từng độ sâu.
-        """
+        """Đảm bảo bảng categories và các index tồn tại."""
+        if "categories" in self._schemas_ensured:
+            return
         cur.execute("""
             CREATE TABLE IF NOT EXISTS categories (
                 id SERIAL PRIMARY KEY,
@@ -265,17 +264,12 @@ class PostgresStorage:
             -- Only essential index: level_2 is used for category filtering queries
             CREATE INDEX IF NOT EXISTS idx_cat_level2 ON categories(level_2);
         """)
+        self._schemas_ensured.add("categories")
 
     def _ensure_products_schema(self, cur) -> None:
-        """Đảm bảo bảng products và các index tồn tại.
-
-        Đã loại bỏ các trường: category_path, review_count, description, images,
-        estimated_revenue, price_savings, price_category, value_score, sales_velocity,
-        specifications, popularity_score, discount_amount, stock_quantity, stock_status
-
-        Đã thêm metadata columns: data_quality, last_crawl_status, retry_count
-        Đã thêm timestamp columns: last_crawled_at, last_crawl_attempt_at, first_seen_at
-        """
+        """Đảm bảo bảng products và các index tồn tại."""
+        if "products" in self._schemas_ensured:
+            return
         # Step 1: Create table if not exists
         cur.execute("""
             CREATE TABLE IF NOT EXISTS products (
@@ -352,30 +346,14 @@ class PostgresStorage:
                     ON UPDATE CASCADE
                 """)
             except Exception:
-                # FK constraint may fail if there are orphan records
                 # This is expected and will be handled by migration script
                 pass
+        self._schemas_ensured.add("products")
 
     def _ensure_history_schema(self, cur) -> None:
-        """Đảm bảo bảng crawl_history và các index tồn tại.
-
-        Bảng này lưu lịch sử crawl cho MỌI lần crawl (không chỉ khi có thay đổi giá).
-        MỖI LẦN CRAWL = 1 RECORD MỚI (không ghi đè) → Lịch sử đầy đủ
-
-        Schema tối ưu - CHỈ GIỮ CORE FIELDS:
-        - Price tracking: price, original_price, discount_percent, price_change, previous_*
-        - Price analysis: discount_amount (tiền giảm), price_change_percent (% thay đổi)
-        - Sales tracking: sales_count, sales_change
-        - Promotion: is_flash_sale (đang khuyến mãi mạnh)
-        - Crawl type: 'price_change', 'no_change'
-        - Timestamps: crawled_at, updated_at
-
-        Đã XÓA các fields không populate được:
-        - started_at, completed_at (không track được từ app)
-        - crawl_status, retry_count, error_message (job-level, không product-level)
-        - missing_fields, data_completeness_score (không cần trong history)
-        - crawl_duration_ms, page_load_time_ms (performance metrics không cần lưu)
-        """
+        """Đảm bảo bảng crawl_history và các index tồn tại."""
+        if "history" in self._schemas_ensured:
+            return
         # Step 1: Create table if not exists
         cur.execute("""
             CREATE TABLE IF NOT EXISTS crawl_history (
@@ -458,9 +436,9 @@ class PostgresStorage:
                     ON UPDATE CASCADE
                 """)
             except Exception:
-                # FK constraint may fail if there are orphan records
                 # This is expected and will be handled by migration script
                 pass
+        self._schemas_ensured.add("history")
 
     def _write_dicts_to_csv_buffer(
         self, rows: list[dict[str, Any]], columns: list[str]
@@ -1268,14 +1246,13 @@ class PostgresStorage:
                                     )
                                     continue
                         else:
-                            # Nếu batch_size đã là 1 mà vẫn lỗi -> re-raise để log
                             raise e
 
-            try:
-                # Use the robust batch history logging method
-                self._log_batch_crawl_history(products)
-            except Exception as e:
-                print(f"⚠️  Failed to log crawl history: {e}")
+        try:
+            # Use the robust batch history logging method - OUTSIDE of the main products transaction
+            self._log_batch_crawl_history(products)
+        except Exception as e:
+            print(f"⚠️  Failed to log crawl history: {e}")
 
         return {
             "saved_count": saved_count,
@@ -1710,16 +1687,20 @@ class PostgresStorage:
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 # Match products với categories theo cả category_url và category_id
+                # Sử dụng UPDATE FROM để tối ưu hóa thay vì subquery cho từng dòng
                 cur.execute("""
                     UPDATE categories c
-                    SET product_count = COALESCE((
-                        SELECT COUNT(DISTINCT p.id)
-                        FROM products p
-                        WHERE p.category_url = c.url
+                    SET product_count = counts.cnt,
+                        updated_at = CURRENT_TIMESTAMP
+                    FROM (
+                        SELECT c.url, COUNT(DISTINCT p.id) as cnt
+                        FROM categories c
+                        LEFT JOIN products p ON p.category_url = c.url 
                            OR (c.category_id IS NOT NULL AND p.category_id = c.category_id)
-                    ), 0),
-                    updated_at = CURRENT_TIMESTAMP
-                    WHERE c.is_leaf = TRUE
+                        WHERE c.is_leaf = TRUE
+                        GROUP BY c.url
+                    ) counts
+                    WHERE c.url = counts.url AND c.is_leaf = TRUE;
                 """)
                 return cur.rowcount
 
@@ -2101,14 +2082,15 @@ class PostgresStorage:
                     do_nothing=not upsert,
                 )
 
-                try:
-                    # Use the robust batch history logging method
-                    self._log_batch_crawl_history(products)
-                except Exception as e:
-                    print(f"⚠️  Failed to log bulk history: {e}")
+        # Log history OUTSIDE of the connection context to avoid deadlock/nested transaction issues
+        try:
+            # Use the robust batch history logging method
+            self._log_batch_crawl_history(products)
+        except Exception as e:
+            print(f"⚠️  Failed to log bulk history: {e}")
 
-                return {
-                    "saved_count": saved_count,
-                    "inserted_count": saved_count if upsert else 0,  # Approx; 0 if insert-only
-                    "updated_count": 0,
-                }
+        return {
+            "saved_count": saved_count,
+            "inserted_count": saved_count if upsert else 0,  # Approx; 0 if insert-only
+            "updated_count": 0,
+        }

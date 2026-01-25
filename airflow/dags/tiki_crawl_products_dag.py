@@ -5379,18 +5379,24 @@ def backup_database(**context) -> dict[str, Any]:
 
                 if result.returncode == 0:
                     logger.info("✅ Backup thành công!")
-                    logger.info(result.stdout)
+                    if result.stdout:
+                        logger.info(result.stdout)
                     return {
                         "status": "success",
                         "output": result.stdout,
                     }
                 else:
                     logger.warning(f"⚠️  Backup có lỗi (exit code: {result.returncode})")
-                    logger.warning(result.stderr)
+                    if result.stdout:
+                        logger.info("--- STDOUT ---")
+                        logger.info(result.stdout)
+                    if result.stderr:
+                        logger.warning("--- STDERR ---")
+                        logger.warning(result.stderr)
                     # Không fail task, chỉ log warning
                     return {
                         "status": "warning",
-                        "error": result.stderr,
+                        "error": result.stderr or result.stdout,
                     }
             except subprocess.TimeoutExpired:
                 logger.error("❌ Timeout khi backup database")

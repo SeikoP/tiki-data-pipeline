@@ -12,7 +12,7 @@ ENV PYTHONPATH="/opt/airflow:/opt/airflow/src:/opt/airflow/dags:/home/airflow/.l
 # Cài đặt Chrome (minimal)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        wget gnupg ca-certificates tzdata && \
+        wget gnupg ca-certificates tzdata postgresql-client && \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
     wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
     echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list && \

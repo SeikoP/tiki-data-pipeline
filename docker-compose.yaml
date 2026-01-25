@@ -21,6 +21,7 @@ x-airflow-common:
     # Generate: openssl rand -hex 32
     # SECURITY: Must be set in .env file, no default value for production safety
     AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET}
+    AIRFLOW__CORE__SECRET_KEY: ${_AIRFLOW__CORE__SECRET_KEY}
     # Fernet key for Variable/Connection encryption (must be consistent across rebuilds)
     # Generate new key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     # If not set in .env, will use empty string (Airflow will generate one, but it won't persist across restarts)
