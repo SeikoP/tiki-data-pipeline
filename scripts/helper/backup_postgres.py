@@ -245,7 +245,7 @@ def main():
         "--database",
         "-d",
         default="all",
-        choices=["all", "airflow", "crawl_data"],
+        choices=["all", "airflow", "tiki"],
         help="Database để backup (default: all)",
     )
     parser.add_argument(
@@ -285,7 +285,7 @@ def main():
         # Backup airflow metadata (optional) - ignore failure
         airflow_ok = backup_database("airflow", args.format)
         print()
-        data_ok = backup_database("crawl_data", args.format)
+        data_ok = backup_database("tiki", args.format)
         success = airflow_ok and data_ok
     else:
         success = backup_database(args.database, args.format)

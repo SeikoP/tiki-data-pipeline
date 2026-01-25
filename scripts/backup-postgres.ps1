@@ -101,7 +101,7 @@ function Backup-Database {
 # Thực hiện backup
 if ($Database -eq "all") {
     Write-Host "🔄 Backup database crawl_data..." -ForegroundColor Cyan
-    Backup-Database -DbName "crawl_data" -BackupFormat $Format
+    Backup-Database -DbName "tiki" -BackupFormat $Format
 } else {
     Backup-Database -DbName $Database -BackupFormat $Format
 }
