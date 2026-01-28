@@ -470,6 +470,7 @@ class CIRunner:
                         str(line_length),
                         "--make-summary-multi-line",
                         "--close-quotes-on-newline",
+                        "-r",
                     ]
                     docformatter_cmd.extend(paths)
                     self._run_command(
@@ -493,6 +494,7 @@ class CIRunner:
                         "--remove-unused-variables",
                         "--remove-duplicate-keys",
                         "--expand-star-imports",
+                        "-r",
                     ]
                     autoflake_cmd.extend(paths)
                     self._run_command(autoflake_cmd, "Remove unused imports", check=False)
