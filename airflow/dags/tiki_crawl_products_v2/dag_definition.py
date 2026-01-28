@@ -25,7 +25,6 @@ from .tasks import (
 )
 
 with DAG(**DAG_CONFIG) as dag:
-
     # ===== STEP 1: PRE-CRAWL CLEANUP & LOAD =====
     with TaskGroup("pre_crawl") as pre_crawl_group:
         task_cleanup_products = PythonOperator(

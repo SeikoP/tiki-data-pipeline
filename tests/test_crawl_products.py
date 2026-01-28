@@ -106,7 +106,9 @@ def test_crawl_single_category():
         test_category = (
             test_categories[2]
             if len(test_categories) > 2
-            else test_categories[0] if test_categories else None
+            else test_categories[0]
+            if test_categories
+            else None
         )
 
         if not test_category:
@@ -125,7 +127,9 @@ def test_crawl_single_category():
         # Crawl với giới hạn 2 trang để test nhanh
         # Thử với Selenium nếu requests không tìm thấy sản phẩm
         products = crawl_category_products(
-            category_url, max_pages=2, use_selenium=True  # Dùng Selenium để render JavaScript
+            category_url,
+            max_pages=2,
+            use_selenium=True,  # Dùng Selenium để render JavaScript
         )
 
         print(f"\n✅ Tìm thấy {len(products)} sản phẩm")

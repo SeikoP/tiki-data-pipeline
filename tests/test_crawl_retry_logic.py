@@ -16,7 +16,6 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 
-
 @pytest.fixture
 def mock_html_complete():
     """Mock HTML with complete product data."""
@@ -212,7 +211,6 @@ def test_retry_logic_handles_permanent_failures():
         ]
 
         result = crawl_product_with_retry("https://tiki.vn/test-product", max_retries=2)
-
 
         # After exhausting retries, we should return the last extracted product
         assert result is not None

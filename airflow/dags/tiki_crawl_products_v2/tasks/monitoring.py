@@ -241,7 +241,7 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 
                 logger.info("=" * 70)
                 logger.info("⚡ PERFORMANCE SUMMARY")
-                logger.info(f"⏱️  Duration: {duration/60:.1f} min | Products: {total_products}")
+                logger.info(f"⏱️  Duration: {duration / 60:.1f} min | Products: {total_products}")
                 if throughput > 0:
                     logger.info(
                         f"📈 Throughput: {throughput:.2f} products/s | Avg: {avg_time:.1f}s/product"

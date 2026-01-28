@@ -22,12 +22,10 @@ src_path = os.path.join(project_root, "src")
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-# Import modules
-from pipelines.transform.transformer import DataTransformer
 from pipelines.load.loader import OptimizedDataLoader as DataLoader
 
-
-
+# Import modules
+from pipelines.transform.transformer import DataTransformer
 
 
 def create_sample_products() -> list[dict[str, Any]]:
@@ -400,9 +398,9 @@ def test_load_integration():
         print(f"   - File loaded: {load_stats['file_loaded']}")
         print(f"   - Success: {load_stats['success_count']}")
 
-        assert (
-            transform_stats["valid_products"] == load_stats["file_loaded"]
-        ), "Số products transform và load phải khớp"
+        assert transform_stats["valid_products"] == load_stats["file_loaded"], (
+            "Số products transform và load phải khớp"
+        )
 
         print("\n✅ Test integration thành công!")
         return transform_stats, load_stats

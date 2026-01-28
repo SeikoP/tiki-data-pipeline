@@ -288,16 +288,19 @@ def parse_categories(html_content, parent_url=None, level=0):
 
         # Tìm tất cả link có pattern danh mục trong section này
         all_links = section.find_all("a", href=True)
-        
+
         for link in all_links:
             href = link.get("href", "")
             if not href or not category_pattern.search(href):
                 continue
 
             # Chuẩn hóa URL
-            if href.startswith("//"): href = "https:" + href
-            elif href.startswith("/"): href = "https://tiki.vn" + href
-            elif not href.startswith("http"): continue
+            if href.startswith("//"):
+                href = "https:" + href
+            elif href.startswith("/"):
+                href = "https://tiki.vn" + href
+            elif not href.startswith("http"):
+                continue
 
             if "?" in href:
                 base_url = href.split("?")[0]
@@ -319,14 +322,21 @@ def parse_categories(html_content, parent_url=None, level=0):
                     container = link.find_parent(["div", "li", "article", "section"])
                     if container:
                         imgs = container.find_all("img")
-                        if imgs: img = imgs[0]
+                        if imgs:
+                            img = imgs[0]
 
                 img_url = ""
                 if img:
-                    img_url = (img.get("src", "") or img.get("data-src", "") or img.get("data-lazy-src", ""))
+                    img_url = (
+                        img.get("src", "")
+                        or img.get("data-src", "")
+                        or img.get("data-lazy-src", "")
+                    )
                     if img_url:
-                        if img_url.startswith("//"): img_url = "https:" + img_url
-                        elif img_url.startswith("/"): img_url = "https://tiki.vn" + img_url
+                        if img_url.startswith("//"):
+                            img_url = "https:" + img_url
+                        elif img_url.startswith("/"):
+                            img_url = "https://tiki.vn" + img_url
 
                 # Mandatory: Bắt buộc có image_url
                 if not img_url or not img_url.strip():
@@ -338,7 +348,8 @@ def parse_categories(html_content, parent_url=None, level=0):
                     name = img.get("alt", "").strip()
                 if not name:
                     name_elem = link.find(["span", "div", "h3", "h4"])
-                    if name_elem: name = name_elem.get_text(strip=True)
+                    if name_elem:
+                        name = name_elem.get_text(strip=True)
                 if not name:
                     url_parts = href.split("/")
                     if len(url_parts) >= 4:
@@ -347,16 +358,19 @@ def parse_categories(html_content, parent_url=None, level=0):
                 if name and len(name.strip()) > 1:
                     slug = ""
                     url_parts = href.split("/")
-                    if len(url_parts) >= 4: slug = url_parts[-2]
+                    if len(url_parts) >= 4:
+                        slug = url_parts[-2]
 
-                    current_section_categories.append({
-                        "name": name.strip(),
-                        "slug": slug,
-                        "url": href,
-                        "image_url": img_url,
-                        "parent_url": parent_url,
-                        "level": level,
-                    })
+                    current_section_categories.append(
+                        {
+                            "name": name.strip(),
+                            "slug": slug,
+                            "url": href,
+                            "image_url": img_url,
+                            "parent_url": parent_url,
+                            "level": level,
+                        }
+                    )
             except Exception:
                 continue
 
@@ -369,8 +383,9 @@ def parse_categories(html_content, parent_url=None, level=0):
         print("[Parse] ⚠ Không tìm thấy danh mục nào có hình ảnh trong tất cả sections")
         return []
 
-    print(f"[Parse] ✓ Chọn Section {best_section_index} với {len(best_categories_with_images)} danh mục có hình ảnh")
-
+    print(
+        f"[Parse] ✓ Chọn Section {best_section_index} với {len(best_categories_with_images)} danh mục có hình ảnh"
+    )
 
     # Lưu dữ liệu JSON (chỉ khi không phải đệ quy)
     if level == 0 and parent_url is None:
@@ -380,7 +395,6 @@ def parse_categories(html_content, parent_url=None, level=0):
         print(f"[Parse] ✓ Đã lưu dữ liệu vào {output_file}")
 
     return best_categories_with_images
-
 
 
 # ========== MAIN ==========

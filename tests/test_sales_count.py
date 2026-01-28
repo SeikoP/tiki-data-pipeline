@@ -44,10 +44,10 @@ def test_crawl_products_sales_count():
         print("\n📊 Thống kê:")
         print(f"   - Tổng số products: {len(products)}")
         print(
-            f"   - Có sales_count: {len(products_with_sales)} ({len(products_with_sales)/len(products)*100:.1f}%)"
+            f"   - Có sales_count: {len(products_with_sales)} ({len(products_with_sales) / len(products) * 100:.1f}%)"
         )
         print(
-            f"   - Không có sales_count: {len(products_without_sales)} ({len(products_without_sales)/len(products)*100:.1f}%)"
+            f"   - Không có sales_count: {len(products_without_sales)} ({len(products_without_sales) / len(products) * 100:.1f}%)"
         )
 
         # Hiển thị một số ví dụ
@@ -221,12 +221,12 @@ def test_crawl_product_detail_sales_count():
 
     print(f"   - Tổng số products test: {total}")
     print(
-        f"   - Có sales_count: {with_sales} ({with_sales/total*100:.1f}%)"
+        f"   - Có sales_count: {with_sales} ({with_sales / total * 100:.1f}%)"
         if total > 0
         else "   - Có sales_count: 0"
     )
     print(
-        f"   - Không có sales_count: {without_sales} ({without_sales/total*100:.1f}%)"
+        f"   - Không có sales_count: {without_sales} ({without_sales / total * 100:.1f}%)"
         if total > 0
         else "   - Không có sales_count: 0"
     )
@@ -274,7 +274,7 @@ def main():
         print("✅ Test 1 (Crawl Products):")
         print(f"   - Tổng: {len(products)} products")
         print(
-            f"   - Có sales_count: {products_with_sales} ({products_with_sales/len(products)*100:.1f}%)"
+            f"   - Có sales_count: {products_with_sales} ({products_with_sales / len(products) * 100:.1f}%)"
         )
 
     if detail_results:
@@ -282,7 +282,7 @@ def main():
         print("\n✅ Test 2 (Crawl Product Detail):")
         print(f"   - Tổng: {len(detail_results)} products")
         print(
-            f"   - Có sales_count: {detail_with_sales} ({detail_with_sales/len(detail_results)*100:.1f}%)"
+            f"   - Có sales_count: {detail_with_sales} ({detail_with_sales / len(detail_results) * 100:.1f}%)"
         )
 
     print("\n" + "=" * 70)

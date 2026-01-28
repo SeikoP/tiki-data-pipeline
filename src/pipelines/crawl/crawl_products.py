@@ -1104,7 +1104,7 @@ def crawl_products_from_categories(
     print(f"✅ Thành công: {stats['total_success']}")
     print(f"❌ Thất bại: {stats['total_failed']}")
     print(f"📦 Tổng sản phẩm: {len(unique_products)}")
-    print(f"⚡ Tốc độ: {stats['total_products']/elapsed:.2f} sản phẩm/s" if elapsed > 0 else "")
+    print(f"⚡ Tốc độ: {stats['total_products'] / elapsed:.2f} sản phẩm/s" if elapsed > 0 else "")
     print("=" * 70)
 
     return unique_products

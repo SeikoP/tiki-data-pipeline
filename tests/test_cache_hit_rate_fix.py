@@ -125,7 +125,6 @@ def test_validate_product_detail():
     assert is_valid is True, "Should be valid if has name and brand"
     print("✅ PASS\n")
 
-
     # Test case 4: Invalid - empty detail
     is_valid = cache.validate_product_detail({})
     print(f"Empty detail: {is_valid}")
@@ -181,9 +180,9 @@ def test_cache_key_generation():
     print(f"Canonical 2: {canonical2}")
     print(f"Canonicals match: {canonical1 == canonical2}")
 
-    assert (
-        canonical1 == canonical2
-    ), "Different URLs with tracking params removed should canonicalize to same"
+    assert canonical1 == canonical2, (
+        "Different URLs with tracking params removed should canonicalize to same"
+    )
     print("✅ PASS\n")
 
     print("✅ TEST 4 PASSED\n")

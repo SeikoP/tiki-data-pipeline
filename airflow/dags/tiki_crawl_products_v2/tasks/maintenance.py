@@ -617,7 +617,11 @@ def backup_database(**context) -> dict[str, Any]:
 
             try:
                 result = subprocess.run(
-                    cmd, capture_output=True, text=True, check=False, timeout=600  # 10 phút timeout
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=600,  # 10 phút timeout
                 )
 
                 if result.returncode == 0:

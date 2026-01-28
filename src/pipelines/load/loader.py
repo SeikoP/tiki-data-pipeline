@@ -148,7 +148,6 @@ class OptimizedDataLoader:
             if self.stats["success_count"] == 0 and self.stats["file_loaded"] > 0:
                 self.stats["success_count"] = self.stats["file_loaded"]
 
-
             self.stats["processing_time"] = timer.duration if timer.duration else 0.0
 
         return self.stats
@@ -402,7 +401,6 @@ class OptimizedDataLoader:
             return self.stats
         finally:
             self.enable_db = original_enable_db
-
 
 
 __all__ = ["OptimizedDataLoader"]

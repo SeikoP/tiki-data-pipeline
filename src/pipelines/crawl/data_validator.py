@@ -166,7 +166,6 @@ def validate_product_data(
         # Retry to get missing fields
         return "retry"
     else:
-
         # Exceeded max retries - check if we should accept partial data
 
         # ENHANCEMENT: Skip logic for strict fields

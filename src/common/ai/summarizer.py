@@ -387,13 +387,11 @@ Tên rút gọn:
             report += "📊 Quy mô dataset:\n"
             report += f"   • Tổng sản phẩm trong DB: {total:,}\n"
             report += f"   • Sản phẩm có doanh số: {with_sales:,} ({coverage:.1f}%)\n"
-            report += (
-                f"   • Sản phẩm không có doanh số: {total - with_sales:,} ({100-coverage:.1f}%)\n\n"
-            )
+            report += f"   • Sản phẩm không có doanh số: {total - with_sales:,} ({100 - coverage:.1f}%)\n\n"
 
             report += "✅ Chất lượng:\n"
             report += f"   • Hợp lệ đầy đủ: {with_sales:,} / {total:,} = {coverage:.1f}% ✓\n"
-            report += f"   • Lỗi / thiếu dữ liệu: {100-coverage:.1f}%\n"
+            report += f"   • Lỗi / thiếu dữ liệu: {100 - coverage:.1f}%\n"
             report += "   • Đánh giá: Dữ liệu ở mức chấp nhận được\n\n"
 
             # II. Phân tích giảm giá

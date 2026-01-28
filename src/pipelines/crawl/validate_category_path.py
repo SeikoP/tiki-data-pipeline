@@ -64,7 +64,7 @@ def validate_and_fix_category_path(
             info.get("name") == first_item and info.get("level", 1) == 0
             for info in hierarchy_map.values()
         )
-    
+
     # Nếu item đầu tiên đã là parent category (hoặc là một root đã biết), không cần fix
     if first_item == PARENT_CATEGORY_NAME or is_known_root:
         # Đảm bảo không vượt quá MAX_CATEGORY_LEVELS

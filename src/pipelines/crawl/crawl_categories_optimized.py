@@ -399,9 +399,9 @@ def crawl_category_recursive_optimized(
             if not new_urls:
                 continue
 
-            print(f"\n{'='*70}")
+            print(f"\n{'=' * 70}")
             print(f"Level {current_level}: Dang crawl {len(new_urls)} danh muc...")
-            print(f"{'='*70}")
+            print(f"{'=' * 70}")
 
             # Crawl song song
             results = crawl_level_parallel(
@@ -447,9 +447,9 @@ def print_stats():
         elapsed = time.time() - stats["start_time"]
         rate = stats["total_crawled"] / elapsed if elapsed > 0 else 0
 
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("📈 THỐNG KÊ")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
         print(f"⏱  Thời gian: {elapsed:.1f}s")
         print(f"📥 Đã crawl: {stats['total_crawled']} danh mục")
         print(f"✅ Thành công: {stats['total_success']}")

@@ -73,11 +73,11 @@ def crawl_category_recursive(
     # Đánh dấu đã crawl
     visited_urls.add(url)
 
-    print(f"\n{'  ' * level}{'='*60}")
+    print(f"\n{'  ' * level}{'=' * 60}")
     print(f"{'  ' * level}[Level {level}] 🔍 Đang crawl: {url}")
     if parent_url:
         print(f"{'  ' * level}  📁 Parent: {parent_url}")
-    print(f"{'  ' * level}{'='*60}")
+    print(f"{'  ' * level}{'=' * 60}")
 
     try:
         # Crawl với Selenium

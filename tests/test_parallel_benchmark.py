@@ -90,7 +90,7 @@ try:
     print(f"   - Sequential: {sequential_time:.2f}s")
     print(f"   - Parallel: {parallel_time:.2f}s")
     print(
-        f"   - Time saved: {sequential_time - parallel_time:.2f}s ({(1 - parallel_time/sequential_time)*100:.1f}%)"
+        f"   - Time saved: {sequential_time - parallel_time:.2f}s ({(1 - parallel_time / sequential_time) * 100:.1f}%)"
     )
 
 except Exception as e:

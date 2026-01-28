@@ -185,9 +185,7 @@ def merge_products(**context) -> dict[str, Any]:
                                 stats["total_products"] += len(products)
                             elif result.get("status") == "timeout":
                                 stats["timeout_categories"] += 1
-                                logger.warning(
-                                    f"⏱️  Category {result.get('category_name')} timeout"
-                                )
+                                logger.warning(f"⏱️  Category {result.get('category_name')} timeout")
                             else:
                                 stats["failed_categories"] += 1
                                 logger.warning(
@@ -219,7 +217,7 @@ def merge_products(**context) -> dict[str, Any]:
 
         # Log thống kê sales_count
         logger.info(
-            f"📊 Products có sales_count: {products_with_sales_count}/{len(unique_products)} ({products_with_sales_count/len(unique_products)*100:.1f}%)"
+            f"📊 Products có sales_count: {products_with_sales_count}/{len(unique_products)} ({products_with_sales_count / len(unique_products) * 100:.1f}%)"
             if unique_products
             else "📊 Products có sales_count: 0/0"
         )

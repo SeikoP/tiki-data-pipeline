@@ -292,11 +292,13 @@ class PostgresStorage:
         """
         # 1. Tạo staging table
         # 1. Tạo staging table
-        cur.execute(sql.SQL("""
+        cur.execute(
+            sql.SQL("""
             CREATE TEMP TABLE IF NOT EXISTS {staging} (
                 LIKE {target} INCLUDING DEFAULTS
             ) ON COMMIT DROP
-        """).format(staging=sql.Identifier(staging_table), target=sql.Identifier(target_table)))
+        """).format(staging=sql.Identifier(staging_table), target=sql.Identifier(target_table))
+        )
 
         cur.execute(sql.SQL("TRUNCATE {staging}").format(staging=sql.Identifier(staging_table)))
 
@@ -794,7 +796,6 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-
                 # Column names to update on conflict
                 update_columns = [
                     "name",
@@ -1188,7 +1189,6 @@ class PostgresStorage:
         added_count = 0
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-
                 for cat_info in categories_to_add:
                     # Use INSERT ... ON CONFLICT DO UPDATE to update if exists
                     cur.execute(
@@ -1897,7 +1897,6 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-
                 # Column names to update on conflict (all except product_id)
                 update_columns = [c for c in columns if c != "product_id"]
 

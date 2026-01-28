@@ -200,7 +200,7 @@ else:
         from crawl_products import crawl_category_products
     except ImportError as e:
         raise ImportError(
-            f"Không tìm thấy hàm crawl_category_products trong crawl_products.\n" f"Lỗi gốc: {e}"
+            f"Không tìm thấy hàm crawl_category_products trong crawl_products.\nLỗi gốc: {e}"
         ) from e
 
 # Import SeleniumDriverPool từ utils ở module level

@@ -1587,7 +1587,7 @@ def merge_product_details(**context) -> dict[str, Any]:
             # Heartbeat: log mỗi batch để Airflow biết task vẫn đang chạy
             if batch_num % 5 == 0 or batch_num == 1:
                 logger.info(
-                    f"💓 [Heartbeat] Đang xử lý batch {batch_num}/{total_batches} (index {start_idx}-{end_idx-1})..."
+                    f"💓 [Heartbeat] Đang xử lý batch {batch_num}/{total_batches} (index {start_idx}-{end_idx - 1})..."
                 )
 
             try:
