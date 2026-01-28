@@ -280,6 +280,10 @@ def get_logger(context=None):
     """
     # In Airflow 3.0+, context["ti"] is a RuntimeTaskInstance which may not have .log
     # Standard way to get the task logger across versions:
+    ti = (context or {}).get("ti")
+    logger = getattr(ti, "log", None)
+    if logger is not None:
+        return logger
     return logging.getLogger("airflow.task")
 
 

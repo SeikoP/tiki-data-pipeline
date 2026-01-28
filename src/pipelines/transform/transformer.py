@@ -652,7 +652,6 @@ class DataTransformer:
             r"\b\d+[\.,]?\d*\s*(?:m|cm|mm|kg|g|l|ml|w|v|kw|ah|ma|mah)\b",  # 5m, 10kg, 100w, 2000mah
             r"\b\d+\s*(?:chế độ|đầu|món|chi tiết|cái|nấc|vị|mùi|lít|hũ|gói|viên)\b", # 5 chế độ, 4 đầu
             r"\b\d+[-/]\d+\b",  # 2/3, 2-1
-            r"\b\d{2,}\b",  # Long numbers (likely years or codes)
         ]
         for pattern in spec_patterns:
             cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
@@ -736,6 +735,9 @@ class DataTransformer:
                 # But allow cutting if it's "Dien thoai ABC chinh hang" (idx > 10)
                 if idx > 5 and idx < earliest_idx:
                     earliest_idx = idx
+
+        if earliest_idx < len(cleaned):
+            cleaned = cleaned[:earliest_idx].strip()
 
         # 4. Cleanup trailing noise
         cleaned = re.sub(r"[\s\-\+\&\,\/\|\(\)\[\]]+$", "", cleaned)

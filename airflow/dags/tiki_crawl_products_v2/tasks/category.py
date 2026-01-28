@@ -61,12 +61,18 @@ def load_categories(**context) -> list[dict[str, Any]]:
         logger.info(f"✅ Đã load {len(categories)} danh mục")
 
         # Lọc level
-        min_level = get_int_variable("TIKI_MIN_CATEGORY_LEVEL", default=2)
-        max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
+        try:
+            min_level = get_int_variable("TIKI_MIN_CATEGORY_LEVEL", default=2)
+            max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
+        except Exception:
+            min_level, max_level = 2, 4
         categories = [cat for cat in categories if min_level <= cat.get("level", 0) <= max_level]
 
-        # Giới hạn số lượng xử lý
-        max_categories = get_int_variable("TIKI_MAX_CATEGORIES", default=0)
+        try:
+            max_categories = get_int_variable("TIKI_MAX_CATEGORIES", default=0)
+        except Exception:
+            max_categories = 0
+            
         if max_categories > 0:
             categories = categories[:max_categories]
             logger.info(f"📊 Xử lý {len(categories)} danh mục (Level {min_level}-{max_level} | Giới hạn: {max_categories})")
