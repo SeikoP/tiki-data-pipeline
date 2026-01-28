@@ -11,9 +11,10 @@ from unittest.mock import patch
 import pytest
 
 # Add src to path
-src_path = Path(__file__).parent.parent.parent / "src"
+src_path = Path(__file__).parent.parent / "src"
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
+
 
 
 @pytest.fixture
@@ -59,7 +60,9 @@ def test_retry_logic_complete_data_first_attempt(mock_html_complete):
                 "price": {"current_price": 100000},
                 "product_id": "12345",
                 "seller": {"name": "Test Seller Official"},
+                "seller_name": "Test Seller Official",
                 "brand": "Test Brand",
+                "category_id": "c123",
                 "category_path": ["Electronics"],
             }
 
@@ -107,7 +110,9 @@ def test_retry_logic_missing_seller_triggers_retry(mock_html_missing_seller, moc
                     "price": {"current_price": 100000},
                     "product_id": "12345",
                     "seller": {"name": ""},  # Missing
+                    "seller_name": "",
                     "brand": "Test Brand",
+                    "category_id": "c123",
                 }
             else:
                 # Second: complete
@@ -116,7 +121,9 @@ def test_retry_logic_missing_seller_triggers_retry(mock_html_missing_seller, moc
                     "price": {"current_price": 100000},
                     "product_id": "12345",
                     "seller": {"name": "Test Seller"},
+                    "seller_name": "Test Seller",
                     "brand": "Test Brand",
+                    "category_id": "c123",
                 }
 
         with patch("pipelines.crawl.crawl_products_detail.extract_product_detail") as mock_extract:
@@ -148,9 +155,10 @@ def test_retry_logic_accepts_partial_after_max_retries(mock_html_missing_seller)
                 "name": "Test Product",
                 "price": {"current_price": 100000},
                 "product_id": "12345",
-                "seller": {"name": ""},  # Missing
+                "seller": {"name": "Test Seller"},
+                "seller_name": "Test Seller",
                 "brand": "Test Brand",
-                "category_id": "c123",
+                "category_id": "",  # Missing category_id -> retry -> partial
             }
 
             result = crawl_product_with_retry(
@@ -161,7 +169,8 @@ def test_retry_logic_accepts_partial_after_max_retries(mock_html_missing_seller)
             assert result is not None
             assert result["_metadata"]["retry_count"] == 2
             assert result["_metadata"]["crawl_status"] == "partial"
-            assert "seller_name" in result["_metadata"]["missing_fields"]
+            assert "category_id" in result["_metadata"]["missing_fields"]
+
             assert mock_crawl.call_count == 3  # Initial + 2 retries
 
 
@@ -190,6 +199,11 @@ def test_retry_logic_handles_permanent_failures():
         # Extraction is performed only once; subsequent calls should never happen
         extracted_product = {
             "product_id": "123",
+            "name": "Test Product",
+            "price": {"current_price": 50000},
+            "seller_name": "Test",
+            "brand": "Test",
+            "category_id": "",  # Missing category_id -> retry
             "_metadata": {},
         }
         mock_extract.side_effect = [
@@ -197,7 +211,8 @@ def test_retry_logic_handles_permanent_failures():
             AssertionError("extract_product_detail should not be called after the first attempt"),
         ]
 
-        result = crawl_product_with_retry(original_product, max_retries=2)
+        result = crawl_product_with_retry("https://tiki.vn/test-product", max_retries=2)
+
 
         # After exhausting retries, we should return the last extracted product
         assert result is not None
@@ -228,7 +243,9 @@ def test_retry_logic_skips_missing_critical_fields():
             # Return product missing critical fields
             mock_extract.return_value = {
                 "seller": {"name": "Test Seller"},
+                "seller_name": "Test Seller",
                 "brand": "Test Brand",
+                "category_id": "c123",
                 # Missing name, price, product_id
             }
 
@@ -253,7 +270,9 @@ def test_retry_logic_metadata_tracking():
                 "price": {"current_price": 100000},
                 "product_id": "12345",
                 "seller": {"name": "Test Seller"},
+                "seller_name": "Test Seller",
                 "brand": "Test Brand",
+                "category_id": "c123",
             }
 
             result = crawl_product_with_retry(url="https://tiki.vn/test-product", verbose=False)

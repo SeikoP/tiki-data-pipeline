@@ -35,7 +35,7 @@ class AISummarizer:
         # Support multiple keys separated by comma
         self.api_keys = [k.strip() for k in self.raw_api_key.split(",") if k.strip()]
         self.current_key_index = 0
-        
+
         self.base_url = GROQ_CONFIG.get("base_url", "https://api.groq.com/openai/v1")
         self.model = GROQ_CONFIG.get("model", "openai/gpt-oss-120b")
         self.enabled = GROQ_CONFIG.get("enabled", False)
@@ -44,7 +44,7 @@ class AISummarizer:
             logger.warning("⚠️  GROQ_API_KEY không được cấu hình trong environment variables")
         if not self.enabled:
             logger.warning("⚠️  GROQ_ENABLED chưa được bật")
-        
+
         if len(self.api_keys) > 1:
             logger.info(f"🔑 Đã load {len(self.api_keys)} API keys cho Groq AI")
 
@@ -52,7 +52,7 @@ class AISummarizer:
         """Chuyển sang API Key tiếp theo"""
         if len(self.api_keys) <= 1:
             return
-        
+
         old_index = self.current_key_index
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
         logger.info(f"🔄 Rotating API Key: {old_index} -> {self.current_key_index}")
@@ -244,11 +244,11 @@ Tên rút gọn:
         # Thử với tối đa số lượng key * 2 lần (để retry mỗi key ít nhất 1 lần nếu cần)
         max_attempts = len(self.api_keys) * 2 if self.api_keys else 1
         attempts = 0
-        
+
         while attempts < max_attempts:
             attempts += 1
             current_key = self.api_keys[self.current_key_index] if self.api_keys else ""
-            
+
             try:
                 headers = {
                     "Authorization": f"Bearer {current_key}",
@@ -286,13 +286,17 @@ Tên rút gọn:
                     timeout=60,
                 )
 
-                if response.status_code == 429: # Rate Limit
-                    logger.warning(f"⚠️  Rate Limit (429) hit on Key #{self.current_key_index}. Rotating...")
+                if response.status_code == 429:  # Rate Limit
+                    logger.warning(
+                        f"⚠️  Rate Limit (429) hit on Key #{self.current_key_index}. Rotating..."
+                    )
                     self._rotate_key()
                     continue
-                
-                if response.status_code == 401: # Auth Error
-                    logger.warning(f"⚠️  Auth Error (401) on Key #{self.current_key_index}. Rotating...")
+
+                if response.status_code == 401:  # Auth Error
+                    logger.warning(
+                        f"⚠️  Auth Error (401) on Key #{self.current_key_index}. Rotating..."
+                    )
                     self._rotate_key()
                     continue
 
@@ -301,7 +305,7 @@ Tên rút gọn:
 
                 if "choices" in result and len(result["choices"]) > 0:
                     return result["choices"][0]["message"]["content"]
-                
+
                 # Nếu response 200 nhưng format lạ
                 logger.error(f"❌ Response không hợp lệ từ Groq API: {result}")
                 return ""
@@ -309,23 +313,23 @@ Tên rút gọn:
             except requests.exceptions.RequestException as e:
                 # Xử lý các lỗi mạng khác
                 logger.error(f"❌ Lỗi khi gọi Groq API (Key #{self.current_key_index}): {e}")
-                
+
                 # Nếu lỗi liên quan đến model, thử đổi model (chỉ làm 1 lần)
                 if hasattr(e, "response") and e.response is not None:
-                     error_detail = e.response.json()
-                     error_msg = error_detail.get("error", {}).get("message", "")
-                     if "not found" in error_msg.lower() or "deprecated" in error_msg.lower():
-                         # Logic đổi model (đơn giản hóa)
-                         pass
+                    error_detail = e.response.json()
+                    error_msg = error_detail.get("error", {}).get("message", "")
+                    if "not found" in error_msg.lower() or "deprecated" in error_msg.lower():
+                        # Logic đổi model (đơn giản hóa)
+                        pass
 
                 # Với lỗi mạng, thử rotate key (có thể key này bị ban IP?)
                 self._rotate_key()
                 continue
-                
+
             except Exception as e:
                 logger.error(f"❌ Lỗi không xác định khi gọi Groq API: {e}")
                 return ""
-        
+
         logger.error("❌ Đã thử tất cả API keys nhưng đều thất bại.")
         return ""
 

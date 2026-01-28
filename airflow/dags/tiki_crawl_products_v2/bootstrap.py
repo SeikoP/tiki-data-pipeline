@@ -38,7 +38,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 src_path = Path("/opt/airflow/src")
 if src_path.exists() and str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
-    
+
 # Fallback for local development
 if not src_path.exists():
     local_src = Path(__file__).resolve().parent.parent.parent / "src"
@@ -49,26 +49,41 @@ if not src_path.exists():
 try:
     from common.airflow_utils import (
         TaskGroup,
-        safe_import_attr,
-        get_variable,
         get_int_variable,
-        load_env_file
+        get_variable,
+        load_env_file,
+        safe_import_attr,
     )
     from pipelines.crawl.hierarchy import get_hierarchy_map
 except ImportError as e:
     logging.warning(f"⚠️ Could not import common utilities: {e}")
+
     # Minimal fallback to allow DAG parse (though it will likely fail run)
-    def get_variable(key, default=None): return os.getenv(key, default)
-    def get_int_variable(key, default=0): return int(os.getenv(key, default))
-    def load_env_file(): pass
-    
+    def get_variable(key, default=None):
+        return os.getenv(key, default)
+
+    def get_int_variable(key, default=0):
+        return int(os.getenv(key, default))
+
+    def load_env_file():
+        pass
+
     class TaskGroup:
-        def __init__(self, *args, **kwargs): pass
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        
-    def safe_import_attr(*args, **kwargs): return None
-    def get_hierarchy_map(force_reload=False): return {}
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def safe_import_attr(*args, **kwargs):
+        return None
+
+    def get_hierarchy_map(force_reload=False):
+        return {}
+
 
 # NOTE: Avoid heavy work at DAG parse time.
 # We defer loading .env and other expensive initialization until first use in tasks.
@@ -83,6 +98,7 @@ def ensure_env_loaded() -> None:
         load_env_file()
     finally:
         _ENV_LOADED = True
+
 
 # Try to import redis_cache for caching
 redis_cache = None
@@ -547,6 +563,7 @@ PROGRESS_FILE = OUTPUT_DIR / "crawl_progress.json"
 
 # Asset/Dataset đã được xóa - dependencies được quản lý bằng >> operator
 
+
 @lru_cache(maxsize=1)
 def ensure_output_dirs() -> None:
     """
@@ -558,8 +575,10 @@ def ensure_output_dirs() -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+
 # Thread-safe lock cho atomic writes
 write_lock = Lock()
+
 
 @lru_cache(maxsize=1)
 def get_tiki_circuit_breaker():
@@ -598,6 +617,7 @@ def get_tiki_degradation():
         failure_threshold=get_int_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default=3),
         recovery_threshold=get_int_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default=5),
     )
+
 
 # Import modules cho AI summarization và Discord notification
 # Tìm các thư mục: analytics/, ai/, notifications/ ở common/ (sau src/)
@@ -638,6 +658,7 @@ for common_base in common_base_paths:
     if analytics_path and ai_path and notifications_path and config_path:
         break
 
+
 def _lazy_import_from_file(module_name: str, file_path: str, attr: str):
     """Import attribute from a .py file path lazily."""
     import importlib.util
@@ -662,6 +683,7 @@ def get_DataAggregator():
             warnings.warn(f"Không thể import common.analytics.aggregator module: {e}", stacklevel=2)
     return None
 
+
 @lru_cache(maxsize=1)
 def get_load_categories_db_func():
     ensure_env_loaded()
@@ -673,6 +695,7 @@ def get_load_categories_db_func():
     if not func:
         warnings.warn("load_categories_to_db not available; DB load will be skipped", stacklevel=2)
     return func
+
 
 # Global debug flags controlled via Airflow Variables
 DEBUG_LOAD_CATEGORIES = (
@@ -693,6 +716,7 @@ def get_AISummarizer():
             warnings.warn(f"Không thể import common.ai.summarizer module: {e}", stacklevel=2)
     return None
 
+
 @lru_cache(maxsize=1)
 def get_DiscordNotifier():
     ensure_env_loaded()
@@ -706,5 +730,3 @@ def get_DiscordNotifier():
                 f"Không thể import common.notifications.discord module: {e}", stacklevel=2
             )
     return None
-
-

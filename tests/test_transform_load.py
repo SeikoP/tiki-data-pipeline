@@ -19,57 +19,15 @@ if sys.platform == "win32":
 # Thêm src vào path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 src_path = os.path.join(project_root, "src")
-common_path = os.path.join(src_path, "common")
-pipelines_path = os.path.join(src_path, "pipelines")
-transform_path = os.path.join(pipelines_path, "transform")
-load_path = os.path.join(pipelines_path, "load")
-
-# Load .env từ src/common/ nếu có
-env_file = os.path.join(common_path, ".env")
-if os.path.exists(env_file):
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv(env_file)
-        print(f"✅ Đã load .env từ: {env_file}")
-    except ImportError:
-        print("⚠️  python-dotenv chưa được cài đặt, bỏ qua load .env")
-    except Exception as e:
-        print(f"⚠️  Lỗi khi load .env: {e}")
-
-# Thêm các path vào sys.path
-for path in [project_root, src_path, common_path, pipelines_path, transform_path, load_path]:
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
-import importlib.util  # noqa: E402
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 # Import modules
-import types  # noqa: E402
+from pipelines.transform.transformer import DataTransformer
+from pipelines.load.loader import OptimizedDataLoader as DataLoader
 
-# Setup package structure
-if "pipelines" not in sys.modules:
-    sys.modules["pipelines"] = types.ModuleType("pipelines")
-if "pipelines.transform" not in sys.modules:
-    sys.modules["pipelines.transform"] = types.ModuleType("pipelines.transform")
-if "pipelines.load" not in sys.modules:
-    sys.modules["pipelines.load"] = types.ModuleType("pipelines.load")
 
-# Import transformer
-transformer_path = os.path.join(transform_path, "transformer.py")
-spec = importlib.util.spec_from_file_location("pipelines.transform.transformer", transformer_path)
-transformer_module = importlib.util.module_from_spec(spec)
-sys.modules["pipelines.transform.transformer"] = transformer_module
-spec.loader.exec_module(transformer_module)
-DataTransformer = transformer_module.DataTransformer
 
-# Import loader
-loader_path = os.path.join(load_path, "loader.py")
-spec = importlib.util.spec_from_file_location("pipelines.load.loader", loader_path)
-loader_module = importlib.util.module_from_spec(spec)
-sys.modules["pipelines.load.loader"] = loader_module
-spec.loader.exec_module(loader_module)
-DataLoader = loader_module.DataLoader
 
 
 def create_sample_products() -> list[dict[str, Any]]:

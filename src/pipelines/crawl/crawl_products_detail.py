@@ -385,7 +385,12 @@ def crawl_product_with_retry(
     # Import config and validator
     try:
         from .config import PRODUCT_RETRY_DELAY_BASE, PRODUCT_RETRY_MAX_ATTEMPTS
-        from .data_validator import enrich_product_metadata, validate_product_data
+        from .data_validator import (
+            enrich_product_metadata,
+            get_missing_fields,
+            validate_product_data,
+        )
+
     except ImportError:
         # Fallback defaults
         PRODUCT_RETRY_MAX_ATTEMPTS = 2
@@ -471,7 +476,7 @@ def crawl_product_with_retry(
             crawl_duration_ms = int((time.time() - attempt_start_time) * 1000)
 
             # Validate product data
-            action = validate_product_data(product, retry_count=retry_count)
+            action = validate_product_data(product, retry_count=retry_count, max_retries=max_retries)
 
             if verbose:
                 print(f"[Retry Wrapper] Validation result: {action}")
@@ -480,10 +485,16 @@ def crawl_product_with_retry(
                     print(f"[Retry Wrapper] Missing fields: {missing}")
 
             if action == "accept":
-                # Enrich with metadata
-                product = enrich_product_metadata(
-                    product, retry_count=retry_count, crawl_status="success"
+                # Determine status: if we missing important fields, it's 'partial', else 'success'
+                important_missing = get_missing_fields(
+                    product,
+                    field_list=None,  # default to important fields
                 )
+                status = "partial" if (important_missing and retry_count > 0) else "success"
+
+                # Enrich with metadata
+                product = enrich_product_metadata(product, retry_count=retry_count, crawl_status=status)
+
                 # Add timing metadata
                 if "_metadata" not in product:
                     product["_metadata"] = {}
@@ -493,10 +504,11 @@ def crawl_product_with_retry(
 
                 if verbose:
                     score = product["_metadata"].get("data_completeness_score", 0)
-                    print(f"[Retry Wrapper] ✅ Accepted with score: {score}")
+                    print(f"[Retry Wrapper] ✅ Accepted as {status} with score: {score}")
 
                 last_product = product
                 return product
+
 
             elif action == "skip":
                 if verbose:
@@ -565,6 +577,8 @@ def crawl_product_with_retry(
                 return None
 
     return None
+
+
 
 
 def crawl_product_detail_with_driver(

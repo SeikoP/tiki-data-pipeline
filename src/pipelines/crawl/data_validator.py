@@ -125,7 +125,9 @@ def calculate_completeness_score(product: dict[str, Any]) -> float:
     return round(total_score, 2)
 
 
-def validate_product_data(product: dict[str, Any], retry_count: int = 0) -> str:
+def validate_product_data(
+    product: dict[str, Any], retry_count: int = 0, max_retries: int | None = None
+) -> str:
     """
     Validate product data and determine action.
 
@@ -138,10 +140,14 @@ def validate_product_data(product: dict[str, Any], retry_count: int = 0) -> str:
     Args:
         product: Product data dictionary
         retry_count: Current retry count (default: 0)
+        max_retries: Maximum retry attempts (default: from config)
 
     Returns:
         Action string: 'accept', 'retry', or 'skip'
     """
+    if max_retries is None:
+        max_retries = PRODUCT_RETRY_MAX_ATTEMPTS
+
     # Check critical fields
     critical_missing = get_missing_fields(product, DATA_QUALITY_CRITICAL_FIELDS)
     if critical_missing:
@@ -156,10 +162,11 @@ def validate_product_data(product: dict[str, Any], retry_count: int = 0) -> str:
         return "accept"
 
     # Has missing important fields
-    if retry_count < PRODUCT_RETRY_MAX_ATTEMPTS:
+    if retry_count < max_retries:
         # Retry to get missing fields
         return "retry"
     else:
+
         # Exceeded max retries - check if we should accept partial data
 
         # ENHANCEMENT: Skip logic for strict fields

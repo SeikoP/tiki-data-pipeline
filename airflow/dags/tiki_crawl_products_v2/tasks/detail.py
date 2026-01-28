@@ -3,14 +3,14 @@ from __future__ import annotations
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from ..bootstrap import (
-    Any,
     DETAIL_CACHE_DIR,
     OUTPUT_FILE,
     OUTPUT_FILE_WITH_DETAIL,
     PROGRESS_FILE,
-    Path,
+    Any,
     CircuitBreakerOpenError,
     CrawlError,
+    Path,
     classify_error,
     crawl_product_detail_async,
     crawl_product_detail_with_driver,
@@ -34,11 +34,11 @@ from ..bootstrap import (
     sys,
     time,
 )
-
-from .common import get_logger  # noqa: F401
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
 from .common import atomic_write_file  # noqa: F401
+from .common import get_logger  # noqa: F401
 from .loader import _import_postgres_storage  # noqa: F401
+
 
 def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
     """
@@ -180,16 +180,21 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                             for i in range(0, len(product_ids_to_check), 1000):
                                 batch_ids = product_ids_to_check[i : i + 1000]
                                 placeholders = ",".join(["%s"] * len(batch_ids))
-                                
+
                                 # Logic check:
                                 # Normal: Skip if (Has Full Detail) OR (Is Recent)
                                 # Strict Recency (Force Update Old): Skip if (Is Recent) ONLY.
-                                
-                                check_recency_only = get_variable("TIKI_CHECK_RECENCY_ONLY", default="false").lower() == "true"
-                                
+
+                                check_recency_only = (
+                                    get_variable("TIKI_CHECK_RECENCY_ONLY", default="false").lower()
+                                    == "true"
+                                )
+
                                 if check_recency_only:
                                     logger.info("🕒 RECENCY MODE: Chỉ check updated_at")
-                                    filter_condition = f"updated_at > NOW() - INTERVAL '{cache_relax_days} days'"
+                                    filter_condition = (
+                                        f"updated_at > NOW() - INTERVAL '{cache_relax_days} days'"
+                                    )
                                 else:
                                     filter_condition = f"""
                                         (brand IS NOT NULL AND brand != '' AND seller_name IS NOT NULL AND seller_name != '')
@@ -210,7 +215,9 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                                 existing_product_ids_in_db.update(row[0] for row in cur.fetchall())
 
                     if len(existing_product_ids_in_db) > 0:
-                        logger.info(f"✅ DB Check: Found {len(existing_product_ids_in_db)} valid/recent products to skip")
+                        logger.info(
+                            f"✅ DB Check: Found {len(existing_product_ids_in_db)} valid/recent products to skip"
+                        )
                     storage.close()
         except Exception as e:
             logger.warning(f"⚠️  Không thể kiểm tra database: {e}")
@@ -218,12 +225,12 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         # Bắt đầu iteration từ đầu (Stateless iteration)
         # Thay vì dựa vào index, chúng ta dựa vào crawled_product_ids
-        
+
         # Check Force Crawl flag
         force_crawl = get_variable("TIKI_FORCE_CRAWL", default="false").lower() == "true"
         # Check Ignore Progress flag (Soft Force)
         ignore_progress = get_variable("TIKI_IGNORE_PROGRESS", default="false").lower() == "true"
-        
+
         if force_crawl:
             logger.warning("🔥 FORCE CRAWL: ON")
         elif ignore_progress:
@@ -235,7 +242,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         skipped_count = 0
         products_to_crawl = []
-        
+
         # Reset counters
         db_hits = 0
         cache_hits = 0
@@ -250,7 +257,11 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 continue
 
             # 1. Kiểm tra xem đã crawl chưa (từ progress) - Trừ khi force crawl hoặc ignore progress
-            if not force_crawl and not ignore_progress and product_id in progress["crawled_product_ids"]:
+            if (
+                not force_crawl
+                and not ignore_progress
+                and product_id in progress["crawled_product_ids"]
+            ):
                 already_crawled += 1
                 skipped_count += 1
                 continue
@@ -286,8 +297,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
             # Nếu chưa có valid cache (hoặc force crawl), thêm vào danh sách crawl
             if cache_hit:
-                 continue
-                 
+                continue
+
             products_to_crawl.append(
                 {
                     "product_id": product_id,
@@ -313,23 +324,29 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         total_checked = idx + 1
         cache_hit_rate = (cache_hits / total_checked * 100) if total_checked > 0 else 0.0
         total_skipped = already_crawled
-        
-        progress['total_crawled'] = len(progress['crawled_product_ids'])
-        
+
+        progress["total_crawled"] = len(progress["crawled_product_ids"])
+
         logger.info(("-" * 30))
-        logger.info(f"📊 SUMMARY: Input={len(products)} | ToCrawl={len(products_to_crawl)} | Skipped={total_skipped}")
+        logger.info(
+            f"📊 SUMMARY: Input={len(products)} | ToCrawl={len(products_to_crawl)} | Skipped={total_skipped}"
+        )
         logger.info(f"   Hits: DB={db_hits}, Cache={cache_hits} ({cache_hit_rate:.1f}%)")
         logger.info(f"   Total Unique Crawled: {progress['total_crawled']}")
         logger.info(("-" * 30))
 
         if len(products_to_crawl) == 0:
-            logger.warning(f"⚠️  NO PRODUCTS TO CRAWL! (Check: Progress={not ignore_progress}, DB/Cache={not force_crawl})")
-            logger.info("   Hint: Set TIKI_FORCE_CRAWL=true to recrawl all, or TIKI_IGNORE_PROGRESS=true to rescan.")
+            logger.warning(
+                f"⚠️  NO PRODUCTS TO CRAWL! (Check: Progress={not ignore_progress}, DB/Cache={not force_crawl})"
+            )
+            logger.info(
+                "   Hint: Set TIKI_FORCE_CRAWL=true to recrawl all, or TIKI_IGNORE_PROGRESS=true to rescan."
+            )
 
         # Lưu progress (list of IDs)
-        if products_to_crawl or skipped_count > 0: # Lưu nếu có thay đổi hoặc skip
+        if products_to_crawl or skipped_count > 0:  # Lưu nếu có thay đổi hoặc skip
             # Update last_crawled_index is mostly meaningless now, set to last checked
-            progress["last_crawled_index"] = idx 
+            progress["last_crawled_index"] = idx
             progress["last_updated"] = datetime.now().isoformat()
 
             # Lưu progress vào file
@@ -365,6 +382,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"❌ Lỗi khi prepare products: {e}", exc_info=True)
         raise
+
 
 def crawl_product_batch(
     product_batch: list[dict[str, Any]] = None, batch_index: int = -1, **context
@@ -421,7 +439,7 @@ def crawl_product_batch(
         logger.warning(f"⚠️  BATCH {batch_index} EMPTY")
         return []
 
-    ids_preview = [p.get('product_id', 'unknown') for p in product_batch[:3]]
+    ids_preview = [p.get("product_id", "unknown") for p in product_batch[:3]]
     logger.info(f"📦 BATCH {batch_index}: {len(product_batch)} products. IDs={ids_preview}...")
 
     results = []
@@ -843,6 +861,7 @@ def crawl_product_batch(
             logger.error("⚠️  Không thể tạo failed results vì product_batch không hợp lệ")
 
     return results
+
 
 def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) -> dict[str, Any]:
     """
@@ -1371,6 +1390,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         default_result["product_id"] = product_id if "product_id" in locals() else "unknown"
         default_result["url"] = product_url if "product_url" in locals() else ""
         return default_result
+
 
 def merge_product_details(**context) -> dict[str, Any]:
     """
@@ -2102,6 +2122,7 @@ def merge_product_details(**context) -> dict[str, Any]:
         except Exception:
             pass
         raise
+
 
 def save_products_with_detail(**context) -> str:
     """

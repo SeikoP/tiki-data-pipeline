@@ -14,8 +14,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...common.batch_processor import BatchProcessor
-from ...common.monitoring import PerformanceTimer
+from common.batch_processor import BatchProcessor
+from common.monitoring import PerformanceTimer
+
 from .db_pool import get_db_pool, initialize_db_pool
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ class OptimizedDataLoader:
             "total_products": 0,
             "db_loaded": 0,
             "file_loaded": 0,
+            "total_loaded": 0,
             "success_count": 0,
             "failed_count": 0,
             "inserted_count": 0,
@@ -142,8 +144,10 @@ class OptimizedDataLoader:
                 self._save_to_file(products, save_to_file)
 
             # Update success count
+            self.stats["total_loaded"] = max(self.stats["db_loaded"], self.stats["file_loaded"])
             if self.stats["success_count"] == 0 and self.stats["file_loaded"] > 0:
                 self.stats["success_count"] = self.stats["file_loaded"]
+
 
             self.stats["processing_time"] = timer.duration if timer.duration else 0.0
 
@@ -355,6 +359,7 @@ class OptimizedDataLoader:
     def load_from_file(
         self,
         input_file: str,
+        save_to_db: bool = True,
         save_to_file: str | None = None,
         upsert: bool = True,
     ) -> dict[str, Any]:
@@ -370,6 +375,11 @@ class OptimizedDataLoader:
         Returns:
             Stats dictionary
         """
+        # Tạm thời override enable_db nếu save_to_db=False
+        original_enable_db = self.enable_db
+        if not save_to_db:
+            self.enable_db = False
+
         try:
             with open(input_file, encoding="utf-8") as f:
                 data = json.load(f)
@@ -390,6 +400,9 @@ class OptimizedDataLoader:
             self.stats["errors"].append(error_msg)
             logger.error(f"❌ {error_msg}")
             return self.stats
+        finally:
+            self.enable_db = original_enable_db
+
 
 
 __all__ = ["OptimizedDataLoader"]

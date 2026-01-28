@@ -1,7 +1,3 @@
-"""
-Load pipeline module
-"""
-
-from .loader import DataLoader
+from .loader import OptimizedDataLoader as DataLoader
 
 __all__ = ["DataLoader"]

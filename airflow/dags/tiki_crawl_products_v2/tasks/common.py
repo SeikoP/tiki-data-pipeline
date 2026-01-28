@@ -4,6 +4,7 @@ from __future__ import annotations
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from ..bootstrap import Any, Path, json, logging, os, shutil, src_path, sys
 
+
 def get_logger(context):
     """Lấy logger từ context (Airflow 3.x compatible)"""
     try:
@@ -23,6 +24,7 @@ def get_logger(context):
         import logging
 
         return logging.getLogger("airflow.task")
+
 
 def _fix_sys_path_for_pipelines_import(logger=None):
     """
@@ -78,6 +80,7 @@ def _fix_sys_path_for_pipelines_import(logger=None):
             return src_path
 
     return None
+
 
 def atomic_write_file(filepath: str, data: Any, **context):
     """

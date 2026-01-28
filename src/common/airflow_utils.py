@@ -1,9 +1,10 @@
+import logging
 import os
 import sys
-import logging
 import warnings
 from pathlib import Path
 from typing import Any, Optional
+
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -22,6 +23,7 @@ except ImportError:
     try:
         from airflow.sdk import TaskGroup
     except ImportError:
+
         class TaskGroup:
             def __init__(self, *args, **kwargs):
                 pass
@@ -31,6 +33,7 @@ except ImportError:
 
             def __exit__(self, *args):
                 pass
+
 
 def safe_import_attr(module_path: str, attr_name: str, fallback_paths: list[Any] | None = None):
     """
@@ -75,6 +78,7 @@ def safe_import_attr(module_path: str, attr_name: str, fallback_paths: list[Any]
                         continue
         return None
 
+
 def get_variable(key: str, default: Any = None) -> Any:
     """
     Get generic variable from Airflow Variable or Environment Variable.
@@ -85,9 +89,10 @@ def get_variable(key: str, default: Any = None) -> Any:
             return Variable.get(key, default_var=default)
         except Exception:
             pass
-    
+
     # 2. Try Environment Variable
     return os.getenv(key, default)
+
 
 def get_int_variable(key: str, default: int) -> int:
     """Safely parse Airflow variable as integer with fallback and warning"""
@@ -103,6 +108,7 @@ def get_int_variable(key: str, default: int) -> int:
         )
         return default
 
+
 def load_env_file(search_paths: list[Path] | None = None) -> bool:
     """
     Load .env file for the DAG/Process.
@@ -112,11 +118,8 @@ def load_env_file(search_paths: list[Path] | None = None) -> bool:
         return False
 
     if not search_paths:
-        search_paths = [
-            Path("/opt/airflow/.env"),                      # Docker root
-            Path(os.getcwd()) / ".env"                      # CWD
-        ]
-        # Add local dev path relative to this file if possible, 
+        search_paths = [Path("/opt/airflow/.env"), Path(os.getcwd()) / ".env"]  # Docker root  # CWD
+        # Add local dev path relative to this file if possible,
         # but since this file is in src/common, we can try to look up to project root
         # src/common/airflow_utils.py -> src/common -> src -> project_root
         project_root = Path(__file__).parent.parent.parent
@@ -127,6 +130,6 @@ def load_env_file(search_paths: list[Path] | None = None) -> bool:
             load_dotenv(env_p, override=True)
             logging.info(f"✅ Loaded .env from {env_p}")
             return True
-            
+
     logging.warning("⚠️ Could not find .env file")
     return False

@@ -3,12 +3,12 @@ from __future__ import annotations
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from ..bootstrap import (
-    Any,
     CATEGORIES_FILE,
     DATA_DIR,
     OUTPUT_DIR,
     OUTPUT_FILE,
     OUTPUT_FILE_WITH_DETAIL,
+    Any,
     dag_file_dir,
     datetime,
     ensure_output_dirs,
@@ -16,10 +16,10 @@ from ..bootstrap import (
     os,
     re,
 )
-
-from .common import get_logger  # noqa: F401
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
 from .common import atomic_write_file  # noqa: F401
+from .common import get_logger  # noqa: F401
+
 
 def merge_products(**context) -> dict[str, Any]:
     """
@@ -249,6 +249,7 @@ def merge_products(**context) -> dict[str, Any]:
         logger.error(f"❌ Lỗi khi merge products: {e}", exc_info=True)
         raise
 
+
 def save_products(**context) -> str:
     """
     Task 4: Lưu sản phẩm vào file (atomic write)
@@ -333,6 +334,7 @@ def save_products(**context) -> str:
     except Exception as e:
         logger.error(f"❌ Lỗi khi save products: {e}", exc_info=True)
         raise
+
 
 def transform_products(**context) -> dict[str, Any]:
     """

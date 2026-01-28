@@ -91,36 +91,40 @@ def test_validate_product_detail():
     detail_with_price = {
         "product_id": "123",
         "name": "Laptop",
+        "brand": "Apple",
         "price": {"current_price": 10000000},
         # no sales_count
     }
     is_valid = cache.validate_product_detail(detail_with_price)
-    print(f"Detail with ONLY price: {is_valid}")
-    assert is_valid is True, "Should be valid if has price"
+    print(f"Detail with price + brand: {is_valid}")
+    assert is_valid is True, "Should be valid if has price and brand"
     print("✅ PASS\n")
 
     # Test case 2: Valid - has sales_count
     detail_with_sales = {
         "product_id": "123",
         "name": "Laptop",
+        "brand": "Apple",
         # no price
         "sales_count": 150,
     }
     is_valid = cache.validate_product_detail(detail_with_sales)
-    print(f"Detail with ONLY sales_count: {is_valid}")
-    assert is_valid is True, "Should be valid if has sales_count"
+    print(f"Detail with sales_count + brand: {is_valid}")
+    assert is_valid is True, "Should be valid if has sales_count and brand"
     print("✅ PASS\n")
 
     # Test case 3: Valid - has name
     detail_with_name = {
         "product_id": "123",
         "name": "Laptop Pro",
+        "brand": "Apple",
         # no price, no sales_count
     }
     is_valid = cache.validate_product_detail(detail_with_name)
-    print(f"Detail with ONLY name: {is_valid}")
-    assert is_valid is True, "Should be valid if has name"
+    print(f"Detail with name + brand: {is_valid}")
+    assert is_valid is True, "Should be valid if has name and brand"
     print("✅ PASS\n")
+
 
     # Test case 4: Invalid - empty detail
     is_valid = cache.validate_product_detail({})

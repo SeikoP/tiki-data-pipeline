@@ -2,10 +2,10 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import Any, CATEGORIES_FILE, Path, datetime, json, os, redis_cache, src_path, sys
-
-from .common import get_logger  # noqa: F401
+from ..bootstrap import CATEGORIES_FILE, Any, Path, datetime, json, os, redis_cache, src_path, sys
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
+from .common import get_logger  # noqa: F401
+
 
 def cleanup_incomplete_products_wrapper(**context):
     """
@@ -61,6 +61,7 @@ def cleanup_incomplete_products_wrapper(**context):
             "deleted_no_brand": 0,
             "deleted_both": 0,
         }
+
 
 def cleanup_orphan_categories_wrapper(**context):
     """
@@ -132,6 +133,7 @@ def cleanup_orphan_categories_wrapper(**context):
         logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
         return {"status": "error", "message": str(e), "deleted_count": 0}
 
+
 def cleanup_redundant_categories_wrapper(**context):
     """
     Task wrapper to remove non-leaf categories.
@@ -147,6 +149,7 @@ def cleanup_redundant_categories_wrapper(**context):
     except Exception as e:
         logger.error(f"❌ Error during redundant category cleanup: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
 
 def reconcile_categories_wrapper(**context):
     """
@@ -199,6 +202,7 @@ def reconcile_categories_wrapper(**context):
         logger.error(f"❌ Error during category reconciliation: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
+
 def cleanup_old_history_wrapper(**context):
     """
     Task wrapper to archive and delete old crawl history.
@@ -223,6 +227,7 @@ def cleanup_old_history_wrapper(**context):
     except Exception as e:
         logger.error(f"❌ Error during history cleanup: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
 
 def validate_data(**context) -> dict[str, Any]:
     """
@@ -351,6 +356,7 @@ def validate_data(**context) -> dict[str, Any]:
         logger.error(f"❌ Lỗi khi validate data: {e}", exc_info=True)
         raise
 
+
 def cleanup_redis_cache(**context) -> dict[str, Any]:
     """
     Task: Cleanup Redis cache
@@ -478,6 +484,7 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
 
     logger.info("=" * 70)
     return result
+
 
 def backup_database(**context) -> dict[str, Any]:
     """

@@ -3,9 +3,9 @@ from __future__ import annotations
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from ..bootstrap import (
-    Any,
     CATEGORIES_FILE,
     DATA_DIR,
+    Any,
     Path,
     dag_file_dir,
     get_load_categories_db_func,
@@ -16,9 +16,9 @@ from ..bootstrap import (
     src_path,
     sys,
 )
-
-from .common import get_logger  # noqa: F401
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
+from .common import get_logger  # noqa: F401
+
 
 def fix_missing_parent_categories(**context) -> dict[str, Any]:
     """
@@ -220,6 +220,7 @@ def fix_missing_parent_categories(**context) -> dict[str, Any]:
         logger.error(f"❌ Lỗi khi fix missing parent categories: {e}", exc_info=True)
         return {"status": "error", "message": str(e), "fixed_count": 0}
 
+
 def load_categories_to_db_wrapper(**context):
     """
     Task wrapper to load categories from JSON file into PostgreSQL database.
@@ -261,6 +262,7 @@ def load_categories_to_db_wrapper(**context):
     except Exception as e:
         logger.error(f"❌ Lỗi khi load categories vào DB: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
 
 def _import_postgres_storage():
     """
@@ -350,6 +352,7 @@ def _import_postgres_storage():
             except Exception:
                 return None
 
+
 def load_products(**context) -> dict[str, Any]:
     """
     Task: Load dữ liệu đã transform vào database
@@ -400,8 +403,8 @@ def load_products(**context) -> dict[str, Any]:
         # Import OptimizedDataLoader
         try:
             # Tìm đường dẫn load module
-            # Ưu tiên load từ file src/pipelines/load/loader_optimized.py
-            from pipelines.load.loader_optimized import OptimizedDataLoader
+            # Ưu tiên load từ file src/pipelines/load/loader.py
+            from pipelines.load.loader import OptimizedDataLoader
 
             # Lấy database config từ Airflow Variables hoặc environment variables
             db_host = get_variable("POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres"))
@@ -428,7 +431,7 @@ def load_products(**context) -> dict[str, Any]:
                 batch_size=int(get_variable("TIKI_SAVE_BATCH_SIZE", default=2000)),
                 enable_db=True,
                 db_config=db_config,
-                show_progress=True
+                show_progress=True,
             )
 
             try:
@@ -466,10 +469,7 @@ def load_products(**context) -> dict[str, Any]:
                 # Sử dụng OptimizedDataLoader.load_products
                 # Signature: load_products(products, upsert=True, validate_before_load=True, save_to_file=None)
                 load_stats = loader.load_products(
-                    products,
-                    upsert=True,
-                    validate_before_load=True,
-                    save_to_file=str(final_file)
+                    products, upsert=True, validate_before_load=True, save_to_file=str(final_file)
                 )
 
                 # Kiểm tra số lượng products trong DB sau khi load
@@ -494,7 +494,9 @@ def load_products(**context) -> dict[str, Any]:
                             if diff > 0:
                                 logger.info(f"✅ Đã thêm {diff} products mới vào DB")
                             elif diff == 0:
-                                logger.info("ℹ️  Không có products mới (chỉ UPDATE các products đã có)")
+                                logger.info(
+                                    "ℹ️  Không có products mới (chỉ UPDATE các products đã có)"
+                                )
                 except Exception as e:
                     logger.warning(f"⚠️  Không thể kiểm tra số lượng products sau khi load: {e}")
                     count_after = None
@@ -503,18 +505,20 @@ def load_products(**context) -> dict[str, Any]:
                 logger.info("📊 LOAD RESULTS (Optimized)")
                 logger.info("=" * 70)
                 logger.info(f"✅ DB loaded: {load_stats.get('db_loaded', 0)} products")
-                
+
                 inserted = load_stats.get("inserted_count", 0)
                 updated = load_stats.get("updated_count", 0)
                 if inserted > 0 or updated > 0:
                     logger.info(f"   - INSERT: {inserted}")
                     logger.info(f"   - UPDATE: {updated}")
-                
+
                 logger.info(f"✅ File loaded: {load_stats.get('file_loaded', 0)}")
                 logger.info(f"❌ Failed: {load_stats.get('failed_count', 0)}")
-                
+
                 if load_stats.get("errors"):
-                     logger.warning(f"⚠️  Errors ({len(load_stats['errors'])}): {load_stats['errors'][:5]}...")
+                    logger.warning(
+                        f"⚠️  Errors ({len(load_stats['errors'])}): {load_stats['errors'][:5]}..."
+                    )
 
                 return {
                     "final_file": str(final_file),

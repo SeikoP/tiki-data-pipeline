@@ -1,7 +1,28 @@
 from __future__ import annotations
 
 from .bootstrap import DAG, DAG_CONFIG, PythonOperator, logging, timedelta
-from .tasks import aggregate_and_notify, backup_database, cleanup_incomplete_products_wrapper, cleanup_old_history_wrapper, cleanup_orphan_categories_wrapper, cleanup_redis_cache, cleanup_redundant_categories_wrapper, crawl_product_batch, crawl_single_category, load_categories, load_categories_to_db_wrapper, load_products, merge_product_details, merge_products, prepare_products_for_detail, reconcile_categories_wrapper, save_products, save_products_with_detail, transform_products, validate_data
+from .tasks import (
+    aggregate_and_notify,
+    backup_database,
+    cleanup_incomplete_products_wrapper,
+    cleanup_old_history_wrapper,
+    cleanup_orphan_categories_wrapper,
+    cleanup_redis_cache,
+    cleanup_redundant_categories_wrapper,
+    crawl_product_batch,
+    crawl_single_category,
+    load_categories,
+    load_categories_to_db_wrapper,
+    load_products,
+    merge_product_details,
+    merge_products,
+    prepare_products_for_detail,
+    reconcile_categories_wrapper,
+    save_products,
+    save_products_with_detail,
+    transform_products,
+    validate_data,
+)
 
 with DAG(**DAG_CONFIG) as dag:
 
@@ -285,4 +306,3 @@ with DAG(**DAG_CONFIG) as dag:
         >> transform_load_group
         >> maintenance_group
     )
-

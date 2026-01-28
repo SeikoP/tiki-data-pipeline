@@ -504,7 +504,7 @@ def main():
     # Default: danh sách mặc định nếu không có config
     if not root_urls:
         root_urls = [
-            "https://tiki.vn/cham-soc-nha-cua/c15078",
+            "https://tiki.vn/do-dung-va-thiet-bi-nha-tam/c1966",
             # Có thể thêm các root categories khác ở đây
             # "https://tiki.vn/nha-cua-doi-song/c1883",
             # "https://tiki.vn/dien-tu-dien-lanh/c4221",

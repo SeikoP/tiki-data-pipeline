@@ -3,10 +3,10 @@ from __future__ import annotations
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from ..bootstrap import (
-    Any,
     CACHE_DIR,
     CATEGORIES_FILE,
     DEBUG_LOAD_CATEGORIES,
+    Any,
     CircuitBreakerOpenError,
     classify_error,
     datetime,
@@ -19,9 +19,9 @@ from ..bootstrap import (
     sys,
     time,
 )
-
-from .common import get_logger  # noqa: F401
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
+from .common import get_logger  # noqa: F401
+
 
 def load_categories(**context) -> list[dict[str, Any]]:
     """
@@ -81,6 +81,7 @@ def load_categories(**context) -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"❌ Lỗi khi load categories: {e}", exc_info=True)
         raise
+
 
 def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
     """

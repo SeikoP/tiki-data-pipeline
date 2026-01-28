@@ -2,10 +2,18 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import Any, OUTPUT_FILE_WITH_DETAIL, datetime, get_AISummarizer, get_DataAggregator, get_DiscordNotifier, os
-
-from .common import get_logger  # noqa: F401
+from ..bootstrap import (
+    OUTPUT_FILE_WITH_DETAIL,
+    Any,
+    datetime,
+    get_AISummarizer,
+    get_DataAggregator,
+    get_DiscordNotifier,
+    os,
+)
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
+from .common import get_logger  # noqa: F401
+
 
 def aggregate_and_notify(**context) -> dict[str, Any]:
     """

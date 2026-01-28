@@ -631,11 +631,11 @@ class DataTransformer:
         if "," in cleaned_name:
             parts = cleaned_name.split(",")
             first_part = parts[0].strip()
-            # Validation: 
+            # Validation:
             # - Không quá ngắn (ví dụ "Áo")
             # - Không quá dài (nếu dài quá thì vẫn cần AI hoặc truncate)
             if len(first_part) >= 4 and len(first_part) <= 60:
-                 return first_part
+                return first_part
 
         # 2. Try AI shortening if enabled (nếu không tách được hoặc kết quả không tốt)
         if self.ai_summarizer:
