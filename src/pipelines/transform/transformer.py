@@ -617,7 +617,7 @@ class DataTransformer:
         return cleaned
 
     def _get_short_name(self, name: str) -> str:
-        """Get shortened name using AI with local fallback if needed"""
+        """Get shortened name using heuristic (comma split) -> AI -> Fallback"""
         if not name:
             return ""
 
@@ -626,7 +626,18 @@ class DataTransformer:
         if not cleaned_name:
             cleaned_name = name
 
-        # 1. Try AI shortening if enabled
+        # 1. Heuristic: Split by comma (User request)
+        # "dùng cách bình thường để tách ,"
+        if "," in cleaned_name:
+            parts = cleaned_name.split(",")
+            first_part = parts[0].strip()
+            # Validation: 
+            # - Không quá ngắn (ví dụ "Áo")
+            # - Không quá dài (nếu dài quá thì vẫn cần AI hoặc truncate)
+            if len(first_part) >= 4 and len(first_part) <= 60:
+                 return first_part
+
+        # 2. Try AI shortening if enabled (nếu không tách được hoặc kết quả không tốt)
         if self.ai_summarizer:
             try:
                 # Pass already cleaned name to AI to focus on core attributes
@@ -637,7 +648,7 @@ class DataTransformer:
             except Exception as e:
                 logger.warning(f"⚠️  AI shortening failed, using fallback: {e}")
 
-        # 2. Local Fallback: Use heuristic cleaned name, truncate if still too long
+        # 3. Local Fallback: Use heuristic cleaned name, truncate if still too long
         if len(cleaned_name) > 80:
             # Try to cut at space
             truncated = cleaned_name[:77]

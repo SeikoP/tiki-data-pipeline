@@ -9,9 +9,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Tìm file .env trong src/common/
+# Tìm file .env ở root (lên 2 cấp từ src/common/)
 current_dir = Path(__file__).parent
-env_file = current_dir / ".env"
+env_file = current_dir.parent.parent / ".env"
 
 # Load .env nếu có
 if env_file.exists():

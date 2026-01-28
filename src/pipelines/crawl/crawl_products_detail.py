@@ -60,6 +60,7 @@ def crawl_product_detail_with_selenium(
     timeout=30,
     use_redis_cache=True,
     use_rate_limiting=True,
+    wait_config_overrides: dict | None = None,
 ):
     """Crawl trang sản phẩm Tiki bằng Selenium để load đầy đủ dữ liệu
 
@@ -131,12 +132,19 @@ def crawl_product_detail_with_selenium(
             # Set timeout cho page load
             driver.set_page_load_timeout(timeout)
             # Tier 1: Moderate wait time increase for better data capture
+            implicit_wait = 4  # Default fallback
             try:
                 from .config import CRAWL_IMPLICIT_WAIT_NORMAL
 
-                driver.implicitly_wait(CRAWL_IMPLICIT_WAIT_NORMAL)  # 4s (increased from 3s)
+                implicit_wait = CRAWL_IMPLICIT_WAIT_NORMAL
             except ImportError:
-                driver.implicitly_wait(4)  # Fallback: 4s
+                pass
+
+            # Apply overrides if present
+            if wait_config_overrides and "implicit_wait" in wait_config_overrides:
+                implicit_wait = wait_config_overrides["implicit_wait"]
+
+            driver.implicitly_wait(implicit_wait)
 
             if verbose:
                 print(f"[Selenium] Đang mở {url}... (attempt {attempt + 1}/{max_retries})")
@@ -183,19 +191,37 @@ def crawl_product_detail_with_selenium(
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 # Wait cho dynamic content (seller, price, sales_count, rating) load
                 # Tier 1: Increased timeout to ensure seller and original_price load
+                # Wait cho dynamic content (seller, price, sales_count, rating) load
+                # Tier 1: Increased timeout to ensure seller and original_price load
+                dynamic_wait = 4
+                scroll_sleep = 1.2
+
                 try:
                     from .config import (
                         CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL,
                         CRAWL_POST_SCROLL_SLEEP_NORMAL,
                     )
 
-                    wait_for_dynamic_content_loaded(
-                        driver, timeout=CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL, verbose=verbose
-                    )  # 4s
-                    time.sleep(CRAWL_POST_SCROLL_SLEEP_NORMAL)  # 1.2s
+                    dynamic_wait = CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL
+                    scroll_sleep = CRAWL_POST_SCROLL_SLEEP_NORMAL
                 except ImportError:
-                    wait_for_dynamic_content_loaded(driver, timeout=4, verbose=verbose)
-                    time.sleep(1.2)  # Fallback
+                    pass
+
+                # Apply overrides if present
+                if wait_config_overrides:
+                    if "dynamic_content_wait" in wait_config_overrides:
+                        dynamic_wait = wait_config_overrides["dynamic_content_wait"]
+                    if "post_scroll_sleep" in wait_config_overrides:
+                        scroll_sleep = wait_config_overrides["post_scroll_sleep"]
+
+                try:
+                    from .utils_selenium_wait import wait_for_dynamic_content_loaded
+
+                    wait_for_dynamic_content_loaded(driver, timeout=dynamic_wait, verbose=verbose)
+                    time.sleep(scroll_sleep)
+                except ImportError:
+                    wait_for_dynamic_content_loaded(driver, timeout=dynamic_wait, verbose=verbose)
+                    time.sleep(scroll_sleep)  # Fallback
             except ImportError:
                 # Fallback về time.sleep nếu module chưa có
                 # Scroll đến seller section và wait lâu hơn
@@ -400,46 +426,37 @@ def crawl_product_with_retry(
                 )
             else:
                 # Tier 2: Increased wait times for retry
-                # Temporarily override config values
-                import sys
+                # Define overrides directly
+                retry_overrides = {
+                    "implicit_wait": 8,  # Default retry value
+                    "dynamic_content_wait": 8,
+                    "post_scroll_sleep": 2.4,
+                }
 
-                # Create temporary config module with increased wait times
-                if "pipelines.crawl.config" in sys.modules:
-                    config_module = sys.modules["pipelines.crawl.config"]
-                    # Save original values
-                    original_implicit = getattr(config_module, "CRAWL_IMPLICIT_WAIT_NORMAL", 4)
-                    original_dynamic = getattr(
-                        config_module, "CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL", 4
-                    )
-                    original_sleep = getattr(config_module, "CRAWL_POST_SCROLL_SLEEP_NORMAL", 1.2)
-
-                    # Set retry values (2x normal)
-                    config_module.CRAWL_IMPLICIT_WAIT_NORMAL = getattr(
-                        config_module, "CRAWL_IMPLICIT_WAIT_RETRY", 8
-                    )
-                    config_module.CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL = getattr(
-                        config_module, "CRAWL_DYNAMIC_CONTENT_WAIT_RETRY", 8
-                    )
-                    config_module.CRAWL_POST_SCROLL_SLEEP_NORMAL = getattr(
-                        config_module, "CRAWL_POST_SCROLL_SLEEP_RETRY", 2.4
-                    )
-
+                # Try to load values from config if available (optional)
                 try:
-                    html = crawl_product_detail_with_selenium(
-                        url,
-                        save_html=False,
-                        verbose=verbose,
-                        max_retries=1,
-                        timeout=120,
-                        use_redis_cache=False,  # Don't use cache on retry
-                        use_rate_limiting=use_rate_limiting,
+                    from .config import (
+                        CRAWL_DYNAMIC_CONTENT_WAIT_RETRY,
+                        CRAWL_IMPLICIT_WAIT_RETRY,
+                        CRAWL_POST_SCROLL_SLEEP_RETRY,
                     )
-                finally:
-                    # Restore original values
-                    if "pipelines.crawl.config" in sys.modules:
-                        config_module.CRAWL_IMPLICIT_WAIT_NORMAL = original_implicit
-                        config_module.CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL = original_dynamic
-                        config_module.CRAWL_POST_SCROLL_SLEEP_NORMAL = original_sleep
+
+                    retry_overrides["implicit_wait"] = CRAWL_IMPLICIT_WAIT_RETRY
+                    retry_overrides["dynamic_content_wait"] = CRAWL_DYNAMIC_CONTENT_WAIT_RETRY
+                    retry_overrides["post_scroll_sleep"] = CRAWL_POST_SCROLL_SLEEP_RETRY
+                except ImportError:
+                    pass
+
+                html = crawl_product_detail_with_selenium(
+                    url,
+                    save_html=False,
+                    verbose=verbose,
+                    max_retries=1,
+                    timeout=120,
+                    use_redis_cache=False,  # Don't use cache on retry
+                    use_rate_limiting=use_rate_limiting,
+                    wait_config_overrides=retry_overrides,
+                )
 
             if not html:
                 raise ValueError("Failed to get HTML content")
@@ -1329,7 +1346,10 @@ def extract_product_detail(
 
                 # Cập nhật seller
                 seller_info = (
-                    product_from_next.get("seller") or product_from_next.get("vendor") or {}
+                    product_from_next.get("current_seller")
+                    or product_from_next.get("seller")
+                    or product_from_next.get("vendor")
+                    or {}
                 )
                 if isinstance(seller_info, dict):
                     if not product_data["seller"]["name"]:
@@ -1337,9 +1357,20 @@ def extract_product_detail(
                             seller_info.get("name") or seller_info.get("sellerName") or ""
                         )
                     if not product_data["seller"]["seller_id"]:
-                        product_data["seller"]["seller_id"] = (
-                            seller_info.get("id") or seller_info.get("sellerId") or ""
-                        )
+                        # Extract ID directly or from URL if needed
+                        seller_id = seller_info.get("id") or seller_info.get("sellerId")
+                        if not seller_id and seller_info.get("link"):
+                            # Try to extract from link if direct ID is missing
+                            import re
+
+                            link = seller_info.get("link")
+                            id_match = re.search(r"seller_id=([0-9]+)", link) or re.search(
+                                r"/seller/([0-9]+)", link
+                            )
+                            if id_match:
+                                seller_id = id_match.group(1)
+                        product_data["seller"]["seller_id"] = str(seller_id) if seller_id else ""
+
                     if seller_info.get("isOfficial") or seller_info.get("is_official"):
                         product_data["seller"]["is_official"] = True
 
