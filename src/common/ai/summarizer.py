@@ -12,20 +12,17 @@ from typing import Any
 
 import requests
 
-# Import config từ common.config (ưu tiên) hoặc pipelines.crawl.config (fallback)
+# Import config từ common.config (ưu tiên)
 try:
-    from ..config import GROQ_CONFIG
+    from ..config import AI_CONFIG
 except ImportError:
-    try:
-        from ...pipelines.crawl.config import GROQ_CONFIG
-    except ImportError:
-        # Fallback: đọc trực tiếp từ environment
-        GROQ_CONFIG = {
-            "enabled": os.getenv("GROQ_ENABLED", "false").lower() == "true",
-            "api_key": os.getenv("GROQ_API_KEY", ""),
-            "base_url": os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1"),
-            "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
-        }
+    # Fallback: đọc trực tiếp từ environment
+    AI_CONFIG = {
+        "enabled": os.getenv("AI_ENABLED", os.getenv("GROQ_ENABLED", "false")).lower() == "true",
+        "api_key": os.getenv("AI_API_KEY", os.getenv("GROQ_API_KEY", "")),
+        "base_url": os.getenv("AI_API_BASE", os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")),
+        "model": os.getenv("AI_MODEL", os.getenv("GROQ_MODEL", "arcee-ai/trinity-large-preview:free")),
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +33,19 @@ class AISummarizer:
     """
 
     def __init__(self):
-        self.raw_api_key = GROQ_CONFIG.get("api_key", "")
+        self.raw_api_key = AI_CONFIG.get("api_key", "")
         # Support multiple keys separated by comma
         self.api_keys = [k.strip() for k in self.raw_api_key.split(",") if k.strip()]
         self.current_key_index = 0
 
-        self.base_url = GROQ_CONFIG.get("base_url", "https://api.groq.com/openai/v1")
-        self.model = GROQ_CONFIG.get("model", "openai/gpt-oss-120b")
-        self.enabled = GROQ_CONFIG.get("enabled", False)
+        self.base_url = AI_CONFIG.get("base_url", "https://openrouter.ai/api/v1")
+        self.model = AI_CONFIG.get("model", "arcee-ai/trinity-large-preview:free")
+        self.enabled = AI_CONFIG.get("enabled", False)
 
         if not self.api_keys:
-            logger.warning("⚠️  GROQ_API_KEY không được cấu hình trong environment variables")
+            logger.warning("⚠️  AI_API_KEY không được cấu hình trong environment variables")
         if not self.enabled:
-            logger.warning("⚠️  GROQ_ENABLED chưa được bật")
+            logger.warning("⚠️  AI_ENABLED chưa được bật")
 
         if len(self.api_keys) > 1:
             logger.info(f"🔑 Đã load {len(self.api_keys)} API keys cho Groq AI")
@@ -321,6 +318,11 @@ Tên rút gọn:
                     "Authorization": f"Bearer {current_key}",
                     "Content-Type": "application/json",
                 }
+                
+                # OpenRouter specific headers (recommended)
+                if "openrouter.ai" in self.base_url:
+                    headers["HTTP-Referer"] = "https://github.com/SeikoP/tiki-data-pipeline"
+                    headers["X-Title"] = "Tiki Data Pipeline"
 
                 # Map model cũ sang model mới nếu cần
                 model = self.model
