@@ -30,7 +30,7 @@ else:
     logger.debug(f"📝 File .env không tồn tại tại: {env_file.absolute()}")
 
 # AI configuration (Groq or OpenRouter)
-# Models examples: 
+# Models examples:
 # Groq: llama-3.3-70b-versatile, llama-3.1-8b-instant
 # OpenRouter: arcee-ai/trinity-large-preview:free, google/learnlm-1.5-pro-experimental:free
 AI_CONFIG = {

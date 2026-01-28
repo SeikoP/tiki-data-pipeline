@@ -318,7 +318,7 @@ Tên rút gọn:
                     "Authorization": f"Bearer {current_key}",
                     "Content-Type": "application/json",
                 }
-                
+
                 # OpenRouter specific headers (recommended)
                 if "openrouter.ai" in self.base_url:
                     headers["HTTP-Referer"] = "https://github.com/SeikoP/tiki-data-pipeline"
