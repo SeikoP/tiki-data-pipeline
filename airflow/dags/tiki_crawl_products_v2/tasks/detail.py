@@ -15,7 +15,6 @@ from tiki_crawl_products_v2.bootstrap import (
     crawl_product_detail_async,
     crawl_product_detail_with_driver,
     crawl_product_detail_with_selenium,
-    dag_file_dir,
     datetime,
     ensure_output_dirs,
     extract_product_detail,
@@ -454,22 +453,27 @@ def crawl_product_batch(
             # 1. Try standard package import first (preferred)
             _fix_sys_path_for_pipelines_import(logger)
             from pipelines.crawl.utils import SeleniumDriverPool
+
             _SeleniumDriverPool = SeleniumDriverPool
             logger.info("✅ Imported SeleniumDriverPool from pipelines.crawl.utils")
         except ImportError:
             try:
                 # 2. Fallback to file-based import logic
-                logger.warning("⚠️ Standard import failed, trying file-based import for SeleniumDriverPool")
+                logger.warning(
+                    "⚠️ Standard import failed, trying file-based import for SeleniumDriverPool"
+                )
                 import importlib.util
-                
+
                 src_path = Path("/opt/airflow/src")
                 if not src_path.exists():
-                     # Try local dev path
-                     src_path = Path(__file__).parent.parent.parent.parent.parent / "src"
-                
+                    # Try local dev path
+                    src_path = Path(__file__).parent.parent.parent.parent.parent / "src"
+
                 utils_path = src_path / "pipelines" / "crawl" / "utils.py"
                 if utils_path.exists():
-                    spec = importlib.util.spec_from_file_location("crawl_utils_task", str(utils_path))
+                    spec = importlib.util.spec_from_file_location(
+                        "crawl_utils_task", str(utils_path)
+                    )
                     if spec and spec.loader:
                         utils_mod = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(utils_mod)
@@ -478,7 +482,7 @@ def crawl_product_batch(
                 logger.error(f"❌ Failed to import SeleniumDriverPool: {e}")
 
         if _SeleniumDriverPool is None:
-             raise ImportError("Could not import SeleniumDriverPool from any source")
+            raise ImportError("Could not import SeleniumDriverPool from any source")
 
         # Sử dụng hàm đã được import ở đầu file
         # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file

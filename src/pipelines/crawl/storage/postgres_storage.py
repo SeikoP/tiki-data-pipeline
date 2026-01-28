@@ -1774,7 +1774,9 @@ class PostgresStorage:
                         reason_parts.append(f"{deleted_both} missing both/multiple")
 
                     reason_str = ", ".join(reason_parts)
-                    print(f"🧹 Cleaned up {deleted_count} incomplete products ({reason_str}) and {deleted_history} history records")
+                    print(
+                        f"🧹 Cleaned up {deleted_count} incomplete products ({reason_str}) and {deleted_history} history records"
+                    )
 
         # 3. Update category counts if products were deleted
         # (Outside transaction block to avoid long locking or transaction issues)
