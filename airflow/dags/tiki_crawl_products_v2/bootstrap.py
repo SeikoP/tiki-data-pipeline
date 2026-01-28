@@ -94,8 +94,9 @@ except ImportError:
 
 
 def load_env_file():
-    """Dummy load_env_file for bootstrap"""
-    pass
+    """
+    Dummy load_env_file for bootstrap.
+    """
 
 
 # Setup imports path
@@ -202,8 +203,8 @@ possible_paths = [
 
 
 def _fix_sys_path_for_pipelines_import(logger=None):
-    """
-    Sửa sys.path và sys.modules để đảm bảo import được pipelines.
+    """Sửa sys.path và sys.modules để đảm bảo import được pipelines.
+
     Xử lý trường hợp pipelines bị nhận nhầm là namespace package hoặc module không tồn tại.
     """
     if logger:

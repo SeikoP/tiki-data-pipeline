@@ -10,7 +10,6 @@ from tiki_crawl_products_v2.bootstrap import (
     Any,
     CircuitBreakerOpenError,
     Path,
-    SeleniumDriverPool,
     atomic_write_file,
     classify_error,
     crawl_product_detail_async,
@@ -36,9 +35,7 @@ from tiki_crawl_products_v2.bootstrap import (
     time,
 )
 
-from .common import (
-    _fix_sys_path_for_pipelines_import,  # noqa: F401
-)
+from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
 from .loader import _import_postgres_storage  # noqa: F401
 
 

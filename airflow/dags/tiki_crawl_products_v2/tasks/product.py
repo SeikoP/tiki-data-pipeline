@@ -19,9 +19,7 @@ from tiki_crawl_products_v2.bootstrap import (
     os,
 )
 
-from .common import (
-    _fix_sys_path_for_pipelines_import,  # noqa: F401
-)
+from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
 
 
 def merge_products(**context) -> dict[str, Any]:

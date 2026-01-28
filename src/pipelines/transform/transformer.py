@@ -696,8 +696,8 @@ class DataTransformer:
         return cleaned
 
     def _extract_short_name_heuristics(self, name: str) -> str:
-        """
-        Advanced heuristic extraction to find the core product name.
+        """Advanced heuristic extraction to find the core product name.
+
         Strategies:
         1. Clean noise/fluff.
         2. Structural split (delimiters).
