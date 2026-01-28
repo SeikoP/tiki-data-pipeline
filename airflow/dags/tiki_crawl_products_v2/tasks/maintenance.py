@@ -521,9 +521,9 @@ def backup_database(**context) -> dict[str, Any]:
             container_name = "tiki-data-pipeline-postgres-1"
             # Thử nhiều đường dẫn backup
             backup_dirs = [
-                Path("/opt/airflow/backups/postgres"),  # Trong container Airflow
-                Path("/backups"),  # Mount từ postgres container
-                Path("/opt/airflow/data/backups/postgres"),  # Fallback
+                Path("/opt/airflow/data/backups/postgres"),  # Priority 1: Mounted local data dir
+                Path("/opt/airflow/backups/postgres"),  # Priority 2: Container internal
+                Path("/backups"),  # Priority 3: Postgres volume
             ]
             backup_dir = None
             for bd in backup_dirs:
@@ -570,7 +570,7 @@ def backup_database(**context) -> dict[str, Any]:
                 "--format=plain",  # Plain SQL format - dễ restore, tương thích
                 "--no-owner",  # Không dump owner info
                 "--no-acl",  # Không dump access privileges
-                "crawl_data",
+                os.getenv("POSTGRES_DB", "tiki"),
             ]
 
             try:
@@ -614,7 +614,8 @@ def backup_database(**context) -> dict[str, Any]:
             # Sử dụng script backup (dùng format sql để tránh vấn đề version dump)
             logger.info(f"📦 Đang backup database bằng script: {script_path}")
 
-            cmd = ["python", str(script_path), "--database", "crawl_data", "--format", "sql"]
+            db_name = os.getenv("POSTGRES_DB", "tiki")
+            cmd = ["python", str(script_path), "--database", db_name, "--format", "sql"]
 
             try:
                 result = subprocess.run(

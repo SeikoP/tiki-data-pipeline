@@ -305,7 +305,9 @@ class DataTransformer:
             "category_id": product.get("category_id"),  # Extract từ category_url nếu chưa có
             "category_path": product.get("category_path")
             or [],  # Default [] nếu không có breadcrumb
-            "sales_count": product.get("sales_count"),
+            "sales_count": product.get("sales_count")
+            if product.get("sales_count") is not None
+            else 0,
         }
 
         # Extract category_id từ category_url nếu chưa có

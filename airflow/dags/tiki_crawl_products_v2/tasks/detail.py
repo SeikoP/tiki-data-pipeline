@@ -448,35 +448,37 @@ def crawl_product_batch(
     try:
         import asyncio
 
-        # Import SeleniumDriverPool từ utils nếu chưa có (cho task scope)
-        global SeleniumDriverPool
-        _SeleniumDriverPool = SeleniumDriverPool
-        if _SeleniumDriverPool is None:
-            # Fallback: thử import từ utils trực tiếp nếu không thành công
+        # Import SeleniumDriverPool từ utils (explicit import to avoid NameError)
+        _SeleniumDriverPool = None
+        try:
+            # 1. Try standard package import first (preferred)
+            _fix_sys_path_for_pipelines_import(logger)
+            from pipelines.crawl.utils import SeleniumDriverPool
+            _SeleniumDriverPool = SeleniumDriverPool
+            logger.info("✅ Imported SeleniumDriverPool from pipelines.crawl.utils")
+        except ImportError:
             try:
-                _fix_sys_path_for_pipelines_import(logger)
-                # utils là file (.py), không phải package
+                # 2. Fallback to file-based import logic
+                logger.warning("⚠️ Standard import failed, trying file-based import for SeleniumDriverPool")
                 import importlib.util
-
+                
                 src_path = Path("/opt/airflow/src")
                 if not src_path.exists():
-                    src_path = Path(dag_file_dir).parent.parent.parent / "src"
+                     # Try local dev path
+                     src_path = Path(__file__).parent.parent.parent.parent.parent / "src"
+                
                 utils_path = src_path / "pipelines" / "crawl" / "utils.py"
                 if utils_path.exists():
-                    spec = importlib.util.spec_from_file_location(
-                        "crawl_utils_fallback", str(utils_path)
-                    )
+                    spec = importlib.util.spec_from_file_location("crawl_utils_task", str(utils_path))
                     if spec and spec.loader:
-                        crawl_utils = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(crawl_utils)
-                        _SeleniumDriverPool = getattr(crawl_utils, "SeleniumDriverPool", None)
-                if _SeleniumDriverPool:
-                    logger.info("✅ Imported SeleniumDriverPool from utils.py file")
-                else:
-                    raise ImportError("Không tìm thấy SeleniumDriverPool trong utils.py")
+                        utils_mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(utils_mod)
+                        _SeleniumDriverPool = getattr(utils_mod, "SeleniumDriverPool", None)
             except Exception as e:
-                logger.error(f"⚠️  Không thể import SeleniumDriverPool từ pipelines: {e}")
-                raise ImportError("SeleniumDriverPool chưa được import từ utils module") from e
+                logger.error(f"❌ Failed to import SeleniumDriverPool: {e}")
+
+        if _SeleniumDriverPool is None:
+             raise ImportError("Could not import SeleniumDriverPool from any source")
 
         # Sử dụng hàm đã được import ở đầu file
         # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file
