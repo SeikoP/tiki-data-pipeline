@@ -188,6 +188,7 @@ class DataVerifier:
         if duplicates:
             self.stats["duplicates"] = sum(len(indices) - 1 for indices in duplicates.values())
             print(f"   ❌ Tìm thấy {len(duplicates)} URL bị trùng lặp:")
+            self.log_error(f"Dữ liệu có {len(duplicates)} URL bị trùng lặp")
 
             for url, indices in list(duplicates.items())[:5]:  # Show first 5
                 print(f"      • '{url}' xuất hiện {len(indices)} lần tại: {indices}")
@@ -374,8 +375,14 @@ class DataVerifier:
         results.append(self.verify_hierarchy())
         results.append(self.verify_parent_child_links())
 
-        # Print summary
-        is_valid = self.print_summary()
+        # Use both individual check results and the summary output
+        checks_ok = all(bool(result) for result in results)
+
+        # Print summary (also validates internal error/warning state)
+        summary_ok = self.print_summary()
+
+        # Final validity requires both checks and summary to be OK
+        is_valid = checks_ok and summary_ok
 
         # Save report if requested
         if save_report:
