@@ -1,8 +1,7 @@
-"""
-Data validator module for product data quality assessment.
+"""Data validator module for product data quality assessment.
 
-This module provides validation logic to determine whether product data
-is complete enough to save, needs retry, or should be skipped.
+This module provides validation logic to determine whether product data is complete enough to save,
+needs retry, or should be skipped.
 """
 
 from typing import Any
@@ -26,8 +25,7 @@ except ImportError:
 
 
 def get_missing_fields(product: dict[str, Any], field_list: list[str] | None = None) -> list[str]:
-    """
-    Get list of missing fields from product data.
+    """Get list of missing fields from product data.
 
     Args:
         product: Product data dictionary
@@ -125,9 +123,10 @@ def calculate_completeness_score(product: dict[str, Any]) -> float:
     return round(total_score, 2)
 
 
-def validate_product_data(product: dict[str, Any], retry_count: int = 0) -> str:
-    """
-    Validate product data and determine action.
+def validate_product_data(
+    product: dict[str, Any], retry_count: int = 0, max_retries: int | None = None
+) -> str:
+    """Validate product data and determine action.
 
     Decision logic:
     1. If missing critical fields → 'skip' (cannot save)
@@ -138,10 +137,14 @@ def validate_product_data(product: dict[str, Any], retry_count: int = 0) -> str:
     Args:
         product: Product data dictionary
         retry_count: Current retry count (default: 0)
+        max_retries: Maximum retry attempts (default: from config)
 
     Returns:
         Action string: 'accept', 'retry', or 'skip'
     """
+    if max_retries is None:
+        max_retries = PRODUCT_RETRY_MAX_ATTEMPTS
+
     # Check critical fields
     critical_missing = get_missing_fields(product, DATA_QUALITY_CRITICAL_FIELDS)
     if critical_missing:
@@ -156,7 +159,7 @@ def validate_product_data(product: dict[str, Any], retry_count: int = 0) -> str:
         return "accept"
 
     # Has missing important fields
-    if retry_count < PRODUCT_RETRY_MAX_ATTEMPTS:
+    if retry_count < max_retries:
         # Retry to get missing fields
         return "retry"
     else:
@@ -182,8 +185,7 @@ def validate_product_data(product: dict[str, Any], retry_count: int = 0) -> str:
 def enrich_product_metadata(
     product: dict[str, Any], retry_count: int = 0, crawl_status: str = "success"
 ) -> dict[str, Any]:
-    """
-    Enrich product data with metadata for tracking.
+    """Enrich product data with metadata for tracking.
 
     Adds:
     - _metadata.missing_fields: List of missing important fields
@@ -225,8 +227,7 @@ def enrich_product_metadata(
 
 
 def should_retry_for_field(field_name: str) -> bool:
-    """
-    Check if a specific field is worth retrying for.
+    """Check if a specific field is worth retrying for.
 
     Args:
         field_name: Field name to check

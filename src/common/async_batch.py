@@ -1,5 +1,4 @@
-"""
-Async batch processor for concurrent I/O operations
+"""Async batch processor for concurrent I/O operations.
 
 Features:
 - asyncio for async operations
@@ -16,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 class AsyncBatchProcessor:
-    """Process batches asynchronously with concurrency control"""
+    """
+    Process batches asynchronously with concurrency control.
+    """
 
     def __init__(
         self,
@@ -44,8 +45,7 @@ class AsyncBatchProcessor:
         async_processor: Callable,
         total_count: int | None = None,
     ):
-        """
-        Process items asynchronously
+        """Process items asynchronously.
 
         Args:
             items: List of items to process
@@ -78,7 +78,9 @@ class AsyncBatchProcessor:
         return results
 
     async def _process_with_semaphore(self, item: Any, processor: Callable):
-        """Process with semaphore for concurrency control"""
+        """
+        Process with semaphore for concurrency control.
+        """
         async with self.semaphore:
             return await processor(item)
 

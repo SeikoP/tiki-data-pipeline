@@ -1,5 +1,5 @@
 """
-Extract pipeline module
+Extract pipeline module.
 """
 
 from .extract_categories import (

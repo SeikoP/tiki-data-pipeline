@@ -1,5 +1,7 @@
 #!/usr/bin/env python
-"""Test that product names are NOT included in category_path"""
+"""
+Test that product names are NOT included in category_path.
+"""
 
 import os
 import sys

@@ -1,5 +1,4 @@
-"""
-Optimized batch processing for large datasets
+"""Optimized batch processing for large datasets.
 
 Features:
 - Configurable batch sizes
@@ -14,8 +13,7 @@ from typing import Any
 
 
 def create_batches(items: Iterable[Any], batch_size: int) -> Generator[list[Any], None, None]:
-    """
-    Create batches from an iterable
+    """Create batches from an iterable.
 
     Args:
         items: Iterable of items
@@ -36,7 +34,9 @@ def create_batches(items: Iterable[Any], batch_size: int) -> Generator[list[Any]
 
 
 class BatchProcessor:
-    """Process items in batches with progress tracking and error handling"""
+    """
+    Process items in batches with progress tracking and error handling.
+    """
 
     def __init__(
         self, batch_size: int = 100, show_progress: bool = True, continue_on_error: bool = True
@@ -61,8 +61,7 @@ class BatchProcessor:
         processor: Callable[[list[Any]], Any],
         total_count: int | None = None,
     ) -> dict:
-        """
-        Process items in batches
+        """Process items in batches.
 
         Args:
             items: Iterable of items to process

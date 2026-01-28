@@ -21,7 +21,6 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.pipelines.crawl.crawl_products_detail import (
-    get_parent_category_name,
     load_category_hierarchy,
 )
 from src.pipelines.crawl.validate_category_path import (
@@ -33,7 +32,9 @@ load_dotenv()
 
 
 def get_db_connection():
-    """Connect to crawl_data database"""
+    """
+    Connect to crawl_data database.
+    """
     import psycopg2
 
     # Try multiple connection options
@@ -66,7 +67,7 @@ def get_db_connection():
 
     for i, conn_info in enumerate(connections):
         try:
-            print(f"  Trying connection {i+1}: {conn_info['host']}:{conn_info['port']}")
+            print(f"  Trying connection {i + 1}: {conn_info['host']}:{conn_info['port']}")
             conn = psycopg2.connect(**conn_info)
             print("  ✓ Connected successfully")
             return conn
@@ -78,14 +79,13 @@ def get_db_connection():
 
 
 def analyze_products_needing_fix(cur, hierarchy_map, limit=None):
-    """
-    Phân tích products cần fix
+    """Phân tích products cần fix.
 
     Returns:
         list: Danh sách products cần fix với old_path và new_path
     """
     # Build name -> url lookup
-    name_to_url = {info.get("name"): url for url, info in hierarchy_map.items()}
+    {info.get("name"): url for url, info in hierarchy_map.items()}
 
     # Query: Lấy tất cả products có category_path
     query = """
@@ -174,7 +174,9 @@ def main():
     try:
         # Có thể giới hạn số lượng để test trước
         need_fix, already_ok = analyze_products_needing_fix(
-            cur, hierarchy_map, limit=None  # None = không giới hạn
+            cur,
+            hierarchy_map,
+            limit=None,  # None = không giới hạn
         )
     except Exception as e:
         print(f"❌ ERROR analyzing products: {e}")
@@ -185,7 +187,7 @@ def main():
         conn.close()
         return
 
-    print(f"\n📈 Analysis Results:")
+    print("\n📈 Analysis Results:")
     print(f"  • Products OK (không cần fix): {len(already_ok)}")
     print(f"  • Products cần fix: {len(need_fix)}")
 
@@ -316,4 +318,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

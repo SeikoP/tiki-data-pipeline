@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Script để fix NULL values trong category_path column
+"""Script để fix NULL values trong category_path column.
 
 Khi categories có dữ liệu nhưng category_path bị NULL,
 script này sẽ:
@@ -17,7 +16,9 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 
 def fix_category_path_null():
-    """Fix NULL category_path values"""
+    """
+    Fix NULL category_path values.
+    """
 
     # Get DB connection info
     db_host = os.getenv("POSTGRES_HOST", "localhost")
@@ -45,7 +46,7 @@ def fix_category_path_null():
         print("📊 Bước 1: Kiểm tra state hiện tại...")
         cur.execute(
             """
-            SELECT 
+            SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE category_path IS NULL) as null_count,
                 COUNT(*) FILTER (WHERE category_path IS NOT NULL) as non_null_count
@@ -76,7 +77,7 @@ def fix_category_path_null():
         print("\n📊 Bước 3: Verify kết quả...")
         cur.execute(
             """
-            SELECT 
+            SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE category_path IS NULL) as null_count,
                 COUNT(*) FILTER (WHERE category_path = '[]'::jsonb) as empty_array_count,
@@ -111,8 +112,8 @@ def fix_category_path_null():
         try:
             cur.execute(
                 """
-                ALTER TABLE products 
-                ADD CONSTRAINT check_category_path_not_null 
+                ALTER TABLE products
+                ADD CONSTRAINT check_category_path_not_null
                 CHECK (category_path IS NOT NULL);
             """
             )

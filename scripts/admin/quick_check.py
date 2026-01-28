@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-Quick sanity check before DAG run
-Run this before triggering DAG to catch early issues
+Quick sanity check before DAG run Run this before triggering DAG to catch early issues.
 """
+
 import sys
 from pathlib import Path
 

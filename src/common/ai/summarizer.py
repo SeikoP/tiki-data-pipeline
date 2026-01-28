@@ -1,10 +1,13 @@
 """
-Module để tổng hợp dữ liệu sử dụng Groq AI
+Module để tổng hợp dữ liệu sử dụng Groq AI.
 """
 
 import json
 import logging
 import os
+import re
+import time
+from functools import lru_cache
 from typing import Any
 
 import requests
@@ -28,14 +31,16 @@ logger = logging.getLogger(__name__)
 
 
 class AISummarizer:
-    """Class để tổng hợp dữ liệu sử dụng Groq AI"""
+    """
+    Class để tổng hợp dữ liệu sử dụng Groq AI.
+    """
 
     def __init__(self):
         self.raw_api_key = GROQ_CONFIG.get("api_key", "")
         # Support multiple keys separated by comma
         self.api_keys = [k.strip() for k in self.raw_api_key.split(",") if k.strip()]
         self.current_key_index = 0
-        
+
         self.base_url = GROQ_CONFIG.get("base_url", "https://api.groq.com/openai/v1")
         self.model = GROQ_CONFIG.get("model", "openai/gpt-oss-120b")
         self.enabled = GROQ_CONFIG.get("enabled", False)
@@ -44,22 +49,23 @@ class AISummarizer:
             logger.warning("⚠️  GROQ_API_KEY không được cấu hình trong environment variables")
         if not self.enabled:
             logger.warning("⚠️  GROQ_ENABLED chưa được bật")
-        
+
         if len(self.api_keys) > 1:
             logger.info(f"🔑 Đã load {len(self.api_keys)} API keys cho Groq AI")
 
     def _rotate_key(self):
-        """Chuyển sang API Key tiếp theo"""
+        """
+        Chuyển sang API Key tiếp theo.
+        """
         if len(self.api_keys) <= 1:
             return
-        
+
         old_index = self.current_key_index
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
         logger.info(f"🔄 Rotating API Key: {old_index} -> {self.current_key_index}")
 
     def summarize_data(self, data_summary: dict[str, Any], max_tokens: int = 2000) -> str:
-        """
-        Tổng hợp dữ liệu sử dụng Groq AI
+        """Tổng hợp dữ liệu sử dụng Groq AI.
 
         Args:
             data_summary: Dictionary chứa thông tin tổng hợp về dữ liệu
@@ -91,7 +97,9 @@ class AISummarizer:
             return ""
 
     def _create_prompt(self, data_summary: dict[str, Any]) -> str:
-        """Tạo prompt cho AI từ dữ liệu tổng hợp"""
+        """
+        Tạo prompt cho AI từ dữ liệu tổng hợp.
+        """
         # Lấy thống kê và làm rõ số liệu quan trọng
         stats = data_summary.get("statistics", {})
         total_products = stats.get("total_products", 0)
@@ -178,9 +186,9 @@ Data JSON:
 
         return prompt
 
+    @lru_cache(maxsize=2048)  # noqa: B019
     def shorten_product_name(self, product_name: str) -> str:
-        """
-        Rút gọn tên sản phẩm sử dụng AI
+        """Rút gọn tên sản phẩm sử dụng AI (có caching và regex fallback).
 
         Args:
             product_name: Tên sản phẩm gốc
@@ -188,17 +196,29 @@ Data JSON:
         Returns:
             Tên sản phẩm đã được rút gọn
         """
-        if not self.enabled or not self.api_keys:
+        if not product_name:
+            return ""
+
+        # 0. Pre-check: Nếu tên đã ngắn (< 15 chars) hoặc quá dài (> 200 chars - có thể là spam), trả về regex clean luôn
+        if len(product_name) < 15:
             return product_name
 
-        if not product_name or len(product_name) < 50:
-            return product_name
+        # 1. Regex Cleanup (Heuristic) - Luôn chạy cái này trước để tiết kiệm token
+        # Loại bỏ các từ khóa spam/marketing phổ biến
+        cleaned_name = self._regex_clean_name(product_name)
+
+        # Nếu sau khi regex clean, tên đã đủ ngắn (< 40 chars) -> Return luôn, không cần AI
+        if len(cleaned_name) < 40:
+            return cleaned_name
+
+        if not self.enabled or not self.api_keys:
+            return cleaned_name
 
         try:
             prompt = f"""
 Bạn là trợ lý AI chuyên chuẩn hóa và rút gọn tên sản phẩm thương mại điện tử.
 
-Tên gốc: "{product_name}"
+Tên gốc: "{cleaned_name}"
 
 Nhiệm vụ:
 - Tạo một tên sản phẩm ngắn gọn, rõ nghĩa, phù hợp để hiển thị trên sàn TMĐT.
@@ -231,24 +251,72 @@ Tên rút gọn:
             # Increase max_tokens to accommodate reasoning steps used by some models
             response = self._call_groq_api(prompt, max_tokens=1000)
             if response:
-                cleaned_name = response.strip().strip('"').strip("'")
-                return cleaned_name
-            return product_name
+                cleaned_name_ai = response.strip().strip('"').strip("'")
+                # Fallback check: Nếu AI trả về tên quá ngắn hoặc rỗng, dùng regex clean
+                if len(cleaned_name_ai) < 3:
+                    return cleaned_name
+                return cleaned_name_ai
+
+            return cleaned_name
 
         except Exception as e:
             logger.error(f"❌ Lỗi khi rút gọn tên sản phẩm: {e}")
-            return product_name
+            return cleaned_name
+
+    def _regex_clean_name(self, name: str) -> str:
+        """
+        Helper method để clean tên sản phẩm bằng regex.
+        """
+        if not name:
+            return ""
+
+        # 1. Remove hashtags (e.g., #jean)
+        cleaned = re.sub(r"#\w+\b", "", name)
+
+        # 2. Loại bỏ SKU codes phổ biến (e.g., CV0016, SP123, MS123)
+        sku_patterns = [
+            r"\b[A-Za-z]{2,}\d{3,}\b",  # CV0016, SP1234
+            r"\b[A-Za-z]+\-\d+\b",  # SKU-123
+            r"\bMS\s*\d+\b",  # MS 123
+            r"\bDòng\s*.*\d+\b",  # Dòng X123
+        ]
+        for pattern in sku_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+        # 3. Loại bỏ ký tự đặc biệt thừa
+        cleaned = re.sub(r"[\[\]\(\)\{\}\!]", " ", cleaned)
+
+        # 4. Loại bỏ marketing keywords
+        keywords = [
+            "chính hãng",
+            "cao cấp",
+            "giá rẻ",
+            "new",
+            "hot",
+            "xả kho",
+            "thanh lý",
+            "fullbox",
+        ]
+        pattern = r"\b(" + "|".join(keywords) + r")\b"
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+        # 5. Normalize whitespace
+        cleaned = " ".join(cleaned.split())
+
+        return cleaned
 
     def _call_groq_api(self, prompt: str, max_tokens: int = 2000) -> str:
-        """Gọi Groq API để tổng hợp (với Retry và Key Rotation)"""
+        """
+        Gọi Groq API để tổng hợp (với Retry và Key Rotation)
+        """
         # Thử với tối đa số lượng key * 2 lần (để retry mỗi key ít nhất 1 lần nếu cần)
         max_attempts = len(self.api_keys) * 2 if self.api_keys else 1
         attempts = 0
-        
+
         while attempts < max_attempts:
             attempts += 1
             current_key = self.api_keys[self.current_key_index] if self.api_keys else ""
-            
+
             try:
                 headers = {
                     "Authorization": f"Bearer {current_key}",
@@ -286,13 +354,20 @@ Tên rút gọn:
                     timeout=60,
                 )
 
-                if response.status_code == 429: # Rate Limit
-                    logger.warning(f"⚠️  Rate Limit (429) hit on Key #{self.current_key_index}. Rotating...")
+                if response.status_code == 429:  # Rate Limit
+                    retry_after = int(response.headers.get("Retry-After", 5))
+                    wait_time = max(retry_after, 5)  # Wait at least 5s
+                    logger.warning(
+                        f"⚠️  Rate Limit (429) hit on Key #{self.current_key_index}. Waiting {wait_time}s then rotating..."
+                    )
+                    time.sleep(wait_time)
                     self._rotate_key()
                     continue
-                
-                if response.status_code == 401: # Auth Error
-                    logger.warning(f"⚠️  Auth Error (401) on Key #{self.current_key_index}. Rotating...")
+
+                if response.status_code == 401:  # Auth Error
+                    logger.warning(
+                        f"⚠️  Auth Error (401) on Key #{self.current_key_index}. Rotating..."
+                    )
                     self._rotate_key()
                     continue
 
@@ -301,7 +376,7 @@ Tên rút gọn:
 
                 if "choices" in result and len(result["choices"]) > 0:
                     return result["choices"][0]["message"]["content"]
-                
+
                 # Nếu response 200 nhưng format lạ
                 logger.error(f"❌ Response không hợp lệ từ Groq API: {result}")
                 return ""
@@ -309,29 +384,28 @@ Tên rút gọn:
             except requests.exceptions.RequestException as e:
                 # Xử lý các lỗi mạng khác
                 logger.error(f"❌ Lỗi khi gọi Groq API (Key #{self.current_key_index}): {e}")
-                
+
                 # Nếu lỗi liên quan đến model, thử đổi model (chỉ làm 1 lần)
                 if hasattr(e, "response") and e.response is not None:
-                     error_detail = e.response.json()
-                     error_msg = error_detail.get("error", {}).get("message", "")
-                     if "not found" in error_msg.lower() or "deprecated" in error_msg.lower():
-                         # Logic đổi model (đơn giản hóa)
-                         pass
+                    error_detail = e.response.json()
+                    error_msg = error_detail.get("error", {}).get("message", "")
+                    if "not found" in error_msg.lower() or "deprecated" in error_msg.lower():
+                        # Logic đổi model (đơn giản hóa)
+                        pass
 
                 # Với lỗi mạng, thử rotate key (có thể key này bị ban IP?)
                 self._rotate_key()
                 continue
-                
+
             except Exception as e:
                 logger.error(f"❌ Lỗi không xác định khi gọi Groq API: {e}")
                 return ""
-        
+
         logger.error("❌ Đã thử tất cả API keys nhưng đều thất bại.")
         return ""
 
     def generate_data_quality_report(self, conn) -> str:
-        """
-        Tạo báo cáo chất lượng dữ liệu với phân tích chiến lược giảm giá
+        """Tạo báo cáo chất lượng dữ liệu với phân tích chiến lược giảm giá.
 
         Returns: Chuỗi báo cáo định dạng
         """
@@ -383,13 +457,11 @@ Tên rút gọn:
             report += "📊 Quy mô dataset:\n"
             report += f"   • Tổng sản phẩm trong DB: {total:,}\n"
             report += f"   • Sản phẩm có doanh số: {with_sales:,} ({coverage:.1f}%)\n"
-            report += (
-                f"   • Sản phẩm không có doanh số: {total - with_sales:,} ({100-coverage:.1f}%)\n\n"
-            )
+            report += f"   • Sản phẩm không có doanh số: {total - with_sales:,} ({100 - coverage:.1f}%)\n\n"
 
             report += "✅ Chất lượng:\n"
             report += f"   • Hợp lệ đầy đủ: {with_sales:,} / {total:,} = {coverage:.1f}% ✓\n"
-            report += f"   • Lỗi / thiếu dữ liệu: {100-coverage:.1f}%\n"
+            report += f"   • Lỗi / thiếu dữ liệu: {100 - coverage:.1f}%\n"
             report += "   • Đánh giá: Dữ liệu ở mức chấp nhận được\n\n"
 
             # II. Phân tích giảm giá

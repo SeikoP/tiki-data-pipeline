@@ -126,7 +126,9 @@ HAS_WEBDRIVER_MANAGER = None  # Sẽ được check khi cần
 
 
 def _check_selenium_available():
-    """Check xem Selenium có sẵn không (lazy check)"""
+    """
+    Check xem Selenium có sẵn không (lazy check)
+    """
     global HAS_SELENIUM, HAS_WEBDRIVER_MANAGER
     if HAS_SELENIUM is not None:
         return HAS_SELENIUM
@@ -420,7 +422,9 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
 
 
 def parse_products_from_next_data(html_content):
-    """Parse sản phẩm từ __NEXT_DATA__ (Next.js)"""
+    """
+    Parse sản phẩm từ __NEXT_DATA__ (Next.js)
+    """
     # Lazy import để tránh timeout khi load DAG
     from bs4 import BeautifulSoup
 
@@ -440,7 +444,9 @@ def parse_products_from_next_data(html_content):
         # Đi sâu vào cấu trúc Next.js để tìm product data
         # Tiki có thể lưu products ở nhiều nơi trong cấu trúc
         def find_products_in_dict(obj, path=""):
-            """Đệ quy tìm products trong nested dict"""
+            """
+            Đệ quy tìm products trong nested dict.
+            """
             if isinstance(obj, dict):
                 # Kiểm tra các key có thể chứa products
                 if "products" in obj and isinstance(obj["products"], list):
@@ -555,7 +561,9 @@ def parse_products_from_next_data(html_content):
 
 
 def parse_products_from_html(html_content, category_url):
-    """Parse danh sách sản phẩm từ HTML"""
+    """
+    Parse danh sách sản phẩm từ HTML.
+    """
     # Lazy import để tránh timeout khi load DAG
     from bs4 import BeautifulSoup
 
@@ -682,7 +690,9 @@ def parse_products_from_html(html_content, category_url):
 
 
 def get_total_pages(html_content):
-    """Lấy tổng số trang từ HTML"""
+    """
+    Lấy tổng số trang từ HTML.
+    """
     # Lazy import để tránh timeout khi load DAG
     from bs4 import BeautifulSoup
 
@@ -724,7 +734,9 @@ def get_total_pages(html_content):
 
 
 def get_category_page_url(category_url, page=1):
-    """Tạo URL trang phân trang của danh mục"""
+    """
+    Tạo URL trang phân trang của danh mục.
+    """
     if "?" in category_url:
         # Nếu đã có query params
         base_url, query_string = category_url.split("?", 1)
@@ -744,7 +756,7 @@ def crawl_category_products(
     use_redis_cache=True,
     use_rate_limiting=True,
 ):
-    """Crawl tất cả sản phẩm từ một danh mục
+    """Crawl tất cả sản phẩm từ một danh mục.
 
     Args:
         category_url: URL của category
@@ -924,7 +936,9 @@ def crawl_category_products(
 
 
 def crawl_single_category(category, max_pages=None, use_selenium=False):
-    """Crawl sản phẩm từ một danh mục (wrapper cho threading)"""
+    """
+    Crawl sản phẩm từ một danh mục (wrapper cho threading)
+    """
     global stats
 
     category_url = category.get("url", "")
@@ -961,8 +975,7 @@ def crawl_products_from_categories(
     use_selenium=False,
     categories_filter=None,
 ):
-    """
-    Crawl sản phẩm từ file danh mục
+    """Crawl sản phẩm từ file danh mục.
 
     Args:
         categories_file: Đường dẫn file JSON chứa danh mục
@@ -1104,14 +1117,16 @@ def crawl_products_from_categories(
     print(f"✅ Thành công: {stats['total_success']}")
     print(f"❌ Thất bại: {stats['total_failed']}")
     print(f"📦 Tổng sản phẩm: {len(unique_products)}")
-    print(f"⚡ Tốc độ: {stats['total_products']/elapsed:.2f} sản phẩm/s" if elapsed > 0 else "")
+    print(f"⚡ Tốc độ: {stats['total_products'] / elapsed:.2f} sản phẩm/s" if elapsed > 0 else "")
     print("=" * 70)
 
     return unique_products
 
 
 def main():
-    """Hàm main"""
+    """
+    Hàm main.
+    """
     categories_file = "data/raw/categories_recursive_optimized.json"
     output_file = DEFAULT_PRODUCTS_DIR / "products.json"
 

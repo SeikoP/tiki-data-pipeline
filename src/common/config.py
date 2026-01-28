@@ -1,6 +1,6 @@
 """
-Configuration module cho common modules
-Load từ file .env trong src/common/ hoặc từ environment variables
+Configuration module cho common modules Load từ file .env trong src/common/ hoặc từ environment
+variables.
 """
 
 import logging
@@ -42,4 +42,9 @@ GROQ_CONFIG = {
 DISCORD_CONFIG = {
     "webhook_url": os.getenv("DISCORD_WEBHOOK_URL", ""),
     "enabled": os.getenv("DISCORD_ENABLED", "false").lower() == "true",
+}
+
+# Short Name AI Configuration
+SHORT_NAME_CONFIG = {
+    "use_ai": os.getenv("SHORT_NAME_USE_AI", "true").lower() == "false",
 }

@@ -1,6 +1,5 @@
 """
-Dead Letter Queue (DLQ) cho failed tasks
-Lưu trữ các task thất bại để xử lý sau
+Dead Letter Queue (DLQ) cho failed tasks Lưu trữ các task thất bại để xử lý sau.
 """
 
 import json
@@ -20,8 +19,7 @@ except ImportError:
 
 
 class DeadLetterQueue:
-    """
-    Dead Letter Queue để lưu trữ failed tasks
+    """Dead Letter Queue để lưu trữ failed tasks.
 
     Hỗ trợ cả file-based và Redis-based storage
     """
@@ -70,8 +68,7 @@ class DeadLetterQueue:
         context: dict[str, Any] | None = None,
         retry_count: int = 0,
     ) -> bool:
-        """
-        Thêm failed task vào DLQ
+        """Thêm failed task vào DLQ.
 
         Args:
             task_id: ID của task
@@ -108,7 +105,9 @@ class DeadLetterQueue:
                 return self._add_to_redis(task_id, entry)
 
     def _add_to_file(self, task_id: str, entry: dict[str, Any]) -> bool:
-        """Thêm entry vào file"""
+        """
+        Thêm entry vào file.
+        """
         try:
             filepath = self.storage_path / f"{task_id}.json"
             with open(filepath, "w", encoding="utf-8") as f:
@@ -118,7 +117,9 @@ class DeadLetterQueue:
             return False
 
     def _add_to_redis(self, task_id: str, entry: dict[str, Any]) -> bool:
-        """Thêm entry vào Redis"""
+        """
+        Thêm entry vào Redis.
+        """
         try:
             key = f"dlq:{task_id}"
             value = json.dumps(entry, ensure_ascii=False)
@@ -131,14 +132,18 @@ class DeadLetterQueue:
             return False
 
     def get(self, task_id: str) -> dict[str, Any] | None:
-        """Lấy entry từ DLQ"""
+        """
+        Lấy entry từ DLQ.
+        """
         if self.storage_type == "file":
             return self._get_from_file(task_id)
         else:
             return self._get_from_redis(task_id)
 
     def _get_from_file(self, task_id: str) -> dict[str, Any] | None:
-        """Lấy entry từ file"""
+        """
+        Lấy entry từ file.
+        """
         try:
             filepath = self.storage_path / f"{task_id}.json"
             if not filepath.exists():
@@ -149,7 +154,9 @@ class DeadLetterQueue:
             return None
 
     def _get_from_redis(self, task_id: str) -> dict[str, Any] | None:
-        """Lấy entry từ Redis"""
+        """
+        Lấy entry từ Redis.
+        """
         try:
             key = f"dlq:{task_id}"
             value = self.redis_client.get(key)
@@ -160,7 +167,9 @@ class DeadLetterQueue:
             return None
 
     def remove(self, task_id: str) -> bool:
-        """Xóa entry khỏi DLQ"""
+        """
+        Xóa entry khỏi DLQ.
+        """
         with self._lock:
             if self.storage_type == "file":
                 return self._remove_from_file(task_id)
@@ -168,7 +177,9 @@ class DeadLetterQueue:
                 return self._remove_from_redis(task_id)
 
     def _remove_from_file(self, task_id: str) -> bool:
-        """Xóa entry từ file"""
+        """
+        Xóa entry từ file.
+        """
         try:
             filepath = self.storage_path / f"{task_id}.json"
             if filepath.exists():
@@ -179,7 +190,9 @@ class DeadLetterQueue:
             return False
 
     def _remove_from_redis(self, task_id: str) -> bool:
-        """Xóa entry từ Redis"""
+        """
+        Xóa entry từ Redis.
+        """
         try:
             key = f"dlq:{task_id}"
             self.redis_client.delete(key)
@@ -194,8 +207,7 @@ class DeadLetterQueue:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """
-        Lấy danh sách tất cả entries
+        """Lấy danh sách tất cả entries.
 
         Args:
             task_type: Lọc theo task type (None = tất cả)
@@ -216,7 +228,9 @@ class DeadLetterQueue:
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
-        """Lấy danh sách từ file"""
+        """
+        Lấy danh sách từ file.
+        """
         entries = []
         try:
             for filepath in sorted(self.storage_path.glob("*.json")):
@@ -240,7 +254,9 @@ class DeadLetterQueue:
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
-        """Lấy danh sách từ Redis"""
+        """
+        Lấy danh sách từ Redis.
+        """
         entries = []
         try:
             # Lấy từ sorted set (sorted theo timestamp)
@@ -258,7 +274,9 @@ class DeadLetterQueue:
             return []
 
     def _count(self) -> int:
-        """Đếm số entries"""
+        """
+        Đếm số entries.
+        """
         if self.storage_type == "file":
             try:
                 return len(list(self.storage_path.glob("*.json")))
@@ -271,7 +289,9 @@ class DeadLetterQueue:
                 return 0
 
     def _remove_oldest(self, count: int) -> int:
-        """Xóa các entries cũ nhất"""
+        """
+        Xóa các entries cũ nhất.
+        """
         removed = 0
         if self.storage_type == "file":
             try:
@@ -297,7 +317,9 @@ class DeadLetterQueue:
         return removed
 
     def get_stats(self) -> dict[str, Any]:
-        """Lấy thống kê DLQ"""
+        """
+        Lấy thống kê DLQ.
+        """
         entries = self.list_all(limit=10000)  # Lấy tất cả để thống kê
 
         stats = {
@@ -334,8 +356,7 @@ def get_dlq(
     storage_path: str | Path | None = None,
     redis_url: str | None = None,
 ) -> DeadLetterQueue:
-    """
-    Lấy DLQ instance (singleton)
+    """Lấy DLQ instance (singleton)
 
     Args:
         storage_type: "file" hoặc "redis"

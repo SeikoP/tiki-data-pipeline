@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""
-Script kiểm tra code quality với các tools:
+"""Script kiểm tra code quality với các tools:
+
 - Ruff (PERF rules) - Performance
 - Pylint - Code smell
 - Mypy - Type checking
@@ -18,10 +18,12 @@ SRC_DIR = PROJECT_ROOT / "src" / "pipelines" / "crawl"
 
 
 def run_command(cmd: list[str], description: str) -> tuple[int, str]:
-    """Chạy command và trả về exit code và output"""
-    print(f"\n{'='*60}")
+    """
+    Chạy command và trả về exit code và output.
+    """
+    print(f"\n{'=' * 60}")
     print(f"🔍 {description}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     try:
         result = subprocess.run(
             cmd,
@@ -37,37 +39,49 @@ def run_command(cmd: list[str], description: str) -> tuple[int, str]:
 
 
 def check_ruff_perf():
-    """Kiểm tra performance với Ruff"""
+    """
+    Kiểm tra performance với Ruff.
+    """
     cmd = ["ruff", "check", str(SRC_DIR), "--select", "PERF"]
     return run_command(cmd, "Ruff PERF Rules - Performance Issues")
 
 
 def check_ruff_all():
-    """Kiểm tra tất cả rules với Ruff"""
+    """
+    Kiểm tra tất cả rules với Ruff.
+    """
     cmd = ["ruff", "check", str(SRC_DIR)]
     return run_command(cmd, "Ruff - All Rules")
 
 
 def check_vulture():
-    """Kiểm tra dead code với Vulture"""
+    """
+    Kiểm tra dead code với Vulture.
+    """
     cmd = ["vulture", str(SRC_DIR), "--min-confidence", "80"]
     return run_command(cmd, "Vulture - Dead Code Detection")
 
 
 def check_radon_complexity():
-    """Kiểm tra complexity với Radon"""
+    """
+    Kiểm tra complexity với Radon.
+    """
     cmd = ["radon", "cc", str(SRC_DIR), "--min", "B", "--show-complexity"]
     return run_command(cmd, "Radon - Cyclomatic Complexity")
 
 
 def check_radon_maintainability():
-    """Kiểm tra maintainability với Radon"""
+    """
+    Kiểm tra maintainability với Radon.
+    """
     cmd = ["radon", "mi", str(SRC_DIR), "--min", "B"]
     return run_command(cmd, "Radon - Maintainability Index")
 
 
 def check_pylint():
-    """Kiểm tra code smell với Pylint"""
+    """
+    Kiểm tra code smell với Pylint.
+    """
     try:
         cmd = ["pylint", str(SRC_DIR), "--output-format=text"]
         return run_command(cmd, "Pylint - Code Smell Analysis")
@@ -76,7 +90,9 @@ def check_pylint():
 
 
 def check_mypy():
-    """Kiểm tra type với Mypy"""
+    """
+    Kiểm tra type với Mypy.
+    """
     try:
         cmd = ["mypy", str(SRC_DIR), "--ignore-missing-imports"]
         return run_command(cmd, "Mypy - Type Checking")
@@ -85,7 +101,9 @@ def check_mypy():
 
 
 def main():
-    """Chạy tất cả checks"""
+    """
+    Chạy tất cả checks.
+    """
     import io
     import sys
 
@@ -128,9 +146,9 @@ def main():
     results.append(("Mypy", exit_code, output))
 
     # Tổng hợp kết quả
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("TONG HOP KET QUA")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     total_issues = 0
     for name, exit_code, output in results:
@@ -151,9 +169,9 @@ def main():
         f.write(f"Code Quality Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("=" * 60 + "\n\n")
         for name, _exit_code, output in results:
-            f.write(f"\n{'='*60}\n")
+            f.write(f"\n{'=' * 60}\n")
             f.write(f"{name}\n")
-            f.write(f"{'='*60}\n")
+            f.write(f"{'=' * 60}\n")
             f.write(output)
             f.write("\n")
 

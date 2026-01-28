@@ -1,6 +1,5 @@
 """
-Batch Processing Utilities với parallel processing support
-Tối ưu cho xử lý dữ liệu lớn
+Batch Processing Utilities với parallel processing support Tối ưu cho xử lý dữ liệu lớn.
 """
 
 from collections.abc import Callable, Iterator
@@ -12,8 +11,7 @@ R = TypeVar("R")
 
 
 def chunk_list(items: list[T], chunk_size: int) -> Iterator[list[T]]:
-    """
-    Chia list thành các chunks
+    """Chia list thành các chunks.
 
     Args:
         items: List cần chia
@@ -32,8 +30,7 @@ def process_batch_sequential(
     batch_size: int = 100,
     on_error: Callable[[T, Exception], None] | None = None,
 ) -> list[R]:
-    """
-    Xử lý batch tuần tự
+    """Xử lý batch tuần tự.
 
     Args:
         items: List items cần xử lý
@@ -68,8 +65,7 @@ def process_batch_parallel_threads(
     on_error: Callable[[T, Exception], None] | None = None,
     timeout: float | None = None,
 ) -> list[R]:
-    """
-    Xử lý batch song song với threads (I/O-bound tasks)
+    """Xử lý batch song song với threads (I/O-bound tasks)
 
     Args:
         items: List items cần xử lý
@@ -127,8 +123,7 @@ def process_batch_parallel_processes(
     batch_size: int | None = None,
     on_error: Callable[[T, Exception], None] | None = None,
 ) -> list[R]:
-    """
-    Xử lý batch song song với processes (CPU-bound tasks)
+    """Xử lý batch song song với processes (CPU-bound tasks)
 
     Args:
         items: List items cần xử lý
@@ -183,8 +178,7 @@ def process_batch_with_progress(
     on_error: Callable[[T, Exception], None] | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[R]:
-    """
-    Xử lý batch với progress tracking
+    """Xử lý batch với progress tracking.
 
     Args:
         items: List items cần xử lý
@@ -226,7 +220,9 @@ def process_batch_with_progress(
 
 
 class BatchProcessor:
-    """Batch processor với configurable options"""
+    """
+    Batch processor với configurable options.
+    """
 
     def __init__(
         self,
@@ -248,7 +244,9 @@ class BatchProcessor:
         self.on_error = on_error
 
     def process(self, items: list[T], processor: Callable[[T], R]) -> list[R]:
-        """Xử lý items"""
+        """
+        Xử lý items.
+        """
         return process_batch_with_progress(
             items,
             processor,

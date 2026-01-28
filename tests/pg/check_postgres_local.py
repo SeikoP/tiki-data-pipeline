@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Script test kết nối PostgreSQL từ máy local (không phải trong Docker container)
-Sử dụng khi muốn kết nối từ máy local đến PostgreSQL trong Docker
+Script test kết nối PostgreSQL từ máy local (không phải trong Docker container) Sử dụng khi muốn kết
+nối từ máy local đến PostgreSQL trong Docker.
 """
 
 import os

@@ -1,5 +1,4 @@
-"""
-Incremental Crawler Helper
+"""Incremental Crawler Helper.
 
 Provides smart scheduling logic for incremental crawling:
 - Priority queue based on last_crawled_at
@@ -13,8 +12,7 @@ from typing import Any
 def get_products_to_crawl(
     storage, max_products: int = 1000, min_hours_since_crawl: int = 24, prioritize_hot: bool = True
 ) -> list[dict[str, Any]]:
-    """
-    Get list of products that need to be crawled based on smart scheduling
+    """Get list of products that need to be crawled based on smart scheduling.
 
     Args:
         storage: PostgresStorage instance
@@ -105,8 +103,7 @@ def get_products_to_crawl(
 
 
 def get_crawl_statistics(storage) -> dict[str, Any]:
-    """
-    Get crawl statistics for monitoring
+    """Get crawl statistics for monitoring.
 
     Returns:
         Dictionary with crawl stats

@@ -1,5 +1,4 @@
-"""
-Script để kiểm tra dữ liệu có được refresh hay không
+"""Script để kiểm tra dữ liệu có được refresh hay không.
 
 Kiểm tra:
 1. Xem products có được crawl lại (không dùng cache)
@@ -31,7 +30,9 @@ DB_CONFIG = {
 
 
 def get_products_from_db(product_ids: list[str]) -> dict[str, dict]:
-    """Lấy products từ database"""
+    """
+    Lấy products từ database.
+    """
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -57,7 +58,9 @@ def get_products_from_db(product_ids: list[str]) -> dict[str, dict]:
 
 
 def check_data_freshness():
-    """Kiểm tra dữ liệu có được refresh hay không"""
+    """
+    Kiểm tra dữ liệu có được refresh hay không.
+    """
     print("=" * 70)
     print("🔍 KIỂM TRA DATA FRESHNESS")
     print("=" * 70)
@@ -144,9 +147,9 @@ def check_data_freshness():
 
                 time_diff = (datetime.now(updated_dt.tzinfo) - updated_dt).total_seconds()
                 if time_diff < 3600:  # 1 giờ
-                    print(f"   ✅ Updated gần đây ({time_diff/60:.1f} phút trước)")
+                    print(f"   ✅ Updated gần đây ({time_diff / 60:.1f} phút trước)")
                 else:
-                    print(f"   ⚠️  Updated lâu rồi ({time_diff/3600:.1f} giờ trước)")
+                    print(f"   ⚠️  Updated lâu rồi ({time_diff / 3600:.1f} giờ trước)")
             except Exception as e:
                 print(f"   ⚠️  Không thể parse updated_at: {e}")
 

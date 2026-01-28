@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
-Comprehensive validation to prevent errors in next DAG run
+Comprehensive validation to prevent errors in next DAG run.
 """
+
 import json
 import os
 import sys
@@ -14,7 +15,9 @@ from pipelines.crawl.config import MAX_CATEGORY_LEVELS
 
 
 def check_hierarchy_map():
-    """Check if hierarchy map exists and is valid"""
+    """
+    Check if hierarchy map exists and is valid.
+    """
     print("\n" + "=" * 80)
     print("1. CHECKING HIERARCHY MAP")
     print("=" * 80)
@@ -52,7 +55,7 @@ def check_hierarchy_map():
 
         # Check for duplicate names
         names = {}
-        for url, info in data.items():
+        for info in data.values():
             name = info.get("name")
             if name:
                 if name in names:
@@ -77,7 +80,9 @@ def check_hierarchy_map():
 
 
 def check_category_path_in_db():
-    """Check if products in DB have valid category_path"""
+    """
+    Check if products in DB have valid category_path.
+    """
     print("\n" + "=" * 80)
     print("2. CHECKING CATEGORY_PATH IN DATABASE")
     print("=" * 80)
@@ -101,7 +106,7 @@ def check_category_path_in_db():
             try:
                 conn = psycopg2.connect(**conn_info)
                 break
-            except:
+            except Exception:
                 continue
 
         if not conn:
@@ -113,7 +118,7 @@ def check_category_path_in_db():
         # Check category_path distribution
         cur.execute(
             """
-            SELECT 
+            SELECT
                 jsonb_array_length(category_path) as levels,
                 COUNT(*) as count
             FROM products
@@ -193,7 +198,9 @@ def check_category_path_in_db():
 
 
 def check_extract_function():
-    """Check if extract_product_detail function works correctly"""
+    """
+    Check if extract_product_detail function works correctly.
+    """
     print("\n" + "=" * 80)
     print("3. CHECKING extract_product_detail FUNCTION")
     print("=" * 80)
@@ -257,7 +264,9 @@ def check_extract_function():
 
 
 def check_dag_syntax():
-    """Check if main DAG files have valid syntax"""
+    """
+    Check if main DAG files have valid syntax.
+    """
     print("\n" + "=" * 80)
     print("4. CHECKING DAG SYNTAX")
     print("=" * 80)

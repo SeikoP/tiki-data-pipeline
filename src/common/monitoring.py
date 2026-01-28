@@ -1,5 +1,4 @@
-"""
-Performance monitoring utilities for Tiki Data Pipeline
+"""Performance monitoring utilities for Tiki Data Pipeline.
 
 Provides decorators and utilities for measuring and logging performance metrics
 """
@@ -14,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def measure_time(operation_name: str | None = None, log_args: bool = False):
-    """
-    Decorator to measure and log function execution time
+    """Decorator to measure and log function execution time.
 
     Args:
         operation_name: Custom name for the operation (defaults to function name)
@@ -61,8 +59,7 @@ def measure_time(operation_name: str | None = None, log_args: bool = False):
 
 
 def measure_time_simple(func: Callable) -> Callable:
-    """
-    Simple decorator to measure execution time (no parameters)
+    """Simple decorator to measure execution time (no parameters)
 
     Example:
         @measure_time_simple
@@ -87,7 +84,9 @@ def measure_time_simple(func: Callable) -> Callable:
 
 
 class PerformanceTimer:
-    """Context manager for timing code blocks"""
+    """
+    Context manager for timing code blocks.
+    """
 
     def __init__(self, operation_name: str, verbose: bool = True):
         """
@@ -122,8 +121,7 @@ class PerformanceTimer:
 
 
 class PerformanceMetrics:
-    """
-    Collect and track performance metrics
+    """Collect and track performance metrics.
 
     Example:
         metrics = PerformanceMetrics()
@@ -142,11 +140,15 @@ class PerformanceMetrics:
         self.counts = {}
 
     def timer(self, operation_name: str):
-        """Get a timer for an operation"""
+        """
+        Get a timer for an operation.
+        """
         return _MetricsTimer(self, operation_name)
 
     def record(self, operation_name: str, duration: float):
-        """Record a timing"""
+        """
+        Record a timing.
+        """
         if operation_name not in self.timings:
             self.timings[operation_name] = []
             self.counts[operation_name] = 0
@@ -155,7 +157,9 @@ class PerformanceMetrics:
         self.counts[operation_name] += 1
 
     def get_stats(self, operation_name: str) -> dict[str, float]:
-        """Get statistics for an operation"""
+        """
+        Get statistics for an operation.
+        """
         if operation_name not in self.timings:
             return {}
 
@@ -169,7 +173,9 @@ class PerformanceMetrics:
         }
 
     def print_summary(self):
-        """Print summary of all metrics"""
+        """
+        Print summary of all metrics.
+        """
         logger.info("=" * 60)
         logger.info("PERFORMANCE SUMMARY")
         logger.info("=" * 60)
@@ -189,7 +195,9 @@ class PerformanceMetrics:
 
 
 class _MetricsTimer:
-    """Internal timer class for PerformanceMetrics"""
+    """
+    Internal timer class for PerformanceMetrics.
+    """
 
     def __init__(self, metrics: PerformanceMetrics, operation_name: str):
         self.metrics = metrics
@@ -207,8 +215,7 @@ class _MetricsTimer:
 
 
 def log_slow_operations(threshold_seconds: float = 1.0):
-    """
-    Decorator to log only slow operations
+    """Decorator to log only slow operations.
 
     Args:
         threshold_seconds: Only log if duration exceeds this threshold

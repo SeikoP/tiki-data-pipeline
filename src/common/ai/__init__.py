@@ -1,5 +1,5 @@
 """
-AI summarization module
+AI summarization module.
 """
 
 from .summarizer import AISummarizer

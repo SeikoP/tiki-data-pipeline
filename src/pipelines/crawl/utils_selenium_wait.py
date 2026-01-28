@@ -25,8 +25,7 @@ except ImportError:
 
 
 def wait_for_product_page_loaded(driver: Any, timeout: int = 5, verbose: bool = False) -> bool:
-    """
-    Chờ product page load đầy đủ bằng cách check các elements quan trọng
+    """Chờ product page load đầy đủ bằng cách check các elements quan trọng.
 
     Args:
         driver: Selenium WebDriver
@@ -71,8 +70,7 @@ def wait_for_product_page_loaded(driver: Any, timeout: int = 5, verbose: bool = 
 
 
 def wait_for_dynamic_content_loaded(driver: Any, timeout: int = 3, verbose: bool = False) -> bool:
-    """
-    Chờ dynamic content (sales_count, rating, seller, price) load sau khi scroll
+    """Chờ dynamic content (sales_count, rating, seller, price) load sau khi scroll.
 
     Lưu ý: seller_name và original_price là dynamic content, cần wait để đảm bảo load đầy đủ.
 
@@ -125,8 +123,7 @@ def wait_for_dynamic_content_loaded(driver: Any, timeout: int = 3, verbose: bool
 
 
 def wait_after_scroll(driver: Any, timeout: int = 2, verbose: bool = False) -> bool:
-    """
-    Chờ sau khi scroll để content load (thay thế time.sleep sau scroll)
+    """Chờ sau khi scroll để content load (thay thế time.sleep sau scroll)
 
     Args:
         driver: Selenium WebDriver

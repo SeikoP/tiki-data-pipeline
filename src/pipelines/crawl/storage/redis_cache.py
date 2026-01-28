@@ -1,5 +1,4 @@
-"""
-Redis Cache và Rate Limiting cho Tiki Crawl Pipeline
+"""Redis Cache và Rate Limiting cho Tiki Crawl Pipeline.
 
 Các tính năng:
 1. Caching HTML/JSON responses để tránh crawl lại
@@ -37,8 +36,7 @@ _connection_pools = {}
 
 
 def get_redis_pool(redis_url: str, max_connections: int = 20) -> ConnectionPool:
-    """
-    Get or create a connection pool for the given Redis URL
+    """Get or create a connection pool for the given Redis URL.
 
     Args:
         redis_url: Redis connection URL
@@ -63,7 +61,9 @@ def get_redis_pool(redis_url: str, max_connections: int = 20) -> ConnectionPool:
 
 
 class RedisCache:
-    """Redis cache wrapper với connection pooling cho crawl pipeline"""
+    """
+    Redis cache wrapper với connection pooling cho crawl pipeline.
+    """
 
     def __init__(self, redis_url: str = "redis://redis:6379/1", default_ttl: int = 86400):
         """
@@ -137,11 +137,15 @@ class RedisCache:
             return url
 
     def _make_key(self, key: str) -> str:
-        """Tạo key với prefix"""
+        """
+        Tạo key với prefix.
+        """
         return f"{self.prefix}{key}"
 
     def get(self, key: str) -> Any | None:
-        """Lấy giá trị từ cache"""
+        """
+        Lấy giá trị từ cache.
+        """
         try:
             value = self.client.get(self._make_key(key))
             if value:
@@ -152,7 +156,9 @@ class RedisCache:
             return None
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
-        """Lưu giá trị vào cache"""
+        """
+        Lưu giá trị vào cache.
+        """
         try:
             ttl = ttl or self.default_ttl
             serialized = json.dumps(value, ensure_ascii=False)
@@ -161,14 +167,18 @@ class RedisCache:
             return False
 
     def delete(self, key: str) -> bool:
-        """Xóa key khỏi cache"""
+        """
+        Xóa key khỏi cache.
+        """
         try:
             return bool(self.client.delete(self._make_key(key)))
         except Exception:
             return False
 
     def exists(self, key: str) -> bool:
-        """Kiểm tra key có tồn tại không"""
+        """
+        Kiểm tra key có tồn tại không.
+        """
         try:
             return bool(self.client.exists(self._make_key(key)))
         except Exception:
@@ -187,16 +197,22 @@ class RedisCache:
         return f"{cache_type}:{url_hash}"
 
     def get_cache_key(self, url: str, cache_type: str = "html") -> str:
-        """Giữ API cũ: trả về key mới (đã canonicalize)."""
+        """
+        Giữ API cũ: trả về key mới (đã canonicalize).
+        """
         return self._new_key_for_url(url, cache_type)
 
     def cache_html(self, url: str, html: str, ttl: int | None = None) -> bool:
-        """Cache HTML content"""
+        """
+        Cache HTML content.
+        """
         key = self._new_key_for_url(url, "html")
         return self.set(key, {"url": url, "html": html, "cached_at": time.time()}, ttl)
 
     def get_cached_html(self, url: str) -> str | None:
-        """Lấy cached HTML"""
+        """
+        Lấy cached HTML.
+        """
         # Thử key mới (canonical) trước, sau đó fallback legacy key để không mất cache cũ
         for key in (
             self._new_key_for_url(url, "html"),
@@ -208,7 +224,9 @@ class RedisCache:
         return None
 
     def cache_products(self, category_url: str, products: list, ttl: int | None = None) -> bool:
-        """Cache products từ category"""
+        """
+        Cache products từ category.
+        """
         # Với category, bỏ tham số trang để gom cache theo danh mục
         key = self._new_key_for_url(category_url, "products", drop_params={"page"})
         return self.set(
@@ -216,7 +234,9 @@ class RedisCache:
         )
 
     def get_cached_products(self, category_url: str) -> list | None:
-        """Lấy cached products"""
+        """
+        Lấy cached products.
+        """
         # Thử key mới (bỏ page) trước, sau đó legacy key
         for key in (
             self._new_key_for_url(category_url, "products", drop_params={"page"}),
@@ -228,14 +248,18 @@ class RedisCache:
         return None
 
     def cache_product_detail(self, product_id: str, detail: dict, ttl: int | None = None) -> bool:
-        """Cache product detail"""
+        """
+        Cache product detail.
+        """
         key = f"detail:{product_id}"
         return self.set(
             key, {"product_id": product_id, "detail": detail, "cached_at": time.time()}, ttl
         )
 
     def get_cached_product_detail(self, product_id: str) -> dict | None:
-        """Lấy cached product detail"""
+        """
+        Lấy cached product detail.
+        """
         key = f"detail:{product_id}"
         cached = self.get(key)
         if cached:
@@ -243,8 +267,7 @@ class RedisCache:
         return None
 
     def validate_product_detail(self, detail: dict | None, min_fields: list | None = None) -> bool:
-        """
-        Kiểm tra product detail có hợp lệ không (flexible validation).
+        """Kiểm tra product detail có hợp lệ không (flexible validation).
 
         Args:
             detail: Product detail dict để validate
@@ -288,8 +311,7 @@ class RedisCache:
     def get_product_detail_with_validation(
         self, product_id: str, min_fields: list | None = None
     ) -> tuple[dict | None, bool]:
-        """
-        Lấy product detail từ cache với validation.
+        """Lấy product detail từ cache với validation.
 
         Returns:
             Tuple[detail_dict or None, is_valid_bool]
@@ -300,7 +322,9 @@ class RedisCache:
 
 
 class RedisRateLimiter:
-    """Distributed rate limiter sử dụng Redis"""
+    """
+    Distributed rate limiter sử dụng Redis.
+    """
 
     def __init__(
         self, redis_url: str = "redis://redis:6379/2", max_requests: int = 10, window: int = 60
@@ -320,12 +344,13 @@ class RedisRateLimiter:
         self.prefix = "tiki:ratelimit:"
 
     def _make_key(self, identifier: str) -> str:
-        """Tạo key với prefix"""
+        """
+        Tạo key với prefix.
+        """
         return f"{self.prefix}{identifier}"
 
     def is_allowed(self, identifier: str = "default") -> bool:
-        """
-        Kiểm tra xem request có được phép không
+        """Kiểm tra xem request có được phép không.
 
         Args:
             identifier: Identifier cho rate limit (có thể là IP, domain, etc.)
@@ -347,7 +372,9 @@ class RedisRateLimiter:
             return True
 
     def wait_if_needed(self, identifier: str = "default") -> None:
-        """Đợi nếu cần thiết để không vượt quá rate limit"""
+        """
+        Đợi nếu cần thiết để không vượt quá rate limit.
+        """
         if not self.is_allowed(identifier):
             # Tính thời gian cần đợi
             key = self._make_key(identifier)
@@ -356,7 +383,9 @@ class RedisRateLimiter:
                 time.sleep(min(ttl, self.window))
 
     def reset(self, identifier: str = "default") -> None:
-        """Reset rate limit cho identifier"""
+        """
+        Reset rate limit cho identifier.
+        """
         try:
             self.client.delete(self._make_key(identifier))
         except Exception:
@@ -364,7 +393,9 @@ class RedisRateLimiter:
 
 
 class RedisLock:
-    """Distributed lock sử dụng Redis để tránh crawl trùng lặp"""
+    """
+    Distributed lock sử dụng Redis để tránh crawl trùng lặp.
+    """
 
     def __init__(self, redis_url: str = "redis://redis:6379/2", default_timeout: int = 300):
         """
@@ -380,12 +411,13 @@ class RedisLock:
         self.prefix = "tiki:lock:"
 
     def _make_key(self, key: str) -> str:
-        """Tạo key với prefix"""
+        """
+        Tạo key với prefix.
+        """
         return f"{self.prefix}{key}"
 
     def acquire(self, key: str, timeout: int | None = None, blocking: bool = True) -> bool:
-        """
-        Acquire lock
+        """Acquire lock.
 
         Args:
             key: Lock key
@@ -415,19 +447,24 @@ class RedisLock:
             return False
 
     def release(self, key: str) -> bool:
-        """Release lock"""
+        """
+        Release lock.
+        """
         try:
             return bool(self.client.delete(self._make_key(key)))
         except Exception:
             return False
 
     def __enter__(self):
-        """Context manager entry"""
+        """
+        Context manager entry.
+        """
         return self
 
     def __exit__(self, _exc_type, _exc_val, _exc_tb):
-        """Context manager exit"""
-        pass
+        """
+        Context manager exit.
+        """
 
 
 # Singleton instances (optional, có thể tạo mới mỗi lần)
@@ -437,7 +474,9 @@ _redis_lock_instance = None
 
 
 def get_redis_cache(redis_url: str = "redis://redis:6379/1") -> RedisCache | None:
-    """Lấy Redis cache instance (singleton)"""
+    """
+    Lấy Redis cache instance (singleton)
+    """
     global _redis_cache_instance
     if not REDIS_AVAILABLE:
         return None
@@ -450,7 +489,9 @@ def get_redis_cache(redis_url: str = "redis://redis:6379/1") -> RedisCache | Non
 
 
 def get_redis_rate_limiter(redis_url: str = "redis://redis:6379/2") -> RedisRateLimiter | None:
-    """Lấy Redis rate limiter instance (singleton)"""
+    """
+    Lấy Redis rate limiter instance (singleton)
+    """
     global _redis_rate_limiter_instance
     if not REDIS_AVAILABLE:
         return None
@@ -463,7 +504,9 @@ def get_redis_rate_limiter(redis_url: str = "redis://redis:6379/2") -> RedisRate
 
 
 def get_redis_lock(redis_url: str = "redis://redis:6379/2") -> RedisLock | None:
-    """Lấy Redis lock instance (singleton)"""
+    """
+    Lấy Redis lock instance (singleton)
+    """
     global _redis_lock_instance
     if not REDIS_AVAILABLE:
         return None

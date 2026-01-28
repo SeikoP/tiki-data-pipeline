@@ -43,8 +43,7 @@ def crawl_category_recursive(
     visited_urls=None,
     all_categories=None,
 ):
-    """
-    Crawl đệ quy các danh mục con từ một URL danh mục (phiên bản test với giới hạn)
+    """Crawl đệ quy các danh mục con từ một URL danh mục (phiên bản test với giới hạn)
 
     Args:
         url: URL danh mục cần crawl
@@ -73,11 +72,11 @@ def crawl_category_recursive(
     # Đánh dấu đã crawl
     visited_urls.add(url)
 
-    print(f"\n{'  ' * level}{'='*60}")
+    print(f"\n{'  ' * level}{'=' * 60}")
     print(f"{'  ' * level}[Level {level}] 🔍 Đang crawl: {url}")
     if parent_url:
         print(f"{'  ' * level}  📁 Parent: {parent_url}")
-    print(f"{'  ' * level}{'='*60}")
+    print(f"{'  ' * level}{'=' * 60}")
 
     try:
         # Crawl với Selenium
@@ -135,7 +134,9 @@ def crawl_category_recursive(
 
 
 def main():
-    """Hàm main để test crawl đệ quy với giới hạn"""
+    """
+    Hàm main để test crawl đệ quy với giới hạn.
+    """
 
     # URL danh mục gốc
     root_url = "https://tiki.vn/nha-cua-doi-song/c1883"

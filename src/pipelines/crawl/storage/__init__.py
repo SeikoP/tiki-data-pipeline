@@ -1,5 +1,5 @@
-"""
-Storage utilities cho crawl pipeline
+"""Storage utilities cho crawl pipeline.
+
 - PostgreSQL storage
 - Redis cache
 - Multi-level cache

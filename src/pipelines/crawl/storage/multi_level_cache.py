@@ -1,5 +1,4 @@
-"""
-Multi-level Cache System cho Tiki Crawl Pipeline
+"""Multi-level Cache System cho Tiki Crawl Pipeline.
 
 Cấu trúc 3 tầng:
 - L1: In-memory LRU cache (nhanh nhất, giới hạn size)
@@ -27,7 +26,9 @@ except ImportError:
 
 
 class LRUCache:
-    """In-memory LRU cache (L1)"""
+    """
+    In-memory LRU cache (L1)
+    """
 
     def __init__(self, maxsize: int = 1000):
         """
@@ -40,7 +41,9 @@ class LRUCache:
         self.misses = 0
 
     def get(self, key: str) -> Any | None:
-        """Lấy giá trị từ cache"""
+        """
+        Lấy giá trị từ cache.
+        """
         if key in self.cache:
             # Move to end (most recently used)
             self.cache.move_to_end(key)
@@ -50,7 +53,9 @@ class LRUCache:
         return None
 
     def set(self, key: str, value: Any) -> None:
-        """Lưu giá trị vào cache"""
+        """
+        Lưu giá trị vào cache.
+        """
         if key in self.cache:
             # Update existing
             self.cache.move_to_end(key)
@@ -61,20 +66,26 @@ class LRUCache:
         self.cache[key] = value
 
     def delete(self, key: str) -> bool:
-        """Xóa key khỏi cache"""
+        """
+        Xóa key khỏi cache.
+        """
         if key in self.cache:
             del self.cache[key]
             return True
         return False
 
     def clear(self) -> None:
-        """Xóa toàn bộ cache"""
+        """
+        Xóa toàn bộ cache.
+        """
         self.cache.clear()
         self.hits = 0
         self.misses = 0
 
     def stats(self) -> dict:
-        """Lấy thống kê cache"""
+        """
+        Lấy thống kê cache.
+        """
         total = self.hits + self.misses
         hit_rate = (self.hits / total * 100) if total > 0 else 0
         return {
@@ -87,7 +98,9 @@ class LRUCache:
 
 
 class FileCache:
-    """File-based cache với compression (L3)"""
+    """
+    File-based cache với compression (L3)
+    """
 
     def __init__(self, cache_dir: str | Path, compress: bool = True):
         """
@@ -101,13 +114,17 @@ class FileCache:
         self.extension = ".json.gz" if compress else ".json"
 
     def _get_filepath(self, key: str) -> Path:
-        """Lấy đường dẫn file từ key"""
+        """
+        Lấy đường dẫn file từ key.
+        """
         # Hash key để tránh tên file quá dài
         key_hash = hashlib.md5(key.encode()).hexdigest()
         return self.cache_dir / f"{key_hash}{self.extension}"
 
     def get(self, key: str) -> Any | None:
-        """Lấy giá trị từ file cache"""
+        """
+        Lấy giá trị từ file cache.
+        """
         filepath = self._get_filepath(key)
         if not filepath.exists():
             return None
@@ -136,7 +153,9 @@ class FileCache:
             return None
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
-        """Lưu giá trị vào file cache"""
+        """
+        Lưu giá trị vào file cache.
+        """
         filepath = self._get_filepath(key)
         try:
             data = {
@@ -157,7 +176,9 @@ class FileCache:
             return False
 
     def delete(self, key: str) -> bool:
-        """Xóa file cache"""
+        """
+        Xóa file cache.
+        """
         filepath = self._get_filepath(key)
         try:
             if filepath.exists():
@@ -168,13 +189,15 @@ class FileCache:
             return False
 
     def exists(self, key: str) -> bool:
-        """Kiểm tra file có tồn tại không"""
+        """
+        Kiểm tra file có tồn tại không.
+        """
         return self._get_filepath(key).exists()
 
 
 class MultiLevelCache:
-    """
-    Multi-level cache system với 3 tầng:
+    """Multi-level cache system với 3 tầng:
+
     - L1: In-memory LRU (nhanh nhất)
     - L2: Redis (distributed)
     - L3: File cache (persistent)
@@ -240,8 +263,7 @@ class MultiLevelCache:
         }
 
     def get(self, key: str) -> Any | None:
-        """
-        Lấy giá trị từ cache (check L1 -> L2 -> L3)
+        """Lấy giá trị từ cache (check L1 -> L2 -> L3)
 
         Args:
             key: Cache key
@@ -289,8 +311,7 @@ class MultiLevelCache:
         return None
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
-        """
-        Lưu giá trị vào tất cả các tầng cache
+        """Lưu giá trị vào tất cả các tầng cache.
 
         Args:
             key: Cache key
@@ -333,7 +354,9 @@ class MultiLevelCache:
         return success
 
     def delete(self, key: str) -> bool:
-        """Xóa key khỏi tất cả các tầng cache"""
+        """
+        Xóa key khỏi tất cả các tầng cache.
+        """
         results = []
 
         if self.l1:
@@ -354,7 +377,9 @@ class MultiLevelCache:
         return any(results)
 
     def exists(self, key: str) -> bool:
-        """Kiểm tra key có tồn tại trong bất kỳ tầng nào"""
+        """
+        Kiểm tra key có tồn tại trong bất kỳ tầng nào.
+        """
         if self.l1 and self.l1.get(key) is not None:
             return True
         if self.l2:
@@ -372,7 +397,9 @@ class MultiLevelCache:
         return False
 
     def clear(self) -> None:
-        """Xóa toàn bộ cache ở tất cả các tầng"""
+        """
+        Xóa toàn bộ cache ở tất cả các tầng.
+        """
         if self.l1:
             self.l1.clear()
         if self.l2:
@@ -384,17 +411,23 @@ class MultiLevelCache:
         # L3: Không clear file cache (có thể rất nhiều files)
 
     def get_cache_key(self, url: str, cache_type: str = "html") -> str:
-        """Tạo cache key từ URL"""
+        """
+        Tạo cache key từ URL.
+        """
         url_hash = hashlib.md5(url.encode()).hexdigest()
         return f"{cache_type}:{url_hash}"
 
     def cache_html(self, url: str, html: str, ttl: int | None = None) -> bool:
-        """Cache HTML content"""
+        """
+        Cache HTML content.
+        """
         key = self.get_cache_key(url, "html")
         return self.set(key, {"url": url, "html": html, "cached_at": time.time()}, ttl=ttl)
 
     def get_cached_html(self, url: str) -> str | None:
-        """Lấy cached HTML"""
+        """
+        Lấy cached HTML.
+        """
         key = self.get_cache_key(url, "html")
         cached = self.get(key)
         if cached:
@@ -402,7 +435,9 @@ class MultiLevelCache:
         return None
 
     def cache_products(self, category_url: str, products: list, ttl: int | None = None) -> bool:
-        """Cache products từ category"""
+        """
+        Cache products từ category.
+        """
         key = self.get_cache_key(category_url, "products")
         return self.set(
             key,
@@ -411,7 +446,9 @@ class MultiLevelCache:
         )
 
     def get_cached_products(self, category_url: str) -> list | None:
-        """Lấy cached products"""
+        """
+        Lấy cached products.
+        """
         key = self.get_cache_key(category_url, "products")
         cached = self.get(key)
         if cached:
@@ -419,14 +456,18 @@ class MultiLevelCache:
         return None
 
     def cache_product_detail(self, product_id: str, detail: dict, ttl: int | None = None) -> bool:
-        """Cache product detail"""
+        """
+        Cache product detail.
+        """
         key = f"detail:{product_id}"
         return self.set(
             key, {"product_id": product_id, "detail": detail, "cached_at": time.time()}, ttl=ttl
         )
 
     def get_cached_product_detail(self, product_id: str) -> dict | None:
-        """Lấy cached product detail"""
+        """
+        Lấy cached product detail.
+        """
         key = f"detail:{product_id}"
         cached = self.get(key)
         if cached:
@@ -434,7 +475,9 @@ class MultiLevelCache:
         return None
 
     def get_stats(self) -> dict:
-        """Lấy thống kê cache"""
+        """
+        Lấy thống kê cache.
+        """
         stats = self.stats.copy()
 
         if self.l1:
@@ -468,8 +511,7 @@ def get_multi_level_cache(
     enable_l3: bool = True,
     compress_l3: bool = True,
 ) -> MultiLevelCache:
-    """
-    Lấy MultiLevelCache instance (singleton)
+    """Lấy MultiLevelCache instance (singleton)
 
     Args:
         l1_maxsize: Số items tối đa trong L1 cache

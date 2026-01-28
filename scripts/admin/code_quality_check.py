@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
-Code quality check and auto-fix script
+Code quality check and auto-fix script.
 """
+
 import subprocess
 import sys
 from pathlib import Path
@@ -11,7 +12,9 @@ SRC_PATHS = ["src", "tests", "airflow/dags"]
 
 
 def run_command(cmd, description):
-    """Run command and show result"""
+    """
+    Run command and show result.
+    """
     print(f"\n{'=' * 60}")
     print(f"🔍 {description}")
     print(f"{'=' * 60}")

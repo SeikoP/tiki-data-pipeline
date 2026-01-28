@@ -1,12 +1,12 @@
 #!/usr/bin/env python
-"""
-Validate and fix category_path to ensure parent category (Level 0) is always at index 0
+"""Validate and fix category_path to ensure parent category (Level 0) is always at index 0.
 
 Vấn đề: Một số products có category_path mà danh mục level 1 đang ở index 0 thay vì parent category.
 Giải pháp: Validate và tự động fix để đảm bảo parent category luôn ở index 0.
 """
 
 import logging
+import os
 from typing import Any
 
 from .config import MAX_CATEGORY_LEVELS
@@ -17,8 +17,8 @@ from .crawl_products_detail import (
 
 logger = logging.getLogger(__name__)
 
-# Parent category name (Level 0)
-PARENT_CATEGORY_NAME = "Nhà Cửa - Đời Sống"
+# Get default parent category name from environment or fallback
+PARENT_CATEGORY_NAME = os.getenv("TIKI_DEFAULT_ROOT_CATEGORY", "Nhà Cửa - Đời Sống")
 
 
 def validate_and_fix_category_path(
@@ -27,8 +27,7 @@ def validate_and_fix_category_path(
     hierarchy_map: dict[str, Any] | None = None,
     auto_fix: bool = True,
 ) -> list[str]:
-    """
-    Validate và fix category_path để đảm bảo parent category (Level 0) ở index 0
+    """Validate và fix category_path để đảm bảo parent category (Level 0) ở index 0.
 
     Args:
         category_path: Danh sách category names (có thể None hoặc empty)
@@ -55,8 +54,17 @@ def validate_and_fix_category_path(
     # Kiểm tra xem item đầu tiên có phải là parent category không
     first_item = category_path[0]
 
-    # Nếu item đầu tiên đã là parent category, không cần fix
-    if first_item == PARENT_CATEGORY_NAME:
+    # Kiểm tra xem first_item có phải là một Level 0 category trong hierarchy map không
+    is_known_root = False
+    if hierarchy_map:
+        # Tìm xem có category nào có name == first_item và level == 0 không
+        is_known_root = any(
+            info.get("name") == first_item and info.get("level", 1) == 0
+            for info in hierarchy_map.values()
+        )
+
+    # Nếu item đầu tiên đã là parent category (hoặc là một root đã biết), không cần fix
+    if first_item == PARENT_CATEGORY_NAME or is_known_root:
         # Đảm bảo không vượt quá MAX_CATEGORY_LEVELS
         return category_path[:MAX_CATEGORY_LEVELS]
 
@@ -121,8 +129,7 @@ def fix_product_category_path(
     hierarchy_map: dict[str, Any] | None = None,
     auto_fix: bool = True,
 ) -> dict[str, Any]:
-    """
-    Fix category_path cho một product
+    """Fix category_path cho một product.
 
     Args:
         product: Product dictionary
@@ -149,8 +156,7 @@ def fix_products_category_paths(
     hierarchy_map: dict[str, Any] | None = None,
     auto_fix: bool = True,
 ) -> list[dict[str, Any]]:
-    """
-    Fix category_path cho danh sách products
+    """Fix category_path cho danh sách products.
 
     Args:
         products: List of product dictionaries

@@ -1,5 +1,4 @@
-"""
-Script Python để backup PostgreSQL database.
+"""Script Python để backup PostgreSQL database.
 
 Tối ưu và sửa lỗi:
 - Fallback lấy biến môi trường (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_HOST, POSTGRES_PORT)
@@ -29,7 +28,9 @@ CONTAINER_NAME = os.getenv("POSTGRES_CONTAINER_NAME", "tiki-data-pipeline-postgr
 
 
 def get_env_value(key: str, default: str | None = None) -> str | None:
-    """Lấy giá trị từ environment hoặc fallback .env nếu tồn tại"""
+    """
+    Lấy giá trị từ environment hoặc fallback .env nếu tồn tại.
+    """
     val = os.getenv(key)
     if val:
         return val
@@ -47,7 +48,9 @@ def get_env_value(key: str, default: str | None = None) -> str | None:
 
 
 def docker_cli_available() -> bool:
-    """Kiểm tra xem docker CLI và socket có sẵn không"""
+    """
+    Kiểm tra xem docker CLI và socket có sẵn không.
+    """
     if shutil.which("docker") is None:
         return False
     # Nếu không có quyền truy cập socket /var/run/docker.sock thì không dùng được
@@ -58,7 +61,9 @@ def docker_cli_available() -> bool:
 
 
 def check_container_running() -> bool:
-    """Kiểm tra container Postgres có đang chạy không (yêu cầu docker)"""
+    """
+    Kiểm tra container Postgres có đang chạy không (yêu cầu docker)
+    """
     if not docker_cli_available():
         return False
     try:
@@ -75,7 +80,7 @@ def check_container_running() -> bool:
 
 
 def backup_database(db_name: str, format_type: str = "custom") -> bool:
-    """Backup một database
+    """Backup một database.
 
     Args:
         db_name: Tên database
@@ -217,7 +222,9 @@ def backup_database(db_name: str, format_type: str = "custom") -> bool:
 
 
 def list_backups():
-    """Liệt kê các file backup"""
+    """
+    Liệt kê các file backup.
+    """
     if not BACKUP_DIR.exists():
         print("📁 Thư mục backup chưa có file nào")
         return
@@ -237,7 +244,9 @@ def list_backups():
 
 
 def main():
-    """Main function"""
+    """
+    Main function.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(description="Backup PostgreSQL database")

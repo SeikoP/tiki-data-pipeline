@@ -1,8 +1,5 @@
 x-airflow-common:
   &airflow-common
-  build:
-    context: .
-    dockerfile: airflow/Dockerfile
   image: tiki-airflow
   env_file:
     - .env
@@ -125,6 +122,9 @@ services:
   # ============================================
   airflow-webserver:
     <<: *airflow-common
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
     command: api-server
     ports:
       - "8080:8080"

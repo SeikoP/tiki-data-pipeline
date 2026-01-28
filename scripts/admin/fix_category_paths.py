@@ -2,6 +2,7 @@
 """
 Fix category_path data in database - add parent categories to 3-4 level paths
 """
+
 import json
 import os
 import sys
@@ -22,7 +23,9 @@ load_dotenv()
 
 
 def get_db_connection():
-    """Connect to crawl_data database"""
+    """
+    Connect to crawl_data database.
+    """
     import psycopg2
 
     # Try multiple connection options
@@ -55,7 +58,7 @@ def get_db_connection():
 
     for i, conn_info in enumerate(connections):
         try:
-            print(f"  Trying connection {i+1}: {conn_info['host']}:{conn_info['port']}")
+            print(f"  Trying connection {i + 1}: {conn_info['host']}:{conn_info['port']}")
             conn = psycopg2.connect(**conn_info)
             print("  ✓ Connected successfully")
             return conn
@@ -67,7 +70,9 @@ def get_db_connection():
 
 
 def add_parent_to_path(category_path, hierarchy_map, name_to_url):
-    """Add parent category to beginning of path if missing and found in hierarchy"""
+    """
+    Add parent category to beginning of path if missing and found in hierarchy.
+    """
     if not category_path or len(category_path) == 0:
         return category_path
 
@@ -147,7 +152,7 @@ def main():
     need_fix = []
     already_have_parent = []
 
-    for product_id, product_id_str, cat_path_json, name in products:
+    for product_id, product_id_str, cat_path_json, _name in products:
         cat_path = json.loads(cat_path_json) if isinstance(cat_path_json, str) else cat_path_json
 
         # Check if first item is already a parent category (top-level)

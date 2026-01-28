@@ -1,5 +1,5 @@
 """
-Module để gửi thông báo qua Discord webhook
+Module để gửi thông báo qua Discord webhook.
 """
 
 import logging
@@ -25,16 +25,16 @@ logger = logging.getLogger(__name__)
 
 
 class DiscordNotifier:
-    """Class để gửi thông báo qua Discord webhook"""
+    """
+    Class để gửi thông báo qua Discord webhook.
+    """
 
     def __init__(self):
         self.webhook_url = DISCORD_CONFIG.get("webhook_url", "")
         self.enabled = DISCORD_CONFIG.get("enabled", False)
 
         if not self.webhook_url:
-            logger.warning(
-                "⚠️  DISCORD_WEBHOOK_URL không được cấu hình trong environment variables"
-            )
+            logger.warning("⚠️  DISCORD_WEBHOOK_URL không được cấu hình trong environment variables")
         if not self.enabled:
             logger.warning("⚠️  DISCORD_ENABLED chưa được bật")
 
@@ -46,8 +46,7 @@ class DiscordNotifier:
         fields: list | None = None,
         footer: str | None = None,
     ) -> bool:
-        """
-        Gửi thông báo qua Discord webhook
+        """Gửi thông báo qua Discord webhook.
 
         Args:
             content: Nội dung thông báo
@@ -60,9 +59,7 @@ class DiscordNotifier:
             True nếu gửi thành công, False nếu có lỗi
         """
         if not self.enabled or not self.webhook_url:
-            logger.warning(
-                "⚠️  Discord không được bật hoặc thiếu webhook URL, bỏ qua gửi thông báo"
-            )
+            logger.warning("⚠️  Discord không được bật hoặc thiếu webhook URL, bỏ qua gửi thông báo")
             return False
 
         try:
@@ -118,8 +115,7 @@ class DiscordNotifier:
         stats: dict[str, Any],
         color: int = 0x3498DB,  # Màu xanh dương
     ) -> bool:
-        """
-        Gửi bản tổng hợp từ AI kèm thống kê
+        """Gửi bản tổng hợp từ AI kèm thống kê.
 
         Args:
             ai_summary: Bản tổng hợp từ AI

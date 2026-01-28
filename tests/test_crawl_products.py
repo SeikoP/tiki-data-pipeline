@@ -16,7 +16,9 @@ from crawl_products import (
 
 
 def test_parse_products_from_html():
-    """Test parse sản phẩm từ HTML"""
+    """
+    Test parse sản phẩm từ HTML.
+    """
     print("=" * 70)
     print("🧪 TEST: Parse sản phẩm từ HTML")
     print("=" * 70)
@@ -58,7 +60,9 @@ def test_parse_products_from_html():
 
 
 def test_crawl_single_category():
-    """Test crawl một danh mục cụ thể"""
+    """
+    Test crawl một danh mục cụ thể.
+    """
     print("=" * 70)
     print("🧪 TEST: Crawl một danh mục")
     print("=" * 70)
@@ -106,7 +110,9 @@ def test_crawl_single_category():
         test_category = (
             test_categories[2]
             if len(test_categories) > 2
-            else test_categories[0] if test_categories else None
+            else test_categories[0]
+            if test_categories
+            else None
         )
 
         if not test_category:
@@ -125,7 +131,9 @@ def test_crawl_single_category():
         # Crawl với giới hạn 2 trang để test nhanh
         # Thử với Selenium nếu requests không tìm thấy sản phẩm
         products = crawl_category_products(
-            category_url, max_pages=2, use_selenium=True  # Dùng Selenium để render JavaScript
+            category_url,
+            max_pages=2,
+            use_selenium=True,  # Dùng Selenium để render JavaScript
         )
 
         print(f"\n✅ Tìm thấy {len(products)} sản phẩm")
@@ -283,7 +291,9 @@ def test_crawl_multiple_categories():
 
 
 def test_get_page():
-    """Test lấy trang web"""
+    """
+    Test lấy trang web.
+    """
     print("=" * 70)
     print("🧪 TEST: Lấy trang web")
     print("=" * 70)

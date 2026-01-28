@@ -22,7 +22,9 @@ print()
 
 # Mock crawler function (simulates web request)
 def mock_crawl_product(product_id: str) -> dict:
-    """Simulate crawling a product (I/O delay)"""
+    """
+    Simulate crawling a product (I/O delay)
+    """
     time.sleep(0.1)  # 100ms per product (simulates network delay)
     return {
         "product_id": product_id,
@@ -90,7 +92,7 @@ try:
     print(f"   - Sequential: {sequential_time:.2f}s")
     print(f"   - Parallel: {parallel_time:.2f}s")
     print(
-        f"   - Time saved: {sequential_time - parallel_time:.2f}s ({(1 - parallel_time/sequential_time)*100:.1f}%)"
+        f"   - Time saved: {sequential_time - parallel_time:.2f}s ({(1 - parallel_time / sequential_time) * 100:.1f}%)"
     )
 
 except Exception as e:
@@ -113,7 +115,9 @@ try:
 
     @cache_in_memory(ttl=60)
     def cached_function(x: int) -> int:
-        """Simulate expensive computation"""
+        """
+        Simulate expensive computation.
+        """
         time.sleep(0.01)  # 10ms
         return x * x
 

@@ -1,5 +1,4 @@
-"""
-Memory optimization utilities
+"""Memory optimization utilities.
 
 Features:
 - Memory profiling
@@ -14,13 +13,14 @@ from typing import Any
 
 
 def get_object_size(obj: Any) -> int:
-    """Get approximate size of object in bytes"""
+    """
+    Get approximate size of object in bytes.
+    """
     return sys.getsizeof(obj)
 
 
 def profile_memory() -> dict[str, Any]:
-    """
-    Get current memory usage statistics
+    """Get current memory usage statistics.
 
     Returns:
         dict with memory stats
@@ -40,14 +40,15 @@ def profile_memory() -> dict[str, Any]:
 
 
 def force_gc():
-    """Force garbage collection"""
+    """
+    Force garbage collection.
+    """
     collected = gc.collect()
     return collected
 
 
 def get_large_objects(limit: int = 10) -> list[tuple]:
-    """
-    Get largest objects in memory
+    """Get largest objects in memory.
 
     Args:
         limit: Number of objects to return
@@ -69,8 +70,7 @@ def get_large_objects(limit: int = 10) -> list[tuple]:
 
 
 def optimize_dataframe_memory(df):
-    """
-    Optimize pandas DataFrame memory usage
+    """Optimize pandas DataFrame memory usage.
 
     Args:
         df: pandas DataFrame

@@ -1,6 +1,6 @@
 """
-Utility để lưu dữ liệu crawl vào PostgreSQL database
-Tối ưu: Connection pooling, batch processing, error handling
+Utility để lưu dữ liệu crawl vào PostgreSQL database Tối ưu: Connection pooling, batch processing,
+error handling.
 """
 
 import csv
@@ -55,7 +55,9 @@ def normalize_category_id(cat_id: str | None) -> str | None:
 
 
 class PostgresStorage:
-    """Class để lưu và truy vấn dữ liệu crawl từ PostgreSQL với connection pooling tối ưu"""
+    """
+    Class để lưu và truy vấn dữ liệu crawl từ PostgreSQL với connection pooling tối ưu.
+    """
 
     def __init__(
         self,
@@ -71,8 +73,7 @@ class PostgresStorage:
         keepalives_interval: int = 10,
         keepalives_count: int = 5,
     ):
-        """
-        Khởi tạo connection pool đến PostgreSQL với tối ưu hóa
+        """Khởi tạo connection pool đến PostgreSQL với tối ưu hóa.
 
         Args:
             host: PostgreSQL host (mặc định: lấy từ env hoặc 'postgres')
@@ -116,7 +117,9 @@ class PostgresStorage:
         }
 
     def _get_pool(self) -> SimpleConnectionPool:
-        """Lấy hoặc tạo connection pool với retry logic"""
+        """
+        Lấy hoặc tạo connection pool với retry logic.
+        """
         if self._pool is None:
             max_retries = 3
             for attempt in range(max_retries):
@@ -142,7 +145,9 @@ class PostgresStorage:
         return self._pool
 
     def _check_connection(self, conn) -> bool:
-        """Kiểm tra connection còn sống không (pre-ping)"""
+        """
+        Kiểm tra connection còn sống không (pre-ping)
+        """
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
@@ -151,7 +156,9 @@ class PostgresStorage:
             return False
 
     def get_used_category_ids(self) -> set[str]:
-        """Lấy danh sách unique category_id từ bảng products"""
+        """
+        Lấy danh sách unique category_id từ bảng products.
+        """
         used_ids = set()
         try:
             with self.get_connection() as conn:
@@ -180,8 +187,7 @@ class PostgresStorage:
 
     @contextmanager
     def get_connection(self, retries: int = 3):
-        """
-        Context manager để lấy connection từ pool với retry và health check
+        """Context manager để lấy connection từ pool với retry và health check.
 
         Args:
             retries: Số lần retry nếu connection lỗi
@@ -244,7 +250,9 @@ class PostgresStorage:
     def _write_dicts_to_csv_buffer(
         self, rows: list[dict[str, Any]], columns: list[str]
     ) -> io.StringIO:
-        """Chuyển đổi danh sách dict thành CSV buffer (tab-separated)."""
+        """
+        Chuyển đổi danh sách dict thành CSV buffer (tab-separated).
+        """
         buf = io.StringIO()
         writer = csv.writer(buf, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL)
 
@@ -292,11 +300,13 @@ class PostgresStorage:
         """
         # 1. Tạo staging table
         # 1. Tạo staging table
-        cur.execute(sql.SQL("""
+        cur.execute(
+            sql.SQL("""
             CREATE TEMP TABLE IF NOT EXISTS {staging} (
                 LIKE {target} INCLUDING DEFAULTS
             ) ON COMMIT DROP
-        """).format(staging=sql.Identifier(staging_table), target=sql.Identifier(target_table)))
+        """).format(staging=sql.Identifier(staging_table), target=sql.Identifier(target_table))
+        )
 
         cur.execute(sql.SQL("TRUNCATE {staging}").format(staging=sql.Identifier(staging_table)))
 
@@ -351,8 +361,7 @@ class PostgresStorage:
         only_leaf: bool = True,  # Changed: Start defaulting to True to prevent redundant data
         sync_with_products: bool = False,
     ) -> int:
-        """
-        Lưu danh sách categories vào DB sử dụng bulk processing tối ưu.
+        """Lưu danh sách categories vào DB sử dụng bulk processing tối ưu.
 
         Args:
             categories: Danh sách categories cần lưu
@@ -794,7 +803,6 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-
                 # Column names to update on conflict
                 update_columns = [
                     "name",
@@ -854,8 +862,7 @@ class PostgresStorage:
     def save_products(
         self, products: list[dict[str, Any]], upsert: bool = True, batch_size: int = 100
     ) -> dict[str, Any]:
-        """
-        Lưu danh sách products vào database (batch insert để tối ưu)
+        """Lưu danh sách products vào database (batch insert để tối ưu)
 
         Args:
             products: List các product dictionaries
@@ -1069,8 +1076,7 @@ class PostgresStorage:
         }
 
     def _ensure_categories_from_products(self, products: list[dict[str, Any]]) -> int:
-        """
-        Tự động tạo/update missing categories từ products với đầy đủ dữ liệu từ JSON file.
+        """Tự động tạo/update missing categories từ products với đầy đủ dữ liệu từ JSON file.
 
         Khi crawl products, category_id và category_url có thể chưa tồn tại trong bảng categories.
         Method này sẽ:
@@ -1188,7 +1194,6 @@ class PostgresStorage:
         added_count = 0
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-
                 for cat_info in categories_to_add:
                     # Use INSERT ... ON CONFLICT DO UPDATE to update if exists
                     cur.execute(
@@ -1247,8 +1252,7 @@ class PostgresStorage:
         products: list[dict[str, Any]],
         previous_state: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        """
-        Log crawl history for ALL products (không chỉ khi có thay đổi giá).
+        """Log crawl history for ALL products (không chỉ khi có thay đổi giá).
 
         Tối ưu:
         - Sử dụng batch lookup để lấy giá cũ (thay vì query từng product)
@@ -1508,10 +1512,9 @@ class PostgresStorage:
                         print("⚠️  Continuing without crawl history (will retry on next crawl)")
 
     def update_category_product_counts(self) -> int:
-        """
-        Update product_count for all categories based on actual products in DB.
-        Match products với categories theo category_url hoặc category_id để đảm bảo tính đúng.
-        Call this after saving products.
+        """Update product_count for all categories based on actual products in DB. Match products
+        với categories theo category_url hoặc category_id để đảm bảo tính đúng. Call this after
+        saving products.
 
         Returns:
             Number of categories updated
@@ -1527,7 +1530,7 @@ class PostgresStorage:
                     FROM (
                         SELECT c.url, COUNT(DISTINCT p.id) as cnt
                         FROM categories c
-                        LEFT JOIN products p ON p.category_url = c.url 
+                        LEFT JOIN products p ON p.category_url = c.url
                            OR (c.category_id IS NOT NULL AND p.category_id = c.category_id)
                         WHERE c.is_leaf = TRUE
                         GROUP BY c.url
@@ -1537,9 +1540,8 @@ class PostgresStorage:
                 return cur.rowcount
 
     def cleanup_redundant_categories(self, cur=None, dry_run: bool = False) -> int:
-        """
-        Xóa các categories không phải là leaf (có categories con)
-        hoặc các categories không có sản phẩm nếu cần thiết.
+        """Xóa các categories không phải là leaf (có categories con) hoặc các categories không có
+        sản phẩm nếu cần thiết.
 
         Method này đảm bảo bảng categories chỉ chứa dữ liệu 'leaf' thực sự.
 
@@ -1597,7 +1599,9 @@ class PostgresStorage:
                     return count
 
     def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
-        """Lấy danh sách products theo category_url"""
+        """
+        Lấy danh sách products theo category_url.
+        """
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1615,7 +1619,9 @@ class PostgresStorage:
                 return [dict(zip(columns, row, strict=False)) for row in cur.fetchall()]
 
     def get_category_stats(self) -> dict[str, Any]:
-        """Lấy thống kê tổng quan về products (Category stats removed)"""
+        """
+        Lấy thống kê tổng quan về products (Category stats removed)
+        """
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -1636,7 +1642,9 @@ class PostgresStorage:
                 }
 
     def get_pool_stats(self) -> dict[str, Any]:
-        """Lấy thống kê connection pool"""
+        """
+        Lấy thống kê connection pool.
+        """
         stats = self._pool_stats.copy()
         if self._pool:
             try:
@@ -1648,7 +1656,9 @@ class PostgresStorage:
         return stats
 
     def close(self):
-        """Đóng connection pool"""
+        """
+        Đóng connection pool.
+        """
         if self._pool:
             self._pool.closeall()
             self._pool = None
@@ -1660,9 +1670,8 @@ class PostgresStorage:
         require_brand: bool = True,
         require_rating: bool = False,
     ) -> dict[str, int]:
-        """
-        Delete products with missing required fields (seller, brand, and/or rating).
-        Run this BEFORE each crawl to allow re-crawling of incomplete data.
+        """Delete products with missing required fields (seller, brand, and/or rating). Run this
+        BEFORE each crawl to allow re-crawling of incomplete data.
 
         Args:
             require_seller: If True, delete products where seller_name IS NULL or empty
@@ -1835,9 +1844,8 @@ class PostgresStorage:
         return result["deleted_count"]
 
     def cleanup_orphan_categories(self) -> int:
-        """
-        Remove categories that don't have any matching products.
-        This ensures categories table stays clean after product crawls.
+        """Remove categories that don't have any matching products. This ensures categories table
+        stays clean after product crawls.
 
         Only removes leaf categories (is_leaf = true) that have no products.
         Parent categories are kept to maintain hierarchy.
@@ -1865,7 +1873,9 @@ class PostgresStorage:
     def _save_products_bulk_copy(
         self, products: list[dict[str, Any]], upsert: bool
     ) -> dict[str, Any]:
-        """Thực hiện Bulk Load sử dụng COPY protocol qua Staging Table."""
+        """
+        Thực hiện Bulk Load sử dụng COPY protocol qua Staging Table.
+        """
         if not products:
             return {"saved_count": 0, "inserted_count": 0, "updated_count": 0}
 
@@ -1897,7 +1907,6 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-
                 # Column names to update on conflict (all except product_id)
                 update_columns = [c for c in columns if c != "product_id"]
 

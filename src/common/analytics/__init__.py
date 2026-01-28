@@ -1,5 +1,5 @@
 """
-Analytics module for data aggregation and analysis
+Analytics module for data aggregation and analysis.
 """
 
 from .aggregator import DataAggregator

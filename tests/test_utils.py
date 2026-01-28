@@ -1,5 +1,5 @@
 """
-Script test các utilities để đảm bảo không có lỗi
+Script test các utilities để đảm bảo không có lỗi.
 """
 
 import os
@@ -10,7 +10,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "pipelin
 
 
 def test_utils_imports():
-    """Test import các utilities"""
+    """
+    Test import các utilities.
+    """
     print("=" * 70)
     print("TEST UTILS IMPORTS")
     print("=" * 70)
@@ -24,7 +26,9 @@ def test_utils_imports():
 
 
 def test_parse_sales_count():
-    """Test parse_sales_count function"""
+    """
+    Test parse_sales_count function.
+    """
     print("\n" + "=" * 70)
     print("TEST PARSE_SALES_COUNT")
     print("=" * 70)
@@ -67,7 +71,9 @@ def test_parse_sales_count():
 
 
 def test_parse_price():
-    """Test parse_price function"""
+    """
+    Test parse_price function.
+    """
     print("\n" + "=" * 70)
     print("TEST PARSE_PRICE")
     print("=" * 70)
@@ -101,7 +107,9 @@ def test_parse_price():
 
 
 def test_extract_product_id():
-    """Test extract_product_id_from_url function"""
+    """
+    Test extract_product_id_from_url function.
+    """
     print("\n" + "=" * 70)
     print("TEST EXTRACT_PRODUCT_ID_FROM_URL")
     print("=" * 70)
@@ -134,7 +142,9 @@ def test_extract_product_id():
 
 
 def test_crawl_products_import():
-    """Test import crawl_products module"""
+    """
+    Test import crawl_products module.
+    """
     print("\n" + "=" * 70)
     print("TEST CRAWL_PRODUCTS IMPORT")
     print("=" * 70)
@@ -169,7 +179,9 @@ def test_crawl_products_import():
 
 
 def test_crawl_products_detail_import():
-    """Test import crawl_products_detail module"""
+    """
+    Test import crawl_products_detail module.
+    """
     print("\n" + "=" * 70)
     print("TEST CRAWL_PRODUCTS_DETAIL IMPORT")
     print("=" * 70)
@@ -205,7 +217,9 @@ def test_crawl_products_detail_import():
 
 
 def main():
-    """Chạy tất cả tests"""
+    """
+    Chạy tất cả tests.
+    """
     print("=" * 70)
     print("TEST UTILITIES VA MODULES")
     print("=" * 70)

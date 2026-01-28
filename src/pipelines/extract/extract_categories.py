@@ -1,5 +1,5 @@
 """
-Extract categories từ categories_tree.json và flatten thành flat list
+Extract categories từ categories_tree.json và flatten thành flat list.
 """
 
 import json
@@ -16,7 +16,9 @@ except ImportError:
     import re
 
     def extract_category_id_from_url(url: str) -> str | None:
-        """Extract category ID từ URL Tiki"""
+        """
+        Extract category ID từ URL Tiki.
+        """
         if not url:
             return None
         match = re.search(r"/c(\d+)", url)
@@ -28,8 +30,7 @@ except ImportError:
 def flatten_category_tree(
     tree: list[dict[str, Any]], parent_url: str | None = None
 ) -> list[dict[str, Any]]:
-    """
-    Flatten category tree thành flat list
+    """Flatten category tree thành flat list.
 
     Args:
         tree: List các category nodes (có thể có children)
@@ -76,8 +77,7 @@ def flatten_category_tree(
 def extract_categories_from_tree_file(
     tree_file: str | Path,
 ) -> list[dict[str, Any]]:
-    """
-    Extract và flatten categories từ file categories_tree.json
+    """Extract và flatten categories từ file categories_tree.json.
 
     Args:
         tree_file: Đường dẫn đến file categories_tree.json

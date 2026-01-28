@@ -1,5 +1,4 @@
-"""
-System monitoring utilities for infrastructure
+"""System monitoring utilities for infrastructure.
 
 Features:
 - Docker container stats
@@ -17,7 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 def get_docker_stats() -> list[dict[str, Any]]:
-    """Get Docker container statistics"""
+    """
+    Get Docker container statistics.
+    """
     try:
         result = subprocess.run(
             ["docker", "stats", "--no-stream", "--format", "json"],
@@ -36,8 +37,7 @@ def get_docker_stats() -> list[dict[str, Any]]:
 
 
 def get_postgres_stats(conn_string: str) -> dict[str, Any]:
-    """
-    Get PostgreSQL performance statistics
+    """Get PostgreSQL performance statistics.
 
     Args:
         conn_string: PostgreSQL connection string
@@ -118,8 +118,7 @@ def get_postgres_stats(conn_string: str) -> dict[str, Any]:
 
 
 def get_redis_stats(redis_host: str = "localhost", redis_port: int = 6379) -> dict[str, Any]:
-    """
-    Get Redis statistics
+    """Get Redis statistics.
 
     Args:
         redis_host: Redis host
@@ -157,7 +156,9 @@ def get_redis_stats(redis_host: str = "localhost", redis_port: int = 6379) -> di
 
 
 def get_system_resources() -> dict[str, Any]:
-    """Get system resource usage"""
+    """
+    Get system resource usage.
+    """
     try:
         import psutil
 
@@ -175,7 +176,9 @@ def get_system_resources() -> dict[str, Any]:
 
 
 def print_monitoring_report():
-    """Print comprehensive monitoring report"""
+    """
+    Print comprehensive monitoring report.
+    """
     print("=" * 70)
     print("📊 INFRASTRUCTURE MONITORING REPORT")
     print("=" * 70)

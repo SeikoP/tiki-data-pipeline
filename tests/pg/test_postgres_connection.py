@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script test kết nối PostgreSQL từ Airflow container
+Script test kết nối PostgreSQL từ Airflow container.
 """
 
 import os

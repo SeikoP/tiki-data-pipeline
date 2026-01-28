@@ -122,8 +122,7 @@ def crawl_single_category(
     cache_dir=DEFAULT_CATEGORY_CACHE_DIR,
     driver_pool=None,
 ):
-    """
-    Crawl một danh mục đơn lẻ (thread-safe)
+    """Crawl một danh mục đơn lẻ (thread-safe)
 
     Args:
         driver_pool: Optional SeleniumDriverPool for driver reuse
@@ -155,7 +154,6 @@ def crawl_single_category(
             except Exception as e:
                 # Nếu cache file bị lỗi, tiếp tục crawl lại
                 print(f"  ⚠️  Cache file lỗi, sẽ crawl lại: {cache_file} - {str(e)}")
-                pass
 
     try:
         # Crawl với Selenium (ưu tiên driver pool nếu có)
@@ -225,8 +223,7 @@ def crawl_single_category(
 def crawl_level_parallel(
     urls_to_crawl, parent_urls, level, max_level, visited_urls, max_workers=3, driver_pool=None
 ):
-    """
-    Crawl song song nhiều danh mục cùng level
+    """Crawl song song nhiều danh mục cùng level.
 
     Args:
         urls_to_crawl: List các URL cần crawl
@@ -306,8 +303,7 @@ def crawl_level_parallel(
 def crawl_category_recursive_optimized(
     root_urls, max_level=3, max_workers=3, visited_urls=None, all_categories=None
 ):
-    """
-    Crawl đệ quy các danh mục với tối ưu song song
+    """Crawl đệ quy các danh mục với tối ưu song song.
 
     Args:
         root_urls: URL danh mục gốc (str) hoặc danh sách các URL gốc (list[str])
@@ -399,9 +395,9 @@ def crawl_category_recursive_optimized(
             if not new_urls:
                 continue
 
-            print(f"\n{'='*70}")
+            print(f"\n{'=' * 70}")
             print(f"Level {current_level}: Dang crawl {len(new_urls)} danh muc...")
-            print(f"{'='*70}")
+            print(f"{'=' * 70}")
 
             # Crawl song song
             results = crawl_level_parallel(
@@ -441,15 +437,17 @@ def crawl_category_recursive_optimized(
 
 
 def print_stats():
-    """In thống kê real-time"""
+    """
+    In thống kê real-time.
+    """
     global stats
     with stats_lock:
         elapsed = time.time() - stats["start_time"]
         rate = stats["total_crawled"] / elapsed if elapsed > 0 else 0
 
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("📈 THỐNG KÊ")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
         print(f"⏱  Thời gian: {elapsed:.1f}s")
         print(f"📥 Đã crawl: {stats['total_crawled']} danh mục")
         print(f"✅ Thành công: {stats['total_success']}")
@@ -464,7 +462,9 @@ def print_stats():
 
 
 def main():
-    """Hàm main để crawl đệ quy với tối ưu"""
+    """
+    Hàm main để crawl đệ quy với tối ưu.
+    """
 
     # Hỗ trợ nhiều root categories từ config file hoặc tham số
     # Có thể cấu hình qua:
@@ -504,7 +504,7 @@ def main():
     # Default: danh sách mặc định nếu không có config
     if not root_urls:
         root_urls = [
-            "https://tiki.vn/cham-soc-nha-cua/c15078",
+            "https://tiki.vn/do-dung-va-thiet-bi-nha-tam/c1966",
             # Có thể thêm các root categories khác ở đây
             # "https://tiki.vn/nha-cua-doi-song/c1883",
             # "https://tiki.vn/dien-tu-dien-lanh/c4221",
