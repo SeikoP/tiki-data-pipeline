@@ -34,44 +34,18 @@ def merge_products(**context) -> dict[str, Any]:
 
     try:
         ensure_output_dirs()
-
         ti = context["ti"]
 
-        # Lấy categories từ task load_categories (trong TaskGroup load_and_prepare)
-        # Thử nhiều cách để lấy categories
+        # Lấy danh sách categories từ các task upstream
         categories = None
-
-        # Cách 1: Lấy từ task_id với TaskGroup prefix (pre_crawl.load_categories)
-        try:
-            categories = ti.xcom_pull(task_ids="pre_crawl.load_categories")
-            logger.info(
-                f"Lấy categories từ 'pre_crawl.load_categories': {len(categories) if categories else 0} items"
-            )
-        except Exception as e:
-            logger.warning(f"Không lấy được từ 'pre_crawl.load_categories': {e}")
-
-        # Fallback: Các check cũ để tương thích ngược
-        if not categories:
-            try:
-                categories = ti.xcom_pull(task_ids="load_and_prepare.load_categories")
-                logger.info(
-                    f"Lấy categories từ 'load_and_prepare.load_categories': {len(categories) if categories else 0} items"
-                )
-            except Exception:
-                pass
-
-        # Cách 2: Thử không có prefix
-        if not categories:
-            try:
-                categories = ti.xcom_pull(task_ids="load_categories")
-                logger.info(
-                    f"Lấy categories từ 'load_categories': {len(categories) if categories else 0} items"
-                )
-            except Exception as e:
-                logger.warning(f"Không lấy được từ 'load_categories': {e}")
+        for task_id in ["pre_crawl.load_categories", "load_and_prepare.load_categories", "load_categories"]:
+            categories = ti.xcom_pull(task_ids=task_id)
+            if categories:
+                logger.info(f"📂 Đã nạp {len(categories)} danh mục từ task: {task_id}")
+                break
 
         if not categories:
-            raise ValueError("Không tìm thấy categories từ XCom")
+            raise ValueError("Không tìm thấy dữ liệu categories từ các task trước đó.")
 
         logger.info(f"Đang merge kết quả từ {len(categories)} danh mục...")
 
@@ -225,16 +199,15 @@ def merge_products(**context) -> dict[str, Any]:
 
         stats["unique_products"] = len(unique_products)
 
-        logger.info("=" * 70)
-        logger.info("📊 THỐNG KÊ")
-        logger.info("=" * 70)
-        logger.info(f"📁 Tổng danh mục: {stats['total_categories']}")
-        logger.info(f"✅ Thành công: {stats['success_categories']}")
-        logger.info(f"❌ Thất bại: {stats['failed_categories']}")
-        logger.info(f"⏱️  Timeout: {stats['timeout_categories']}")
-        logger.info(f"📦 Tổng sản phẩm (trước dedup): {stats['total_products']}")
-        logger.info(f"📦 Sản phẩm unique: {stats['unique_products']}")
-        logger.info("=" * 70)
+        logger.info("=" * 40)
+        logger.info("📊 TỔNG KẾT GIAI ĐOẠN CRAWL")
+        logger.info("-" * 40)
+        logger.info(f"• Tổng danh mục:   {stats['total_categories']}")
+        logger.info(f"• Thành công:      {stats['success_categories']}")
+        logger.info(f"• Thất bại/Lỗi:    {stats['failed_categories'] + stats['timeout_categories']}")
+        logger.info(f"• Tổng sản phẩm:   {stats['total_products']}")
+        logger.info(f"• Sau khi lọc trùng: {stats['unique_products']}")
+        logger.info("=" * 40)
 
         result = {
             "products": unique_products,

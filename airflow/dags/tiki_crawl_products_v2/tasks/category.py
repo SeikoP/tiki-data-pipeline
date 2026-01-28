@@ -60,26 +60,18 @@ def load_categories(**context) -> list[dict[str, Any]]:
 
         logger.info(f"✅ Đã load {len(categories)} danh mục")
 
-        # Lọc danh mục nếu cần (ví dụ: chỉ lấy level 2-4)
-        # Có thể cấu hình qua Airflow Variable
-        try:
-            min_level = get_int_variable("TIKI_MIN_CATEGORY_LEVEL", default=2)
-            max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
-            categories = [
-                cat for cat in categories if min_level <= cat.get("level", 0) <= max_level
-            ]
-            logger.info(f"✓ Sau khi lọc level {min_level}-{max_level}: {len(categories)} danh mục")
-        except Exception as e:
-            logger.warning(f"Không thể lọc theo level: {e}")
+        # Lọc level
+        min_level = get_int_variable("TIKI_MIN_CATEGORY_LEVEL", default=2)
+        max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
+        categories = [cat for cat in categories if min_level <= cat.get("level", 0) <= max_level]
 
-        # Giới hạn số danh mục nếu cần (để test)
-        try:
-            max_categories = get_int_variable("TIKI_MAX_CATEGORIES", default=0)
-            if max_categories > 0:
-                categories = categories[:max_categories]
-                logger.info(f"✓ Giới hạn: {max_categories} danh mục")
-        except Exception:
-            pass
+        # Giới hạn số lượng xử lý
+        max_categories = get_int_variable("TIKI_MAX_CATEGORIES", default=0)
+        if max_categories > 0:
+            categories = categories[:max_categories]
+            logger.info(f"📊 Xử lý {len(categories)} danh mục (Level {min_level}-{max_level} | Giới hạn: {max_categories})")
+        else:
+            logger.info(f"📊 Xử lý {len(categories)} danh mục (Level {min_level}-{max_level})")
 
         # Push categories lên XCom để các task khác dùng
         return categories
@@ -135,7 +127,8 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
     category_name = category.get("name", "Unknown")
     category_id = category.get("id", "")
 
-    logger.info(f"🛍️  TASK: Crawl Category '{category_name}' | URL: {category_url}")
+    # Clean log for workers
+    logger.info(f"▶️  START: Category [{category_id}] {category_name}")
 
     result = {
         "category_id": category_id,
