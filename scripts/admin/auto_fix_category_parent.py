@@ -66,7 +66,7 @@ def get_db_connection():
 
     for i, conn_info in enumerate(connections):
         try:
-            print(f"  Trying connection {i+1}: {conn_info['host']}:{conn_info['port']}")
+            print(f"  Trying connection {i + 1}: {conn_info['host']}:{conn_info['port']}")
             conn = psycopg2.connect(**conn_info)
             print("  ✓ Connected successfully")
             return conn
@@ -174,7 +174,9 @@ def main():
     try:
         # Có thể giới hạn số lượng để test trước
         need_fix, already_ok = analyze_products_needing_fix(
-            cur, hierarchy_map, limit=None  # None = không giới hạn
+            cur,
+            hierarchy_map,
+            limit=None,  # None = không giới hạn
         )
     except Exception as e:
         print(f"❌ ERROR analyzing products: {e}")
@@ -316,4 +318,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

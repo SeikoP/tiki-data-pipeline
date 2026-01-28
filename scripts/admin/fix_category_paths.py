@@ -2,6 +2,7 @@
 """
 Fix category_path data in database - add parent categories to 3-4 level paths
 """
+
 import json
 import os
 import sys
@@ -55,7 +56,7 @@ def get_db_connection():
 
     for i, conn_info in enumerate(connections):
         try:
-            print(f"  Trying connection {i+1}: {conn_info['host']}:{conn_info['port']}")
+            print(f"  Trying connection {i + 1}: {conn_info['host']}:{conn_info['port']}")
             conn = psycopg2.connect(**conn_info)
             print("  ✓ Connected successfully")
             return conn

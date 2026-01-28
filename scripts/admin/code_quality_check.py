@@ -2,6 +2,7 @@
 """
 Code quality check and auto-fix script
 """
+
 import subprocess
 import sys
 from pathlib import Path

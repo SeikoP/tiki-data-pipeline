@@ -108,15 +108,15 @@ def analyze_failed_tasks_from_merge_result(merge_result_file=None):
 
     # In kết quả
     print("\nTHONG KE")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"Tong so products: {failed_analysis['total_products']}")
     print(
-        f"Success: {failed_analysis['success_count']} ({failed_analysis['success_count']/failed_analysis['total_products']*100:.1f}%)"
+        f"Success: {failed_analysis['success_count']} ({failed_analysis['success_count'] / failed_analysis['total_products'] * 100:.1f}%)"
         if failed_analysis["total_products"] > 0
         else "Success: 0"
     )
     print(
-        f"Failed: {failed_analysis['failed_count']} ({failed_analysis['failed_count']/failed_analysis['total_products']*100:.1f}%)"
+        f"Failed: {failed_analysis['failed_count']} ({failed_analysis['failed_count'] / failed_analysis['total_products'] * 100:.1f}%)"
         if failed_analysis["total_products"] > 0
         else "Failed: 0"
     )
@@ -127,7 +127,7 @@ def analyze_failed_tasks_from_merge_result(merge_result_file=None):
             failed_analysis["error_types"].items(), key=lambda x: x[1], reverse=True
         ):
             print(
-                f"   - {error_type}: {count} ({count/failed_analysis['failed_count']*100:.1f}%)"
+                f"   - {error_type}: {count} ({count / failed_analysis['failed_count'] * 100:.1f}%)"
                 if failed_analysis["failed_count"] > 0
                 else f"   - {error_type}: {count}"
             )
@@ -155,7 +155,7 @@ def analyze_failed_tasks_from_merge_result(merge_result_file=None):
         json.dump(failed_analysis, f, ensure_ascii=False, indent=2)
 
     print(f"\nDa luu phan tich vao: {output_file}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     return failed_analysis
 

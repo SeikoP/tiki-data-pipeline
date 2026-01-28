@@ -2,6 +2,7 @@
 """
 Comprehensive validation to prevent errors in next DAG run
 """
+
 import json
 import os
 import sys

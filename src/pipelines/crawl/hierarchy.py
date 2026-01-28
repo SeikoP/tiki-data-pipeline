@@ -7,7 +7,7 @@ from typing import Any, Dict
 _hierarchy_map_cache = None
 
 
-def get_hierarchy_map(force_reload: bool = False) -> Dict[str, Any]:
+def get_hierarchy_map(force_reload: bool = False) -> dict[str, Any]:
     """Load category hierarchy map for auto-parent-detection
 
     This map contains all categories with their parent chains,

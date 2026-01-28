@@ -327,13 +327,13 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         progress["total_crawled"] = len(progress["crawled_product_ids"])
 
-        logger.info(("-" * 30))
+        logger.info("-" * 30)
         logger.info(
             f"📊 SUMMARY: Input={len(products)} | ToCrawl={len(products_to_crawl)} | Skipped={total_skipped}"
         )
         logger.info(f"   Hits: DB={db_hits}, Cache={cache_hits} ({cache_hit_rate:.1f}%)")
         logger.info(f"   Total Unique Crawled: {progress['total_crawled']}")
-        logger.info(("-" * 30))
+        logger.info("-" * 30)
 
         if len(products_to_crawl) == 0:
             logger.warning(

@@ -19,9 +19,9 @@ SRC_DIR = PROJECT_ROOT / "src" / "pipelines" / "crawl"
 
 def run_command(cmd: list[str], description: str) -> tuple[int, str]:
     """Chạy command và trả về exit code và output"""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"🔍 {description}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     try:
         result = subprocess.run(
             cmd,
@@ -128,9 +128,9 @@ def main():
     results.append(("Mypy", exit_code, output))
 
     # Tổng hợp kết quả
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("TONG HOP KET QUA")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     total_issues = 0
     for name, exit_code, output in results:
@@ -151,9 +151,9 @@ def main():
         f.write(f"Code Quality Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("=" * 60 + "\n\n")
         for name, _exit_code, output in results:
-            f.write(f"\n{'='*60}\n")
+            f.write(f"\n{'=' * 60}\n")
             f.write(f"{name}\n")
-            f.write(f"{'='*60}\n")
+            f.write(f"{'=' * 60}\n")
             f.write(output)
             f.write("\n")
 

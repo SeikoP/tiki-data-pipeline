@@ -7,7 +7,7 @@ Cần giữ nguyên key này để decrypt data đã encrypt trước đó.
 
 Usage:
     python scripts/generate_fernet_key.py
-    
+
     Hoặc:
     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 """
@@ -18,7 +18,7 @@ from cryptography.fernet import Fernet
 def main():
     """Generate và hiển thị FERNET_KEY mới"""
     key = Fernet.generate_key().decode()
-    
+
     print("=" * 70)
     print("🔐 FERNET_KEY Generated for Airflow")
     print("=" * 70)

@@ -144,9 +144,9 @@ def check_data_freshness():
 
                 time_diff = (datetime.now(updated_dt.tzinfo) - updated_dt).total_seconds()
                 if time_diff < 3600:  # 1 giờ
-                    print(f"   ✅ Updated gần đây ({time_diff/60:.1f} phút trước)")
+                    print(f"   ✅ Updated gần đây ({time_diff / 60:.1f} phút trước)")
                 else:
-                    print(f"   ⚠️  Updated lâu rồi ({time_diff/3600:.1f} giờ trước)")
+                    print(f"   ⚠️  Updated lâu rồi ({time_diff / 3600:.1f} giờ trước)")
             except Exception as e:
                 print(f"   ⚠️  Không thể parse updated_at: {e}")
 
