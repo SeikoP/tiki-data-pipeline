@@ -16,7 +16,7 @@ from typing import Any
 from common.batch_processor import BatchProcessor
 from common.monitoring import PerformanceTimer
 
-from .db_pool import get_db_pool, initialize_db_pool
+from .db_pool import close_db_pool, get_db_pool, initialize_db_pool
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +221,9 @@ class OptimizedDataLoader:
                 # INSERT ON CONFLICT UPDATE
                 for product in batch:
                     self._upsert_product(cursor, product)
+
+                # Log crawl history (simple implementation)
+                self._log_crawl_history(cursor, batch)
             else:
                 # Chỉ INSERT
                 for product in batch:
@@ -230,16 +233,16 @@ class OptimizedDataLoader:
         """
         Upsert một product với ON CONFLICT UPDATE.
         """
-        # Serialize JSONB fields
-        specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
-        images = json.dumps(product.get("images", {}), ensure_ascii=False)
+        # Serialize JSONB fields (if needed in future)
+        # specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
+        # images = json.dumps(product.get("images", {}), ensure_ascii=False)
         category_path = json.dumps(product.get("category_path", []), ensure_ascii=False)
 
         query = """
             INSERT INTO products (
-                product_id, category_url, category_id, category_path, name, url, price, original_price,
-                discount_percent, rating_average, review_count, sales_count,
-                brand, specifications, images, description,
+                product_id, category_url, category_id, category_path, name, short_name, url, price, original_price,
+                discount_percent, rating_average, sales_count, brand,
+                seller_name, seller_id, seller_is_official,
                 crawled_at, updated_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
@@ -249,17 +252,17 @@ class OptimizedDataLoader:
                 category_id = EXCLUDED.category_id,
                 category_path = EXCLUDED.category_path,
                 name = EXCLUDED.name,
+                short_name = EXCLUDED.short_name,
                 url = EXCLUDED.url,
                 price = EXCLUDED.price,
                 original_price = EXCLUDED.original_price,
                 discount_percent = EXCLUDED.discount_percent,
                 rating_average = EXCLUDED.rating_average,
-                review_count = EXCLUDED.review_count,
                 sales_count = EXCLUDED.sales_count,
                 brand = EXCLUDED.brand,
-                specifications = EXCLUDED.specifications,
-                images = EXCLUDED.images,
-                description = EXCLUDED.description,
+                seller_name = EXCLUDED.seller_name,
+                seller_id = EXCLUDED.seller_id,
+                seller_is_official = EXCLUDED.seller_is_official,
                 updated_at = EXCLUDED.updated_at
         """
 
@@ -271,17 +274,17 @@ class OptimizedDataLoader:
                 product.get("category_id"),
                 category_path,
                 product.get("name"),
+                product.get("short_name"),
                 product.get("url"),
                 product.get("price"),
                 product.get("original_price"),
                 product.get("discount_percent"),
                 product.get("rating_average"),
-                product.get("review_count"),
                 product.get("sales_count"),
                 product.get("brand"),
-                specs,
-                images,
-                product.get("description"),
+                product.get("seller_name"),
+                product.get("seller_id"),
+                product.get("seller_is_official"),
                 product.get("crawled_at"),
                 datetime.now(),
             ),
@@ -297,15 +300,16 @@ class OptimizedDataLoader:
         """
         Insert một product (không UPDATE)
         """
-        specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
-        images = json.dumps(product.get("images", {}), ensure_ascii=False)
+        # Serialize JSONB fields (if needed in future)
+        # specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
+        # images = json.dumps(product.get("images", {}), ensure_ascii=False)
         category_path = json.dumps(product.get("category_path", []), ensure_ascii=False)
 
         query = """
             INSERT INTO products (
-                product_id, category_url, category_id, category_path, name, url, price, original_price,
-                discount_percent, rating_average, review_count, sales_count,
-                brand, specifications, images, description,
+                product_id, category_url, category_id, category_path, name, short_name, url, price, original_price,
+                discount_percent, rating_average, sales_count, brand,
+                seller_name, seller_id, seller_is_official,
                 crawled_at, updated_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
@@ -320,17 +324,17 @@ class OptimizedDataLoader:
                 product.get("category_id"),
                 category_path,
                 product.get("name"),
+                product.get("short_name"),
                 product.get("url"),
                 product.get("price"),
                 product.get("original_price"),
                 product.get("discount_percent"),
                 product.get("rating_average"),
-                product.get("review_count"),
                 product.get("sales_count"),
                 product.get("brand"),
-                specs,
-                images,
-                product.get("description"),
+                product.get("seller_name"),
+                product.get("seller_id"),
+                product.get("seller_is_official"),
                 product.get("crawled_at"),
                 datetime.now(),
             ),
@@ -415,6 +419,45 @@ class OptimizedDataLoader:
             return self.stats
         finally:
             self.enable_db = original_enable_db
+
+    def _log_crawl_history(self, cursor, batch: list[dict]):
+        """
+        Ghi lại lịch sử crawl (giá, sales_count) cho batch.
+        """
+        history_query = """
+            INSERT INTO crawl_history (
+                product_id, price, original_price, discount_percent, sales_count,
+                crawled_at, updated_at
+            ) VALUES %s
+        """
+
+        history_params = [
+            (
+                p.get("product_id"),
+                p.get("price"),
+                p.get("original_price"),
+                p.get("discount_percent"),
+                p.get("sales_count"),
+                p.get("crawled_at") or datetime.now(),
+                datetime.now(),
+            )
+            for p in batch
+        ]
+
+        from psycopg2.extras import execute_values
+
+        execute_values(cursor, history_query, history_params)
+
+    def close(self):
+        """
+        Close resources (DB pool).
+        """
+        if self.enable_db:
+            try:
+                close_db_pool()
+                logger.info("✅ Database connection pool closed")
+            except Exception as e:
+                logger.error(f"❌ Failed to close DB pool: {e}")
 
 
 __all__ = ["OptimizedDataLoader"]

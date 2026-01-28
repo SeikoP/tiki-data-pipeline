@@ -152,8 +152,16 @@ def initialize_db_pool(**kwargs):
     _db_pool.initialize(**kwargs)
 
 
+def close_db_pool():
+    """
+    Close the global database pool instance.
+    """
+    _db_pool.close_all()
+
+
 __all__ = [
     "PostgresConnectionPool",
     "get_db_pool",
     "initialize_db_pool",
+    "close_db_pool",
 ]

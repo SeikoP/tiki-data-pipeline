@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import (
+from tiki_crawl_products_v2.bootstrap import (
     CACHE_DIR,
     CATEGORIES_FILE,
     DEBUG_LOAD_CATEGORIES,
@@ -22,6 +22,7 @@ from ..bootstrap import (
     sys,
     time,
 )
+
 from .common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
     get_logger,  # noqa: F401

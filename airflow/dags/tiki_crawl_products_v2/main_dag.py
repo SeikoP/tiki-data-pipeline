@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .bootstrap import (
+from tiki_crawl_products_v2.bootstrap import (
     DAG,
     DAG_CONFIG,
     PythonOperator,
@@ -9,7 +9,7 @@ from .bootstrap import (
     get_variable,
     timedelta,
 )
-from .tasks import (
+from tiki_crawl_products_v2.tasks import (
     aggregate_and_notify,
     backup_database,
     cleanup_incomplete_products_wrapper,

@@ -2,20 +2,21 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import (
+from tiki_crawl_products_v2.bootstrap import (
     CATEGORIES_FILE,
     DATA_DIR,
     Any,
     dag_file_dir,
     get_load_categories_db_func,
+    get_logger,
     get_variable,
     json,
     os,
     sys,
 )
+
 from .common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
-    get_logger,  # noqa: F401
 )
 
 
@@ -291,7 +292,7 @@ def _import_postgres_storage():
                     # Từ /opt/airflow/src (Docker default - ưu tiên)
                     Path("/opt/airflow/src/pipelines/crawl/storage/postgres_storage.py"),
                     # Từ dag_file_dir
-                    Path(dag_file_dir).parent.parent
+                    Path(dag_file_dir).parent.parent.parent
                     / "src"
                     / "pipelines"
                     / "crawl"
@@ -327,7 +328,7 @@ def _import_postgres_storage():
                 # Nếu không tìm thấy file, thử thêm src vào path và import absolute
                 src_paths = [
                     Path("/opt/airflow/src"),
-                    Path(dag_file_dir).parent.parent / "src",
+                    Path(dag_file_dir).parent.parent.parent / "src",
                     Path(os.getcwd()) / "src",
                 ]
 

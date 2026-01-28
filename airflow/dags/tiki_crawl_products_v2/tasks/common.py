@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import Any, Path, json, logging, os, shutil, sys
+from tiki_crawl_products_v2.bootstrap import Any, Path, json, logging, os, shutil, sys
 
 
 def get_logger(context):
@@ -69,7 +69,7 @@ def _fix_sys_path_for_pipelines_import(logger=None):
     possible_src_paths = [
         "/opt/airflow/src",  # Docker default path
         os.path.abspath(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "src")
         ),  # Local dev
     ]
 

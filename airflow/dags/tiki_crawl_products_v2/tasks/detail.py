@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import (
+from tiki_crawl_products_v2.bootstrap import (
     DETAIL_CACHE_DIR,
     OUTPUT_FILE,
     OUTPUT_FILE_WITH_DETAIL,
@@ -10,15 +10,19 @@ from ..bootstrap import (
     Any,
     CircuitBreakerOpenError,
     Path,
+    SeleniumDriverPool,
+    atomic_write_file,
     classify_error,
     crawl_product_detail_async,
     crawl_product_detail_with_driver,
     crawl_product_detail_with_selenium,
+    dag_file_dir,
     datetime,
     ensure_output_dirs,
     extract_product_detail,
     get_hierarchy_map,
     get_int_variable,
+    get_logger,
     get_tiki_circuit_breaker,
     get_tiki_degradation,
     get_tiki_dlq,
@@ -31,10 +35,9 @@ from ..bootstrap import (
     sys,
     time,
 )
+
 from .common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
-    atomic_write_file,  # noqa: F401
-    get_logger,  # noqa: F401
 )
 from .loader import _import_postgres_storage  # noqa: F401
 
@@ -457,6 +460,8 @@ def crawl_product_batch(
                 import importlib.util
 
                 src_path = Path("/opt/airflow/src")
+                if not src_path.exists():
+                    src_path = Path(dag_file_dir).parent.parent.parent / "src"
                 utils_path = src_path / "pipelines" / "crawl" / "utils.py"
                 if utils_path.exists():
                     spec = importlib.util.spec_from_file_location(
@@ -1783,14 +1788,12 @@ def merge_product_details(**context) -> dict[str, Any]:
                 product_id = detail_result.get("product_id")
                 if product_id:
                     detail_dict[product_id] = detail_result
-                    valid_results += 1
                     status = detail_result.get("status", "failed")
                     error = detail_result.get("error")
 
                     # Đếm số lượng products được crawl (tất cả các status trừ "not_crawled")
                     if status in [
                         "success",
-                        "cached",
                         "failed",
                         "timeout",
                         "degraded",

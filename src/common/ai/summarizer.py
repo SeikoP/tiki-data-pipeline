@@ -5,6 +5,9 @@ Module để tổng hợp dữ liệu sử dụng Groq AI.
 import json
 import logging
 import os
+import re
+import time
+from functools import lru_cache
 from typing import Any
 
 import requests
@@ -183,8 +186,9 @@ Data JSON:
 
         return prompt
 
+    @lru_cache(maxsize=2048)  # noqa: B019
     def shorten_product_name(self, product_name: str) -> str:
-        """Rút gọn tên sản phẩm sử dụng AI.
+        """Rút gọn tên sản phẩm sử dụng AI (có caching và regex fallback).
 
         Args:
             product_name: Tên sản phẩm gốc
@@ -192,17 +196,29 @@ Data JSON:
         Returns:
             Tên sản phẩm đã được rút gọn
         """
-        if not self.enabled or not self.api_keys:
+        if not product_name:
+            return ""
+
+        # 0. Pre-check: Nếu tên đã ngắn (< 15 chars) hoặc quá dài (> 200 chars - có thể là spam), trả về regex clean luôn
+        if len(product_name) < 15:
             return product_name
 
-        if not product_name or len(product_name) < 50:
-            return product_name
+        # 1. Regex Cleanup (Heuristic) - Luôn chạy cái này trước để tiết kiệm token
+        # Loại bỏ các từ khóa spam/marketing phổ biến
+        cleaned_name = self._regex_clean_name(product_name)
+
+        # Nếu sau khi regex clean, tên đã đủ ngắn (< 40 chars) -> Return luôn, không cần AI
+        if len(cleaned_name) < 40:
+            return cleaned_name
+
+        if not self.enabled or not self.api_keys:
+            return cleaned_name
 
         try:
             prompt = f"""
 Bạn là trợ lý AI chuyên chuẩn hóa và rút gọn tên sản phẩm thương mại điện tử.
 
-Tên gốc: "{product_name}"
+Tên gốc: "{cleaned_name}"
 
 Nhiệm vụ:
 - Tạo một tên sản phẩm ngắn gọn, rõ nghĩa, phù hợp để hiển thị trên sàn TMĐT.
@@ -235,13 +251,59 @@ Tên rút gọn:
             # Increase max_tokens to accommodate reasoning steps used by some models
             response = self._call_groq_api(prompt, max_tokens=1000)
             if response:
-                cleaned_name = response.strip().strip('"').strip("'")
-                return cleaned_name
-            return product_name
+                cleaned_name_ai = response.strip().strip('"').strip("'")
+                # Fallback check: Nếu AI trả về tên quá ngắn hoặc rỗng, dùng regex clean
+                if len(cleaned_name_ai) < 3:
+                    return cleaned_name
+                return cleaned_name_ai
+
+            return cleaned_name
 
         except Exception as e:
             logger.error(f"❌ Lỗi khi rút gọn tên sản phẩm: {e}")
-            return product_name
+            return cleaned_name
+
+    def _regex_clean_name(self, name: str) -> str:
+        """
+        Helper method để clean tên sản phẩm bằng regex.
+        """
+        if not name:
+            return ""
+
+        # 1. Remove hashtags (e.g., #jean)
+        cleaned = re.sub(r"#\w+\b", "", name)
+
+        # 2. Loại bỏ SKU codes phổ biến (e.g., CV0016, SP123, MS123)
+        sku_patterns = [
+            r"\b[A-Za-z]{2,}\d{3,}\b",  # CV0016, SP1234
+            r"\b[A-Za-z]+\-\d+\b",  # SKU-123
+            r"\bMS\s*\d+\b",  # MS 123
+            r"\bDòng\s*.*\d+\b",  # Dòng X123
+        ]
+        for pattern in sku_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+        # 3. Loại bỏ ký tự đặc biệt thừa
+        cleaned = re.sub(r"[\[\]\(\)\{\}\!]", " ", cleaned)
+
+        # 4. Loại bỏ marketing keywords
+        keywords = [
+            "chính hãng",
+            "cao cấp",
+            "giá rẻ",
+            "new",
+            "hot",
+            "xả kho",
+            "thanh lý",
+            "fullbox",
+        ]
+        pattern = r"\b(" + "|".join(keywords) + r")\b"
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+        # 5. Normalize whitespace
+        cleaned = " ".join(cleaned.split())
+
+        return cleaned
 
     def _call_groq_api(self, prompt: str, max_tokens: int = 2000) -> str:
         """
@@ -293,9 +355,12 @@ Tên rút gọn:
                 )
 
                 if response.status_code == 429:  # Rate Limit
+                    retry_after = int(response.headers.get("Retry-After", 5))
+                    wait_time = max(retry_after, 5)  # Wait at least 5s
                     logger.warning(
-                        f"⚠️  Rate Limit (429) hit on Key #{self.current_key_index}. Rotating..."
+                        f"⚠️  Rate Limit (429) hit on Key #{self.current_key_index}. Waiting {wait_time}s then rotating..."
                     )
+                    time.sleep(wait_time)
                     self._rotate_key()
                     continue
 

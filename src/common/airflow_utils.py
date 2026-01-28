@@ -34,6 +34,18 @@ except ImportError:
             def __exit__(self, *args):
                 pass
 
+            def __rshift__(self, other):
+                return other
+
+            def __lshift__(self, other):
+                return self
+
+            def __rrshift__(self, other):
+                return self
+
+            def __rlshift__(self, other):
+                return self
+
 
 def safe_import_attr(module_path: str, attr_name: str, fallback_paths: list[Any] | None = None):
     """Import an attribute from a module with optional fallback file paths.

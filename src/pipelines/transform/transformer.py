@@ -4,7 +4,9 @@ Transform pipeline để làm sạch, validate và chuẩn hóa dữ liệu sả
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from threading import Lock
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -40,19 +42,45 @@ class DataTransformer:
         }
 
         # Initialize AI Summarizer for name shortening
+        # Initialize AI Summarizer for name shortening
         try:
             from src.common.ai.summarizer import AISummarizer
 
-            self.ai_summarizer = AISummarizer()
+            # Try to import config to check if AI short name is enabled
+            try:
+                from src.common.config import SHORT_NAME_CONFIG
+
+                use_ai_short_name = SHORT_NAME_CONFIG.get("use_ai", True)
+            except ImportError:
+                import os
+
+                # Fallback to env var directly
+                use_ai_short_name = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
+
+            if use_ai_short_name:
+                self.ai_summarizer = AISummarizer()
+                logger.info("✅ AI Short Name enabled")
+            else:
+                self.ai_summarizer = None
+                logger.info("⚠️  AI Short Name DISABLED by config")
+
         except ImportError:
             # Fallback for relative import if src is not in path
             try:
+                import os
+
                 from ..common.ai.summarizer import AISummarizer
 
-                self.ai_summarizer = AISummarizer()
+                use_ai_short_name = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
+
+                if use_ai_short_name:
+                    self.ai_summarizer = AISummarizer()
+                else:
+                    self.ai_summarizer = None
             except ImportError:
                 # Try absolute path from project root
                 try:
+                    import os
                     import sys
                     from pathlib import Path
 
@@ -61,7 +89,11 @@ class DataTransformer:
                         sys.path.append(str(root_path))
                     from src.common.ai.summarizer import AISummarizer
 
-                    self.ai_summarizer = AISummarizer()
+                    use_ai_short_name = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
+                    if use_ai_short_name:
+                        self.ai_summarizer = AISummarizer()
+                    else:
+                        self.ai_summarizer = None
                 except Exception as e:
                     logger.warning(f"Could not import AISummarizer: {e}")
                     self.ai_summarizer = None
@@ -92,51 +124,65 @@ class DataTransformer:
 
         transformed = []
         seen_product_ids = set()
+        seen_lock = Lock()
 
-        for idx, product in enumerate(products):
-            try:
-                # Transform product
-                transformed_product = self.transform_product(product)
+        # Determine max_workers based on list size, but cap at reasonable limit (e.g. 20)
+        # Higher if IO bound (AI calls), lower if CPU bound.
+        max_workers = min(20, len(products)) if len(products) > 0 else 1
 
-                if not transformed_product:
-                    self.stats["invalid_products"] += 1
-                    continue
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Map futures to original index to maintain error context (log only)
+            future_to_product = {
+                executor.submit(self.transform_product, p): idx for idx, p in enumerate(products)
+            }
 
-                # Kiểm tra duplicate
-                product_id = transformed_product.get("product_id")
-                if product_id in seen_product_ids:
-                    self.stats["duplicates_removed"] += 1
-                    logger.debug(f"⚠️  Duplicate product_id: {product_id}")
-                    continue
+            for future in as_completed(future_to_product):
+                idx = future_to_product[future]
+                try:
+                    transformed_product = future.result()
 
-                seen_product_ids.add(product_id)
+                    if not transformed_product:
+                        self.stats["invalid_products"] += 1
+                        continue
 
-                # Validate nếu cần
-                if validate:
-                    is_valid, error = self.validate_product(transformed_product)
-                    if not is_valid:
-                        if self.remove_invalid:
-                            self.stats["invalid_products"] += 1
-                            self.stats["errors"].append(f"Product {product_id}: {error}")
+                    # Thread-safe duplicate check
+                    product_id = transformed_product.get("product_id")
+                    with seen_lock:
+                        if product_id in seen_product_ids:
+                            self.stats["duplicates_removed"] += 1
+                            logger.debug(f"⚠️  Duplicate product_id: {product_id}")
                             continue
-                        elif self.strict_validation:
-                            raise ValueError(f"Invalid product {product_id}: {error}")
+                        seen_product_ids.add(product_id)
 
-                transformed.append(transformed_product)
-                self.stats["valid_products"] += 1
+                    # Validate if needed
+                    if validate:
+                        is_valid, error = self.validate_product(transformed_product)
+                        if not is_valid:
+                            if self.remove_invalid:
+                                self.stats["invalid_products"] += 1
+                                self.stats["errors"].append(f"Product {product_id}: {error}")
+                                continue
+                            elif self.strict_validation:
+                                raise ValueError(f"Invalid product {product_id}: {error}")
 
-            except Exception as e:
-                self.stats["invalid_products"] += 1
-                error_msg = f"Error transforming product at index {idx}: {str(e)}"
-                self.stats["errors"].append(error_msg)
-                logger.error(f"❌ {error_msg}")
+                    transformed.append(transformed_product)
+                    self.stats["valid_products"] += 1
 
-                if self.strict_validation:
-                    raise
+                except Exception as e:
+                    self.stats["invalid_products"] += 1
+                    error_msg = f"Error transforming product at index {idx}: {str(e)}"
+                    self.stats["errors"].append(error_msg)
+                    logger.error(f"❌ {error_msg}")
+
+                    if self.strict_validation:
+                        raise
 
         logger.info(
             f"✅ Transform hoàn tất: {self.stats['valid_products']}/{self.stats['total_processed']} products hợp lệ"
         )
+
+        # Sort results slightly to ensure some deterministic output order if needed (optional)
+        # transformed.sort(key=lambda x: x.get('product_id'))
 
         return transformed, self.stats
 
@@ -601,6 +647,28 @@ class DataTransformer:
             "hot",
             "giá sốc",
             "giá tốt",
+            "flash sale",
+            "siêu sale",
+            "sale sốc",
+            "khuyến mãi",
+            "quà tặng",
+            "combo",
+            "set",
+            "uy tín",
+            "chất lượng",
+            "nhập khẩu",
+            "xuất khẩu",
+            "hàng hiệu",
+            "bền đẹp",
+            "siêu bền",
+            "chống nước",
+            "cao cấp",
+            "nhập",
+            "xịn",
+            "vip",
+            "luxury",
+            "limited",
+            "bản giới hạn",
         ]
 
         # Build regex for fluff (word boundaries)
@@ -627,50 +695,155 @@ class DataTransformer:
 
         return cleaned
 
+    def _extract_short_name_heuristics(self, name: str) -> str:
+        """
+        Advanced heuristic extraction to find the core product name.
+        Strategies:
+        1. Clean noise/fluff.
+        2. Structural split (delimiters).
+        3. Semantic cutoff (stop words).
+        """
+        # 1. Base cleaning
+        cleaned = self._clean_name_heuristics(name)
+        if not cleaned:
+            return ""
+
+        # 2. Structural Split (Priority Delimiters)
+        # Split by common separators and take the first meaningful chunk
+        # Delimiters: | , - – ( [ /
+        separators = [
+            r"\s\|\s",  # " | "
+            r"\s-\s",  # " - "
+            r"\s–\s",  # " – "
+            r"\(",  # "("
+            r"\[",  # "["
+            r",",  # ","
+            r"\s\/\s",  # " / "
+        ]
+
+        for sep in separators:
+            parts = re.split(sep, cleaned)
+            if parts and len(parts[0].strip()) > 3:
+                # Update cleaned to the first part
+                cleaned = parts[0].strip()
+
+        # 3. Semantic Cutoff (Stop Words/Phrases that start the 'details')
+        # These words often signal the start of attributes, not the name itself
+        stop_phrases = [
+            "chính hãng",
+            "cao cấp",
+            "nhập khẩu",
+            "giá rẻ",
+            "uy tín",
+            "chất lượng",
+            "bảo hành",
+            "xuất xứ",
+            "thương hiệu",
+            "dành cho",
+            "phù hợp",
+            "kích thước",
+            "size",
+            "màu sắc",
+            "màu",
+            "bộ nhớ",
+            "ram",
+            "dung lượng",
+            "phiên bản",
+            "model",
+            "tặng kèm",
+            "miễn phí",
+            "freeship",
+            "fullbox",
+            "nguyên seal",
+            "hàng mới",
+            "new",
+            "hot",
+            "xả kho",
+            "thanh lý",
+        ]
+
+        name_lower = cleaned.lower()
+        earliest_idx = len(cleaned)
+        found_cutoff = False
+
+        for phrase in stop_phrases:
+            # Use regex word boundary to avoid partial matches
+            pattern = re.compile(r"\b" + re.escape(phrase) + r"\b")
+            match = pattern.search(name_lower)
+            if match:
+                idx = match.start()
+                # Only cut if the phrase is not at the very beginning (keep "Bộ nhớ..." if that's the product)
+                # But allow cutting if it's "Dien thoai ABC chinh hang" (idx > 10)
+                if idx > 5 and idx < earliest_idx:
+                    earliest_idx = idx
+                    found_cutoff = True
+
+        if found_cutoff:
+            cleaned = cleaned[:earliest_idx].strip()
+            # Clean up any trailing connectors
+            cleaned = re.sub(r"[\s\-\+\&]+$", "", cleaned)
+
+        return cleaned
+
     def _get_short_name(self, name: str) -> str:
         """
-        Get shortened name using heuristic (comma split) -> AI -> Fallback.
+        Get shortened name using:
+        1. Advanced Heuristics (Extract core name).
+        2. Validation (Is heuristic result good enough?).
+        3. AI Fallback (Only if heuristics fail/result too long).
+        4. Hard Fallback (Truncate).
         """
         if not name:
             return ""
 
-        # Apply heuristic cleaning first to remove fluff and SKUs
-        cleaned_name = self._clean_name_heuristics(name)
-        if not cleaned_name:
-            cleaned_name = name
+        # 1. Advanced Heuristics
+        # This handles cleaning, splitting, and stop-word removal locally
+        heuristic_name = self._extract_short_name_heuristics(name)
 
-        # 1. Heuristic: Split by comma (User request)
-        # "dùng cách bình thường để tách ,"
-        if "," in cleaned_name:
-            parts = cleaned_name.split(",")
-            first_part = parts[0].strip()
-            # Validation:
-            # - Không quá ngắn (ví dụ "Áo")
-            # - Không quá dài (nếu dài quá thì vẫn cần AI hoặc truncate)
-            if len(first_part) >= 4 and len(first_part) <= 60:
-                return first_part
+        # 2. Heuristic Validation
+        # Explicitly accept if result looks "good enough" to avoid AI costs
+        # Criteria:
+        # - Reasonable length (e.g., < 75 chars)
+        # - Reasonable word count (e.g., < 12 words)
+        # - Not empty
+        if heuristic_name:
+            word_count = len(heuristic_name.split())
+            char_count = len(heuristic_name)
 
-        # 2. Try AI shortening if enabled (nếu không tách được hoặc kết quả không tốt)
+            # Acceptance Thresholds
+            if 2 <= word_count <= 12 and char_count <= 75:
+                # logger.debug(f"✅ Heuristic accepted: '{name}' -> '{heuristic_name}'")
+                return heuristic_name
+
+        # 3. AI Fallback (Smart Summarization)
+        # Use AI only if heuristic result is still too long or complex
         if self.ai_summarizer:
             try:
-                # Pass already cleaned name to AI to focus on core attributes
-                short_name = self.ai_summarizer.shorten_product_name(cleaned_name)
-                # Ensure we got a valid, different name
-                if short_name and short_name != cleaned_name:
+                # Pass the *heuristic* result to AI (it's already cleaner than raw name)
+                # If heuristic failed (empty), use original name
+                input_name = heuristic_name if heuristic_name and len(heuristic_name) > 3 else name
+
+                short_name = self.ai_summarizer.shorten_product_name(input_name)
+
+                if short_name and short_name != input_name:
                     return short_name
+
             except Exception as e:
                 logger.warning(f"⚠️  AI shortening failed, using fallback: {e}")
 
-        # 3. Local Fallback: Use heuristic cleaned name, truncate if still too long
-        if len(cleaned_name) > 80:
-            # Try to cut at space
-            truncated = cleaned_name[:77]
+        # 4. Hard Fallback
+        # If Heuristic result exists but wasn't perfect, and AI failed, use Heuristic result.
+        # Otherwise use truncation.
+        final_candidate = heuristic_name if heuristic_name else name
+
+        if len(final_candidate) > 80:
+            truncated = final_candidate[:77]
             last_space = truncated.rfind(" ")
             if last_space > 40:
-                truncated = cleaned_name[:last_space]
+                truncated = final_candidate[:last_space]
             return truncated + "..."
 
-        return cleaned_name
+        return final_candidate
 
     def get_stats(self) -> dict[str, Any]:
         """

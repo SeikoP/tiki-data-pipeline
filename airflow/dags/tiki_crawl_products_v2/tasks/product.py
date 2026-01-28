@@ -2,24 +2,25 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import (
+from tiki_crawl_products_v2.bootstrap import (
     CATEGORIES_FILE,
     DATA_DIR,
     OUTPUT_DIR,
     OUTPUT_FILE,
     OUTPUT_FILE_WITH_DETAIL,
     Any,
+    atomic_write_file,
     dag_file_dir,
     datetime,
     ensure_output_dirs,
+    get_logger,
     get_variable,
     json,
     os,
 )
+
 from .common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
-    atomic_write_file,  # noqa: F401
-    get_logger,  # noqa: F401
 )
 
 
@@ -421,7 +422,9 @@ def transform_products(**context) -> dict[str, Any]:
             utils_paths = [
                 "/opt/airflow/src/pipelines/crawl/utils.py",
                 os.path.abspath(
-                    os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "crawl", "utils.py")
+                    os.path.join(
+                        dag_file_dir, "..", "..", "..", "src", "pipelines", "crawl", "utils.py"
+                    )
                 ),
                 os.path.join(os.getcwd(), "src", "pipelines", "crawl", "utils.py"),
             ]
@@ -535,7 +538,14 @@ def transform_products(**context) -> dict[str, Any]:
                 "/opt/airflow/src/pipelines/transform/transformer.py",
                 os.path.abspath(
                     os.path.join(
-                        dag_file_dir, "..", "..", "src", "pipelines", "transform", "transformer.py"
+                        dag_file_dir,
+                        "..",
+                        "..",
+                        "..",
+                        "src",
+                        "pipelines",
+                        "transform",
+                        "transformer.py",
                     )
                 ),
                 os.path.join(os.getcwd(), "src", "pipelines", "transform", "transformer.py"),

@@ -15,6 +15,7 @@ Tính năng:
 Dependencies được quản lý bằng >> operator giữa các tasks.
 """
 
+import json
 import logging
 import os
 import sys
@@ -23,6 +24,79 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
+from typing import Any
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
+
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
+
+try:
+    from airflow import DAG
+    from airflow.models import Pool
+    from airflow.operators.python import PythonOperator
+except ImportError:
+    # Mock for local development without airflow installed
+    class DAG:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    class Pool:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class PythonOperator:
+        def __init__(self, *args, **kwargs):
+            self.output = []
+
+        def expand(self, **kwargs):
+            return self
+
+        @classmethod
+        def partial(cls, *args, **kwargs):
+            return cls()
+
+        def __rshift__(self, other):
+            return other
+
+        def __lshift__(self, other):
+            return self
+
+        def __rrshift__(self, other):
+            return self
+
+        def __rlshift__(self, other):
+            return self
+
+
+try:
+    from airflow.exceptions import AirflowSkipException
+except ImportError:
+
+    class AirflowSkipException(Exception):
+        pass
+
+
+def load_env_file():
+    """Dummy load_env_file for bootstrap"""
+    pass
+
 
 # Setup imports path
 src_path = Path("/opt/airflow/src")
@@ -31,7 +105,7 @@ if src_path.exists() and str(src_path) not in sys.path:
 
 # Fallback for local development
 if not src_path.exists():
-    local_src = Path(__file__).resolve().parent.parent.parent / "src"
+    local_src = Path(__file__).resolve().parent.parent.parent.parent / "src"
     if local_src.exists() and str(local_src) not in sys.path:
         sys.path.insert(0, str(local_src))
 
@@ -67,6 +141,18 @@ except ImportError as e:
 
         def __exit__(self, *args):
             pass
+
+        def __rshift__(self, other):
+            return other
+
+        def __lshift__(self, other):
+            return self
+
+        def __rrshift__(self, other):
+            return self
+
+        def __rlshift__(self, other):
+            return self
 
     def safe_import_attr(*args, **kwargs):
         return None
@@ -109,10 +195,106 @@ dag_file_dir = os.path.dirname(__file__)
 
 # Các đường dẫn có thể chứa module crawl
 possible_paths = [
+    os.path.abspath(os.path.join(dag_file_dir, "..", "..", "..", "src", "pipelines", "crawl")),
     os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src", "pipelines", "crawl")),
-    os.path.abspath(os.path.join(dag_file_dir, "..", "src", "pipelines", "crawl")),
     "/opt/airflow/src/pipelines/crawl",
 ]
+
+
+def _fix_sys_path_for_pipelines_import(logger=None):
+    """
+    Sửa sys.path và sys.modules để đảm bảo import được pipelines.
+    Xử lý trường hợp pipelines bị nhận nhầm là namespace package hoặc module không tồn tại.
+    """
+    if logger:
+        logger.info("🔧 Fixing sys.path for pipelines import...")
+
+    # 1. Thêm src vào sys.path nếu chưa có
+    src_path_str = str(src_path)
+    if src_path_str not in sys.path:
+        sys.path.insert(0, src_path_str)
+        if logger:
+            logger.info(f"   Added {src_path_str} to sys.path")
+
+    # 2. Xóa các entries giả trong sys.modules (quan trọng cho reload)
+    modules_to_remove = [
+        m for m in sys.modules.keys() if m.startswith("pipelines") or m.startswith("common")
+    ]
+    # Chỉ xóa nếu thực sự cần thiết (optional strategy) - ở đây ta giữ nguyên logic cũ là xóa
+    # However, aggressive cleaning might break things if imports are partial.
+    # Let's trust the adding of src_path to sys.path is enough for now,
+    # OR replicate the full logic if we are sure.
+
+    # Full logic from previous viewing:
+    # Xóa các fake modules khỏi sys.modules
+    count = 0
+    for module_name in modules_to_remove:
+        # Check if attribute is None (namespace package without init)
+        if sys.modules[module_name] is None:
+            del sys.modules[module_name]
+            count += 1
+
+    if logger and count > 0:
+        logger.info(f"   Cleaned {count} None modules starting with pipelines/common")
+
+
+def get_logger(context=None):
+    """
+    Get Airflow task logger or standard logger.
+    """
+    if context and "ti" in context:
+        return context["ti"].log
+    return logging.getLogger("airflow.task")
+
+
+def atomic_write_file(filepath: str, data: Any, **context):
+    """Ghi file an toàn (atomic write) để tránh corrupt.
+
+    Sử dụng temporary file và rename để đảm bảo atomicity
+    """
+    logger = get_logger(context)
+
+    filepath = Path(filepath)
+    temp_file = filepath.with_suffix(".tmp")
+
+    try:
+        # Ghi vào temporary file
+        with open(temp_file, "w", encoding="utf-8") as f:
+            if isinstance(data, dict):
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            else:
+                f.write(str(data))
+
+        # Rename atomic
+        # os.replace is atomic on POSIX and Windows (Python 3.3+)
+        os.replace(temp_file, filepath)
+        # logger.info(f"✅ Đã ghi file: {filepath}")
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi ghi file {filepath}: {e}")
+        if temp_file.exists():
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
+        raise
+
+
+# Import pipelines modules
+try:
+    from pipelines.transform.transformer import DataTransformer
+except ImportError:
+    DataTransformer = None
+
+try:
+    from pipelines.load.optimized_loader import OptimizedDataLoader
+except ImportError:
+    OptimizedDataLoader = None
+
+try:
+    from pipelines.transform.merger import combine_products
+except ImportError:
+    combine_products = None
+
 
 # Import module crawl_products_detail
 crawl_products_detail_path = None
@@ -182,40 +364,40 @@ else:
             f"Lỗi gốc: {e}"
         ) from e
 
-    # Import crawl_category_products từ crawl_products
-    crawl_products_path = None
-    for path in possible_paths:
-        test_path = os.path.join(path, "crawl_products.py")
-        if os.path.exists(test_path):
-            crawl_products_path = test_path
-            break
+# Import crawl_category_products từ crawl_products
+crawl_products_path = None
+for path in possible_paths:
+    test_path = os.path.join(path, "crawl_products.py")
+    if os.path.exists(test_path):
+        crawl_products_path = test_path
+        break
 
-    if crawl_products_path and os.path.exists(crawl_products_path):
-        try:
-            import importlib.util
+if crawl_products_path and os.path.exists(crawl_products_path):
+    try:
+        import importlib.util
 
-            spec = importlib.util.spec_from_file_location("crawl_products", crawl_products_path)
-            if spec and spec.loader:
-                crawl_products_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(crawl_products_module)
-                crawl_category_products = getattr(
-                    crawl_products_module, "crawl_category_products", None
-                )
-            else:
-                crawl_category_products = None
-        except Exception as e:
-            err_msg = str(e)
-            warnings.warn(f"Không thể import crawl_products module: {err_msg}", stacklevel=2)
+        spec = importlib.util.spec_from_file_location("crawl_products", crawl_products_path)
+        if spec and spec.loader:
+            crawl_products_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(crawl_products_module)
+            crawl_category_products = getattr(
+                crawl_products_module, "crawl_category_products", None
+            )
+        else:
+            crawl_category_products = None
+    except Exception as e:
+        err_msg = str(e)
+        warnings.warn(f"Không thể import crawl_products module: {err_msg}", stacklevel=2)
 
-            def crawl_category_products(*args, **kwargs):
-                raise ImportError(f"Module crawl_products chưa được import: {err_msg}")
-    else:
-        try:
-            from pipelines.crawl.crawl_products import crawl_category_products
-        except ImportError:
+        def crawl_category_products(*args, **kwargs):
+            raise ImportError(f"Module crawl_products chưa được import: {err_msg}")
+else:
+    try:
+        from pipelines.crawl.crawl_products import crawl_category_products
+    except ImportError:
 
-            def crawl_category_products(*args, **kwargs):
-                raise ImportError("Không tìm thấy module crawl_products")
+        def crawl_category_products(*args, **kwargs):
+            raise ImportError("Không tìm thấy module crawl_products")
 
 
 # Import SeleniumDriverPool từ utils ở module level
@@ -677,6 +859,25 @@ for common_base in common_base_paths:
 
     if analytics_path and ai_path and notifications_path and config_path:
         break
+
+# Fallback for common_base_paths in local dev
+if not (analytics_path and ai_path and notifications_path and config_path):
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    common_base = project_root / "src" / "common"
+    if common_base.exists():
+        test_analytics = common_base / "analytics" / "aggregator.py"
+        test_ai = common_base / "ai" / "summarizer.py"
+        test_notifications = common_base / "notifications" / "discord.py"
+        test_config = common_base / "config.py"
+
+        if test_analytics.exists():
+            analytics_path = str(test_analytics)
+        if test_ai.exists():
+            ai_path = str(test_ai)
+        if test_notifications.exists():
+            notifications_path = str(test_notifications)
+        if test_config.exists():
+            config_path = str(test_config)
 
 
 def _lazy_import_from_file(module_name: str, file_path: str, attr: str):
