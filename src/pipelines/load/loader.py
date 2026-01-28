@@ -460,4 +460,7 @@ class OptimizedDataLoader:
                 logger.error(f"❌ Failed to close DB pool: {e}")
 
 
-__all__ = ["OptimizedDataLoader"]
+# Backward compatibility
+DataLoader = OptimizedDataLoader
+
+__all__ = ["OptimizedDataLoader", "DataLoader"]

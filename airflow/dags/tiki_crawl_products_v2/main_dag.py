@@ -32,6 +32,10 @@ from tiki_crawl_products_v2.tasks import (
     validate_data,
 )
 
+# Safe Mode: airflow DAG
+# This file is an Airflow DAG for Tiki product crawling.
+
+
 with DAG(**DAG_CONFIG) as dag:
     # ===== STEP 1: PRE-CRAWL CLEANUP & LOAD =====
     with TaskGroup("pre_crawl") as pre_crawl_group:
