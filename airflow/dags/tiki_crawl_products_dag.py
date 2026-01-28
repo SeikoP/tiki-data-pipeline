@@ -121,10 +121,17 @@ def safe_import_attr(module_path: str, attr_name: str, fallback_paths: list[Any]
 
 # Wrapper function để từng bước thay thế print debug bằng logger.debug
 def get_variable(key: str, default: Any = None) -> Any:
+    # 1. Try Airflow Variable first
     try:
         return Variable.get(key, default_var=default)
     except Exception:
-        return default
+        pass
+    
+    # 2. Try Environment Variable (from .env or system)
+    # Airflow Variable often expects AIRFLOW_VAR_ prefix, but .env might not have it
+    # We check both the key as-is and with AIRFLOW_VAR_ prefix if needed, 
+    # but Standard python os.getenv is enough for .env values
+    return os.getenv(key, default)
 
 
 def get_int_variable(key: str, default: int) -> int:
@@ -140,6 +147,34 @@ def get_int_variable(key: str, default: int) -> int:
             default,
         )
         return default
+
+# Load .env explicitly for DAG
+# DAGs often run in their own process/context
+try:
+    from dotenv import load_dotenv
+    # Look for .env in project root (3 levels up from dags/)
+    # airflow/dags/tiki_crawl_products_dag.py -> airflow/dags -> airflow -> project_root
+    
+    # Common paths to try
+    possible_env_paths = [
+        Path("/opt/airflow/.env"),                      # Docker root
+        Path(__file__).parent.parent.parent / ".env",   # Local dev relative
+        Path(os.getcwd()) / ".env"                      # CWD
+    ]
+    
+    env_loaded = False
+    for env_p in possible_env_paths:
+        if env_p.exists():
+            load_dotenv(env_p, override=True)
+            logging.info(f"✅ DAG loaded .env from {env_p}")
+            env_loaded = True
+            break
+            
+    if not env_loaded:
+        logging.warning("⚠️ DAG could not find .env file")
+        
+except Exception as e:
+    logging.warning(f"⚠️ Error loading .env in DAG: {e}")
 
 
 # ========== LOAD CATEGORY HIERARCHY MAP FOR AUTO-PARENT-DETECTION ==========
@@ -1458,10 +1493,7 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
     category_name = category.get("name", "Unknown")
     category_id = category.get("id", "")
 
-    logger.info("=" * 70)
-    logger.info(f"🛍️  TASK: Crawl Category - {category_name}")
-    logger.info(f"🔗 URL: {category_url}")
-    logger.info("=" * 70)
+    logger.info(f"🛍️  TASK: Crawl Category '{category_name}' | URL: {category_url}")
 
     result = {
         "category_id": category_id,
@@ -1620,9 +1652,7 @@ def merge_products(**context) -> dict[str, Any]:
         Dict: Tổng hợp sản phẩm và thống kê
     """
     logger = get_logger(context)
-    logger.info("=" * 70)
     logger.info("🔄 TASK: Merge Products")
-    logger.info("=" * 70)
 
     try:
 
@@ -2093,17 +2123,35 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     logger.info(
                         f"🔍 Đang kiểm tra {len(product_ids_to_check)} products trong database..."
                     )
-                    logger.info(
-                        "   (chỉ skip products có price, sales_count VÀ brand - detail đầy đủ)"
-                    )
+
+                    # Cấu hình thời gian relaxation (mặc định 7 ngày)
+                    cache_relax_days = get_int_variable("TIKI_CACHE_RELAX_DAYS", default=7)
+
+                    # Skip check info reduced to avoid spam
+                    # logger.info("Checking skip conditions...")
+
                     with storage.get_connection() as conn:
                         with conn.cursor() as cur:
                             # Chia nhỏ query nếu có quá nhiều product_ids
-                            # Chỉ lấy products có price, sales_count VÀ brand (detail đầy đủ)
-                            # Products không có brand sẽ được crawl lại
                             for i in range(0, len(product_ids_to_check), 1000):
                                 batch_ids = product_ids_to_check[i : i + 1000]
                                 placeholders = ",".join(["%s"] * len(batch_ids))
+                                
+                                # Logic check:
+                                # Normal: Skip if (Has Full Detail) OR (Is Recent)
+                                # Strict Recency (Force Update Old): Skip if (Is Recent) ONLY.
+                                
+                                check_recency_only = get_variable("TIKI_CHECK_RECENCY_ONLY", default="false").lower() == "true"
+                                
+                                if check_recency_only:
+                                    logger.info("🕒 RECENCY MODE: Chỉ check updated_at")
+                                    filter_condition = f"updated_at > NOW() - INTERVAL '{cache_relax_days} days'"
+                                else:
+                                    filter_condition = f"""
+                                        (brand IS NOT NULL AND brand != '' AND seller_name IS NOT NULL AND seller_name != '')
+                                        OR (updated_at > NOW() - INTERVAL '{cache_relax_days} days')
+                                    """
+
                                 cur.execute(
                                     f"""
                                     SELECT product_id
@@ -2111,74 +2159,60 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                                     WHERE product_id IN ({placeholders})
                                       AND price IS NOT NULL
                                       AND sales_count IS NOT NULL
-                                      AND brand IS NOT NULL
-                                      AND brand != ''
-                                      AND seller_name IS NOT NULL
-                                      AND seller_name != ''
+                                      AND ({filter_condition})
                                     """,
                                     batch_ids,
                                 )
                                 existing_product_ids_in_db.update(row[0] for row in cur.fetchall())
 
-                    logger.info(
-                        f"✅ Tìm thấy {len(existing_product_ids_in_db)} products đã có detail đầy đủ trong database"
-                    )
-                    logger.info("   (có price, sales_count VÀ brand - sẽ skip crawl lại)")
-                    logger.info(
-                        "   💡 Products không có brand sẽ được crawl lại để lấy đầy đủ thông tin"
-                    )
+                    if len(existing_product_ids_in_db) > 0:
+                        logger.info(f"✅ DB Check: Found {len(existing_product_ids_in_db)} valid/recent products to skip")
                     storage.close()
         except Exception as e:
             logger.warning(f"⚠️  Không thể kiểm tra database: {e}")
             logger.info("   Sẽ tiếp tục với cache và progress file")
 
-        # Bắt đầu từ index đã crawl
-        start_index = progress["last_crawled_index"]
-
-        # Kiểm tra nếu start_index vượt quá số lượng products hiện tại
-        # (có thể do test mode giới hạn số lượng products)
-        if start_index >= len(products):
-            logger.warning("=" * 70)
-            logger.warning("⚠️  RESET PROGRESS INDEX!")
-            logger.warning(f"   - Progress index: {start_index}")
-            logger.warning(f"   - Số products hiện tại: {len(products)}")
-            logger.warning("   - Index vượt quá số lượng products")
-            logger.warning("   - Có thể do test mode giới hạn số lượng products")
-            logger.warning("   - Reset về index 0 để crawl lại từ đầu")
-            logger.warning("=" * 70)
-            start_index = 0
-            # Reset progress để tránh nhầm lẫn
-            progress["last_crawled_index"] = 0
-            progress["total_crawled"] = 0
-            # Giữ lại crawled_product_ids để tránh crawl lại products đã có
-
-        products_to_check = products[start_index:]
+        # Bắt đầu iteration từ đầu (Stateless iteration)
+        # Thay vì dựa vào index, chúng ta dựa vào crawled_product_ids
+        
+        # Check Force Crawl flag
+        force_crawl = get_variable("TIKI_FORCE_CRAWL", default="false").lower() == "true"
+        # Check Ignore Progress flag (Soft Force)
+        ignore_progress = get_variable("TIKI_IGNORE_PROGRESS", default="false").lower() == "true"
+        
+        if force_crawl:
+            logger.warning("🔥 FORCE CRAWL: ON")
+        elif ignore_progress:
+            logger.warning("🔄 IGNORE PROGRESS: ON (Re-scan list)")
 
         logger.info(
-            f"🔄 Bắt đầu từ index {start_index} (đã crawl {progress['total_crawled']} products, tổng products: {len(products)})"
+            f"🔄 Bắt đầu kiểm tra {len(products)} products (đã crawl {progress['total_crawled']} products)"
         )
 
-        # Tối ưu: Duyệt tất cả products để tìm products chưa có trong DB
-        # Thay vì dừng khi đạt max_products nhưng toàn bộ là skip
         skipped_count = 0
-        max_skipped_before_stop = 100  # Dừng nếu skip liên tiếp 100 products
+        products_to_crawl = []
+        
+        # Reset counters
+        db_hits = 0
+        cache_hits = 0
+        already_crawled = 0
 
-        for idx, product in enumerate(products_to_check):
+        # Tối ưu: Duyệt tất cả products để tìm products chưa có trong DB
+        for idx, product in enumerate(products):
             product_id = product.get("product_id")
             product_url = product.get("url")
 
             if not product_id or not product_url:
                 continue
 
-            # Kiểm tra xem đã crawl chưa (từ progress)
-            if product_id in progress["crawled_product_ids"]:
+            # 1. Kiểm tra xem đã crawl chưa (từ progress) - Trừ khi force crawl hoặc ignore progress
+            if not force_crawl and not ignore_progress and product_id in progress["crawled_product_ids"]:
                 already_crawled += 1
                 skipped_count += 1
                 continue
 
-            # Kiểm tra xem đã có trong database chưa (với detail đầy đủ)
-            # existing_product_ids_in_db chỉ chứa products có price và sales_count
-            if product_id in existing_product_ids_in_db:
+            # 2. Kiểm tra xem đã có trong database chưa (với detail đầy đủ) - Trừ khi force crawl
+            if not force_crawl and product_id in existing_product_ids_in_db:
                 # Đã có trong DB với detail đầy đủ (có price và sales_count)
                 # → Skip crawl lại
                 db_hits += 1
@@ -2187,10 +2221,10 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 skipped_count += 1
                 continue
 
-            # Kiểm tra cache với Redis (thay vì file cache)
+            # 3. Kiểm tra cache với Redis (thay vì file cache)
             cache_hit = False
 
-            if redis_cache:
+            if not force_crawl and redis_cache:
                 # Chuẩn hóa URL trước khi check cache (CRITICAL)
                 product_id_for_cache = product_id
 
@@ -2206,18 +2240,20 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     already_crawled += 1
                     skipped_count += 1
 
-            # Nếu chưa có valid cache, thêm vào danh sách crawl
-            if not cache_hit:
-                products_to_crawl.append(
-                    {
-                        "product_id": product_id,
-                        "url": product_url,
-                        "name": product.get("name", ""),
-                        "product": product,  # Giữ nguyên product data
-                        "index": start_index + idx,  # Lưu index để track progress
-                    }
-                )
-                skipped_count = 0  # Reset counter khi tìm thấy product mới
+            # Nếu chưa có valid cache (hoặc force crawl), thêm vào danh sách crawl
+            if cache_hit:
+                 continue
+                 
+            products_to_crawl.append(
+                {
+                    "product_id": product_id,
+                    "url": product_url,
+                    "name": product.get("name", ""),
+                    "product": product,  # Giữ nguyên product data
+                    "index": idx,  # Lưu index để track progress (nếu cần debug)
+                }
+            )
+            skipped_count = 0  # Reset counter khi tìm thấy product mới
 
             # Giới hạn số lượng products crawl trong ngày này
             if len(products_to_crawl) >= products_per_day:
@@ -2229,67 +2265,27 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 logger.info(f"✓ Đã đạt giới hạn tổng {max_products} products")
                 break
 
-            # Dừng nếu skip quá nhiều products liên tiếp (có thể đã hết products mới)
-            if skipped_count >= max_skipped_before_stop:
-                logger.info(
-                    f"⚠️  Đã skip {skipped_count} products liên tiếp, có thể đã hết products mới"
-                )
-                logger.info(f"   - Đã tìm được {len(products_to_crawl)} products để crawl")
-                break
-
-        logger.info("=" * 70)
-        logger.info("📊 THỐNG KÊ PREPARE PRODUCTS FOR DETAIL")
-        logger.info("=" * 70)
-        logger.info(f"📦 Tổng products đầu vào: {len(products)}")
-        logger.info(f"✅ Products cần crawl hôm nay: {len(products_to_crawl)}")
-
-        # Cache hit rate analytics
-        total_checked = cache_hits + db_hits + (already_crawled - db_hits - cache_hits)
-        if total_checked > 0:
-            cache_hit_rate = (cache_hits / total_checked) * 100
-        else:
-            cache_hit_rate = 0.0
-
-        logger.info(f"🔥 Cache hits (Redis - có data hợp lệ): {cache_hits}")
-        logger.info(f"💾 DB hits (đã có trong DB): {db_hits}")
-        logger.info(f"✓ Đã crawl trước đó (từ progress): {already_crawled - db_hits - cache_hits}")
-        logger.info(f"📈 Tổng đã kiểm tra: {total_checked}")
-        logger.info(f"📊 **CACHE HIT RATE: {cache_hit_rate:.1f}%** ← TARGET: 60-80%")
-        logger.info(f"📈 Tổng đã crawl toàn bộ: {progress['total_crawled'] + already_crawled}")
-        logger.info(
-            f"📉 Còn lại chưa crawl: {len(products) - (progress['total_crawled'] + already_crawled + len(products_to_crawl))}"
-        )
-        logger.info("=" * 70)
+        # Stats Summary
+        total_checked = idx + 1
+        cache_hit_rate = (cache_hits / total_checked * 100) if total_checked > 0 else 0.0
+        total_skipped = already_crawled
+        
+        progress['total_crawled'] = len(progress['crawled_product_ids'])
+        
+        logger.info(("-" * 30))
+        logger.info(f"📊 SUMMARY: Input={len(products)} | ToCrawl={len(products_to_crawl)} | Skipped={total_skipped}")
+        logger.info(f"   Hits: DB={db_hits}, Cache={cache_hits} ({cache_hit_rate:.1f}%)")
+        logger.info(f"   Total Unique Crawled: {progress['total_crawled']}")
+        logger.info(("-" * 30))
 
         if len(products_to_crawl) == 0:
-            logger.warning("=" * 70)
-            logger.warning("⚠️  KHÔNG CÓ PRODUCTS NÀO CẦN CRAWL DETAIL!")
-            logger.warning("=" * 70)
-            logger.warning("💡 Lý do:")
-            if already_crawled > 0:
-                logger.warning(
-                    f"   - Đã có trong progress: {already_crawled - db_hits - cache_hits} products"
-                )
-            if cache_hits > 0:
-                logger.warning(
-                    f"   - Đã có trong cache (có price và sales_count): {cache_hits} products"
-                )
-            if db_hits > 0:
-                logger.warning(
-                    f"   - Đã có trong database (có price và sales_count): {db_hits} products"
-                )
-            logger.warning("=" * 70)
-            logger.warning("💡 Để force crawl lại, bạn có thể:")
-            logger.warning("   1. Xóa progress file: data/processed/detail_crawl_progress.json")
-            logger.warning("   2. Xóa cache files trong: data/raw/products/detail/cache/")
-            logger.warning("   3. Xóa products trong database (nếu muốn crawl lại)")
-            logger.warning("=" * 70)
+            logger.warning(f"⚠️  NO PRODUCTS TO CRAWL! (Check: Progress={not ignore_progress}, DB/Cache={not force_crawl})")
+            logger.info("   Hint: Set TIKI_FORCE_CRAWL=true to recrawl all, or TIKI_IGNORE_PROGRESS=true to rescan.")
 
-        # Lưu progress (sẽ được cập nhật sau khi crawl xong)
-        if products_to_crawl:
-            # Lưu index của product cuối cùng sẽ được crawl
-            last_index = products_to_crawl[-1]["index"]
-            progress["last_crawled_index"] = last_index + 1
+        # Lưu progress (list of IDs)
+        if products_to_crawl or skipped_count > 0: # Lưu nếu có thay đổi hoặc skip
+            # Update last_crawled_index is mostly meaningless now, set to last checked
+            progress["last_crawled_index"] = idx 
             progress["last_updated"] = datetime.now().isoformat()
 
             # Lưu progress vào file
@@ -2370,36 +2366,20 @@ def crawl_product_batch(
             batch_index = context.get("batch_index", -1)
 
     if not product_batch:
-        logger.error("=" * 70)
-        logger.error("❌ KHÔNG TÌM THẤY PRODUCT_BATCH TRONG CONTEXT!")
-        logger.error("=" * 70)
-        logger.error("💡 Debug info:")
-        logger.error(f"   - Context keys: {list(context.keys())}")
-        if ti:
-            logger.error(f"   - ti.op_kwargs: {getattr(ti, 'op_kwargs', 'N/A')}")
-        logger.error("=" * 70)
+        logger.error(f"❌ MISSING PRODUCT_BATCH! Context keys: {list(context.keys())}")
         return []
 
     # Validate product_batch
     if not isinstance(product_batch, list):
-        logger.error("=" * 70)
-        logger.error(f"❌ PRODUCT_BATCH KHÔNG PHẢI LIST: {type(product_batch)}")
-        logger.error(f"   - Value: {product_batch}")
-        logger.error("=" * 70)
+        logger.error(f"❌ INVALID BATCH TYPE: {type(product_batch)} (Value: {product_batch})")
         return []
 
     if len(product_batch) == 0:
-        logger.warning("=" * 70)
-        logger.warning(f"⚠️  BATCH {batch_index} RỖNG - Không có products nào")
-        logger.warning("=" * 70)
+        logger.warning(f"⚠️  BATCH {batch_index} EMPTY")
         return []
 
-    logger.info("=" * 70)
-    logger.info(f"📦 BATCH {batch_index}: Crawl {len(product_batch)} products")
-    logger.info(f"   - Product IDs: {[p.get('product_id', 'unknown') for p in product_batch[:5]]}")
-    if len(product_batch) > 5:
-        logger.info(f"   - ... và {len(product_batch) - 5} products nữa")
-    logger.info("=" * 70)
+    ids_preview = [p.get('product_id', 'unknown') for p in product_batch[:3]]
+    logger.info(f"📦 BATCH {batch_index}: {len(product_batch)} products. IDs={ids_preview}...")
 
     results = []
 
@@ -2887,11 +2867,7 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
     product_url = product_info.get("url", "")
     product_name = product_info.get("name", "Unknown")
 
-    logger.info("=" * 70)
-    logger.info(f"🔍 TASK: Crawl Product Detail - {product_name}")
-    logger.info(f"🆔 Product ID: {product_id}")
-    logger.info(f"🔗 URL: {product_url}")
-    logger.info("=" * 70)
+    logger.info(f"🔍 TASK: Crawl Product '{product_name}' | ID: {product_id} | URL: {product_url}")
 
     result = {
         "product_id": product_id,
@@ -4157,9 +4133,7 @@ def transform_products(**context) -> dict[str, Any]:
         Dict: Kết quả transform với transformed products và stats
     """
     logger = get_logger(context)
-    logger.info("=" * 70)
     logger.info("🔄 TASK: Transform Products")
-    logger.info("=" * 70)
 
     try:
         ti = context["ti"]
@@ -4380,13 +4354,9 @@ def transform_products(**context) -> dict[str, Any]:
                 products, validate=True
             )
 
-            logger.info("=" * 70)
-            logger.info("📊 TRANSFORM RESULTS")
-            logger.info("=" * 70)
-            logger.info(f"✅ Valid products: {transform_stats['valid_products']}")
-            logger.info(f"❌ Invalid products: {transform_stats['invalid_products']}")
-            logger.info(f"🔄 Duplicates removed: {transform_stats['duplicates_removed']}")
-            logger.info("=" * 70)
+            logger.info(
+                f"📊 TRANSFORM: Valid={transform_stats['valid_products']} | Invalid={transform_stats['invalid_products']} | Dupes={transform_stats['duplicates_removed']}"
+            )
 
             # Lưu transformed products vào file
             processed_dir = DATA_DIR / "processed"

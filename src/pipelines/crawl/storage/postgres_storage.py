@@ -108,7 +108,12 @@ class PostgresStorage:
             "keepalives_interval": keepalives_interval,
             "keepalives_count": keepalives_count,
         }
-        self._schemas_ensured = set()
+        self.connect_kwargs = {
+            "connect_timeout": connect_timeout,
+            "keepalives_idle": keepalives_idle,
+            "keepalives_interval": keepalives_interval,
+            "keepalives_count": keepalives_count,
+        }
 
     def _get_pool(self) -> SimpleConnectionPool:
         """Lấy hoặc tạo connection pool với retry logic"""
@@ -235,210 +240,6 @@ class PostgresStorage:
                         pool.putconn(conn)
                     except Exception:
                         pass
-
-    def _ensure_categories_schema(self, cur) -> None:
-        """Đảm bảo bảng categories và các index tồn tại."""
-        if "categories" in self._schemas_ensured:
-            return
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS categories (
-                id SERIAL PRIMARY KEY,
-                category_id VARCHAR(255) UNIQUE,
-                name VARCHAR(500) NOT NULL,
-                url TEXT NOT NULL UNIQUE,
-                image_url TEXT,
-                parent_url TEXT,
-                level INTEGER,
-                category_path JSONB,
-                level_1 VARCHAR(255),
-                level_2 VARCHAR(255),
-                level_3 VARCHAR(255),
-                level_4 VARCHAR(255),
-                level_5 VARCHAR(255),
-                root_category_name VARCHAR(255),
-                is_leaf BOOLEAN DEFAULT FALSE,
-                product_count INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            -- Only essential index: level_2 is used for category filtering queries
-            CREATE INDEX IF NOT EXISTS idx_cat_level2 ON categories(level_2);
-        """)
-        self._schemas_ensured.add("categories")
-
-    def _ensure_products_schema(self, cur) -> None:
-        """Đảm bảo bảng products và các index tồn tại."""
-        if "products" in self._schemas_ensured:
-            return
-        # Step 1: Create table if not exists
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS products (
-                id SERIAL PRIMARY KEY,
-                product_id VARCHAR(255) UNIQUE,
-                name VARCHAR(1000),
-                short_name VARCHAR(255),
-                url TEXT,
-                image_url TEXT,
-                category_url TEXT,
-                category_id VARCHAR(255),
-                sales_count INTEGER,
-                price DECIMAL(15, 2),
-                original_price DECIMAL(15, 2),
-                discount_percent INTEGER,
-                rating_average DECIMAL(3, 2),
-                seller_name VARCHAR(500),
-                seller_id VARCHAR(255),
-                seller_is_official BOOLEAN,
-                brand VARCHAR(255),
-                stock_available BOOLEAN,
-                shipping JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # Step 2: Create index
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
-        """)
-
-        # Step 3: Add metadata columns (for existing tables) - Run separately!
-        try:
-            cur.execute("""
-                ALTER TABLE products ADD COLUMN IF NOT EXISTS data_quality VARCHAR(50);
-                ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawl_status VARCHAR(50);
-                ALTER TABLE products ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
-                ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawled_at TIMESTAMP;
-                ALTER TABLE products ADD COLUMN IF NOT EXISTS last_crawl_attempt_at TIMESTAMP;
-                ALTER TABLE products ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMP;
-                ALTER TABLE products ADD COLUMN IF NOT EXISTS short_name VARCHAR(255);
-            """)
-        except Exception as e:
-            print(f"⚠️  Note: Some ALTER TABLE statements for products may have been skipped: {e}")
-
-        # Step 4: Create indexes for metadata columns
-        try:
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_products_data_quality ON products(data_quality);
-                CREATE INDEX IF NOT EXISTS idx_products_retry_count ON products(retry_count);
-                CREATE INDEX IF NOT EXISTS idx_products_last_crawled_at ON products(last_crawled_at);
-                CREATE INDEX IF NOT EXISTS idx_products_last_crawl_attempt_at ON products(last_crawl_attempt_at);
-            """)
-        except Exception as e:
-            print(f"⚠️  Note: Some index creation for products may have been skipped: {e}")
-
-        # Step 5: Add foreign key constraint if not exists
-        cur.execute("""
-            SELECT constraint_name FROM information_schema.table_constraints
-            WHERE table_name = 'products'
-              AND constraint_type = 'FOREIGN KEY'
-              AND constraint_name = 'fk_products_category_id'
-        """)
-
-        if not cur.fetchone():
-            try:
-                cur.execute("""
-                    ALTER TABLE products
-                    ADD CONSTRAINT fk_products_category_id
-                    FOREIGN KEY (category_id)
-                    REFERENCES categories(category_id)
-                    ON DELETE SET NULL
-                    ON UPDATE CASCADE
-                """)
-            except Exception:
-                # This is expected and will be handled by migration script
-                pass
-        self._schemas_ensured.add("products")
-
-    def _ensure_history_schema(self, cur) -> None:
-        """Đảm bảo bảng crawl_history và các index tồn tại."""
-        if "history" in self._schemas_ensured:
-            return
-        # Step 1: Create table if not exists
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS crawl_history (
-                id SERIAL PRIMARY KEY,
-                product_id VARCHAR(255) NOT NULL,
-
-                -- Price tracking
-                price DECIMAL(12, 2) NOT NULL,
-                original_price DECIMAL(12, 2),
-                discount_percent INTEGER,
-                discount_amount DECIMAL(12, 2),
-                price_change DECIMAL(12, 2),
-                price_change_percent DECIMAL(5, 2),
-                previous_price DECIMAL(12, 2),
-                previous_original_price DECIMAL(12, 2),
-                previous_discount_percent INTEGER,
-
-                -- Sales tracking
-                sales_count INTEGER,
-                sales_change INTEGER,
-
-                -- Promotion tracking
-                is_flash_sale BOOLEAN DEFAULT FALSE,
-
-                -- Metadata
-                crawl_type VARCHAR(20) DEFAULT 'price_change',
-
-                -- Timestamps
-                crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # Step 2: Create indexes (safe to run multiple times)
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_history_product_id ON crawl_history(product_id);
-            CREATE INDEX IF NOT EXISTS idx_history_crawled_at ON crawl_history(crawled_at);
-            CREATE INDEX IF NOT EXISTS idx_history_product_latest ON crawl_history(product_id, crawled_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_history_crawl_type ON crawl_history(crawl_type);
-            CREATE INDEX IF NOT EXISTS idx_history_price_change ON crawl_history(price_change) WHERE price_change IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_history_flash_sale ON crawl_history(is_flash_sale) WHERE is_flash_sale = true;
-            CREATE INDEX IF NOT EXISTS idx_history_discount ON crawl_history(discount_percent) WHERE discount_percent > 0;
-        """)
-
-        # Step 3: Add missing columns (for existing tables) - CRITICAL: Run separately!
-        # This ensures that if the table already existed before code update, it gets the new columns
-        try:
-            cur.execute("""
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_price DECIMAL(12, 2);
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_original_price DECIMAL(12, 2);
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS previous_discount_percent INTEGER;
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS crawl_type VARCHAR(20) DEFAULT 'price_change';
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS sales_count INTEGER;
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS sales_change INTEGER;
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS discount_amount DECIMAL(12, 2);
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS price_change_percent DECIMAL(5, 2);
-                ALTER TABLE crawl_history ADD COLUMN IF NOT EXISTS is_flash_sale BOOLEAN DEFAULT FALSE;
-            """)
-        except Exception as e:
-            # Log but don't fail - columns might already exist
-            print(f"⚠️  Note: Some ALTER TABLE statements may have been skipped: {e}")
-
-        # Step 4: Add foreign key constraint if not exists
-        cur.execute("""
-            SELECT constraint_name FROM information_schema.table_constraints
-            WHERE table_name = 'crawl_history'
-              AND constraint_type = 'FOREIGN KEY'
-              AND constraint_name = 'fk_crawl_history_product_id'
-        """)
-
-        if not cur.fetchone():
-            try:
-                cur.execute("""
-                    ALTER TABLE crawl_history
-                    ADD CONSTRAINT fk_crawl_history_product_id
-                    FOREIGN KEY (product_id)
-                    REFERENCES products(product_id)
-                    ON DELETE CASCADE
-                    ON UPDATE CASCADE
-                """)
-            except Exception:
-                # This is expected and will be handled by migration script
-                pass
-        self._schemas_ensured.add("history")
 
     def _write_dicts_to_csv_buffer(
         self, rows: list[dict[str, Any]], columns: list[str]
@@ -993,7 +794,7 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                self._ensure_categories_schema(cur)
+
                 # Column names to update on conflict
                 update_columns = [
                     "name",
@@ -1100,7 +901,7 @@ class PostgresStorage:
         updated_count = 0
 
         # Lấy danh sách product_id đã có trong DB (để phân biệt INSERT vs UPDATE)
-        existing_product_ids: set[str] = set()
+        existing_products_info: dict[str, dict[str, Any]] = {}
         if upsert:
             try:
                 with self.get_connection() as conn:
@@ -1112,10 +913,14 @@ class PostgresStorage:
                                 batch_ids = product_ids[i : i + 1000]
                                 placeholders = ",".join(["%s"] * len(batch_ids))
                                 cur.execute(
-                                    f"SELECT product_id FROM products WHERE product_id IN ({placeholders})",
+                                    f"SELECT product_id, brand, seller_name FROM products WHERE product_id IN ({placeholders})",
                                     batch_ids,
                                 )
-                                existing_product_ids.update(row[0] for row in cur.fetchall())
+                                for row in cur.fetchall():
+                                    existing_products_info[row[0]] = {
+                                        "brand": row[1],
+                                        "seller_name": row[2],
+                                    }
             except Exception as e:
                 # Nếu không lấy được, tiếp tục với upsert bình thường
                 print(f"⚠️  Không thể lấy danh sách products đã có: {e}")
@@ -1161,7 +966,7 @@ class PostgresStorage:
                                 1
                                 for p in batch
                                 if p.get("product_id")
-                                and p.get("product_id") not in existing_product_ids
+                                and p.get("product_id") not in existing_products_info
                             )
                             batch_updated = len(batch) - batch_inserted
 
@@ -1177,33 +982,36 @@ class PostgresStorage:
                                 VALUES %s
                                 ON CONFLICT (product_id)
                                 DO UPDATE SET
-                                    name = EXCLUDED.name,
-                                    short_name = EXCLUDED.short_name,
-                                    url = EXCLUDED.url,
-                                    image_url = EXCLUDED.image_url,
-                                    category_url = EXCLUDED.category_url,
-                                    category_id = EXCLUDED.category_id,
-                                    sales_count = EXCLUDED.sales_count,
-                                    price = EXCLUDED.price,
-                                    original_price = EXCLUDED.original_price,
-                                    discount_percent = EXCLUDED.discount_percent,
-                                    rating_average = EXCLUDED.rating_average,
-                                    seller_name = EXCLUDED.seller_name,
-                                    seller_id = EXCLUDED.seller_id,
-                                    seller_is_official = EXCLUDED.seller_is_official,
-                                    brand = EXCLUDED.brand,
-                                    stock_available = EXCLUDED.stock_available,
-                                    shipping = EXCLUDED.shipping,
+                                    name = COALESCE(NULLIF(EXCLUDED.name, ''), products.name),
+                                    short_name = COALESCE(NULLIF(EXCLUDED.short_name, ''), products.short_name),
+                                    url = COALESCE(NULLIF(EXCLUDED.url, ''), products.url),
+                                    image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url),
+                                    category_url = COALESCE(NULLIF(EXCLUDED.category_url, ''), products.category_url),
+                                    category_id = COALESCE(NULLIF(EXCLUDED.category_id, ''), products.category_id),
+                                    sales_count = COALESCE(EXCLUDED.sales_count, products.sales_count),
+                                    price = COALESCE(EXCLUDED.price, products.price),
+                                    original_price = COALESCE(EXCLUDED.original_price, products.original_price),
+                                    discount_percent = COALESCE(EXCLUDED.discount_percent, products.discount_percent),
+                                    rating_average = COALESCE(EXCLUDED.rating_average, products.rating_average),
+                                    seller_name = COALESCE(NULLIF(EXCLUDED.seller_name, ''), products.seller_name),
+                                    seller_id = COALESCE(NULLIF(EXCLUDED.seller_id, ''), products.seller_id),
+                                    seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
+                                    brand = COALESCE(NULLIF(EXCLUDED.brand, ''), products.brand),
+                                    stock_available = COALESCE(EXCLUDED.stock_available, products.stock_available),
+                                    shipping = COALESCE(EXCLUDED.shipping, products.shipping),
                                     updated_at = CURRENT_TIMESTAMP
                                 """,
                                 values,
                             )
 
-                            # Cập nhật existing_product_ids sau khi insert
+                            # Cập nhật existing_products_info sau khi insert
                             for product in batch:
                                 product_id = product.get("product_id")
-                                if product_id:
-                                    existing_product_ids.add(product_id)
+                                if product_id and product_id not in existing_products_info:
+                                    existing_products_info[product_id] = {
+                                        "brand": product.get("brand"),
+                                        "seller_name": product.get("seller_name"),
+                                    }
 
                             inserted_count += batch_inserted
                             updated_count += batch_updated
@@ -1250,7 +1058,7 @@ class PostgresStorage:
 
         try:
             # Use the robust batch history logging method - OUTSIDE of the main products transaction
-            self._log_batch_crawl_history(products)
+            self._log_batch_crawl_history(products, previous_state=existing_products_info)
         except Exception as e:
             print(f"⚠️  Failed to log crawl history: {e}")
 
@@ -1380,7 +1188,6 @@ class PostgresStorage:
         added_count = 0
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                self._ensure_categories_schema(cur)
 
                 for cat_info in categories_to_add:
                     # Use INSERT ... ON CONFLICT DO UPDATE to update if exists
@@ -1435,17 +1242,22 @@ class PostgresStorage:
 
         return added_count
 
-    def _log_batch_crawl_history(self, products: list[dict[str, Any]]) -> None:
+    def _log_batch_crawl_history(
+        self,
+        products: list[dict[str, Any]],
+        previous_state: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         """
         Log crawl history for ALL products (không chỉ khi có thay đổi giá).
 
         Tối ưu:
         - Sử dụng batch lookup để lấy giá cũ (thay vì query từng product)
-        - INSERT cho mọi lần crawl với crawl_type: 'price_change', 'no_change', 'failed'
+        - INSERT cho mọi lần crawl với crawl_type: 'price_change', 'no_change', 'data_improvement'
         - Populate metadata fields từ _metadata
 
-        Schema: (product_id, price, original_price, discount_percent, price_change, previous_*,
-                 crawl_type, crawl_status, metadata, crawled_at)
+        Args:
+            products: List các product đã crawl
+            previous_state: Dict chứa thông tin brand/seller cũ từ bảng products (để detect data improvement)
         """
         if not products:
             return
@@ -1459,7 +1271,7 @@ class PostgresStorage:
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 # CRITICAL: Ensure schema is up-to-date BEFORE any queries
-                self._ensure_history_schema(cur)
+
                 conn.commit()  # Commit schema changes first
 
                 # BATCH LOOKUP: Get all previous prices AND sales in one query
@@ -1568,13 +1380,33 @@ class PostgresStorage:
                     # 1. First time crawl (prev is None -> crawl_type='price_change')
                     # 2. Price/Discount changed (crawl_type='price_change')
                     # 3. Sales changed (sales_change != 0)
+                    # 4. Data Quality improved (brand/seller was NULL but now has value)
                     should_log = False
+
+                    # Check for data improvement
+                    data_improved = False
+                    if previous_state and product_id in previous_state:
+                        old_brand = previous_state[product_id].get("brand")
+                        old_seller = previous_state[product_id].get("seller_name")
+
+                        new_brand = p.get("brand")
+                        new_seller = p.get("seller_name")
+
+                        # Detect improvement: was NULL/empty but now has content
+                        brand_found = not old_brand and new_brand
+                        seller_found = not old_seller and new_seller
+
+                        if brand_found or seller_found:
+                            data_improved = True
 
                     if crawl_type == "price_change":
                         should_log = True
                     elif sales_change and sales_change != 0:
                         should_log = True
                         crawl_type = "sales_change"  # Update type for clarity
+                    elif data_improved:
+                        should_log = True
+                        crawl_type = "data_improvement"
 
                     if should_log:
                         records_to_insert.append(
@@ -2065,8 +1897,6 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                self._ensure_products_schema(cur)
-                self._ensure_history_schema(cur)
 
                 # Column names to update on conflict (all except product_id)
                 update_columns = [c for c in columns if c != "product_id"]
