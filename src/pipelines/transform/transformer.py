@@ -626,20 +626,97 @@ class DataTransformer:
 
         # 3. Marketing fluff and subjective adjectives
         fluff_keywords = [
-            "sang chảnh", "siêu xinh", "trẻ trung", "thoáng mát", "cực đẹp", "chất lượng", "cao cấp",
-            "gợi cảm", "quyến rũ", "sexy", "hot hot", "mẫu mới nhất", "new design", "hot trend",
-            "giá rẻ", "siêu rẻ", "vải mềm", "co giãn", "thiết kế", "chất mềm", "mới nhất",
-            "siêu đẹp", "hot", "giá sốc", "giá tốt", "flash sale", "siêu sale", "sale sốc",
-            "khuyến mãi", "quà tặng", "combo", "set", "uy tín", "nhập khẩu", "xuất khẩu",
-            "hàng hiệu", "bền đẹp", "siêu bền", "chống nước", "xịn", "vip", "luxury", "limited",
-            "bản giới hạn", "đa năng", "tiện lợi", "tiện dụng", "thông minh", "tự động",
-            "chính hãng", "hàng công ty", "fullbox", "nguyên seal", "giá sỉ", "giá tận gốc",
-            "mẫu mới", "mẫu hot", "hàng nội địa", "nhập khẩu", "chất lượng cao", "siêu cấp",
-            "siêu sạch", "siêu gọn", "nhỏ gọn", "cầm tay", "mini", "loại 1", "bản cao cấp",
-            "chống trầy", "chống xước", "kháng khuẩn", "khử mùi", "tiết kiệm", "hiệu quả",
-            "bảo hành", "đổi trả", "tặng kèm", "quà tặng", "freeship", "miễn phí",
-            "chăm sóc", "vệ sinh", "làm sạch", "giúp", "giảm", "tăng", "hỗ trợ",
-            "công nghệ", "phong cách", "thiết kế mới", "mẫu mã đẹp",
+            "sang chảnh",
+            "siêu xinh",
+            "trẻ trung",
+            "thoáng mát",
+            "cực đẹp",
+            "chất lượng",
+            "cao cấp",
+            "gợi cảm",
+            "quyến rũ",
+            "sexy",
+            "hot hot",
+            "mẫu mới nhất",
+            "new design",
+            "hot trend",
+            "giá rẻ",
+            "siêu rẻ",
+            "vải mềm",
+            "co giãn",
+            "thiết kế",
+            "chất mềm",
+            "mới nhất",
+            "siêu đẹp",
+            "hot",
+            "giá sốc",
+            "giá tốt",
+            "flash sale",
+            "siêu sale",
+            "sale sốc",
+            "khuyến mãi",
+            "quà tặng",
+            "combo",
+            "set",
+            "uy tín",
+            "nhập khẩu",
+            "xuất khẩu",
+            "hàng hiệu",
+            "bền đẹp",
+            "siêu bền",
+            "chống nước",
+            "xịn",
+            "vip",
+            "luxury",
+            "limited",
+            "bản giới hạn",
+            "đa năng",
+            "tiện lợi",
+            "tiện dụng",
+            "thông minh",
+            "tự động",
+            "chính hãng",
+            "hàng công ty",
+            "fullbox",
+            "nguyên seal",
+            "giá sỉ",
+            "giá tận gốc",
+            "mẫu mới",
+            "mẫu hot",
+            "hàng nội địa",
+            "nhập khẩu",
+            "chất lượng cao",
+            "siêu cấp",
+            "siêu sạch",
+            "siêu gọn",
+            "nhỏ gọn",
+            "cầm tay",
+            "mini",
+            "loại 1",
+            "bản cao cấp",
+            "chống trầy",
+            "chống xước",
+            "kháng khuẩn",
+            "khử mùi",
+            "tiết kiệm",
+            "hiệu quả",
+            "bảo hành",
+            "đổi trả",
+            "tặng kèm",
+            "quà tặng",
+            "freeship",
+            "miễn phí",
+            "chăm sóc",
+            "vệ sinh",
+            "làm sạch",
+            "giúp",
+            "giảm",
+            "tăng",
+            "hỗ trợ",
+            "công nghệ",
+            "phong cách",
+            "thiết kế mới",
+            "mẫu mã đẹp",
         ]
 
         # Build regex for fluff (word boundaries)
@@ -650,7 +727,7 @@ class DataTransformer:
         spec_patterns = [
             r"\b[A-Za-z]?\d+[\.,]?\d*\s*[xX]\s*[A-Za-z]?\d+[\.,]?\d*(?:\s*[xX]\s*[A-Za-z]?\d+[\.,]?\d*)?[^ ]*\b",  # W76xD30.5xH11.5Cm
             r"\b\d+[\.,]?\d*\s*(?:m|cm|mm|kg|g|l|ml|w|v|kw|ah|ma|mah)\b",  # 5m, 10kg, 100w, 2000mah
-            r"\b\d+\s*(?:chế độ|đầu|món|chi tiết|cái|nấc|vị|mùi|lít|hũ|gói|viên)\b", # 5 chế độ, 4 đầu
+            r"\b\d+\s*(?:chế độ|đầu|món|chi tiết|cái|nấc|vị|mùi|lít|hũ|gói|viên)\b",  # 5 chế độ, 4 đầu
             r"\b\d+[-/]\d+\b",  # 2/3, 2-1
         ]
         for pattern in spec_patterns:
@@ -690,12 +767,12 @@ class DataTransformer:
         # Split by common separators and take the first meaningful chunk
         # Delimiters: | , - – ( [ /
         separators = [
-            r"\|",      # "|"
-            r"\s-\s",   # " - "
-            r"\s–\s",   # " – "
-            r"\(",      # "("
-            r"\[",      # "["
-            r",",       # ","
+            r"\|",  # "|"
+            r"\s-\s",  # " - "
+            r"\s–\s",  # " – "
+            r"\(",  # "("
+            r"\[",  # "["
+            r",",  # ","
             r"\s\/\s",  # " / "
         ]
 
@@ -711,15 +788,60 @@ class DataTransformer:
         # 3. Semantic Cutoff (Stop Words/Phrases that start the 'details')
         # These words often signal the start of attributes, not the name itself
         stop_phrases = [
-            "chính hãng", "cao cấp", "nhập khẩu", "giá rẻ", "uy tín", "chất lượng",
-            "bảo hành", "xuất xứ", "thương hiệu", "dành cho", "phù hợp",
-            "kích thước", "size", "màu sắc", "màu", "bộ nhớ", "ram", "dung lượng",
-            "phiên bản", "model", "tặng kèm", "miễn phí", "freeship", "fullbox",
-            "nguyên seal", "hàng mới", "new", "hot", "xả kho", "thanh lý",
-            "chăm sóc", "công nghệ", "tự động", "đa năng", "tiện lợi", "tiện dụng",
-            "hỗ trợ", "giải pháp", "giúp", "hiệu quả", "an toàn", "chống", "tặng",
-            "kèm", "bộ", "set", "combo", "mẫu mã", "mẫu mới", "thiết kế",
-            "phong cách", "không dây", "không dùng", "dùng cho",
+            "chính hãng",
+            "cao cấp",
+            "nhập khẩu",
+            "giá rẻ",
+            "uy tín",
+            "chất lượng",
+            "bảo hành",
+            "xuất xứ",
+            "thương hiệu",
+            "dành cho",
+            "phù hợp",
+            "kích thước",
+            "size",
+            "màu sắc",
+            "màu",
+            "bộ nhớ",
+            "ram",
+            "dung lượng",
+            "phiên bản",
+            "model",
+            "tặng kèm",
+            "miễn phí",
+            "freeship",
+            "fullbox",
+            "nguyên seal",
+            "hàng mới",
+            "new",
+            "hot",
+            "xả kho",
+            "thanh lý",
+            "chăm sóc",
+            "công nghệ",
+            "tự động",
+            "đa năng",
+            "tiện lợi",
+            "tiện dụng",
+            "hỗ trợ",
+            "giải pháp",
+            "giúp",
+            "hiệu quả",
+            "an toàn",
+            "chống",
+            "tặng",
+            "kèm",
+            "bộ",
+            "set",
+            "combo",
+            "mẫu mã",
+            "mẫu mới",
+            "thiết kế",
+            "phong cách",
+            "không dây",
+            "không dùng",
+            "dùng cho",
         ]
 
         name_lower = cleaned.lower()

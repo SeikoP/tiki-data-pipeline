@@ -38,7 +38,11 @@ def merge_products(**context) -> dict[str, Any]:
 
         # Lấy danh sách categories từ các task upstream
         categories = None
-        for task_id in ["pre_crawl.load_categories", "load_and_prepare.load_categories", "load_categories"]:
+        for task_id in [
+            "pre_crawl.load_categories",
+            "load_and_prepare.load_categories",
+            "load_categories",
+        ]:
             categories = ti.xcom_pull(task_ids=task_id)
             if categories:
                 logger.info(f"📂 Đã nạp {len(categories)} danh mục từ task: {task_id}")
@@ -204,7 +208,9 @@ def merge_products(**context) -> dict[str, Any]:
         logger.info("-" * 40)
         logger.info(f"• Tổng danh mục:   {stats['total_categories']}")
         logger.info(f"• Thành công:      {stats['success_categories']}")
-        logger.info(f"• Thất bại/Lỗi:    {stats['failed_categories'] + stats['timeout_categories']}")
+        logger.info(
+            f"• Thất bại/Lỗi:    {stats['failed_categories'] + stats['timeout_categories']}"
+        )
         logger.info(f"• Tổng sản phẩm:   {stats['total_products']}")
         logger.info(f"• Sau khi lọc trùng: {stats['unique_products']}")
         logger.info("=" * 40)

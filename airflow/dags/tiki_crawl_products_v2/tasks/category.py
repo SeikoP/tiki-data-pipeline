@@ -72,10 +72,12 @@ def load_categories(**context) -> list[dict[str, Any]]:
             max_categories = get_int_variable("TIKI_MAX_CATEGORIES", default=0)
         except Exception:
             max_categories = 0
-            
+
         if max_categories > 0:
             categories = categories[:max_categories]
-            logger.info(f"📊 Xử lý {len(categories)} danh mục (Level {min_level}-{max_level} | Giới hạn: {max_categories})")
+            logger.info(
+                f"📊 Xử lý {len(categories)} danh mục (Level {min_level}-{max_level} | Giới hạn: {max_categories})"
+            )
         else:
             logger.info(f"📊 Xử lý {len(categories)} danh mục (Level {min_level}-{max_level})")
 

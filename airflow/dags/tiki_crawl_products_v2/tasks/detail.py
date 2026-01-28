@@ -10,7 +10,6 @@ from tiki_crawl_products_v2.bootstrap import (
     Any,
     CircuitBreakerOpenError,
     Path,
-    SeleniumDriverPool,
     atomic_write_file,
     classify_error,
     crawl_product_detail_async,
@@ -440,7 +439,9 @@ def crawl_product_batch(
         return []
 
     ids_preview = ", ".join([str(p.get("product_id", "unknown")) for p in product_batch[:3]])
-    logger.info(f"🚀 BATCH {batch_index}: Đang xử lý {len(product_batch)} sản phẩm (Mẫu: {ids_preview}...)")
+    logger.info(
+        f"🚀 BATCH {batch_index}: Đang xử lý {len(product_batch)} sản phẩm (Mẫu: {ids_preview}...)"
+    )
 
     results = []
 

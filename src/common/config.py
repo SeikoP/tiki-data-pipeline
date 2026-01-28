@@ -36,7 +36,9 @@ else:
 AI_CONFIG = {
     "enabled": os.getenv("AI_ENABLED", os.getenv("GROQ_ENABLED", "false")).lower() == "true",
     "api_key": os.getenv("AI_API_KEY", os.getenv("GROQ_API_KEY", "")),
-    "base_url": os.getenv("AI_API_BASE", os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")),
+    "base_url": os.getenv(
+        "AI_API_BASE", os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
+    ),
     "model": os.getenv("AI_MODEL", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")),
 }
 
