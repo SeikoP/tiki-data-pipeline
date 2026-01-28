@@ -1,6 +1,6 @@
 # Dự án Tiki Data Pipeline
 
-Dữ liệu trên các sàn thương mại điện tử luôn biến động từng giây. Dự án này được xây dựng để giải quyết bài thách thức về việc thu thập và quản lý nguồn thông tin khổng lồ từ Tiki một cách tự động và bền vững. Mục tiêu cốt lõi là chuyển hóa những dữ liệu thô trên web thành một kho lưu trữ có cấu trúc, cho phép quan sát được sự thay đổi của thị trường theo thời gian.
+Dữ liệu trên các sàn thương mại điện tử luôn biến động từng giây. Dự án này được xây dựng để giải quyết thách thức về việc thu thập và quản lý nguồn thông tin khổng lồ từ Tiki một cách tự động và bền vững. Mục tiêu cốt lõi là chuyển hóa những dữ liệu thô trên web thành một kho lưu trữ có cấu trúc, cho phép quan sát được sự thay đổi của thị trường theo thời gian.
 
 ## Cách thức vận hành và tổ chức dữ liệu
 
