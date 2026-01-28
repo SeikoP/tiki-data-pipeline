@@ -216,34 +216,33 @@ Data JSON:
 
         try:
             prompt = f"""
-Bạn là trợ lý AI chuyên chuẩn hóa và rút gọn tên sản phẩm thương mại điện tử.
+Bạn là một chuyên gia ngôn ngữ học và chuyên gia tối ưu hóa dữ liệu thương mại điện tử (e-commerce).
+
+Nhiệm vụ: Rút gọn "Tên gốc" thành "Tên rút gọn" cực kỳ súc tích, chuyên nghiệp và chuẩn SEO.
 
 Tên gốc: "{cleaned_name}"
 
-Nhiệm vụ:
-- Tạo một tên sản phẩm ngắn gọn, rõ nghĩa, phù hợp để hiển thị trên sàn TMĐT.
+Quy tắc VÀNG:
+1. Giữ lại LOẠI SẢN PHẨM chính (ví dụ: Máy tăm nước, Bàn chải điện, Bàn ủi hơi nước, Cây lau nhà).
+2. Giữ lại THƯƠNG HIỆU (nếu có: Oxo, Parroti, 3M, Scotch Brite, Deli, Index Living Mall).
+3. Giữ lại ĐẶC ĐIỂM CỐT LÕI duy nhất để phân biệt (ví dụ: 2 trong 1, Không dây, Mini, Cầm tay).
+4. LOẠI BỎ hoàn toàn:
+   - Các từ quảng cáo: Chính hãng, Cao cấp, Sang chảnh, Mẫu mới 2024, Bảo hành 12 tháng, Uy tín.
+   - Các thông số thừa: W76xD30.5xH11.5Cm, 5 chế độ, 4 đầu thay thế, Công nghệ sóng âm, 5 nấc.
+   - Các cụm từ khuyến mãi: Tặng kèm, Miễn phí, Giá rẻ, Sale sốc, Giao màu ngẫu nhiên.
+   - Các mô tả tính năng rườm rà: Chải sạch mảng bám, Chăm sóc nướu, Ủi nhanh gấp gọn.
 
-Quy tắc bắt buộc:
-1. Giữ lại theo thứ tự ưu tiên:
-   - Loại sản phẩm chính (ví dụ: Chân váy, Bikini, Áo khoác, Đồ bơi...)
-   - Đối tượng (nữ, nam, bé gái)
-   - Đặc điểm quan trọng (2 mảnh, tay dài, buộc dây...)
-   - Thương hiệu (nếu có và nổi tiếng)
+Ví dụ mục tiêu:
+- "Máy vệ sinh chăm sóc răng miệng bằng điện... 5 Chế Độ... 4 đầu Bàn chải" -> "Bàn chải điện sóng âm"
+- "Bàn Ủi Đồ Để Bàn Thép ERMA... | Index Living Mall" -> "Bàn ủi đồ thép ERMA"
+- "Bàn Chải Nylon Vệ Sinh Khe Hở Cửa Sổ / Khe Hở Nhà Tắm" -> "Bàn chải nylon vệ sinh khe hở"
+- "Chổi Chà Sàn Nhà Tắm Kết Hợp Gạt Nước Đầu Chữ V Deli" -> "Chổi chà sàn Deli 2 trong 1"
+- "Dây Lò Xo Thông Tắc Cống, Nhà Vệ Sinh 5m 10m" -> "Dây lò xo thông tắc cống"
 
-2. Loại bỏ hoàn toàn:
-   - Marketing fluff & Tính từ chủ quan: sang chảnh, siêu xinh, trẻ trung, thoáng mát, cực đẹp, gợi cảm, quyến rũ, cao cấp...
-   - SKU/Mã sản phẩm: CV0016, MS123, SP99...
-   - Ký tự đặc biệt, hashtag, thông tin bán hàng (free ship, giá rẻ...).
-
-3. Ví dụ mẫu:
-   - "Chân Váy CV0016" -> "Chân váy"
-   - "Bikini 2 Mảnh Buộc Dây Sang Chảnh" -> "Bikini 2 mảnh buộc dây"
-   - "Áo Khoác Nữ Trẻ Trung Thoáng Mát" -> "Áo khoác nữ"
-   - "Bộ Đồ Bơi Nữ 1 Mảnh Sexy Quyến Rũ" -> "Bộ đồ bơi nữ 1 mảnh"
-
-4. Độ dài tối đa: 8–12 từ.
-5. Trả về CHỈ tên đã rút gọn, không kèm giải thích.
-6. Giữ nguyên ngôn ngữ gốc, viết hoa chữ cái đầu mỗi cụm chính.
+Yêu cầu định dạng:
+- Độ dài: 4-7 từ.
+- Trả về DUY NHẤT tên rút gọn.
+- Viết hoa chữ cái đầu tiên của mỗi từ (Title Case).
 
 Tên rút gọn:
 """
