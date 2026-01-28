@@ -188,11 +188,6 @@ def test_retry_logic_handles_permanent_failures():
     """
     from pipelines.crawl.crawl_products_detail import crawl_product_with_retry
 
-    original_product = {
-        "product_id": "123",
-        "_metadata": {},
-    }
-
     with (
         patch(
             "pipelines.crawl.crawl_products_detail.crawl_product_detail_with_selenium"

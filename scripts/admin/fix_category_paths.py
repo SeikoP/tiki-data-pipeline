@@ -152,7 +152,7 @@ def main():
     need_fix = []
     already_have_parent = []
 
-    for product_id, product_id_str, cat_path_json, name in products:
+    for product_id, product_id_str, cat_path_json, _name in products:
         cat_path = json.loads(cat_path_json) if isinstance(cat_path_json, str) else cat_path_json
 
         # Check if first item is already a parent category (top-level)

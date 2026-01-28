@@ -12,6 +12,7 @@ from ..bootstrap import (
     dag_file_dir,
     datetime,
     ensure_output_dirs,
+    get_variable,
     json,
     os,
 )

@@ -24,7 +24,6 @@ from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 
-
 # Setup imports path
 src_path = Path("/opt/airflow/src")
 if src_path.exists() and str(src_path) not in sys.path:
@@ -184,12 +183,40 @@ else:
         ) from e
 
     # Import crawl_category_products từ crawl_products
-    try:
-        pass
-    except ImportError as e:
-        raise ImportError(
-            f"Không tìm thấy hàm crawl_category_products trong crawl_products.\nLỗi gốc: {e}"
-        ) from e
+    crawl_products_path = None
+    for path in possible_paths:
+        test_path = os.path.join(path, "crawl_products.py")
+        if os.path.exists(test_path):
+            crawl_products_path = test_path
+            break
+
+    if crawl_products_path and os.path.exists(crawl_products_path):
+        try:
+            import importlib.util
+
+            spec = importlib.util.spec_from_file_location("crawl_products", crawl_products_path)
+            if spec and spec.loader:
+                crawl_products_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(crawl_products_module)
+                crawl_category_products = getattr(
+                    crawl_products_module, "crawl_category_products", None
+                )
+            else:
+                crawl_category_products = None
+        except Exception as e:
+            err_msg = str(e)
+            warnings.warn(f"Không thể import crawl_products module: {err_msg}", stacklevel=2)
+
+            def crawl_category_products(*args, **kwargs):
+                raise ImportError(f"Module crawl_products chưa được import: {err_msg}")
+    else:
+        try:
+            from pipelines.crawl.crawl_products import crawl_category_products
+        except ImportError:
+
+            def crawl_category_products(*args, **kwargs):
+                raise ImportError("Không tìm thấy module crawl_products")
+
 
 # Import SeleniumDriverPool từ utils ở module level
 try:

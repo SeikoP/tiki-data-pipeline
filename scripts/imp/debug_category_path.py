@@ -62,7 +62,7 @@ def analyze_categories(conn):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         # 1. Lấy tất cả categories
         cur.execute("""
-            SELECT 
+            SELECT
                 id,
                 category_id,
                 name,
@@ -152,13 +152,13 @@ def analyze_categories(conn):
             if category_path and len(category_path) > 0:
                 root_name = category_path[0]
                 if root_name != level_1:
-                    issues_found.append(f"⚠️  root_category_name không khớp với level_1")
+                    issues_found.append("⚠️  root_category_name không khớp với level_1")
 
             if issues_found:
                 issues.append({"category": cat, "issues": issues_found})
 
         # 3. Hiển thị kết quả
-        print(f"\n🔍 PHÂN TÍCH CHI TIẾT:\n")
+        print("\n🔍 PHÂN TÍCH CHI TIẾT:\n")
 
         if not issues:
             print("✅ Không tìm thấy vấn đề nào!")
@@ -185,7 +185,7 @@ def analyze_categories(conn):
                 print(f"  Level 4: {cat.get('level_4')}")
                 print(f"  Level 5: {cat.get('level_5')}")
                 print(f"  Root Name: {cat.get('root_category_name')}")
-                print(f"\n  ⚠️  VẤN ĐỀ:")
+                print("\n  ⚠️  VẤN ĐỀ:")
                 for issue in cat_issues:
                     print(f"    {issue}")
 
@@ -231,14 +231,14 @@ def analyze_categories(conn):
 
                 print(f"📂 Category: {cat.get('name')}")
                 print(f"   URL: {url}")
-                print(f"   Parent Chain (từ DB):")
+                print("   Parent Chain (từ DB):")
                 for i, link in enumerate(chain, 1):
                     print(f"     {i}. {link['name']} ({link['url']})")
                 print(f"   Category Path (từ DB): {category_path}")
                 print(f"   Expected Path: {[link['name'] for link in reversed(chain)]}")
 
                 if category_path != [link["name"] for link in reversed(chain)]:
-                    print(f"   ❌ MISMATCH!")
+                    print("   ❌ MISMATCH!")
                 print()
 
         return issues
@@ -315,7 +315,7 @@ def fix_category_paths(conn, dry_run=True):
                     cur.execute(
                         """
                         UPDATE categories
-                        SET 
+                        SET
                             category_path = %s,
                             level_1 = %s,
                             level_2 = %s,
@@ -375,7 +375,7 @@ def main():
             print(f"{'=' * 80}\n")
             fix_category_paths(conn, dry_run=False)
         else:
-            print(f"\n💡 Để sửa tự động, chạy: python scripts/debug_category_path.py --fix")
+            print("\n💡 Để sửa tự động, chạy: python scripts/debug_category_path.py --fix")
 
     finally:
         conn.close()

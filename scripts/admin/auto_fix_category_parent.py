@@ -85,7 +85,7 @@ def analyze_products_needing_fix(cur, hierarchy_map, limit=None):
         list: Danh sách products cần fix với old_path và new_path
     """
     # Build name -> url lookup
-    name_to_url = {info.get("name"): url for url, info in hierarchy_map.items()}
+    {info.get("name"): url for url, info in hierarchy_map.items()}
 
     # Query: Lấy tất cả products có category_path
     query = """
@@ -187,7 +187,7 @@ def main():
         conn.close()
         return
 
-    print(f"\n📈 Analysis Results:")
+    print("\n📈 Analysis Results:")
     print(f"  • Products OK (không cần fix): {len(already_ok)}")
     print(f"  • Products cần fix: {len(need_fix)}")
 

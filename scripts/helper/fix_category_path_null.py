@@ -46,7 +46,7 @@ def fix_category_path_null():
         print("📊 Bước 1: Kiểm tra state hiện tại...")
         cur.execute(
             """
-            SELECT 
+            SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE category_path IS NULL) as null_count,
                 COUNT(*) FILTER (WHERE category_path IS NOT NULL) as non_null_count
@@ -77,7 +77,7 @@ def fix_category_path_null():
         print("\n📊 Bước 3: Verify kết quả...")
         cur.execute(
             """
-            SELECT 
+            SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE category_path IS NULL) as null_count,
                 COUNT(*) FILTER (WHERE category_path = '[]'::jsonb) as empty_array_count,
@@ -112,8 +112,8 @@ def fix_category_path_null():
         try:
             cur.execute(
                 """
-                ALTER TABLE products 
-                ADD CONSTRAINT check_category_path_not_null 
+                ALTER TABLE products
+                ADD CONSTRAINT check_category_path_not_null
                 CHECK (category_path IS NOT NULL);
             """
             )

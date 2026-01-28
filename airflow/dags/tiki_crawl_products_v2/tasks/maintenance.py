@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import CATEGORIES_FILE, Any, datetime, json, os
+from ..bootstrap import CATEGORIES_FILE, Any, datetime, get_variable, json, os
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
 from .common import get_logger  # noqa: F401
 

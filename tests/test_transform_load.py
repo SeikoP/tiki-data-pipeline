@@ -8,24 +8,10 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+from pipelines.load.loader import OptimizedDataLoader as DataLoader
+from pipelines.transform.transformer import DataTransformer
 
 # Fix encoding cho Windows console
-if sys.platform == "win32":
-    import io
-
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-
-# Thêm src vào path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-src_path = os.path.join(project_root, "src")
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
-
-from pipelines.load.loader import OptimizedDataLoader as DataLoader
-
-# Import modules
-from pipelines.transform.transformer import DataTransformer
 
 
 def create_sample_products() -> list[dict[str, Any]]:

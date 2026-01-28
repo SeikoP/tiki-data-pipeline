@@ -55,7 +55,7 @@ def check_hierarchy_map():
 
         # Check for duplicate names
         names = {}
-        for url, info in data.items():
+        for info in data.values():
             name = info.get("name")
             if name:
                 if name in names:
@@ -106,7 +106,7 @@ def check_category_path_in_db():
             try:
                 conn = psycopg2.connect(**conn_info)
                 break
-            except:
+            except Exception:
                 continue
 
         if not conn:
@@ -118,7 +118,7 @@ def check_category_path_in_db():
         # Check category_path distribution
         cur.execute(
             """
-            SELECT 
+            SELECT
                 jsonb_array_length(category_path) as levels,
                 COUNT(*) as count
             FROM products

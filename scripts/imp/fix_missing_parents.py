@@ -48,7 +48,7 @@ for path in paths_to_add:
 
 # Debug: In ra đường dẫn để kiểm tra
 if os.getenv("DEBUG", "").lower() == "true":
-    print(f"🔍 Debug paths:")
+    print("🔍 Debug paths:")
     print(f"   Script dir: {script_dir}")
     print(f"   Project root: {project_root}")
     print(f"   Src path: {src_path}")
@@ -59,9 +59,9 @@ try:
     from pipelines.crawl.storage.postgres_storage import PostgresStorage
 except ImportError as e:
     print(f"❌ Lỗi import: {e}")
-    print(f"   Đang thử tìm pipelines module...")
+    print("   Đang thử tìm pipelines module...")
     # Thử tìm pipelines module
-    for root, dirs, files in os.walk(project_root):
+    for root, dirs, _files in os.walk(project_root):
         if "pipelines" in dirs:
             pipelines_path = os.path.join(root, "pipelines")
             if os.path.exists(os.path.join(pipelines_path, "__init__.py")):
@@ -75,8 +75,8 @@ except ImportError as e:
     try:
         from pipelines.crawl.storage.postgres_storage import PostgresStorage
     except ImportError:
-        print(f"❌ Vẫn không thể import pipelines module")
-        print(f"   Vui lòng chạy script từ project root hoặc đảm bảo src/ trong PYTHONPATH")
+        print("❌ Vẫn không thể import pipelines module")
+        print("   Vui lòng chạy script từ project root hoặc đảm bảo src/ trong PYTHONPATH")
         sys.exit(1)
 
 try:
@@ -293,16 +293,15 @@ def main():
             print(f"\n✅ Đã load {saved_count} parent categories vào DB")
 
             # 4. Rebuild category_path cho tất cả categories có parent_url trỏ đến parent vừa load
-            print(f"\n🔧 Đang rebuild category_path cho các categories liên quan...")
+            print("\n🔧 Đang rebuild category_path cho các categories liên quan...")
 
             # Reload categories từ DB để rebuild paths
             cur.execute("SELECT url FROM categories")
             all_db_urls = [row["url"] for row in cur.fetchall()]
 
-            categories_to_rebuild = []
-            for url in all_db_urls:
-                if url in url_to_cat:
-                    categories_to_rebuild.append(url_to_cat[url])
+            categories_to_rebuild = [
+                url_to_cat[url] for url in all_db_urls if url in url_to_cat
+            ]
 
             if categories_to_rebuild:
                 # Use PostgresStorage với connection parameters

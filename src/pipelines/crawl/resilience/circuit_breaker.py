@@ -178,7 +178,6 @@ class CircuitBreakerOpenError(Exception):
     """
 
 
-
 def circuit_breaker(
     failure_threshold: int = 5,
     recovery_timeout: int = 60,

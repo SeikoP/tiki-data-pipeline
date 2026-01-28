@@ -1530,7 +1530,7 @@ class PostgresStorage:
                     FROM (
                         SELECT c.url, COUNT(DISTINCT p.id) as cnt
                         FROM categories c
-                        LEFT JOIN products p ON p.category_url = c.url 
+                        LEFT JOIN products p ON p.category_url = c.url
                            OR (c.category_id IS NOT NULL AND p.category_id = c.category_id)
                         WHERE c.is_leaf = TRUE
                         GROUP BY c.url

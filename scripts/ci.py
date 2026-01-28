@@ -14,7 +14,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 # TOML support for config files
 try:
@@ -68,7 +67,7 @@ class CIRunner:
     """
 
     def __init__(
-        self, verbose: bool = False, parallel: bool = True, config_file: Optional[str] = None
+        self, verbose: bool = False, parallel: bool = True, config_file: str | None = None
     ):
         self.verbose = verbose
         self.parallel = parallel
@@ -96,7 +95,7 @@ class CIRunner:
         os.environ["PYTHONIOENCODING"] = "utf-8"
         os.environ["PYTHONUTF8"] = "1"
 
-    def _load_config(self, config_file: Optional[str] = None) -> dict:
+    def _load_config(self, config_file: str | None = None) -> dict:
         """
         Load configuration from TOML file.
         """
@@ -375,10 +374,10 @@ class CIRunner:
     def format_code(
         self,
         check_only: bool = False,
-        use_ruff: Optional[bool] = None,
-        line_length: Optional[int] = None,
-        target_version: Optional[str] = None,
-        skip_string_normalization: Optional[bool] = None,
+        use_ruff: bool | None = None,
+        line_length: int | None = None,
+        target_version: str | None = None,
+        skip_string_normalization: bool | None = None,
     ) -> TaskResult:
         """Format code with modern formatters.
 
@@ -858,24 +857,41 @@ else:
             if "SKIP" in result.stdout:
                 self._print_warning("Airflow not installed, trying Docker...")
                 # Try Docker validation
+                # Try Docker validation - use pipe to avoid shell escaping issues
+                docker_cmd = [
+                    "docker-compose",
+                    "run",
+                    "--rm",
+                    "-i",  # Interactive to read from stdin
+                    "--entrypoint",
+                    "python3",
+                    "airflow-scheduler",
+                    "-",  # Read from stdin
+                ]
+
                 docker_result = subprocess.run(
-                    [
-                        "docker-compose",
-                        "run",
-                        "--rm",
-                        "airflow-scheduler",
-                        "python3",
-                        "-c",
-                        validation_script,
-                    ],
-                    check=False,
+                    docker_cmd,
+                    input=validation_script,
                     capture_output=True,
                     text=True,
+                    check=False,
                 )
+
                 if docker_result.returncode != 0:
+                    self._print_error(f"Docker validation failed (exit code: {docker_result.returncode})")
+                    if docker_result.stdout:
+                        print(docker_result.stdout)
+                    if docker_result.stderr:
+                        print(docker_result.stderr)
                     raise subprocess.CalledProcessError(
                         docker_result.returncode, docker_result.args
                     )
+                else:
+                    if docker_result.stdout:
+                        print(docker_result.stdout)
+                    if docker_result.stderr:
+                        # Some logs might go to stderr
+                        print(docker_result.stderr)
             elif result.returncode != 0:
                 raise subprocess.CalledProcessError(result.returncode, result.args)
 

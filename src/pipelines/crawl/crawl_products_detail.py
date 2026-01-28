@@ -1379,8 +1379,6 @@ def extract_product_detail(
                         seller_id = seller_info.get("id") or seller_info.get("sellerId")
                         if not seller_id and seller_info.get("link"):
                             # Try to extract from link if direct ID is missing
-                            import re
-
                             link = seller_info.get("link")
                             id_match = re.search(r"seller_id=([0-9]+)", link) or re.search(
                                 r"/seller/([0-9]+)", link

@@ -247,7 +247,6 @@ def parse_categories(html_content, parent_url=None, level=0):
     """
 
     soup = BeautifulSoup(html_content, "html.parser")
-    seen_urls = set()  # Để tránh trùng lặp trong cùng một trang
 
     # Pattern URL danh mục Tiki: /c[0-9]+
     category_pattern = re.compile(r"/c\d+")
