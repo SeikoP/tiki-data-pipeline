@@ -878,7 +878,9 @@ else:
                 )
 
                 if docker_result.returncode != 0:
-                    self._print_error(f"Docker validation failed (exit code: {docker_result.returncode})")
+                    self._print_error(
+                        f"Docker validation failed (exit code: {docker_result.returncode})"
+                    )
                     if docker_result.stdout:
                         print(docker_result.stdout)
                     if docker_result.stderr:

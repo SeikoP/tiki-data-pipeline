@@ -299,9 +299,7 @@ def main():
             cur.execute("SELECT url FROM categories")
             all_db_urls = [row["url"] for row in cur.fetchall()]
 
-            categories_to_rebuild = [
-                url_to_cat[url] for url in all_db_urls if url in url_to_cat
-            ]
+            categories_to_rebuild = [url_to_cat[url] for url in all_db_urls if url in url_to_cat]
 
             if categories_to_rebuild:
                 # Use PostgresStorage với connection parameters

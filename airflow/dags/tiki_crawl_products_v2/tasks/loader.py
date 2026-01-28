@@ -13,8 +13,10 @@ from ..bootstrap import (
     os,
     sys,
 )
-from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
-from .common import get_logger  # noqa: F401
+from .common import (
+    _fix_sys_path_for_pipelines_import,  # noqa: F401
+    get_logger,  # noqa: F401
+)
 
 
 def fix_missing_parent_categories(**context) -> dict[str, Any]:
