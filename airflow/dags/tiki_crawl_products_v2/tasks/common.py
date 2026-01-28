@@ -119,3 +119,44 @@ def atomic_write_file(filepath: str, data: Any, **context):
             temp_file.unlink()
         logger.error(f"❌ Lỗi khi ghi file: {e}", exc_info=True)
         raise
+
+
+def get_selenium_driver_pool_class(logger):
+    """
+    Import SeleniumDriverPool helper to reduce complexity in tasks.
+    """
+    _SeleniumDriverPool = None
+
+    try:
+        # 1. Try standard package import first (preferred)
+        _fix_sys_path_for_pipelines_import(logger)
+        from pipelines.crawl.utils import SeleniumDriverPool
+
+        _SeleniumDriverPool = SeleniumDriverPool
+        logger.info("✅ Imported SeleniumDriverPool from pipelines.crawl.utils")
+        return _SeleniumDriverPool
+    except ImportError:
+        logger.warning("⚠️ Standard import failed, trying file-based import for SeleniumDriverPool")
+
+    try:
+        import importlib.util
+
+        src_path = Path("/opt/airflow/src")
+        if not src_path.exists():
+            # Try local dev path
+            src_path = Path(__file__).parent.parent.parent.parent.parent / "src"
+
+        utils_path = src_path / "pipelines" / "crawl" / "utils.py"
+        if utils_path.exists():
+            spec = importlib.util.spec_from_file_location("crawl_utils_task", str(utils_path))
+            if spec and spec.loader:
+                utils_mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(utils_mod)
+                _SeleniumDriverPool = getattr(utils_mod, "SeleniumDriverPool", None)
+    except Exception as e:
+        logger.error(f"❌ Failed to import SeleniumDriverPool: {e}")
+
+    if _SeleniumDriverPool is None:
+        raise ImportError("Could not import SeleniumDriverPool from any source")
+
+    return _SeleniumDriverPool

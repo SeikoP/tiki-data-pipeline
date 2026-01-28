@@ -15,7 +15,6 @@ from tiki_crawl_products_v2.bootstrap import (
     crawl_product_detail_async,
     crawl_product_detail_with_driver,
     crawl_product_detail_with_selenium,
-    dag_file_dir,
     datetime,
     ensure_output_dirs,
     extract_product_detail,
@@ -35,7 +34,10 @@ from tiki_crawl_products_v2.bootstrap import (
     time,
 )
 
-from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
+from .common import (  # noqa: F401
+    _fix_sys_path_for_pipelines_import,
+    get_selenium_driver_pool_class,
+)
 from .loader import _import_postgres_storage  # noqa: F401
 
 
@@ -448,35 +450,8 @@ def crawl_product_batch(
     try:
         import asyncio
 
-        # Import SeleniumDriverPool từ utils nếu chưa có (cho task scope)
-        global SeleniumDriverPool
-        _SeleniumDriverPool = SeleniumDriverPool
-        if _SeleniumDriverPool is None:
-            # Fallback: thử import từ utils trực tiếp nếu không thành công
-            try:
-                _fix_sys_path_for_pipelines_import(logger)
-                # utils là file (.py), không phải package
-                import importlib.util
-
-                src_path = Path("/opt/airflow/src")
-                if not src_path.exists():
-                    src_path = Path(dag_file_dir).parent.parent.parent / "src"
-                utils_path = src_path / "pipelines" / "crawl" / "utils.py"
-                if utils_path.exists():
-                    spec = importlib.util.spec_from_file_location(
-                        "crawl_utils_fallback", str(utils_path)
-                    )
-                    if spec and spec.loader:
-                        crawl_utils = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(crawl_utils)
-                        _SeleniumDriverPool = getattr(crawl_utils, "SeleniumDriverPool", None)
-                if _SeleniumDriverPool:
-                    logger.info("✅ Imported SeleniumDriverPool from utils.py file")
-                else:
-                    raise ImportError("Không tìm thấy SeleniumDriverPool trong utils.py")
-            except Exception as e:
-                logger.error(f"⚠️  Không thể import SeleniumDriverPool từ pipelines: {e}")
-                raise ImportError("SeleniumDriverPool chưa được import từ utils module") from e
+        # Import SeleniumDriverPool using the common helper to reduce complexity
+        _SeleniumDriverPool = get_selenium_driver_pool_class(logger)
 
         # Sử dụng hàm đã được import ở đầu file
         # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file

@@ -1528,7 +1528,7 @@ class PostgresStorage:
                     SET product_count = counts.cnt,
                         updated_at = CURRENT_TIMESTAMP
                     FROM (
-                        SELECT c.url, COUNT(DISTINCT p.id) as cnt
+                        SELECT c.url, COUNT(DISTINCT p.product_id) as cnt
                         FROM categories c
                         LEFT JOIN products p ON p.category_url = c.url
                            OR (c.category_id IS NOT NULL AND p.category_id = c.category_id)
@@ -1673,6 +1673,8 @@ class PostgresStorage:
         """Delete products with missing required fields (seller, brand, and/or rating). Run this
         BEFORE each crawl to allow re-crawling of incomplete data.
 
+        Also cleans up related crawl_history and updates category counts.
+
         Args:
             require_seller: If True, delete products where seller_name IS NULL or empty
             require_brand: If True, delete products where brand IS NULL or empty
@@ -1681,6 +1683,12 @@ class PostgresStorage:
         Returns:
             dict with keys: deleted_count, deleted_no_seller, deleted_no_brand, deleted_both
         """
+        deleted_count = 0
+        deleted_no_seller = 0
+        deleted_no_brand = 0
+        deleted_no_rating = 0
+        deleted_both = 0
+
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 # Build WHERE clause based on requirements
@@ -1705,11 +1713,6 @@ class PostgresStorage:
 
                 # Get counts before deletion for detailed reporting
                 # Only calculate stats if both requirements are enabled
-                deleted_no_seller = 0
-                deleted_no_brand = 0
-                deleted_no_rating = 0
-                deleted_both = 0
-
                 if require_seller and require_brand:
                     # Calculate detailed stats: missing seller only, missing brand only, missing both, missing rating
                     stats_query = f"""
@@ -1740,7 +1743,18 @@ class PostgresStorage:
                     cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
                     deleted_no_rating = cur.fetchone()[0] or 0
 
-                # Delete products matching criteria
+                # 1. Delete from crawl_history (orphaned records prevention)
+                history_delete_query = f"""
+                    DELETE FROM crawl_history
+                    WHERE product_id IN (
+                        SELECT product_id FROM products
+                        WHERE {where_clause}
+                    )
+                """
+                cur.execute(history_delete_query)
+                deleted_history = cur.rowcount
+
+                # 2. Delete products matching criteria
                 delete_query = f"""
                     DELETE FROM products
                     WHERE {where_clause}
@@ -1760,15 +1774,27 @@ class PostgresStorage:
                         reason_parts.append(f"{deleted_both} missing both/multiple")
 
                     reason_str = ", ".join(reason_parts)
-                    print(f"🧹 Cleaned up {deleted_count} incomplete products ({reason_str})")
+                    print(
+                        f"🧹 Cleaned up {deleted_count} incomplete products ({reason_str}) and {deleted_history} history records"
+                    )
 
-                return {
-                    "deleted_count": deleted_count,
-                    "deleted_no_seller": deleted_no_seller if require_seller else 0,
-                    "deleted_no_brand": deleted_no_brand if require_brand else 0,
-                    "deleted_no_rating": deleted_no_rating if require_rating else 0,
-                    "deleted_both": deleted_both if (require_seller and require_brand) else 0,
-                }
+        # 3. Update category counts if products were deleted
+        # (Outside transaction block to avoid long locking or transaction issues)
+        if deleted_count > 0:
+            try:
+                print("🔄 Updating category product counts...")
+                updated_cats = self.update_category_product_counts()
+                print(f"✅ Updated counts for {updated_cats} categories")
+            except Exception as e:
+                print(f"⚠️ Failed to update category counts: {e}")
+
+        return {
+            "deleted_count": deleted_count,
+            "deleted_no_seller": deleted_no_seller if require_seller else 0,
+            "deleted_no_brand": deleted_no_brand if require_brand else 0,
+            "deleted_no_rating": deleted_no_rating if require_rating else 0,
+            "deleted_both": deleted_both if (require_seller and require_brand) else 0,
+        }
 
     def cleanup_old_history(
         self, archive_months: int = 6, delete_months: int = 12

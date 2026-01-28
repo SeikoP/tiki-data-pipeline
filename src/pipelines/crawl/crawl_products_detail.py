@@ -1549,6 +1549,33 @@ def extract_product_detail(
         except Exception:
             product_data["category_path"] = []
 
+    # --- Handle Missing/Default Data ---
+    # 2. Handle images: Remove if empty
+    if not product_data.get("images"):
+        product_data.pop("images", None)
+
+    # 3. Handle shipping: Remove if no data (all defaults)
+    shipping_info = product_data.get("shipping", {})
+    is_default_shipping = (
+        not shipping_info.get("free_shipping")
+        and not shipping_info.get("fast_delivery")
+        and not shipping_info.get("delivery_time")
+    )
+    if is_default_shipping:
+        product_data.pop("shipping", None)
+
+    # 4. Handle stock: Remove if no data (all defaults)
+    # Default is {"available": True, "quantity": 0, "stock_status": ""}
+    # Only remove if it matches default exactly (implying no extraction occurred)
+    stock_info = product_data.get("stock", {})
+    is_default_stock = (
+        stock_info.get("available") is True
+        and stock_info.get("quantity") == 0
+        and not stock_info.get("stock_status")
+    )
+    if is_default_stock:
+        product_data.pop("stock", None)
+
     return product_data
 
 
@@ -1628,20 +1655,28 @@ async def crawl_product_detail_async(
             # Extract product detail từ HTML
             product_data = extract_product_detail(html_content, url, verbose=verbose)
 
-            # Kiểm tra xem có đầy đủ thông tin không (đặc biệt là sales_count)
+            # Kiểm tra xem có đầy đủ thông tin không (đặc biệt là sales_count và rating)
             has_sales_count = product_data.get("sales_count") is not None
+            has_rating = product_data.get("rating", {}).get("average") is not None
 
-            # Nếu thiếu sales_count và có fallback, dùng Selenium
-            if not has_sales_count and use_selenium_fallback:
+            # Nếu thiếu critical data và có fallback, dùng Selenium
+            if (not has_sales_count or not has_rating) and use_selenium_fallback:
                 if verbose:
-                    print(f"[Async] ⚠️  Thiếu sales_count, fallback về Selenium cho {url[:60]}...")
+                    missing = []
+                    if not has_sales_count:
+                        missing.append("sales_count")
+                    if not has_rating:
+                        missing.append("rating")
+                    print(
+                        f"[Async] ⚠️  Thiếu {', '.join(missing)}, fallback về Selenium cho {url[:60]}..."
+                    )
                 if create_session:
                     await session.close()
                 return crawl_product_detail_with_selenium(url, verbose=verbose)
 
             # Cập nhật metadata
             product_data["_metadata"]["extraction_method"] = (
-                "aiohttp" if has_sales_count else "aiohttp+selenium_fallback"
+                "aiohttp" if (has_sales_count and has_rating) else "aiohttp+selenium_fallback"
             )
 
             if verbose:
