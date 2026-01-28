@@ -1,6 +1,6 @@
 """
-Script test để kiểm tra khả năng lấy số lượng đã bán (sales_count)
-Test từ crawl_products.py và crawl_products_detail.py
+Script test để kiểm tra khả năng lấy số lượng đã bán (sales_count) Test từ crawl_products.py và
+crawl_products_detail.py.
 """
 
 import json
@@ -253,7 +253,9 @@ def test_crawl_product_detail_sales_count():
 
 
 def main():
-    """Chạy tất cả tests"""
+    """
+    Chạy tất cả tests.
+    """
     print("=" * 70)
     print("🧪 TEST SALES COUNT - Kiểm tra khả năng lấy số lượng đã bán")
     print("=" * 70)

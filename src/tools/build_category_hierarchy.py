@@ -1,7 +1,6 @@
 #!/usr/bin/env python
-"""
-Build category hierarchy map to determine parent categories for products.
-This helps fix the missing Level 0 issue.
+"""Build category hierarchy map to determine parent categories for products. This helps fix the
+missing Level 0 issue.
 
 Usage:
     python build_category_hierarchy.py
@@ -28,7 +27,9 @@ from collections import defaultdict
 
 
 def normalize_category_name(name):
-    """Normalize category names to consistent format (Title Case)"""
+    """
+    Normalize category names to consistent format (Title Case)
+    """
     # Map of common variations to standard format
     name_map = {
         "Nhà cửa - đời sống": "Nhà Cửa - Đời Sống",
@@ -39,7 +40,9 @@ def normalize_category_name(name):
 
 
 def build_category_hierarchy():
-    """Build category hierarchy from crawled categories"""
+    """
+    Build category hierarchy from crawled categories.
+    """
 
     categories_file = "data/raw/categories_recursive_optimized.json"
     if not os.path.exists(categories_file):
@@ -88,7 +91,9 @@ def build_category_hierarchy():
 
     # Function to get all parent URLs for a category
     def get_parent_chain(url):
-        """Get list of parent URLs from root to this category"""
+        """
+        Get list of parent URLs from root to this category.
+        """
         chain = []
         current = url_to_category.get(url)
         if not current:
@@ -132,7 +137,9 @@ def build_category_hierarchy():
 
 
 def get_parent_category_for_product(category_url):
-    """Get immediate parent category name for a product"""
+    """
+    Get immediate parent category name for a product.
+    """
 
     hierarchy_file = "data/raw/category_hierarchy_map.json"
     if not os.path.exists(hierarchy_file):

@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 def load_categories(json_file_path: str):
-    """
-    Load data from categories JSON file to DB using Bulk Copy.
+    """Load data from categories JSON file to DB using Bulk Copy.
+
     Re-creates table if needed.
     """
     from pipelines.crawl.storage.postgres_storage import PostgresStorage

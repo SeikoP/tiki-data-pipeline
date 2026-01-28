@@ -40,8 +40,8 @@ def _post_json(url: str, payload: dict[str, Any]) -> tuple[int, str]:
 class DiscordNotifier:
     """Simple Discord Webhook notifier with convenience params.
 
-    Accepts either direct content or (title, message, color) which will be
-    transformed into an embed to match existing DAG usage.
+    Accepts either direct content or (title, message, color) which will be transformed into an embed
+    to match existing DAG usage.
     """
 
     def __init__(self, webhook_url: str | None = None) -> None:

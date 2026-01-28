@@ -1,5 +1,4 @@
-"""
-Optimized DataLoader với connection pooling và batch processing
+"""Optimized DataLoader với connection pooling và batch processing.
 
 Improvements over loader.py:
 - PostgreSQL connection pooling (40-50% faster DB ops)
@@ -23,7 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 class DateTimeEncoder(json.JSONEncoder):
-    """JSON encoder để serialize datetime objects"""
+    """
+    JSON encoder để serialize datetime objects.
+    """
 
     def default(self, obj):
         if isinstance(obj, datetime):
@@ -32,7 +33,9 @@ class DateTimeEncoder(json.JSONEncoder):
 
 
 def serialize_for_json(obj: Any) -> Any:
-    """Recursively convert datetime objects to ISO format strings"""
+    """
+    Recursively convert datetime objects to ISO format strings.
+    """
     if isinstance(obj, datetime):
         return obj.isoformat()
     elif isinstance(obj, dict):
@@ -44,8 +47,7 @@ def serialize_for_json(obj: Any) -> Any:
 
 
 class OptimizedDataLoader:
-    """
-    Optimized loader với connection pooling và batch processing
+    """Optimized loader với connection pooling và batch processing.
 
     Features:
     - Database connection pooling
@@ -112,8 +114,7 @@ class OptimizedDataLoader:
         validate_before_load: bool = True,
         save_to_file: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Load products vào database với connection pooling
+        """Load products vào database với connection pooling.
 
         Args:
             products: Danh sách products đã transform
@@ -153,7 +154,9 @@ class OptimizedDataLoader:
         return self.stats
 
     def _validate_products(self, products: list[dict]) -> list[dict]:
-        """Validate products và loại bỏ invalid ones"""
+        """
+        Validate products và loại bỏ invalid ones.
+        """
         valid_products = []
 
         for product in products:
@@ -174,12 +177,16 @@ class OptimizedDataLoader:
         return valid_products
 
     def _load_to_database(self, products: list[dict], upsert: bool):
-        """Load products vào database với batch processing"""
+        """
+        Load products vào database với batch processing.
+        """
         try:
             db_pool = get_db_pool()
 
             def process_batch(batch: list[dict]):
-                """Process một batch products"""
+                """
+                Process một batch products.
+                """
                 self._upsert_batch(batch, upsert, db_pool)
 
             # Process với BatchProcessor
@@ -206,7 +213,9 @@ class OptimizedDataLoader:
             logger.error(f"❌ {error_msg}")
 
     def _upsert_batch(self, batch: list[dict], upsert: bool, db_pool):
-        """Upsert một batch vào database"""
+        """
+        Upsert một batch vào database.
+        """
         with db_pool.get_cursor(commit=True) as cursor:
             if upsert:
                 # INSERT ON CONFLICT UPDATE
@@ -218,7 +227,9 @@ class OptimizedDataLoader:
                     self._insert_product(cursor, product)
 
     def _upsert_product(self, cursor, product: dict):
-        """Upsert một product với ON CONFLICT UPDATE"""
+        """
+        Upsert một product với ON CONFLICT UPDATE.
+        """
         # Serialize JSONB fields
         specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
         images = json.dumps(product.get("images", {}), ensure_ascii=False)
@@ -283,7 +294,9 @@ class OptimizedDataLoader:
             self.stats["inserted_count"] += 1
 
     def _insert_product(self, cursor, product: dict):
-        """Insert một product (không UPDATE)"""
+        """
+        Insert một product (không UPDATE)
+        """
         specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
         images = json.dumps(product.get("images", {}), ensure_ascii=False)
         category_path = json.dumps(product.get("category_path", []), ensure_ascii=False)
@@ -324,7 +337,9 @@ class OptimizedDataLoader:
         )
 
     def _save_to_file(self, products: list[dict], file_path: str):
-        """Save products to JSON file"""
+        """
+        Save products to JSON file.
+        """
         try:
             path = Path(file_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -362,8 +377,7 @@ class OptimizedDataLoader:
         save_to_file: str | None = None,
         upsert: bool = True,
     ) -> dict[str, Any]:
-        """
-        Load products từ file JSON
+        """Load products từ file JSON.
 
         Args:
             input_file: Đường dẫn file JSON input

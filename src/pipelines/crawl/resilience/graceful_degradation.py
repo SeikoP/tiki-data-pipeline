@@ -1,6 +1,5 @@
 """
-Graceful Degradation
-Hệ thống vẫn hoạt động ở mức độ thấp khi có lỗi
+Graceful Degradation Hệ thống vẫn hoạt động ở mức độ thấp khi có lỗi.
 """
 
 import time
@@ -12,7 +11,9 @@ T = TypeVar("T")
 
 
 class DegradationLevel:
-    """Các mức độ degradation"""
+    """
+    Các mức độ degradation.
+    """
 
     FULL = "full"  # Hoạt động bình thường
     REDUCED = "reduced"  # Giảm chức năng
@@ -22,8 +23,7 @@ class DegradationLevel:
 
 class GracefulDegradation:
     """
-    Graceful Degradation Manager
-    Tự động giảm chức năng khi có lỗi, tăng lại khi phục hồi
+    Graceful Degradation Manager Tự động giảm chức năng khi có lỗi, tăng lại khi phục hồi.
     """
 
     def __init__(
@@ -54,23 +54,31 @@ class GracefulDegradation:
         self.level_callbacks: dict[str, Callable] = {}
 
     def register_callback(self, level: str, callback: Callable):
-        """Đăng ký callback cho một level"""
+        """
+        Đăng ký callback cho một level.
+        """
         self.level_callbacks[level] = callback
 
     def record_success(self):
-        """Ghi nhận success"""
+        """
+        Ghi nhận success.
+        """
         self.success_count += 1
         self.failure_count = 0
         self._check_level()
 
     def record_failure(self):
-        """Ghi nhận failure"""
+        """
+        Ghi nhận failure.
+        """
         self.failure_count += 1
         self.success_count = 0
         self._check_level()
 
     def _check_level(self):
-        """Kiểm tra và cập nhật level"""
+        """
+        Kiểm tra và cập nhật level.
+        """
         old_level = self.current_level
 
         # Giảm level nếu có quá nhiều lỗi
@@ -99,19 +107,27 @@ class GracefulDegradation:
                 pass
 
     def get_level(self) -> str:
-        """Lấy current level"""
+        """
+        Lấy current level.
+        """
         return self.current_level
 
     def is_available(self) -> bool:
-        """Kiểm tra xem service có available không"""
+        """
+        Kiểm tra xem service có available không.
+        """
         return self.current_level != DegradationLevel.FAILED
 
     def should_skip(self) -> bool:
-        """Kiểm tra xem có nên skip operation không"""
+        """
+        Kiểm tra xem có nên skip operation không.
+        """
         return self.current_level == DegradationLevel.FAILED
 
     def get_stats(self) -> dict[str, Any]:
-        """Lấy thống kê"""
+        """
+        Lấy thống kê.
+        """
         return {
             "name": self.name,
             "current_level": self.current_level,
@@ -126,8 +142,7 @@ def graceful_degradation(
     fallback_value: Any = None,
     skip_on_failed: bool = True,
 ):
-    """
-    Decorator để áp dụng graceful degradation cho function
+    """Decorator để áp dụng graceful degradation cho function.
 
     Args:
         degradation_manager: GracefulDegradation instance
@@ -171,8 +186,7 @@ def graceful_degradation(
 
 class ServiceHealth:
     """
-    Quản lý health của các services
-    Tự động degrade khi service không available
+    Quản lý health của các services Tự động degrade khi service không available.
     """
 
     def __init__(self):
@@ -184,7 +198,9 @@ class ServiceHealth:
         failure_threshold: int = 3,
         recovery_threshold: int = 5,
     ) -> GracefulDegradation:
-        """Đăng ký service"""
+        """
+        Đăng ký service.
+        """
         degradation = GracefulDegradation(
             name=name,
             failure_threshold=failure_threshold,
@@ -194,16 +210,22 @@ class ServiceHealth:
         return degradation
 
     def get_service(self, name: str) -> GracefulDegradation | None:
-        """Lấy service degradation"""
+        """
+        Lấy service degradation.
+        """
         return self.services.get(name)
 
     def is_service_available(self, name: str) -> bool:
-        """Kiểm tra service có available không"""
+        """
+        Kiểm tra service có available không.
+        """
         service = self.services.get(name)
         return service.is_available() if service else True
 
     def get_all_stats(self) -> dict[str, Any]:
-        """Lấy thống kê tất cả services"""
+        """
+        Lấy thống kê tất cả services.
+        """
         return {name: service.get_stats() for name, service in self.services.items()}
 
 
@@ -212,5 +234,7 @@ _service_health = ServiceHealth()
 
 
 def get_service_health() -> ServiceHealth:
-    """Lấy global service health manager"""
+    """
+    Lấy global service health manager.
+    """
     return _service_health

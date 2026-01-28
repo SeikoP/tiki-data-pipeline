@@ -43,8 +43,7 @@ def crawl_category_recursive(
     visited_urls=None,
     all_categories=None,
 ):
-    """
-    Crawl đệ quy các danh mục con từ một URL danh mục (phiên bản test với giới hạn)
+    """Crawl đệ quy các danh mục con từ một URL danh mục (phiên bản test với giới hạn)
 
     Args:
         url: URL danh mục cần crawl
@@ -135,7 +134,9 @@ def crawl_category_recursive(
 
 
 def main():
-    """Hàm main để test crawl đệ quy với giới hạn"""
+    """
+    Hàm main để test crawl đệ quy với giới hạn.
+    """
 
     # URL danh mục gốc
     root_url = "https://tiki.vn/nha-cua-doi-song/c1883"

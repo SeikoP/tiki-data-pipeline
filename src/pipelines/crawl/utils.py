@@ -1,6 +1,5 @@
 """
-Shared utilities cho crawl pipeline
-Tối ưu: loại bỏ code duplication, cải thiện performance
+Shared utilities cho crawl pipeline Tối ưu: loại bỏ code duplication, cải thiện performance.
 """
 
 import json
@@ -17,7 +16,9 @@ from typing import Any
 # UTF-8 Encoding Setup (tránh lặp lại ở nhiều file)
 # ============================================================================
 def setup_utf8_encoding():
-    """Setup UTF-8 encoding cho stdout trên Windows"""
+    """
+    Setup UTF-8 encoding cho stdout trên Windows.
+    """
     if sys.platform == "win32":
         try:
             if hasattr(sys.stdout, "buffer") and not sys.stdout.closed:
@@ -38,9 +39,7 @@ def setup_utf8_encoding():
 # Selenium Setup (shared configuration)
 # ============================================================================
 def get_selenium_options(headless: bool = True) -> Any | None:
-    """
-    Tạo Chrome options cho Selenium (shared config)
-    Tối ưu hóa để khởi động nhanh hơn
+    """Tạo Chrome options cho Selenium (shared config) Tối ưu hóa để khởi động nhanh hơn.
 
     Returns:
         Chrome Options object hoặc None nếu Selenium không có
@@ -114,8 +113,7 @@ def get_selenium_options(headless: bool = True) -> Any | None:
 
 
 def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | None:
-    """
-    Tạo Selenium WebDriver với cấu hình tối ưu và timeout
+    """Tạo Selenium WebDriver với cấu hình tối ưu và timeout.
 
     Tối ưu:
     - Ưu tiên dùng ChromeDriver có sẵn trong PATH để tránh download chậm
@@ -143,7 +141,9 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
         error_occurred = [None]  # Dùng list để có thể modify trong nested function
 
         def create_driver():
-            """Helper function để tạo driver trong thread riêng"""
+            """
+            Helper function để tạo driver trong thread riêng.
+            """
             nonlocal driver
             try:
                 # Ưu tiên 1: Thử dùng ChromeDriver có sẵn trong PATH (nhanh nhất)
@@ -253,7 +253,7 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
 # Selenium Driver Pool (for batch processing optimization)
 # ============================================================================
 class SeleniumDriverPool:
-    """Thread-safe pool để reuse Selenium WebDriver instances
+    """Thread-safe pool để reuse Selenium WebDriver instances.
 
     Tối ưu: Giảm overhead tạo driver bằng cách reuse drivers trong batch processing
     """
@@ -273,7 +273,7 @@ class SeleniumDriverPool:
         self.created_count = 0  # Track số lượng drivers đã tạo
 
     def get_driver(self) -> Any | None:
-        """Lấy driver từ pool hoặc tạo mới nếu pool rỗng
+        """Lấy driver từ pool hoặc tạo mới nếu pool rỗng.
 
         Returns:
             WebDriver object hoặc None nếu không thể tạo
@@ -305,7 +305,7 @@ class SeleniumDriverPool:
                 return None
 
     def return_driver(self, driver: Any) -> None:
-        """Trả driver về pool hoặc đóng nếu pool đầy
+        """Trả driver về pool hoặc đóng nếu pool đầy.
 
         Args:
             driver: WebDriver object cần trả về pool
@@ -336,7 +336,9 @@ class SeleniumDriverPool:
                     pass
 
     def cleanup(self) -> None:
-        """Đóng tất cả drivers trong pool"""
+        """
+        Đóng tất cả drivers trong pool.
+        """
         with self.lock:
             for driver in self.pool:
                 try:
@@ -347,7 +349,9 @@ class SeleniumDriverPool:
             self.created_count = 0
 
     def __enter__(self):
-        """Context manager entry"""
+        """
+        Context manager entry.
+        """
         return self
 
     def __exit__(self, _exc_type, _exc_val, _exc_tb):
@@ -359,8 +363,7 @@ class SeleniumDriverPool:
 # Sales Count Parsing (shared logic)
 # ============================================================================
 def parse_sales_count(value: str | int | float | dict | None) -> int | None:
-    """
-    Parse sales_count từ nhiều format khác nhau
+    """Parse sales_count từ nhiều format khác nhau.
 
     Args:
         value: Giá trị có thể là string, int, float, dict, hoặc None
@@ -412,8 +415,7 @@ def parse_sales_count(value: str | int | float | dict | None) -> int | None:
 # Price Parsing (shared logic)
 # ============================================================================
 def parse_price(price_text: str | None) -> int | None:
-    """
-    Parse giá từ text (ví dụ: '389.000₫' -> 389000)
+    """Parse giá từ text (ví dụ: '389.000₫' -> 389000)
 
     Args:
         price_text: Text chứa giá
@@ -436,15 +438,16 @@ def parse_price(price_text: str | None) -> int | None:
 # File Operations (optimized)
 # ============================================================================
 def ensure_dir(path: str | Path) -> Path:
-    """Đảm bảo thư mục tồn tại"""
+    """
+    Đảm bảo thư mục tồn tại.
+    """
     path_obj = Path(path)
     path_obj.mkdir(parents=True, exist_ok=True)
     return path_obj
 
 
 def atomic_write_json(filepath: str | Path, data: Any, compress: bool = False, **kwargs) -> bool:
-    """
-    Ghi JSON file một cách atomic (tránh corrupt file) với optional compression
+    """Ghi JSON file một cách atomic (tránh corrupt file) với optional compression.
 
     Args:
         filepath: Đường dẫn file
@@ -511,8 +514,7 @@ def atomic_write_json(filepath: str | Path, data: Any, compress: bool = False, *
 
 
 def safe_read_json(filepath: str | Path, default: Any = None, try_compressed: bool = True) -> Any:
-    """
-    Đọc JSON file một cách an toàn với support cho compressed files
+    """Đọc JSON file một cách an toàn với support cho compressed files.
 
     Args:
         filepath: Đường dẫn file
@@ -550,8 +552,7 @@ def safe_read_json(filepath: str | Path, default: Any = None, try_compressed: bo
 # URL Utilities
 # ============================================================================
 def extract_product_id_from_url(url: str) -> str | None:
-    """
-    Extract product ID từ URL Tiki
+    """Extract product ID từ URL Tiki.
 
     Args:
         url: URL sản phẩm
@@ -567,8 +568,7 @@ def extract_product_id_from_url(url: str) -> str | None:
 
 
 def extract_category_id_from_url(url: str) -> str | None:
-    """
-    Extract category ID từ URL Tiki
+    """Extract category ID từ URL Tiki.
 
     Args:
         url: URL danh mục (ví dụ: https://tiki.vn/amplifier/c68289)
@@ -586,8 +586,7 @@ def extract_category_id_from_url(url: str) -> str | None:
 
 
 def normalize_url(url: str, base_url: str = "https://tiki.vn") -> str:
-    """
-    Chuẩn hóa URL
+    """Chuẩn hóa URL.
 
     Args:
         url: URL cần chuẩn hóa
@@ -617,7 +616,9 @@ def normalize_url(url: str, base_url: str = "https://tiki.vn") -> str:
 # Rate Limiting
 # ============================================================================
 class RateLimiter:
-    """Rate limiter đơn giản để tránh quá tải server"""
+    """
+    Rate limiter đơn giản để tránh quá tải server.
+    """
 
     def __init__(self, delay: float = 1.0):
         """
@@ -628,7 +629,9 @@ class RateLimiter:
         self.last_request_time = 0.0
 
     def wait(self):
-        """Chờ đến khi đủ thời gian delay"""
+        """
+        Chờ đến khi đủ thời gian delay.
+        """
         current_time = time.time()
         elapsed = current_time - self.last_request_time
         if elapsed < self.delay:

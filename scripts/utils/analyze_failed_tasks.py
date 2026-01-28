@@ -1,6 +1,5 @@
 """
-Script để phân tích các task failed trong DAG
-Giúp hiểu rõ nguyên nhân và loại lỗi
+Script để phân tích các task failed trong DAG Giúp hiểu rõ nguyên nhân và loại lỗi.
 """
 
 import json
@@ -10,8 +9,7 @@ from pathlib import Path
 
 
 def analyze_failed_tasks_from_merge_result(merge_result_file=None):
-    """
-    Phân tích các task failed từ merge result hoặc cache files
+    """Phân tích các task failed từ merge result hoặc cache files.
 
     Args:
         merge_result_file: Đường dẫn file merge result (nếu có)
@@ -162,7 +160,7 @@ def analyze_failed_tasks_from_merge_result(merge_result_file=None):
 
 def analyze_from_airflow_logs():
     """
-    Hướng dẫn phân tích từ Airflow logs
+    Hướng dẫn phân tích từ Airflow logs.
     """
     print("\n" + "=" * 70)
     print("HUONG DAN PHAN TICH TU AIRFLOW LOGS")
@@ -195,7 +193,9 @@ De xem logs tu command line:
 
 
 def main():
-    """Chạy phân tích"""
+    """
+    Chạy phân tích.
+    """
     # Phân tích từ merge result
     analysis = analyze_failed_tasks_from_merge_result()
 

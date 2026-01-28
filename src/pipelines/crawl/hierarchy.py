@@ -1,17 +1,17 @@
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any
 
 # Cache hierarchy map globally to avoid reloading in every task
 _hierarchy_map_cache = None
 
 
 def get_hierarchy_map(force_reload: bool = False) -> dict[str, Any]:
-    """Load category hierarchy map for auto-parent-detection
+    """Load category hierarchy map for auto-parent-detection.
 
-    This map contains all categories with their parent chains,
-    allowing extract_product_detail to auto-detect missing Level 0 (parent category)
+    This map contains all categories with their parent chains, allowing extract_product_detail to
+    auto-detect missing Level 0 (parent category)
     """
     global _hierarchy_map_cache
 

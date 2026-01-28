@@ -14,7 +14,6 @@ from ..bootstrap import (
     ensure_output_dirs,
     json,
     os,
-    re,
 )
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
 from .common import atomic_write_file  # noqa: F401

@@ -62,7 +62,7 @@ def crawl_product_detail_with_selenium(
     use_rate_limiting=True,
     wait_config_overrides: dict | None = None,
 ):
-    """Crawl trang sản phẩm Tiki bằng Selenium để load đầy đủ dữ liệu
+    """Crawl trang sản phẩm Tiki bằng Selenium để load đầy đủ dữ liệu.
 
     Args:
         url: URL sản phẩm cần crawl
@@ -360,8 +360,7 @@ def crawl_product_with_retry(
     use_redis_cache: bool = True,
     use_rate_limiting: bool = True,
 ) -> dict[str, Any] | None:
-    """
-    Crawl product with conditional retry for missing critical fields.
+    """Crawl product with conditional retry for missing critical fields.
 
     This function implements the Hybrid Approach:
     - Tier 1: Normal crawl with moderate wait times
@@ -770,7 +769,9 @@ def crawl_product_detail_with_driver(
 
 
 def load_category_hierarchy():
-    """Load category hierarchy map to auto-detect parent categories"""
+    """
+    Load category hierarchy map to auto-detect parent categories.
+    """
     import os
 
     hierarchy_file = "data/raw/category_hierarchy_map.json"
@@ -784,7 +785,7 @@ def load_category_hierarchy():
 
 
 def get_parent_category_name(category_url, hierarchy_map=None):
-    """Get parent category name from hierarchy map
+    """Get parent category name from hierarchy map.
 
     Args:
         category_url: URL của danh mục (level 1-2)
@@ -818,7 +819,7 @@ def get_parent_category_name(category_url, hierarchy_map=None):
 def extract_product_detail(
     html_content, url, verbose=True, parent_category=None, hierarchy_map=None
 ):
-    """Extract thông tin chi tiết sản phẩm từ HTML
+    """Extract thông tin chi tiết sản phẩm từ HTML.
 
     Args:
         html_content: HTML content của trang product
@@ -1113,7 +1114,9 @@ def extract_product_detail(
             # Tìm product data trong __NEXT_DATA__
             # Path chính xác cho Tiki: props.initialState.productv2.productData.response.data
             def get_nested_value(obj, path):
-                """Lấy giá trị từ nested dict theo path (ví dụ: 'a.b.c')"""
+                """
+                Lấy giá trị từ nested dict theo path (ví dụ: 'a.b.c')
+                """
                 keys = path.split(".")
                 current = obj
                 for key in keys:
@@ -1418,7 +1421,6 @@ def extract_product_detail(
         except Exception as e:
             if verbose:
                 print(f"[Parse] Lỗi khi parse __NEXT_DATA__: {e}")
-            pass
 
     # Fix: Ensure category_path is never None, use empty list if not populated
     if product_data.get("category_path") is None:
@@ -1558,7 +1560,7 @@ async def crawl_product_detail_async(
     use_selenium_fallback: bool = True,
     verbose: bool = False,
 ) -> dict[str, Any] | None:
-    """Crawl product detail bằng aiohttp (async) với Selenium fallback
+    """Crawl product detail bằng aiohttp (async) với Selenium fallback.
 
     Hybrid approach:
     - Thử crawl bằng aiohttp trước (nhanh hơn)
@@ -1698,7 +1700,9 @@ async def crawl_product_detail_async(
 
 
 def main():
-    """Test crawl sản phẩm"""
+    """
+    Test crawl sản phẩm.
+    """
     url = "https://tiki.vn/binh-giu-nhiet-inox-304-elmich-el-8013ol-dung-tich-480ml-p120552065.html?itm_campaign=CTP_YPD_TKA_PLA_UNK_ALL_UNK_UNK_UNK_UNK_X.304582_Y.1886902_Z.4008723_CN.HL-l-Binh-Giu-Nhiet&itm_medium=CPC&itm_source=tiki-ads&spid=120552067"
 
     print("=" * 70)

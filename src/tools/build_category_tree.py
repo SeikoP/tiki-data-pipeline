@@ -19,8 +19,7 @@ if sys.platform == "win32":
 
 
 def build_category_tree(categories):
-    """
-    Xây dựng cây phân cấp từ danh sách danh mục phẳng
+    """Xây dựng cây phân cấp từ danh sách danh mục phẳng.
 
     Args:
         categories: List các danh mục với parent_url và level
@@ -71,8 +70,7 @@ def build_category_tree(categories):
 
 
 def print_tree(node, indent=0, max_depth=None, current_depth=0):
-    """
-    In cây phân cấp ra console (để debug/preview)
+    """In cây phân cấp ra console (để debug/preview)
 
     Args:
         node: Node hiện tại
@@ -105,8 +103,7 @@ def print_tree(node, indent=0, max_depth=None, current_depth=0):
 
 
 def get_tree_stats(tree):
-    """
-    Tính thống kê về cây phân cấp
+    """Tính thống kê về cây phân cấp.
 
     Returns:
         dict: Thống kê về số lượng nodes, độ sâu, etc.
@@ -148,7 +145,9 @@ def get_tree_stats(tree):
 
 
 def main():
-    """Hàm main để build category tree"""
+    """
+    Hàm main để build category tree.
+    """
 
     input_file = "data/raw/categories_recursive_optimized.json"
     output_file = "data/raw/categories_tree.json"

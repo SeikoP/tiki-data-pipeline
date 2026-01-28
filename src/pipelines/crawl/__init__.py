@@ -1,5 +1,5 @@
 """
-Crawl pipeline package
+Crawl pipeline package.
 """
 
 # Export utilities modules from utils.py file

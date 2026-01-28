@@ -1,13 +1,14 @@
 """
-Custom Exceptions cho Tiki Crawl Pipeline
-Phân loại rõ ràng các loại lỗi để dễ xử lý và debug
+Custom Exceptions cho Tiki Crawl Pipeline Phân loại rõ ràng các loại lỗi để dễ xử lý và debug.
 """
 
 from typing import Any
 
 
 class CrawlError(Exception):
-    """Base exception cho tất cả các lỗi crawl"""
+    """
+    Base exception cho tất cả các lỗi crawl.
+    """
 
     def __init__(
         self,
@@ -34,7 +35,9 @@ class CrawlError(Exception):
         return base_msg
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert exception thành dict để log/serialize"""
+        """
+        Convert exception thành dict để log/serialize.
+        """
         return {
             "error_type": self.__class__.__name__,
             "message": self.message,
@@ -44,7 +47,9 @@ class CrawlError(Exception):
 
 
 class NetworkError(CrawlError):
-    """Lỗi liên quan đến network (timeout, connection, DNS, etc.)"""
+    """
+    Lỗi liên quan đến network (timeout, connection, DNS, etc.)
+    """
 
     def __init__(
         self,
@@ -63,7 +68,9 @@ class NetworkError(CrawlError):
 
 
 class ParseError(CrawlError):
-    """Lỗi khi parse HTML/JSON (missing data, invalid format, etc.)"""
+    """
+    Lỗi khi parse HTML/JSON (missing data, invalid format, etc.)
+    """
 
     def __init__(
         self,
@@ -82,7 +89,9 @@ class ParseError(CrawlError):
 
 
 class StorageError(CrawlError):
-    """Lỗi khi lưu/đọc dữ liệu (database, file, cache, etc.)"""
+    """
+    Lỗi khi lưu/đọc dữ liệu (database, file, cache, etc.)
+    """
 
     def __init__(
         self,
@@ -101,7 +110,9 @@ class StorageError(CrawlError):
 
 
 class ValidationError(CrawlError):
-    """Lỗi validation dữ liệu (missing required fields, invalid format, etc.)"""
+    """
+    Lỗi validation dữ liệu (missing required fields, invalid format, etc.)
+    """
 
     def __init__(
         self,
@@ -120,7 +131,9 @@ class ValidationError(CrawlError):
 
 
 class RateLimitError(CrawlError):
-    """Lỗi khi vượt quá rate limit"""
+    """
+    Lỗi khi vượt quá rate limit.
+    """
 
     def __init__(
         self,
@@ -136,7 +149,9 @@ class RateLimitError(CrawlError):
 
 
 class TimeoutError(CrawlError):
-    """Lỗi timeout (request timeout, operation timeout, etc.)"""
+    """
+    Lỗi timeout (request timeout, operation timeout, etc.)
+    """
 
     def __init__(
         self,
@@ -155,7 +170,9 @@ class TimeoutError(CrawlError):
 
 
 class SeleniumError(CrawlError):
-    """Lỗi liên quan đến Selenium (driver, browser, etc.)"""
+    """
+    Lỗi liên quan đến Selenium (driver, browser, etc.)
+    """
 
     def __init__(
         self,
@@ -171,7 +188,9 @@ class SeleniumError(CrawlError):
 
 
 class ConfigurationError(CrawlError):
-    """Lỗi cấu hình (missing config, invalid config, etc.)"""
+    """
+    Lỗi cấu hình (missing config, invalid config, etc.)
+    """
 
     def __init__(
         self,
@@ -187,8 +206,7 @@ class ConfigurationError(CrawlError):
 
 
 def classify_error(error: Exception, context: dict[str, Any] | None = None) -> CrawlError:
-    """
-    Phân loại generic exception thành custom exception
+    """Phân loại generic exception thành custom exception.
 
     Args:
         error: Exception gốc

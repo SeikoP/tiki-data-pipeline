@@ -3,7 +3,7 @@ import os
 import sys
 import warnings
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 try:
     from dotenv import load_dotenv
@@ -36,8 +36,7 @@ except ImportError:
 
 
 def safe_import_attr(module_path: str, attr_name: str, fallback_paths: list[Any] | None = None):
-    """
-    Import an attribute from a module with optional fallback file paths.
+    """Import an attribute from a module with optional fallback file paths.
 
     Args:
         module_path: Dot-separated path to the module (e.g., 'pipelines.load.module')
@@ -95,7 +94,9 @@ def get_variable(key: str, default: Any = None) -> Any:
 
 
 def get_int_variable(key: str, default: int) -> int:
-    """Safely parse Airflow variable as integer with fallback and warning"""
+    """
+    Safely parse Airflow variable as integer with fallback and warning.
+    """
     raw_value = get_variable(key, default=str(default))
     try:
         return int(raw_value)

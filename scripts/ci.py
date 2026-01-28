@@ -5,7 +5,6 @@ Usage: python ci.py [command] [options]
 """
 
 import argparse
-import asyncio
 import os
 import platform
 import shutil
@@ -15,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 # TOML support for config files
 try:
@@ -28,10 +27,8 @@ except ImportError:
 
 # Rich for beautiful terminal output
 try:
-    from rich import print as rprint
     from rich.console import Console
     from rich.panel import Panel
-    from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich.table import Table
 
     RICH_AVAILABLE = True
@@ -41,7 +38,9 @@ except ImportError:
 
 
 class TaskStatus(Enum):
-    """Task execution status"""
+    """
+    Task execution status.
+    """
 
     SUCCESS = "✅"
     FAILED = "❌"
@@ -52,7 +51,9 @@ class TaskStatus(Enum):
 
 @dataclass
 class TaskResult:
-    """Result of a task execution"""
+    """
+    Result of a task execution.
+    """
 
     name: str
     status: TaskStatus
@@ -62,7 +63,9 @@ class TaskResult:
 
 
 class CIRunner:
-    """Main CI/CD runner class"""
+    """
+    Main CI/CD runner class.
+    """
 
     def __init__(
         self, verbose: bool = False, parallel: bool = True, config_file: Optional[str] = None
@@ -94,7 +97,9 @@ class CIRunner:
         os.environ["PYTHONUTF8"] = "1"
 
     def _load_config(self, config_file: Optional[str] = None) -> dict:
-        """Load configuration from TOML file"""
+        """
+        Load configuration from TOML file.
+        """
         # Default configuration
         default_config = {
             "format": {
@@ -163,7 +168,9 @@ class CIRunner:
         return default_config
 
     def _detect_python(self) -> str:
-        """Detect the correct Python executable"""
+        """
+        Detect the correct Python executable.
+        """
         # Check virtual environment first
         if self.venv_path.exists():
             if self.is_windows:
@@ -183,7 +190,9 @@ class CIRunner:
         raise RuntimeError("Python executable not found!")
 
     def _detect_pip(self) -> str:
-        """Detect the correct pip executable"""
+        """
+        Detect the correct pip executable.
+        """
         if self.venv_path.exists():
             if self.is_windows:
                 venv_pip = self.venv_path / "Scripts" / "pip.exe"
@@ -196,28 +205,36 @@ class CIRunner:
         return f"{self.python_cmd} -m pip"
 
     def _print_info(self, message: str, style: str = "cyan"):
-        """Print info message"""
+        """
+        Print info message.
+        """
         if RICH_AVAILABLE and self.console:
             self.console.print(f"[{style}]{message}[/{style}]")
         else:
             print(f"ℹ️  {message}")
 
     def _print_success(self, message: str):
-        """Print success message"""
+        """
+        Print success message.
+        """
         if RICH_AVAILABLE and self.console:
             self.console.print(f"[green]✅ {message}[/green]")
         else:
             print(f"✅ {message}")
 
     def _print_error(self, message: str):
-        """Print error message"""
+        """
+        Print error message.
+        """
         if RICH_AVAILABLE and self.console:
             self.console.print(f"[red]❌ {message}[/red]")
         else:
             print(f"❌ {message}")
 
     def _print_warning(self, message: str):
-        """Print warning message"""
+        """
+        Print warning message.
+        """
         if RICH_AVAILABLE and self.console:
             self.console.print(f"[yellow]⚠️  {message}[/yellow]")
         else:
@@ -226,7 +243,9 @@ class CIRunner:
     def _run_command(
         self, cmd: list[str], description: str, check: bool = True, capture_output: bool = False
     ) -> subprocess.CompletedProcess:
-        """Run a shell command"""
+        """
+        Run a shell command.
+        """
         if self.verbose:
             self._print_info(f"Running: {' '.join(cmd)}")
 
@@ -250,7 +269,9 @@ class CIRunner:
             raise
 
     def setup(self) -> None:
-        """Setup development environment"""
+        """
+        Setup development environment.
+        """
         self._print_info("🛠️  Setting up development environment...")
 
         # Create virtual environment
@@ -269,7 +290,9 @@ class CIRunner:
         self.install_dependencies()
 
     def install_dependencies(self) -> None:
-        """Install project dependencies"""
+        """
+        Install project dependencies.
+        """
         self._print_info("📦 Installing dependencies...")
 
         # Upgrade pip
@@ -315,7 +338,9 @@ class CIRunner:
         self._print_success("Dependencies installed successfully!")
 
     def lint(self, fix: bool = False) -> TaskResult:
-        """Run linting with Ruff"""
+        """
+        Run linting with Ruff.
+        """
         import time
 
         start = time.time()
@@ -355,8 +380,7 @@ class CIRunner:
         target_version: Optional[str] = None,
         skip_string_normalization: Optional[bool] = None,
     ) -> TaskResult:
-        """
-        Format code with modern formatters
+        """Format code with modern formatters.
 
         Args:
             check_only: Only check formatting without modifying files
@@ -543,7 +567,9 @@ class CIRunner:
             )
 
     def type_check(self) -> TaskResult:
-        """Run type checking with mypy"""
+        """
+        Run type checking with mypy.
+        """
         import time
 
         start = time.time()
@@ -573,7 +599,9 @@ class CIRunner:
             )
 
     def run_tests(self, fast: bool = False, parallel: bool = False) -> TaskResult:
-        """Run tests with pytest"""
+        """
+        Run tests with pytest.
+        """
         import time
 
         start = time.time()
@@ -627,7 +655,9 @@ class CIRunner:
             )
 
     def security_check(self) -> TaskResult:
-        """Run security checks"""
+        """
+        Run security checks.
+        """
         import time
 
         start = time.time()
@@ -669,7 +699,9 @@ class CIRunner:
             )
 
     def perf_check(self) -> TaskResult:
-        """Check performance with Ruff PERF rules"""
+        """
+        Check performance with Ruff PERF rules.
+        """
         import time
 
         start = time.time()
@@ -701,7 +733,9 @@ class CIRunner:
             )
 
     def dead_code_check(self) -> TaskResult:
-        """Find dead code with Vulture"""
+        """
+        Find dead code with Vulture.
+        """
         import time
 
         start = time.time()
@@ -733,7 +767,9 @@ class CIRunner:
             )
 
     def complexity_check(self) -> TaskResult:
-        """Analyze code complexity with Radon"""
+        """
+        Analyze code complexity with Radon.
+        """
         import time
 
         start = time.time()
@@ -775,7 +811,9 @@ class CIRunner:
             )
 
     def validate_dags(self) -> TaskResult:
-        """Validate Airflow DAGs"""
+        """
+        Validate Airflow DAGs.
+        """
         import time
 
         start = time.time()
@@ -859,7 +897,9 @@ else:
             )
 
     def install_git_hooks(self) -> None:
-        """Install Git pre-commit hooks"""
+        """
+        Install Git pre-commit hooks.
+        """
         self._print_info("⚓ Installing Git pre-commit hooks...")
 
         git_dir = self.project_root / ".git"
@@ -896,7 +936,9 @@ exit 0
         self._print_success("Git hooks installed successfully!")
 
     def clean(self) -> None:
-        """Clean cache and temporary files"""
+        """
+        Clean cache and temporary files.
+        """
         self._print_info("🧹 Cleaning cache and temporary files...")
 
         patterns = [
@@ -928,7 +970,9 @@ exit 0
         self._print_success("Clean completed!")
 
     def docker_build(self) -> None:
-        """Build Docker images"""
+        """
+        Build Docker images.
+        """
         self._print_info("🐳 Building Docker images...")
 
         self._run_command(["docker-compose", "build"], "Docker build")
@@ -936,7 +980,9 @@ exit 0
         self._print_success("Docker build completed!")
 
     def docker_up(self) -> None:
-        """Start Docker Compose services"""
+        """
+        Start Docker Compose services.
+        """
         self._print_info("🐳 Starting Docker Compose services...")
 
         self._run_command(["docker-compose", "up", "-d"], "Docker up")
@@ -944,7 +990,9 @@ exit 0
         self._print_success("Services started!")
 
     def docker_down(self) -> None:
-        """Stop Docker Compose services"""
+        """
+        Stop Docker Compose services.
+        """
         self._print_info("🐳 Stopping Docker Compose services...")
 
         self._run_command(["docker-compose", "down"], "Docker down")
@@ -952,13 +1000,17 @@ exit 0
         self._print_success("Services stopped!")
 
     def docker_logs(self) -> None:
-        """View Docker Compose logs"""
+        """
+        View Docker Compose logs.
+        """
         self._print_info("🐳 Viewing Docker Compose logs...")
 
         self._run_command(["docker-compose", "logs", "-f"], "Docker logs")
 
     def run_parallel_tasks(self, tasks: list[tuple]) -> list[TaskResult]:
-        """Run tasks in parallel"""
+        """
+        Run tasks in parallel.
+        """
         results = []
 
         with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
@@ -983,7 +1035,9 @@ exit 0
         return results
 
     def ci_local(self, parallel: bool = True) -> None:
-        """Run full CI pipeline locally"""
+        """
+        Run full CI pipeline locally.
+        """
         self._print_info("🚀 Running local CI pipeline...")
         self._print_info("=" * 50)
 
@@ -1026,7 +1080,9 @@ exit 0
             self._print_success("\n✅ All CI checks passed!")
 
     def ci_fast(self) -> None:
-        """Run fast CI checks"""
+        """
+        Run fast CI checks.
+        """
         self._print_info("⚡ Running fast CI checks...")
 
         tasks = [
@@ -1047,7 +1103,9 @@ exit 0
             self._print_success("✅ Fast CI passed!")
 
     def ci_quick(self) -> None:
-        """Run quick CI checks (for pre-commit)"""
+        """
+        Run quick CI checks (for pre-commit)
+        """
         self._print_info("⚡ Running quick CI checks...")
 
         self.results.append(self.format_code(check_only=True))
@@ -1063,7 +1121,9 @@ exit 0
             self._print_success("✅ Quick CI passed!")
 
     def _display_results(self) -> None:
-        """Display task results in a table"""
+        """
+        Display task results in a table.
+        """
         if not self.results:
             return
 
@@ -1105,7 +1165,9 @@ exit 0
 
 
 def main():
-    """Main entry point"""
+    """
+    Main entry point.
+    """
     parser = argparse.ArgumentParser(
         description="CI/CD Script - Modern Python Version",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1209,7 +1271,9 @@ def main():
 
 
 def print_help():
-    """Print help information"""
+    """
+    Print help information.
+    """
     help_text = """
 ╔════════════════════════════════════════════════════════════════╗
 ║                    CI/CD Commands - Python                     ║

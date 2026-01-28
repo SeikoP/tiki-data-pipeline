@@ -9,7 +9,6 @@ from ..bootstrap import (
     PROGRESS_FILE,
     Any,
     CircuitBreakerOpenError,
-    CrawlError,
     Path,
     classify_error,
     crawl_product_detail_async,
@@ -25,12 +24,10 @@ from ..bootstrap import (
     get_tiki_dlq,
     get_variable,
     json,
-    logging,
     os,
     re,
     redis_cache,
     shutil,
-    src_path,
     sys,
     time,
 )
@@ -495,7 +492,9 @@ def crawl_product_batch(
         session = None
 
         async def crawl_single_async(product_info: dict) -> dict[str, Any]:
-            """Crawl một product với async"""
+            """
+            Crawl một product với async.
+            """
             product_id = product_info.get("product_id", "unknown")
             product_url = product_info.get("url", "")
 
@@ -731,13 +730,17 @@ def crawl_product_batch(
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def bounded_task(task_coro):
-            """Wrap task để respect semaphore limit"""
+            """
+            Wrap task để respect semaphore limit.
+            """
             async with semaphore:
                 return await task_coro
 
         # Tạo tasks với rate limiting: stagger start times
         async def crawl_batch_parallel():
-            """Crawl batch với parallel processing và rate limiting"""
+            """
+            Crawl batch với parallel processing và rate limiting.
+            """
             # Tạo session ngay lập tức trong async context (trước khi tạo tasks)
             # Đảm bảo session được tạo trong async context có event loop
             nonlocal session
@@ -1077,7 +1080,9 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         try:
             # Wrapper function để gọi với circuit breaker
             def _crawl_detail_with_params():
-                """Wrapper function để gọi với circuit breaker"""
+                """
+                Wrapper function để gọi với circuit breaker.
+                """
                 return crawl_product_detail_with_selenium(
                     product_url,
                     save_html=False,
@@ -1506,7 +1511,6 @@ def merge_product_details(**context) -> dict[str, Any]:
                         break
                 except Exception as e:
                     logger.debug(f"   Không có XCom tại map_index {test_idx}: {e}")
-                    pass
 
             if max_found_index >= 0:
                 # Tìm chính xác map_index cao nhất bằng cách tìm từ max_found_index
@@ -1655,7 +1659,6 @@ def merge_product_details(**context) -> dict[str, Any]:
                     except Exception as e2:
                         # Bỏ qua nếu không lấy được (có thể task chưa chạy xong hoặc failed)
                         logger.debug(f"   Không lấy được map_index {map_index}: {e2}")
-                        pass
 
         logger.info(
             f"✅ Lấy được {len(all_detail_results)} detail results qua batch (mong đợi {actual_crawl_count})"
@@ -1748,7 +1751,6 @@ def merge_product_details(**context) -> dict[str, Any]:
                 except Exception as e:
                     # Bỏ qua nếu không lấy được (có thể task chưa chạy xong hoặc failed)
                     logger.debug(f"   Không lấy được map_index {map_index}: {e}")
-                    pass
 
             logger.info(
                 f"✅ Sau khi lấy từng map_index: tổng {len(all_detail_results)} detail results (lấy thêm {fetched_count})"

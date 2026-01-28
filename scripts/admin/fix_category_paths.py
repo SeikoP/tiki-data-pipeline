@@ -23,7 +23,9 @@ load_dotenv()
 
 
 def get_db_connection():
-    """Connect to crawl_data database"""
+    """
+    Connect to crawl_data database.
+    """
     import psycopg2
 
     # Try multiple connection options
@@ -68,7 +70,9 @@ def get_db_connection():
 
 
 def add_parent_to_path(category_path, hierarchy_map, name_to_url):
-    """Add parent category to beginning of path if missing and found in hierarchy"""
+    """
+    Add parent category to beginning of path if missing and found in hierarchy.
+    """
     if not category_path or len(category_path) == 0:
         return category_path
 

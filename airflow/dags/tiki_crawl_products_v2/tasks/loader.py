@@ -6,14 +6,10 @@ from ..bootstrap import (
     CATEGORIES_FILE,
     DATA_DIR,
     Any,
-    Path,
     dag_file_dir,
     get_load_categories_db_func,
     json,
     os,
-    possible_paths,
-    re,
-    src_path,
     sys,
 )
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
@@ -21,8 +17,8 @@ from .common import get_logger  # noqa: F401
 
 
 def fix_missing_parent_categories(**context) -> dict[str, Any]:
-    """
-    Fix missing parent categories và rebuild category_path đầy đủ.
+    """Fix missing parent categories và rebuild category_path đầy đủ.
+
     Logic từ scripts/imp/fix_missing_parents.py
     """
     logger = get_logger(context)
@@ -222,8 +218,8 @@ def fix_missing_parent_categories(**context) -> dict[str, Any]:
 
 
 def load_categories_to_db_wrapper(**context):
-    """
-    Task wrapper to load categories from JSON file into PostgreSQL database.
+    """Task wrapper to load categories from JSON file into PostgreSQL database.
+
     Sau khi load, tự động fix missing parent categories và rebuild paths.
     """
     logger = get_logger(context)
@@ -265,9 +261,8 @@ def load_categories_to_db_wrapper(**context):
 
 
 def _import_postgres_storage():
-    """
-    Helper function để import PostgresStorage với fallback logic
-    Hỗ trợ cả môi trường Airflow (importlib) và môi trường bình thường
+    """Helper function để import PostgresStorage với fallback logic Hỗ trợ cả môi trường Airflow
+    (importlib) và môi trường bình thường.
 
     Returns:
         PostgresStorage class hoặc None nếu không thể import
@@ -443,7 +438,6 @@ def load_products(**context) -> dict[str, Any]:
                 # Khởi tạo biến để lưu số lượng products
                 count_before = None
                 count_after = None
-                deleted_no_brand_count = 0
 
                 # Kiểm tra số lượng products trong DB trước khi load (for stats)
                 try:

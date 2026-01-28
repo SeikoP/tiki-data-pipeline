@@ -1,5 +1,5 @@
 """
-Test chi tiết cho Transform và Load pipeline
+Test chi tiết cho Transform và Load pipeline.
 """
 
 import json
@@ -29,7 +29,9 @@ from pipelines.transform.transformer import DataTransformer
 
 
 def create_sample_products() -> list[dict[str, Any]]:
-    """Tạo danh sách products mẫu để test"""
+    """
+    Tạo danh sách products mẫu để test.
+    """
     return [
         {
             "product_id": "123456",
@@ -436,7 +438,9 @@ def test_edge_cases():
 
 
 def main():
-    """Chạy tất cả tests"""
+    """
+    Chạy tất cả tests.
+    """
     print("=" * 70)
     print("🧪 TEST TRANSFORM VÀ LOAD PIPELINE")
     print("=" * 70)

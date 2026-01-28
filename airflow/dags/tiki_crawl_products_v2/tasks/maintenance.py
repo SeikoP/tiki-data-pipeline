@@ -2,15 +2,14 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import CATEGORIES_FILE, Any, Path, datetime, json, os, redis_cache, src_path, sys
+from ..bootstrap import CATEGORIES_FILE, Any, datetime, json, os
 from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
 from .common import get_logger  # noqa: F401
 
 
 def cleanup_incomplete_products_wrapper(**context):
-    """
-    Task wrapper to cleanup products with missing required fields (seller and/or brand).
-    Run this BEFORE crawling to allow re-crawling of incomplete data.
+    """Task wrapper to cleanup products with missing required fields (seller and/or brand). Run this
+    BEFORE crawling to allow re-crawling of incomplete data.
 
     This is a PREVENTIVE cleanup - better to clean before crawl than after load.
     """
@@ -64,9 +63,8 @@ def cleanup_incomplete_products_wrapper(**context):
 
 
 def cleanup_orphan_categories_wrapper(**context):
-    """
-    Task wrapper to cleanup categories that don't have any matching products.
-    Run this after loading categories to keep the table clean.
+    """Task wrapper to cleanup categories that don't have any matching products. Run this after
+    loading categories to keep the table clean.
 
     Xóa:
     1. Categories có product_count = 0 (hoặc NULL)
@@ -152,8 +150,8 @@ def cleanup_redundant_categories_wrapper(**context):
 
 
 def reconcile_categories_wrapper(**context):
-    """
-    Task wrapper to reconcile categories from JSON.
+    """Task wrapper to reconcile categories from JSON.
+
     Updates names, removes orphans, and updates product counts.
     """
     logger = get_logger(context)

@@ -21,7 +21,6 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.pipelines.crawl.crawl_products_detail import (
-    get_parent_category_name,
     load_category_hierarchy,
 )
 from src.pipelines.crawl.validate_category_path import (
@@ -33,7 +32,9 @@ load_dotenv()
 
 
 def get_db_connection():
-    """Connect to crawl_data database"""
+    """
+    Connect to crawl_data database.
+    """
     import psycopg2
 
     # Try multiple connection options
@@ -78,8 +79,7 @@ def get_db_connection():
 
 
 def analyze_products_needing_fix(cur, hierarchy_map, limit=None):
-    """
-    Phân tích products cần fix
+    """Phân tích products cần fix.
 
     Returns:
         list: Danh sách products cần fix với old_path và new_path

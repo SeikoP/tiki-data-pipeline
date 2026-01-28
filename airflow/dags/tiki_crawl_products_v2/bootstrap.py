@@ -1,5 +1,4 @@
-"""
-DAG Airflow để crawl sản phẩm Tiki với tối ưu hóa cho dữ liệu lớn
+"""DAG Airflow để crawl sản phẩm Tiki với tối ưu hóa cho dữ liệu lớn.
 
 Tính năng:
 - Dynamic Task Mapping: crawl song song nhiều danh mục
@@ -16,23 +15,15 @@ Tính năng:
 Dependencies được quản lý bằng >> operator giữa các tasks.
 """
 
-import json
 import logging
 import os
-import re
-import shutil
 import sys
-import time
 import warnings
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
-from typing import Any
 
-from airflow import DAG
-from airflow.models import Variable
-from airflow.providers.standard.operators.python import PythonOperator
 
 # Setup imports path
 src_path = Path("/opt/airflow/src")
@@ -181,10 +172,7 @@ else:
     # Fallback: thử import thông thường
     try:
         from crawl_products_detail import (
-            crawl_product_detail_async,
-            crawl_product_detail_with_driver,
             crawl_product_detail_with_selenium,
-            extract_product_detail,
         )
 
         SeleniumDriverPool = None  # Không có trong crawl_products_detail, sẽ import từ utils
@@ -197,7 +185,7 @@ else:
 
     # Import crawl_category_products từ crawl_products
     try:
-        from crawl_products import crawl_category_products
+        pass
     except ImportError as e:
         raise ImportError(
             f"Không tìm thấy hàm crawl_category_products trong crawl_products.\nLỗi gốc: {e}"
@@ -566,8 +554,7 @@ PROGRESS_FILE = OUTPUT_DIR / "crawl_progress.json"
 
 @lru_cache(maxsize=1)
 def ensure_output_dirs() -> None:
-    """
-    Ensure output/cache directories exist.
+    """Ensure output/cache directories exist.
 
     Previously executed at import time; now lazily executed on first write-related task call.
     """
@@ -582,7 +569,9 @@ write_lock = Lock()
 
 @lru_cache(maxsize=1)
 def get_tiki_circuit_breaker():
-    """Lazy circuit breaker init to speed up DAG parse."""
+    """
+    Lazy circuit breaker init to speed up DAG parse.
+    """
     ensure_env_loaded()
     return CircuitBreaker(
         failure_threshold=get_int_variable("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default=5),
@@ -594,7 +583,9 @@ def get_tiki_circuit_breaker():
 
 @lru_cache(maxsize=1)
 def get_tiki_dlq():
-    """Lazy DLQ init (redis preferred, file fallback)."""
+    """
+    Lazy DLQ init (redis preferred, file fallback).
+    """
     ensure_env_loaded()
     try:
         redis_url = get_variable("REDIS_URL", default="redis://redis:6379/3")
@@ -609,7 +600,9 @@ def get_tiki_dlq():
 
 @lru_cache(maxsize=1)
 def get_tiki_degradation():
-    """Lazy graceful degradation registration."""
+    """
+    Lazy graceful degradation registration.
+    """
     ensure_env_loaded()
     service_health = get_service_health()
     return service_health.register_service(
@@ -660,7 +653,9 @@ for common_base in common_base_paths:
 
 
 def _lazy_import_from_file(module_name: str, file_path: str, attr: str):
-    """Import attribute from a .py file path lazily."""
+    """
+    Import attribute from a .py file path lazily.
+    """
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(module_name, file_path)

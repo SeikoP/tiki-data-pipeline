@@ -1,5 +1,5 @@
 """
-Transform pipeline để làm sạch, validate và chuẩn hóa dữ liệu sản phẩm
+Transform pipeline để làm sạch, validate và chuẩn hóa dữ liệu sản phẩm.
 """
 
 import logging
@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class DataTransformer:
-    """Class để transform dữ liệu sản phẩm trước khi load vào database"""
+    """
+    Class để transform dữ liệu sản phẩm trước khi load vào database.
+    """
 
     def __init__(
         self,
@@ -19,8 +21,7 @@ class DataTransformer:
         remove_invalid: bool = True,
         normalize_fields: bool = True,
     ):
-        """
-        Khởi tạo DataTransformer
+        """Khởi tạo DataTransformer.
 
         Args:
             strict_validation: Nếu True, bỏ qua products không pass validation
@@ -68,8 +69,7 @@ class DataTransformer:
     def transform_products(
         self, products: list[dict[str, Any]], validate: bool = True
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """
-        Transform danh sách products
+        """Transform danh sách products.
 
         Args:
             products: Danh sách products cần transform
@@ -141,8 +141,7 @@ class DataTransformer:
         return transformed, self.stats
 
     def transform_product(self, product: dict[str, Any]) -> dict[str, Any] | None:
-        """
-        Transform một product
+        """Transform một product.
 
         Args:
             product: Product dictionary cần transform
@@ -171,7 +170,9 @@ class DataTransformer:
             return None
 
     def _normalize_product(self, product: dict[str, Any]) -> dict[str, Any]:
-        """Chuẩn hóa các trường dữ liệu"""
+        """
+        Chuẩn hóa các trường dữ liệu.
+        """
         # Normalize product_id
         if "product_id" in product:
             product["product_id"] = str(product["product_id"]).strip()
@@ -245,7 +246,9 @@ class DataTransformer:
         return product
 
     def _transform_to_db_format(self, product: dict[str, Any]) -> dict[str, Any]:
-        """Transform format để phù hợp với database schema"""
+        """
+        Transform format để phù hợp với database schema.
+        """
         db_product = {
             "product_id": product.get("product_id"),
             "name": product.get("name"),
@@ -348,8 +351,7 @@ class DataTransformer:
         return db_product
 
     def validate_product(self, product: dict[str, Any]) -> tuple[bool, str | None]:
-        """
-        Validate một product
+        """Validate một product.
 
         Returns:
             Tuple (is_valid, error_message)
@@ -401,7 +403,9 @@ class DataTransformer:
         return True, None
 
     def _normalize_text(self, text: str) -> str:
-        """Chuẩn hóa text"""
+        """
+        Chuẩn hóa text.
+        """
         if not text:
             return ""
         # Loại bỏ whitespace thừa
@@ -409,7 +413,9 @@ class DataTransformer:
         return text.strip()
 
     def _normalize_url(self, url: str) -> str:
-        """Chuẩn hóa URL"""
+        """
+        Chuẩn hóa URL.
+        """
         if not url:
             return ""
         url = url.strip()
@@ -418,8 +424,7 @@ class DataTransformer:
         return url
 
     def _validate_seller_name(self, seller_name: str | None) -> str | None:
-        """
-        Validate và clean seller_name, trả về None nếu không hợp lệ.
+        """Validate và clean seller_name, trả về None nếu không hợp lệ.
 
         Loại bỏ các giá trị rác dựa trên config (có thể mở rộng qua .env):
         - Patterns trong INVALID_SELLER_PATTERNS (default + extra từ env)
@@ -491,7 +496,9 @@ class DataTransformer:
         return seller_name
 
     def _parse_int(self, value: Any) -> int | None:
-        """Parse value thành int"""
+        """
+        Parse value thành int.
+        """
         if value is None:
             return None
         if isinstance(value, int):
@@ -505,7 +512,9 @@ class DataTransformer:
         return None
 
     def _parse_float(self, value: Any) -> float | None:
-        """Parse value thành float"""
+        """
+        Parse value thành float.
+        """
         if value is None:
             return None
         if isinstance(value, (int, float)):
@@ -517,7 +526,9 @@ class DataTransformer:
         return None
 
     def _parse_datetime(self, value: Any) -> datetime | None:
-        """Parse datetime từ nhiều format"""
+        """
+        Parse datetime từ nhiều format.
+        """
         if value is None:
             return None
         if isinstance(value, datetime):
@@ -617,7 +628,9 @@ class DataTransformer:
         return cleaned
 
     def _get_short_name(self, name: str) -> str:
-        """Get shortened name using heuristic (comma split) -> AI -> Fallback"""
+        """
+        Get shortened name using heuristic (comma split) -> AI -> Fallback.
+        """
         if not name:
             return ""
 
@@ -660,5 +673,7 @@ class DataTransformer:
         return cleaned_name
 
     def get_stats(self) -> dict[str, Any]:
-        """Lấy thống kê transform"""
+        """
+        Lấy thống kê transform.
+        """
         return self.stats.copy()

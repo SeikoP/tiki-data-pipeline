@@ -1,5 +1,5 @@
 """
-Script test để kiểm tra chức năng tổng hợp dữ liệu với AI và gửi thông báo qua Discord
+Script test để kiểm tra chức năng tổng hợp dữ liệu với AI và gửi thông báo qua Discord.
 """
 
 import json
@@ -91,7 +91,9 @@ DiscordNotifier = discord_module.DiscordNotifier
 
 
 def create_sample_data_file(output_path: str) -> str:
-    """Tạo file dữ liệu mẫu để test"""
+    """
+    Tạo file dữ liệu mẫu để test.
+    """
     sample_data = {
         "total_products": 100,
         "stats": {
@@ -490,7 +492,9 @@ def test_with_real_data():
 
 
 def main():
-    """Chạy tất cả tests"""
+    """
+    Chạy tất cả tests.
+    """
     print("=" * 70)
     print("🧪 TEST AI SUMMARY VÀ DISCORD NOTIFICATION")
     print("=" * 70)

@@ -1,5 +1,5 @@
 """
-Module để tổng hợp và phân tích dữ liệu sản phẩm
+Module để tổng hợp và phân tích dữ liệu sản phẩm.
 """
 
 import json
@@ -11,11 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 class DataAggregator:
-    """Class để tổng hợp và phân tích dữ liệu sản phẩm"""
+    """
+    Class để tổng hợp và phân tích dữ liệu sản phẩm.
+    """
 
     def __init__(self, data_file_path: str):
-        """
-        Khởi tạo DataAggregator
+        """Khởi tạo DataAggregator.
 
         Args:
             data_file_path: Đường dẫn đến file JSON chứa dữ liệu sản phẩm
@@ -24,8 +25,7 @@ class DataAggregator:
         self.data: dict[str, Any] = {}
 
     def load_data(self) -> bool:
-        """
-        Load dữ liệu từ file JSON
+        """Load dữ liệu từ file JSON.
 
         Returns:
             True nếu load thành công, False nếu có lỗi
@@ -49,8 +49,7 @@ class DataAggregator:
             return False
 
     def aggregate(self) -> dict[str, Any]:
-        """
-        Tổng hợp và phân tích dữ liệu
+        """Tổng hợp và phân tích dữ liệu.
 
         Returns:
             Dictionary chứa thông tin tổng hợp
@@ -113,7 +112,9 @@ class DataAggregator:
     def _analyze_products(
         self, products: list[dict[str, Any]], summary: dict[str, Any]
     ) -> dict[str, Any]:
-        """Phân tích chi tiết các sản phẩm"""
+        """
+        Phân tích chi tiết các sản phẩm.
+        """
         prices = []
         ratings = []
         categories: dict[str, int] = {}

@@ -1,5 +1,5 @@
 """
-Utilities cho crawl pipeline
+Utilities cho crawl pipeline.
 """
 
 from .batch_processor import (

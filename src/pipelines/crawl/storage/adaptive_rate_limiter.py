@@ -22,7 +22,7 @@ except ImportError:
 
 class AdaptiveRateLimiter:
     """
-    Adaptive rate limiter với tự động điều chỉnh delay
+    Adaptive rate limiter với tự động điều chỉnh delay.
     """
 
     def __init__(
@@ -66,12 +66,13 @@ class AdaptiveRateLimiter:
             pass
 
     def _get_stats_key(self, identifier: str) -> str:
-        """Tạo key cho stats"""
+        """
+        Tạo key cho stats.
+        """
         return f"{self.stats_prefix}{identifier}"
 
     def _update_delay(self, identifier: str, success: bool, error_type: str | None = None):
-        """
-        Cập nhật delay dựa trên success/error
+        """Cập nhật delay dựa trên success/error.
 
         Args:
             identifier: Identifier (domain, IP, etc.)
@@ -131,8 +132,7 @@ class AdaptiveRateLimiter:
             pass
 
     def wait(self, identifier: str = "default"):
-        """
-        Đợi với delay hiện tại
+        """Đợi với delay hiện tại.
 
         Args:
             identifier: Identifier (domain, IP, etc.)
@@ -140,12 +140,13 @@ class AdaptiveRateLimiter:
         time.sleep(self.current_delay)
 
     def record_success(self, identifier: str = "default"):
-        """Ghi nhận request thành công"""
+        """
+        Ghi nhận request thành công.
+        """
         self._update_delay(identifier, success=True)
 
     def record_error(self, identifier: str = "default", error_type: str | None = None):
-        """
-        Ghi nhận request lỗi
+        """Ghi nhận request lỗi.
 
         Args:
             identifier: Identifier (domain, IP, etc.)
@@ -154,11 +155,15 @@ class AdaptiveRateLimiter:
         self._update_delay(identifier, success=False, error_type=error_type)
 
     def get_current_delay(self) -> float:
-        """Lấy delay hiện tại"""
+        """
+        Lấy delay hiện tại.
+        """
         return self.current_delay
 
     def reset_stats(self, identifier: str = "default"):
-        """Reset stats cho identifier"""
+        """
+        Reset stats cho identifier.
+        """
         try:
             stats_key = self._get_stats_key(identifier)
             self.client.delete(f"{stats_key}:history")
@@ -179,8 +184,7 @@ def get_adaptive_rate_limiter(
     min_delay: float = 0.3,
     max_delay: float = 2.0,
 ) -> AdaptiveRateLimiter | None:
-    """
-    Lấy adaptive rate limiter instance (singleton)
+    """Lấy adaptive rate limiter instance (singleton)
 
     Args:
         redis_url: Redis connection URL

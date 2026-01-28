@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script để phân tích và debug category_path trong database
+Script để phân tích và debug category_path trong database.
 """
 
 import json
@@ -29,7 +29,9 @@ except ImportError:
 
 
 def get_db_connection():
-    """Kết nối đến database"""
+    """
+    Kết nối đến database.
+    """
     # Thử localhost trước (cho Windows), sau đó mới dùng POSTGRES_HOST
     db_host = os.getenv("POSTGRES_HOST", "localhost")
     if db_host == "postgres":
@@ -54,7 +56,9 @@ def get_db_connection():
 
 
 def analyze_categories(conn):
-    """Phân tích categories trong database"""
+    """
+    Phân tích categories trong database.
+    """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         # 1. Lấy tất cả categories
         cur.execute("""
@@ -89,8 +93,8 @@ def analyze_categories(conn):
         # 2. Phân tích từng category
         issues = []
         for cat in categories:
-            cat_id = cat.get("category_id", "N/A")
-            name = cat.get("name", "N/A")
+            cat.get("category_id", "N/A")
+            cat.get("name", "N/A")
             url = cat.get("url", "N/A")
             parent_url = cat.get("parent_url")
             level = cat.get("level", 0)
@@ -241,7 +245,9 @@ def analyze_categories(conn):
 
 
 def fix_category_paths(conn, dry_run=True):
-    """Sửa category_path cho các categories có vấn đề"""
+    """
+    Sửa category_path cho các categories có vấn đề.
+    """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         # Lấy tất cả categories
         cur.execute("SELECT id, url, parent_url, name FROM categories")
@@ -360,7 +366,7 @@ def main():
         print("✅ Đã kết nối thành công\n")
 
         # Phân tích
-        issues = analyze_categories(conn)
+        analyze_categories(conn)
 
         # Sửa nếu cần
         if args.fix:

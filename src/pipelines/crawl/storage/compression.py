@@ -1,6 +1,5 @@
 """
-Compression utilities cho data storage
-Hỗ trợ gzip và json compression để giảm disk usage
+Compression utilities cho data storage Hỗ trợ gzip và json compression để giảm disk usage.
 """
 
 import gzip
@@ -10,8 +9,7 @@ from typing import Any
 
 
 def compress_json(data: Any, level: int = 6) -> bytes:
-    """
-    Nén JSON data thành gzip bytes
+    """Nén JSON data thành gzip bytes.
 
     Args:
         data: Data cần nén (sẽ được serialize thành JSON)
@@ -25,8 +23,7 @@ def compress_json(data: Any, level: int = 6) -> bytes:
 
 
 def decompress_json(compressed_data: bytes) -> Any:
-    """
-    Giải nén gzip bytes thành JSON data
+    """Giải nén gzip bytes thành JSON data.
 
     Args:
         compressed_data: Compressed bytes
@@ -40,8 +37,7 @@ def decompress_json(compressed_data: bytes) -> Any:
 
 
 def write_compressed_json(filepath: str | Path, data: Any, level: int = 6) -> bool:
-    """
-    Ghi JSON data vào file với compression
+    """Ghi JSON data vào file với compression.
 
     Args:
         filepath: Đường dẫn file (sẽ tự động thêm .gz nếu chưa có)
@@ -70,8 +66,7 @@ def write_compressed_json(filepath: str | Path, data: Any, level: int = 6) -> bo
 
 
 def read_compressed_json(filepath: str | Path, default: Any = None) -> Any:
-    """
-    Đọc JSON data từ compressed file
+    """Đọc JSON data từ compressed file.
 
     Args:
         filepath: Đường dẫn file (.gz hoặc không)
@@ -100,8 +95,7 @@ def read_compressed_json(filepath: str | Path, default: Any = None) -> Any:
 
 
 def get_compression_ratio(original_data: Any, compressed_data: bytes) -> float:
-    """
-    Tính tỷ lệ compression
+    """Tính tỷ lệ compression.
 
     Args:
         original_data: Data gốc

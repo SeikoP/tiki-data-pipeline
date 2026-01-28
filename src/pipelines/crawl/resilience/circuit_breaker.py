@@ -1,6 +1,5 @@
 """
-Circuit Breaker Pattern Implementation
-Ngừng gọi service khi nó lỗi liên tục, tránh cascade failure
+Circuit Breaker Pattern Implementation Ngừng gọi service khi nó lỗi liên tục, tránh cascade failure.
 """
 
 from collections.abc import Callable
@@ -13,7 +12,9 @@ T = TypeVar("T")
 
 
 class CircuitState(Enum):
-    """Trạng thái của circuit breaker"""
+    """
+    Trạng thái của circuit breaker.
+    """
 
     CLOSED = "closed"  # Bình thường, cho phép requests
     OPEN = "open"  # Đã mở, từ chối requests
@@ -21,11 +22,10 @@ class CircuitState(Enum):
 
 
 class CircuitBreaker:
-    """
-    Circuit Breaker để bảo vệ service khỏi cascade failure
+    """Circuit Breaker để bảo vệ service khỏi cascade failure.
 
-    Khi số lỗi vượt quá threshold trong một khoảng thời gian,
-    circuit sẽ mở và từ chối tất cả requests cho đến khi recovery.
+    Khi số lỗi vượt quá threshold trong một khoảng thời gian, circuit sẽ mở và từ chối tất cả
+    requests cho đến khi recovery.
     """
 
     def __init__(
@@ -57,8 +57,7 @@ class CircuitBreaker:
         self._lock = Lock()
 
     def call(self, func: Callable[..., T], *args, **kwargs) -> T:
-        """
-        Gọi function với circuit breaker protection
+        """Gọi function với circuit breaker protection.
 
         Args:
             func: Function cần gọi
@@ -99,14 +98,18 @@ class CircuitBreaker:
                 raise
 
     def _should_attempt_reset(self) -> bool:
-        """Kiểm tra xem có nên thử reset circuit không"""
+        """
+        Kiểm tra xem có nên thử reset circuit không.
+        """
         if self.opened_at is None:
             return False
         elapsed = (datetime.now() - self.opened_at).total_seconds()
         return elapsed >= self.recovery_timeout
 
     def _on_success(self):
-        """Xử lý khi call thành công"""
+        """
+        Xử lý khi call thành công.
+        """
         self.last_success_time = datetime.now()
 
         if self.state == CircuitState.HALF_OPEN:
@@ -122,7 +125,9 @@ class CircuitBreaker:
             self.failure_count = 0
 
     def _on_failure(self):
-        """Xử lý khi call thất bại"""
+        """
+        Xử lý khi call thất bại.
+        """
         self.last_failure_time = datetime.now()
         self.failure_count += 1
 
@@ -138,7 +143,9 @@ class CircuitBreaker:
                 self.opened_at = datetime.now()
 
     def reset(self):
-        """Reset circuit về trạng thái closed"""
+        """
+        Reset circuit về trạng thái closed.
+        """
         with self._lock:
             self.state = CircuitState.CLOSED
             self.failure_count = 0
@@ -147,7 +154,9 @@ class CircuitBreaker:
             self.opened_at = None
 
     def get_state(self) -> dict:
-        """Lấy thông tin state của circuit breaker"""
+        """
+        Lấy thông tin state của circuit breaker.
+        """
         return {
             "name": self.name,
             "state": self.state.value,
@@ -164,9 +173,10 @@ class CircuitBreaker:
 
 
 class CircuitBreakerOpenError(Exception):
-    """Exception khi circuit breaker đang mở"""
+    """
+    Exception khi circuit breaker đang mở.
+    """
 
-    pass
 
 
 def circuit_breaker(
@@ -175,8 +185,7 @@ def circuit_breaker(
     expected_exception: type = Exception,
     name: str | None = None,
 ):
-    """
-    Decorator để áp dụng circuit breaker cho function
+    """Decorator để áp dụng circuit breaker cho function.
 
     Args:
         failure_threshold: Số lỗi tối đa

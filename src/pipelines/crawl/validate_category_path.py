@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-"""
-Validate and fix category_path to ensure parent category (Level 0) is always at index 0
+"""Validate and fix category_path to ensure parent category (Level 0) is always at index 0.
 
 Vấn đề: Một số products có category_path mà danh mục level 1 đang ở index 0 thay vì parent category.
 Giải pháp: Validate và tự động fix để đảm bảo parent category luôn ở index 0.
@@ -28,8 +27,7 @@ def validate_and_fix_category_path(
     hierarchy_map: dict[str, Any] | None = None,
     auto_fix: bool = True,
 ) -> list[str]:
-    """
-    Validate và fix category_path để đảm bảo parent category (Level 0) ở index 0
+    """Validate và fix category_path để đảm bảo parent category (Level 0) ở index 0.
 
     Args:
         category_path: Danh sách category names (có thể None hoặc empty)
@@ -131,8 +129,7 @@ def fix_product_category_path(
     hierarchy_map: dict[str, Any] | None = None,
     auto_fix: bool = True,
 ) -> dict[str, Any]:
-    """
-    Fix category_path cho một product
+    """Fix category_path cho một product.
 
     Args:
         product: Product dictionary
@@ -159,8 +156,7 @@ def fix_products_category_paths(
     hierarchy_map: dict[str, Any] | None = None,
     auto_fix: bool = True,
 ) -> list[dict[str, Any]]:
-    """
-    Fix category_path cho danh sách products
+    """Fix category_path cho danh sách products.
 
     Args:
         products: List of product dictionaries

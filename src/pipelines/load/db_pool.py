@@ -1,5 +1,4 @@
-"""
-Database connection pooling for PostgreSQL
+"""Database connection pooling for PostgreSQL.
 
 Optimizations:
 - Reuse connections instead of creating new ones
@@ -24,7 +23,9 @@ except ImportError:
 
 
 class PostgresConnectionPool:
-    """Thread-safe PostgreSQL connection pool"""
+    """
+    Thread-safe PostgreSQL connection pool.
+    """
 
     _instance = None
     _pool = None
@@ -44,8 +45,7 @@ class PostgresConnectionPool:
         minconn: int = 2,
         maxconn: int = 20,
     ):
-        """
-        Initialize connection pool
+        """Initialize connection pool.
 
         Args:
             host: Database host (default from env)
@@ -85,18 +85,24 @@ class PostgresConnectionPool:
             raise
 
     def get_connection(self):
-        """Get a connection from the pool"""
+        """
+        Get a connection from the pool.
+        """
         if self._pool is None:
             raise RuntimeError("Connection pool not initialized. Call initialize() first.")
         return self._pool.getconn()
 
     def return_connection(self, conn):
-        """Return a connection to the pool"""
+        """
+        Return a connection to the pool.
+        """
         if self._pool is not None:
             self._pool.putconn(conn)
 
     def close_all(self):
-        """Close all connections in the pool"""
+        """
+        Close all connections in the pool.
+        """
         if self._pool is not None:
             self._pool.closeall()
             self._pool = None
@@ -104,8 +110,7 @@ class PostgresConnectionPool:
 
     @contextmanager
     def get_cursor(self, commit: bool = True) -> Generator[Any, None, None]:
-        """
-        Context manager for database cursor
+        """Context manager for database cursor.
 
         Args:
             commit: Auto-commit after context exit
@@ -134,12 +139,16 @@ _db_pool = PostgresConnectionPool()
 
 
 def get_db_pool() -> PostgresConnectionPool:
-    """Get the singleton database pool instance"""
+    """
+    Get the singleton database pool instance.
+    """
     return _db_pool
 
 
 def initialize_db_pool(**kwargs):
-    """Initialize the database pool with custom settings"""
+    """
+    Initialize the database pool with custom settings.
+    """
     _db_pool.initialize(**kwargs)
 
 

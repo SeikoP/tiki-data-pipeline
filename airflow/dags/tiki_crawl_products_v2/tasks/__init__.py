@@ -1,7 +1,7 @@
 """Task callables split by domain.
 
-This package re-exports all task callables to preserve backward compatibility with
-`from tiki_crawl_products_v2.tasks import *`.
+This package re-exports all task callables to preserve backward compatibility with `from
+tiki_crawl_products_v2.tasks import *`.
 """
 
 from __future__ import annotations

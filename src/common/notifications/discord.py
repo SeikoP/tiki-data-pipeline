@@ -1,5 +1,5 @@
 """
-Module để gửi thông báo qua Discord webhook
+Module để gửi thông báo qua Discord webhook.
 """
 
 import logging
@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 class DiscordNotifier:
-    """Class để gửi thông báo qua Discord webhook"""
+    """
+    Class để gửi thông báo qua Discord webhook.
+    """
 
     def __init__(self):
         self.webhook_url = DISCORD_CONFIG.get("webhook_url", "")
@@ -44,8 +46,7 @@ class DiscordNotifier:
         fields: list | None = None,
         footer: str | None = None,
     ) -> bool:
-        """
-        Gửi thông báo qua Discord webhook
+        """Gửi thông báo qua Discord webhook.
 
         Args:
             content: Nội dung thông báo
@@ -114,8 +115,7 @@ class DiscordNotifier:
         stats: dict[str, Any],
         color: int = 0x3498DB,  # Màu xanh dương
     ) -> bool:
-        """
-        Gửi bản tổng hợp từ AI kèm thống kê
+        """Gửi bản tổng hợp từ AI kèm thống kê.
 
         Args:
             ai_summary: Bản tổng hợp từ AI

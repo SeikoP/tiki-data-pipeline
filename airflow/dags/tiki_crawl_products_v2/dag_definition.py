@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .bootstrap import DAG, DAG_CONFIG, PythonOperator, logging, timedelta
+from .bootstrap import DAG, DAG_CONFIG, PythonOperator, timedelta
 from .tasks import (
     aggregate_and_notify,
     backup_database,
@@ -43,14 +43,15 @@ with DAG(**DAG_CONFIG) as dag:
 
         # Tối ưu: Cho phép chạy song song vì task_cleanup_products và task_load_categories độc lập
         # Không còn sử dụng task_cleanup_products >> task_load_categories
-        pass
 
     # TaskGroup: Crawl Categories (Dynamic Task Mapping)
     with TaskGroup("crawl_categories") as crawl_group:
         # Sử dụng expand để Dynamic Task Mapping
         # Cần một task helper để lấy categories và tạo list op_kwargs
         def prepare_crawl_kwargs(**context):
-            """Helper function để prepare op_kwargs cho Dynamic Task Mapping"""
+            """
+            Helper function để prepare op_kwargs cho Dynamic Task Mapping.
+            """
             import logging
 
             logger = logging.getLogger("airflow.task")
@@ -62,7 +63,9 @@ with DAG(**DAG_CONFIG) as dag:
             return [{"category": cat} for cat in categories]
 
         def prepare_category_batch_kwargs(**context):
-            """Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing"""
+            """
+            Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing.
+            """
             import logging
 
             logger = logging.getLogger("airflow.task")
@@ -129,7 +132,9 @@ with DAG(**DAG_CONFIG) as dag:
     with TaskGroup("crawl_product_details") as detail_group:
 
         def prepare_detail_kwargs(**context):
-            """Helper function để prepare op_kwargs cho Dynamic Task Mapping detail"""
+            """
+            Helper function để prepare op_kwargs cho Dynamic Task Mapping detail.
+            """
             import logging
 
             logging.getLogger("airflow.task")

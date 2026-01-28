@@ -1,5 +1,5 @@
 """
-Transform pipeline module
+Transform pipeline module.
 """
 
 from .transformer import DataTransformer

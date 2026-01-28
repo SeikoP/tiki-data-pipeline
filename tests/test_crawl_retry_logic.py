@@ -1,5 +1,4 @@
-"""
-Integration tests for retry logic.
+"""Integration tests for retry logic.
 
 Tests end-to-end retry flow with validation and metadata tracking.
 """
@@ -18,7 +17,9 @@ if str(src_path) not in sys.path:
 
 @pytest.fixture
 def mock_html_complete():
-    """Mock HTML with complete product data."""
+    """
+    Mock HTML with complete product data.
+    """
     return """
     <html>
         <h1 data-view-id="pdp_product_name">Test Product</h1>
@@ -32,7 +33,9 @@ def mock_html_complete():
 
 @pytest.fixture
 def mock_html_missing_seller():
-    """Mock HTML missing seller information."""
+    """
+    Mock HTML missing seller information.
+    """
     return """
     <html>
         <h1 data-view-id="pdp_product_name">Test Product</h1>
@@ -43,7 +46,9 @@ def mock_html_missing_seller():
 
 
 def test_retry_logic_complete_data_first_attempt(mock_html_complete):
-    """Test that complete data is accepted on first attempt without retry."""
+    """
+    Test that complete data is accepted on first attempt without retry.
+    """
     from pipelines.crawl.crawl_products_detail import crawl_product_with_retry
 
     with patch(
@@ -77,7 +82,9 @@ def test_retry_logic_complete_data_first_attempt(mock_html_complete):
 
 
 def test_retry_logic_missing_seller_triggers_retry(mock_html_missing_seller, mock_html_complete):
-    """Test that missing seller triggers retry."""
+    """
+    Test that missing seller triggers retry.
+    """
     from pipelines.crawl.crawl_products_detail import crawl_product_with_retry
 
     call_count = 0
@@ -139,7 +146,9 @@ def test_retry_logic_missing_seller_triggers_retry(mock_html_missing_seller, moc
 
 
 def test_retry_logic_accepts_partial_after_max_retries(mock_html_missing_seller):
-    """Test that partial data is accepted after max retries."""
+    """
+    Test that partial data is accepted after max retries.
+    """
     from pipelines.crawl.crawl_products_detail import crawl_product_with_retry
 
     with patch(
@@ -174,7 +183,9 @@ def test_retry_logic_accepts_partial_after_max_retries(mock_html_missing_seller)
 
 
 def test_retry_logic_handles_permanent_failures():
-    """Test that permanent failures return last_product with failed status."""
+    """
+    Test that permanent failures return last_product with failed status.
+    """
     from pipelines.crawl.crawl_products_detail import crawl_product_with_retry
 
     original_product = {
@@ -229,7 +240,9 @@ def test_retry_logic_handles_permanent_failures():
 
 
 def test_retry_logic_skips_missing_critical_fields():
-    """Test that products with missing critical fields are skipped."""
+    """
+    Test that products with missing critical fields are skipped.
+    """
     from pipelines.crawl.crawl_products_detail import crawl_product_with_retry
 
     with patch(
@@ -254,7 +267,9 @@ def test_retry_logic_skips_missing_critical_fields():
 
 
 def test_retry_logic_metadata_tracking():
-    """Test that metadata is properly tracked through retries."""
+    """
+    Test that metadata is properly tracked through retries.
+    """
     from pipelines.crawl.crawl_products_detail import crawl_product_with_retry
 
     with patch(

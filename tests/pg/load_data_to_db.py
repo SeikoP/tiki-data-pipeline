@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Script để load dữ liệu từ file JSON vào PostgreSQL database
-Sử dụng khi DAG chưa chạy hoặc muốn load lại dữ liệu
+Script để load dữ liệu từ file JSON vào PostgreSQL database Sử dụng khi DAG chưa chạy hoặc muốn load
+lại dữ liệu.
 """
 
 import json

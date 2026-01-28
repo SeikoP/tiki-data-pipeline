@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script để load các parent categories còn thiếu vào DB
+Script để load các parent categories còn thiếu vào DB.
 """
 
 import json
@@ -88,7 +88,9 @@ except ImportError:
 
 
 def get_db_connection():
-    """Kết nối đến database"""
+    """
+    Kết nối đến database.
+    """
     db_host = os.getenv("POSTGRES_HOST", "localhost")
     if db_host == "postgres":
         db_host = "localhost"

@@ -16,8 +16,8 @@ T = TypeVar("T")
 
 
 class ErrorHandler:
-    """
-    Error Handler tích hợp:
+    """Error Handler tích hợp:
+
     - Custom exceptions
     - Circuit breaker
     - Dead letter queue
@@ -57,8 +57,7 @@ class ErrorHandler:
         context: dict[str, Any] | None = None,
         **kwargs,
     ) -> T | None:
-        """
-        Xử lý function call với error handling đầy đủ
+        """Xử lý function call với error handling đầy đủ.
 
         Args:
             func: Function cần gọi
@@ -129,7 +128,9 @@ class ErrorHandler:
         context: dict[str, Any],
         retry_count: int,
     ):
-        """Thêm failed task vào DLQ"""
+        """
+        Thêm failed task vào DLQ.
+        """
         try:
             self.dlq.add(
                 task_id=task_id,
@@ -151,8 +152,7 @@ def with_error_handling(
     max_retries: int = 3,
     retry_delay: float = 1.0,
 ):
-    """
-    Decorator để áp dụng error handling cho function
+    """Decorator để áp dụng error handling cho function.
 
     Args:
         task_type: Loại task

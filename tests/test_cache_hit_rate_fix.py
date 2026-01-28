@@ -1,5 +1,4 @@
-"""
-Test script để verify cache hit rate improvements sau khi fix.
+"""Test script để verify cache hit rate improvements sau khi fix.
 
 Kiểm tra:
 1. Redis cache helper functions làm việc đúng
@@ -230,7 +229,9 @@ def test_cache_hit_scenario():
 
 
 def main():
-    """Run all tests"""
+    """
+    Run all tests.
+    """
     print("\n" + "=" * 70)
     print("CACHE HIT RATE FIX VERIFICATION TESTS")
     print("=" * 70)

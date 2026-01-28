@@ -175,7 +175,9 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
         start_time = time.time()
 
         def _crawl_with_params():
-            """Wrapper function để gọi với circuit breaker"""
+            """
+            Wrapper function để gọi với circuit breaker.
+            """
             return crawl_category_products(
                 category_url,
                 max_pages=max_pages if max_pages > 0 else None,

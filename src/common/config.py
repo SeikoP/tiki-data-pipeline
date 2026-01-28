@@ -1,6 +1,6 @@
 """
-Configuration module cho common modules
-Load từ file .env trong src/common/ hoặc từ environment variables
+Configuration module cho common modules Load từ file .env trong src/common/ hoặc từ environment
+variables.
 """
 
 import logging

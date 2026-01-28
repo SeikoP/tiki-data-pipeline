@@ -1,5 +1,4 @@
-"""
-Advanced caching utilities
+"""Advanced caching utilities.
 
 Features:
 - Multi-level cache (memory + Redis)
@@ -26,7 +25,9 @@ _cache_stats = {
 
 
 def get_cache_key(prefix: str, *args, **kwargs) -> str:
-    """Generate cache key from function arguments"""
+    """
+    Generate cache key from function arguments.
+    """
     key_parts = [prefix]
 
     # Add args
@@ -42,8 +43,7 @@ def get_cache_key(prefix: str, *args, **kwargs) -> str:
 
 
 def cache_in_memory(ttl: int = 300):
-    """
-    Decorator for in-memory caching
+    """Decorator for in-memory caching.
 
     Args:
         ttl: Time to live in seconds (default 5 minutes)
@@ -83,7 +83,9 @@ def cache_in_memory(ttl: int = 300):
 
 
 def get_cache_stats() -> dict:
-    """Get cache statistics"""
+    """
+    Get cache statistics.
+    """
     total = _cache_stats["hits"] + _cache_stats["misses"]
     hit_rate = (_cache_stats["hits"] / total * 100) if total > 0 else 0
 
@@ -96,7 +98,9 @@ def get_cache_stats() -> dict:
 
 
 def clear_memory_cache():
-    """Clear all cached data"""
+    """
+    Clear all cached data.
+    """
     _memory_cache.clear()
     logger.info(f"✅ Cleared {_cache_stats['memory_size']} cached items")
     _cache_stats["memory_size"] = 0

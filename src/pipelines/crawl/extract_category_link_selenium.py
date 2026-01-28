@@ -26,7 +26,7 @@ if sys.platform == "win32":
 
 # ========== SELENIUM ==========
 def crawl_with_selenium(url, save_html=False, verbose=True):
-    """Crawl trang bằng Selenium để load đầy đủ dữ liệu
+    """Crawl trang bằng Selenium để load đầy đủ dữ liệu.
 
     Args:
         url: URL cần crawl
@@ -242,10 +242,11 @@ def crawl_with_driver(driver, url, save_html=False, verbose=True):
 
 # ========== PARSE DỮ LIỆU ==========
 def parse_categories(html_content, parent_url=None, level=0):
-    """Parse các link danh mục từ phần 'Khám phá theo danh mục' của Tiki"""
+    """
+    Parse các link danh mục từ phần 'Khám phá theo danh mục' của Tiki.
+    """
 
     soup = BeautifulSoup(html_content, "html.parser")
-    categories = []
     seen_urls = set()  # Để tránh trùng lặp trong cùng một trang
 
     # Pattern URL danh mục Tiki: /c[0-9]+

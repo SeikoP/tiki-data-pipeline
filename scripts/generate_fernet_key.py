@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Script để generate FERNET_KEY cho Airflow
+"""Script để generate FERNET_KEY cho Airflow.
 
 FERNET_KEY được dùng để encrypt Variables và Connections trong Airflow.
 Cần giữ nguyên key này để decrypt data đã encrypt trước đó.
@@ -16,7 +15,9 @@ from cryptography.fernet import Fernet
 
 
 def main():
-    """Generate và hiển thị FERNET_KEY mới"""
+    """
+    Generate và hiển thị FERNET_KEY mới.
+    """
     key = Fernet.generate_key().decode()
 
     print("=" * 70)

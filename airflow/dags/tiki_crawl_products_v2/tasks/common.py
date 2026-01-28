@@ -2,11 +2,13 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from ..bootstrap import Any, Path, json, logging, os, shutil, src_path, sys
+from ..bootstrap import Any, Path, json, logging, os, shutil, sys
 
 
 def get_logger(context):
-    """Lấy logger từ context (Airflow 3.x compatible)"""
+    """
+    Lấy logger từ context (Airflow 3.x compatible)
+    """
     try:
         # Airflow 3.x: sử dụng logging module
         import logging
@@ -27,10 +29,10 @@ def get_logger(context):
 
 
 def _fix_sys_path_for_pipelines_import(logger=None):
-    """
-    Sửa sys.path và sys.modules để đảm bảo pipelines có thể được import đúng cách.
-    Xóa các đường dẫn con như /opt/airflow/src/pipelines khỏi sys.path,
-    xóa các fake modules khỏi sys.modules, và chỉ giữ lại /opt/airflow/src.
+    """Sửa sys.path và sys.modules để đảm bảo pipelines có thể được import đúng cách.
+
+    Xóa các đường dẫn con như /opt/airflow/src/pipelines khỏi sys.path, xóa các fake modules khỏi
+    sys.modules, và chỉ giữ lại /opt/airflow/src.
     """
 
     if logger is None:
@@ -83,8 +85,7 @@ def _fix_sys_path_for_pipelines_import(logger=None):
 
 
 def atomic_write_file(filepath: str, data: Any, **context):
-    """
-    Ghi file an toàn (atomic write) để tránh corrupt
+    """Ghi file an toàn (atomic write) để tránh corrupt.
 
     Sử dụng temporary file và rename để đảm bảo atomicity
     """

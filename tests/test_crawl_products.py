@@ -16,7 +16,9 @@ from crawl_products import (
 
 
 def test_parse_products_from_html():
-    """Test parse sản phẩm từ HTML"""
+    """
+    Test parse sản phẩm từ HTML.
+    """
     print("=" * 70)
     print("🧪 TEST: Parse sản phẩm từ HTML")
     print("=" * 70)
@@ -58,7 +60,9 @@ def test_parse_products_from_html():
 
 
 def test_crawl_single_category():
-    """Test crawl một danh mục cụ thể"""
+    """
+    Test crawl một danh mục cụ thể.
+    """
     print("=" * 70)
     print("🧪 TEST: Crawl một danh mục")
     print("=" * 70)
@@ -287,7 +291,9 @@ def test_crawl_multiple_categories():
 
 
 def test_get_page():
-    """Test lấy trang web"""
+    """
+    Test lấy trang web.
+    """
     print("=" * 70)
     print("🧪 TEST: Lấy trang web")
     print("=" * 70)

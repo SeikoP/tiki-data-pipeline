@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Script để fix NULL values trong category_path column
+"""Script để fix NULL values trong category_path column.
 
 Khi categories có dữ liệu nhưng category_path bị NULL,
 script này sẽ:
@@ -17,7 +16,9 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 
 def fix_category_path_null():
-    """Fix NULL category_path values"""
+    """
+    Fix NULL category_path values.
+    """
 
     # Get DB connection info
     db_host = os.getenv("POSTGRES_HOST", "localhost")

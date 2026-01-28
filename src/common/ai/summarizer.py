@@ -1,5 +1,5 @@
 """
-Module để tổng hợp dữ liệu sử dụng Groq AI
+Module để tổng hợp dữ liệu sử dụng Groq AI.
 """
 
 import json
@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 
 
 class AISummarizer:
-    """Class để tổng hợp dữ liệu sử dụng Groq AI"""
+    """
+    Class để tổng hợp dữ liệu sử dụng Groq AI.
+    """
 
     def __init__(self):
         self.raw_api_key = GROQ_CONFIG.get("api_key", "")
@@ -49,7 +51,9 @@ class AISummarizer:
             logger.info(f"🔑 Đã load {len(self.api_keys)} API keys cho Groq AI")
 
     def _rotate_key(self):
-        """Chuyển sang API Key tiếp theo"""
+        """
+        Chuyển sang API Key tiếp theo.
+        """
         if len(self.api_keys) <= 1:
             return
 
@@ -58,8 +62,7 @@ class AISummarizer:
         logger.info(f"🔄 Rotating API Key: {old_index} -> {self.current_key_index}")
 
     def summarize_data(self, data_summary: dict[str, Any], max_tokens: int = 2000) -> str:
-        """
-        Tổng hợp dữ liệu sử dụng Groq AI
+        """Tổng hợp dữ liệu sử dụng Groq AI.
 
         Args:
             data_summary: Dictionary chứa thông tin tổng hợp về dữ liệu
@@ -91,7 +94,9 @@ class AISummarizer:
             return ""
 
     def _create_prompt(self, data_summary: dict[str, Any]) -> str:
-        """Tạo prompt cho AI từ dữ liệu tổng hợp"""
+        """
+        Tạo prompt cho AI từ dữ liệu tổng hợp.
+        """
         # Lấy thống kê và làm rõ số liệu quan trọng
         stats = data_summary.get("statistics", {})
         total_products = stats.get("total_products", 0)
@@ -179,8 +184,7 @@ Data JSON:
         return prompt
 
     def shorten_product_name(self, product_name: str) -> str:
-        """
-        Rút gọn tên sản phẩm sử dụng AI
+        """Rút gọn tên sản phẩm sử dụng AI.
 
         Args:
             product_name: Tên sản phẩm gốc
@@ -240,7 +244,9 @@ Tên rút gọn:
             return product_name
 
     def _call_groq_api(self, prompt: str, max_tokens: int = 2000) -> str:
-        """Gọi Groq API để tổng hợp (với Retry và Key Rotation)"""
+        """
+        Gọi Groq API để tổng hợp (với Retry và Key Rotation)
+        """
         # Thử với tối đa số lượng key * 2 lần (để retry mỗi key ít nhất 1 lần nếu cần)
         max_attempts = len(self.api_keys) * 2 if self.api_keys else 1
         attempts = 0
@@ -334,8 +340,7 @@ Tên rút gọn:
         return ""
 
     def generate_data_quality_report(self, conn) -> str:
-        """
-        Tạo báo cáo chất lượng dữ liệu với phân tích chiến lược giảm giá
+        """Tạo báo cáo chất lượng dữ liệu với phân tích chiến lược giảm giá.
 
         Returns: Chuỗi báo cáo định dạng
         """
