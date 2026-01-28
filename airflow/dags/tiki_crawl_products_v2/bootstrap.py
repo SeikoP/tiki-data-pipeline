@@ -25,6 +25,7 @@ import sys
 import time
 import warnings
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -69,8 +70,19 @@ except ImportError as e:
     def safe_import_attr(*args, **kwargs): return None
     def get_hierarchy_map(force_reload=False): return {}
 
-# Load Environment Variables
-load_env_file()
+# NOTE: Avoid heavy work at DAG parse time.
+# We defer loading .env and other expensive initialization until first use in tasks.
+_ENV_LOADED = False
+
+
+def ensure_env_loaded() -> None:
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+    try:
+        load_env_file()
+    finally:
+        _ENV_LOADED = True
 
 # Try to import redis_cache for caching
 redis_cache = None
@@ -535,44 +547,57 @@ PROGRESS_FILE = OUTPUT_DIR / "crawl_progress.json"
 
 # Asset/Dataset đã được xóa - dependencies được quản lý bằng >> operator
 
-# Tạo thư mục nếu chưa có
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+@lru_cache(maxsize=1)
+def ensure_output_dirs() -> None:
+    """
+    Ensure output/cache directories exist.
+
+    Previously executed at import time; now lazily executed on first write-related task call.
+    """
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Thread-safe lock cho atomic writes
 write_lock = Lock()
 
-# Khởi tạo resilience patterns
-# Circuit breaker cho Tiki API
-tiki_circuit_breaker = CircuitBreaker(
-    failure_threshold=get_int_variable("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default=5),
-    recovery_timeout=get_int_variable("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default=60),
-    expected_exception=Exception,
-    name="tiki_api",
-)
+@lru_cache(maxsize=1)
+def get_tiki_circuit_breaker():
+    """Lazy circuit breaker init to speed up DAG parse."""
+    ensure_env_loaded()
+    return CircuitBreaker(
+        failure_threshold=get_int_variable("TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", default=5),
+        recovery_timeout=get_int_variable("TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT", default=60),
+        expected_exception=Exception,
+        name="tiki_api",
+    )
 
-# Dead Letter Queue
-try:
-    # Thử dùng Redis nếu có
-    redis_url = get_variable("REDIS_URL", default="redis://redis:6379/3")
-    tiki_dlq = get_dlq(storage_type="redis", redis_url=redis_url)
-except Exception:
-    # Fallback về file-based
+
+@lru_cache(maxsize=1)
+def get_tiki_dlq():
+    """Lazy DLQ init (redis preferred, file fallback)."""
+    ensure_env_loaded()
     try:
-        dlq_path = DATA_DIR / "dlq"
-        tiki_dlq = get_dlq(storage_type="file", storage_path=str(dlq_path))
+        redis_url = get_variable("REDIS_URL", default="redis://redis:6379/3")
+        return get_dlq(storage_type="redis", redis_url=redis_url)
     except Exception:
-        # Nếu không tạo được, dùng default
-        tiki_dlq = get_dlq()
+        try:
+            dlq_path = DATA_DIR / "dlq"
+            return get_dlq(storage_type="file", storage_path=str(dlq_path))
+        except Exception:
+            return get_dlq()
 
-# Graceful Degradation cho Tiki service
-service_health = get_service_health()
-tiki_degradation = service_health.register_service(
-    name="tiki",
-    failure_threshold=get_int_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default=3),
-    recovery_threshold=get_int_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default=5),
-)
+
+@lru_cache(maxsize=1)
+def get_tiki_degradation():
+    """Lazy graceful degradation registration."""
+    ensure_env_loaded()
+    service_health = get_service_health()
+    return service_health.register_service(
+        name="tiki",
+        failure_threshold=get_int_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default=3),
+        recovery_threshold=get_int_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default=5),
+    )
 
 # Import modules cho AI summarization và Discord notification
 # Tìm các thư mục: analytics/, ai/, notifications/ ở common/ (sau src/)
@@ -613,57 +638,41 @@ for common_base in common_base_paths:
     if analytics_path and ai_path and notifications_path and config_path:
         break
 
-# IMPORTANT: Load config.py TRƯỚC để đảm bảo .env được load
-# Điều này đảm bảo các biến môi trường từ .env được set trước khi các module khác import
-if config_path and os.path.exists(config_path):
-    try:
-        import importlib.util
+def _lazy_import_from_file(module_name: str, file_path: str, attr: str):
+    """Import attribute from a .py file path lazily."""
+    import importlib.util
 
-        spec = importlib.util.spec_from_file_location("common.config", config_path)
-        if spec is not None and spec.loader is not None:
-            config_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(config_module)
-            # Config module sẽ tự động load .env khi được import
-            import warnings
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return getattr(mod, attr, None)
 
-            warnings.warn(
-                f"✅ Đã load common.config từ {config_path}, .env sẽ được load tự động",
-                stacklevel=2,
+
+@lru_cache(maxsize=1)
+def get_DataAggregator():
+    ensure_env_loaded()
+    if analytics_path and os.path.exists(analytics_path):
+        try:
+            return _lazy_import_from_file(
+                "common.analytics.aggregator", analytics_path, "DataAggregator"
             )
-    except Exception as e:
-        import warnings
+        except Exception as e:
+            warnings.warn(f"Không thể import common.analytics.aggregator module: {e}", stacklevel=2)
+    return None
 
-        warnings.warn(f"⚠️  Không thể load common.config: {e}", stacklevel=2)
-
-# Import DataAggregator từ common/analytics/
-if analytics_path and os.path.exists(analytics_path):
-    try:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("common.analytics.aggregator", analytics_path)
-        if spec is not None and spec.loader is not None:
-            aggregator_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(aggregator_module)
-            DataAggregator = aggregator_module.DataAggregator
-        else:
-            DataAggregator = None
-    except Exception as e:
-        import warnings
-
-        warnings.warn(f"Không thể import common.analytics.aggregator module: {e}", stacklevel=2)
-        DataAggregator = None
-else:
-    DataAggregator = None
-
-# Import load_categories function from pipelines/load/load_categories_to_db.py
-load_categories_db_func = safe_import_attr(
-    "pipelines.load.load_categories_to_db",
-    "load_categories",
-    fallback_paths=[Path(p).parent.parent for p in possible_paths],
-)
-
-if not load_categories_db_func:
-    warnings.warn("load_categories_to_db not available; DB load will be skipped", stacklevel=2)
+@lru_cache(maxsize=1)
+def get_load_categories_db_func():
+    ensure_env_loaded()
+    func = safe_import_attr(
+        "pipelines.load.load_categories_to_db",
+        "load_categories",
+        fallback_paths=[Path(p).parent.parent for p in possible_paths],
+    )
+    if not func:
+        warnings.warn("load_categories_to_db not available; DB load will be skipped", stacklevel=2)
+    return func
 
 # Global debug flags controlled via Airflow Variables
 DEBUG_LOAD_CATEGORIES = (
@@ -674,46 +683,28 @@ DEBUG_ENRICH_CATEGORY_PATH = (
 )
 
 
-# Import AISummarizer từ common/ai/
-if ai_path and os.path.exists(ai_path):
-    try:
-        import importlib.util
+@lru_cache(maxsize=1)
+def get_AISummarizer():
+    ensure_env_loaded()
+    if ai_path and os.path.exists(ai_path):
+        try:
+            return _lazy_import_from_file("common.ai.summarizer", ai_path, "AISummarizer")
+        except Exception as e:
+            warnings.warn(f"Không thể import common.ai.summarizer module: {e}", stacklevel=2)
+    return None
 
-        spec = importlib.util.spec_from_file_location("common.ai.summarizer", ai_path)
-        if spec is not None and spec.loader is not None:
-            ai_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(ai_module)
-            AISummarizer = ai_module.AISummarizer
-        else:
-            AISummarizer = None
-    except Exception as e:
-        import warnings
-
-        warnings.warn(f"Không thể import common.ai.summarizer module: {e}", stacklevel=2)
-        AISummarizer = None
-else:
-    AISummarizer = None
-
-# Import DiscordNotifier từ common/notifications/
-if notifications_path and os.path.exists(notifications_path):
-    try:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "common.notifications.discord", notifications_path
-        )
-        if spec is not None and spec.loader is not None:
-            notifications_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(notifications_module)
-            DiscordNotifier = notifications_module.DiscordNotifier
-        else:
-            DiscordNotifier = None
-    except Exception as e:
-        import warnings
-
-        warnings.warn(f"Không thể import common.notifications.discord module: {e}", stacklevel=2)
-        DiscordNotifier = None
-else:
-    DiscordNotifier = None
+@lru_cache(maxsize=1)
+def get_DiscordNotifier():
+    ensure_env_loaded()
+    if notifications_path and os.path.exists(notifications_path):
+        try:
+            return _lazy_import_from_file(
+                "common.notifications.discord", notifications_path, "DiscordNotifier"
+            )
+        except Exception as e:
+            warnings.warn(
+                f"Không thể import common.notifications.discord module: {e}", stacklevel=2
+            )
+    return None
 
 
