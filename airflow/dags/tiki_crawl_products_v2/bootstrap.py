@@ -47,7 +47,17 @@ except ImportError:
 try:
     from airflow import DAG
     from airflow.models import Pool
-    from airflow.operators.python import PythonOperator
+
+    # Airflow 3.0+ compatible imports
+    try:
+        from airflow.sdk import TaskGroup
+    except ImportError:
+        from airflow.utils.task_group import TaskGroup
+
+    try:
+        from airflow.providers.standard.operators.python import PythonOperator
+    except ImportError:
+        from airflow.operators.python import PythonOperator
 except ImportError:
     # Mock for local development without airflow installed
     class DAG:
@@ -74,6 +84,28 @@ except ImportError:
         @classmethod
         def partial(cls, *args, **kwargs):
             return cls()
+
+        def __rshift__(self, other):
+            return other
+
+        def __lshift__(self, other):
+            return self
+
+        def __rrshift__(self, other):
+            return self
+
+        def __rlshift__(self, other):
+            return self
+
+    class TaskGroup:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
 
         def __rshift__(self, other):
             return other
@@ -246,8 +278,12 @@ def get_logger(context=None):
     """
     Get Airflow task logger or standard logger.
     """
-    if context and "ti" in context:
-        return context["ti"].log
+    # In Airflow 3.0+, context["ti"] is a RuntimeTaskInstance which may not have .log
+    # Standard way to get the task logger across versions:
+    ti = (context or {}).get("ti")
+    logger = getattr(ti, "log", None)
+    if logger is not None:
+        return logger
     return logging.getLogger("airflow.task")
 
 

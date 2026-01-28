@@ -29,13 +29,17 @@ if env_file.exists():
 else:
     logger.debug(f"📝 File .env không tồn tại tại: {env_file.absolute()}")
 
-# Groq configuration
-# Các model Groq có sẵn: openai/gpt-oss-120b, llama-3.3-70b-versatile, llama-3.1-8b-instant, mixtral-8x7b-32768, gemma2-9b-it
-GROQ_CONFIG = {
-    "enabled": os.getenv("GROQ_ENABLED", "false").lower() == "true",
-    "api_key": os.getenv("GROQ_API_KEY", ""),
-    "base_url": os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1"),
-    "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),  # Model mặc định Groq
+# AI configuration (Groq or OpenRouter)
+# Models examples:
+# Groq: llama-3.3-70b-versatile, llama-3.1-8b-instant
+# OpenRouter: arcee-ai/trinity-large-preview:free, google/learnlm-1.5-pro-experimental:free
+AI_CONFIG = {
+    "enabled": os.getenv("AI_ENABLED", os.getenv("GROQ_ENABLED", "false")).lower() == "true",
+    "api_key": os.getenv("AI_API_KEY", os.getenv("GROQ_API_KEY", "")),
+    "base_url": os.getenv(
+        "AI_API_BASE", os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
+    ),
+    "model": os.getenv("AI_MODEL", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")),
 }
 
 # Discord configuration
@@ -46,5 +50,5 @@ DISCORD_CONFIG = {
 
 # Short Name AI Configuration
 SHORT_NAME_CONFIG = {
-    "use_ai": os.getenv("SHORT_NAME_USE_AI", "true").lower() == "false",
+    "use_ai": os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true",
 }

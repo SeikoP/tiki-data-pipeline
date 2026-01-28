@@ -12,20 +12,21 @@ from typing import Any
 
 import requests
 
-# Import config từ common.config (ưu tiên) hoặc pipelines.crawl.config (fallback)
+# Import config từ common.config (ưu tiên)
 try:
-    from ..config import GROQ_CONFIG
+    from ..config import AI_CONFIG
 except ImportError:
-    try:
-        from ...pipelines.crawl.config import GROQ_CONFIG
-    except ImportError:
-        # Fallback: đọc trực tiếp từ environment
-        GROQ_CONFIG = {
-            "enabled": os.getenv("GROQ_ENABLED", "false").lower() == "true",
-            "api_key": os.getenv("GROQ_API_KEY", ""),
-            "base_url": os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1"),
-            "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
-        }
+    # Fallback: đọc trực tiếp từ environment
+    AI_CONFIG = {
+        "enabled": os.getenv("AI_ENABLED", os.getenv("GROQ_ENABLED", "false")).lower() == "true",
+        "api_key": os.getenv("AI_API_KEY", os.getenv("GROQ_API_KEY", "")),
+        "base_url": os.getenv(
+            "AI_API_BASE", os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
+        ),
+        "model": os.getenv(
+            "AI_MODEL", os.getenv("GROQ_MODEL", "arcee-ai/trinity-large-preview:free")
+        ),
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +37,19 @@ class AISummarizer:
     """
 
     def __init__(self):
-        self.raw_api_key = GROQ_CONFIG.get("api_key", "")
+        self.raw_api_key = AI_CONFIG.get("api_key", "")
         # Support multiple keys separated by comma
         self.api_keys = [k.strip() for k in self.raw_api_key.split(",") if k.strip()]
         self.current_key_index = 0
 
-        self.base_url = GROQ_CONFIG.get("base_url", "https://api.groq.com/openai/v1")
-        self.model = GROQ_CONFIG.get("model", "openai/gpt-oss-120b")
-        self.enabled = GROQ_CONFIG.get("enabled", False)
+        self.base_url = AI_CONFIG.get("base_url", "https://openrouter.ai/api/v1")
+        self.model = AI_CONFIG.get("model", "arcee-ai/trinity-large-preview:free")
+        self.enabled = AI_CONFIG.get("enabled", False)
 
         if not self.api_keys:
-            logger.warning("⚠️  GROQ_API_KEY không được cấu hình trong environment variables")
+            logger.warning("⚠️  AI_API_KEY không được cấu hình trong environment variables")
         if not self.enabled:
-            logger.warning("⚠️  GROQ_ENABLED chưa được bật")
+            logger.warning("⚠️  AI_ENABLED chưa được bật")
 
         if len(self.api_keys) > 1:
             logger.info(f"🔑 Đã load {len(self.api_keys)} API keys cho Groq AI")
@@ -216,34 +217,33 @@ Data JSON:
 
         try:
             prompt = f"""
-Bạn là trợ lý AI chuyên chuẩn hóa và rút gọn tên sản phẩm thương mại điện tử.
+Bạn là một chuyên gia ngôn ngữ học và chuyên gia tối ưu hóa dữ liệu thương mại điện tử (e-commerce).
+
+Nhiệm vụ: Rút gọn "Tên gốc" thành "Tên rút gọn" cực kỳ súc tích, chuyên nghiệp và chuẩn SEO.
 
 Tên gốc: "{cleaned_name}"
 
-Nhiệm vụ:
-- Tạo một tên sản phẩm ngắn gọn, rõ nghĩa, phù hợp để hiển thị trên sàn TMĐT.
+Quy tắc VÀNG:
+1. Giữ lại LOẠI SẢN PHẨM chính (ví dụ: Máy tăm nước, Bàn chải điện, Bàn ủi hơi nước, Cây lau nhà).
+2. Giữ lại THƯƠNG HIỆU (nếu có: Oxo, Parroti, 3M, Scotch Brite, Deli, Index Living Mall).
+3. Giữ lại ĐẶC ĐIỂM CỐT LÕI duy nhất để phân biệt (ví dụ: 2 trong 1, Không dây, Mini, Cầm tay).
+4. LOẠI BỎ hoàn toàn:
+   - Các từ quảng cáo: Chính hãng, Cao cấp, Sang chảnh, Mẫu mới 2024, Bảo hành 12 tháng, Uy tín.
+   - Các thông số thừa: W76xD30.5xH11.5Cm, 5 chế độ, 4 đầu thay thế, Công nghệ sóng âm, 5 nấc.
+   - Các cụm từ khuyến mãi: Tặng kèm, Miễn phí, Giá rẻ, Sale sốc, Giao màu ngẫu nhiên.
+   - Các mô tả tính năng rườm rà: Chải sạch mảng bám, Chăm sóc nướu, Ủi nhanh gấp gọn.
 
-Quy tắc bắt buộc:
-1. Giữ lại theo thứ tự ưu tiên:
-   - Loại sản phẩm chính (ví dụ: Chân váy, Bikini, Áo khoác, Đồ bơi...)
-   - Đối tượng (nữ, nam, bé gái)
-   - Đặc điểm quan trọng (2 mảnh, tay dài, buộc dây...)
-   - Thương hiệu (nếu có và nổi tiếng)
+Ví dụ mục tiêu:
+- "Máy vệ sinh chăm sóc răng miệng bằng điện... 5 Chế Độ... 4 đầu Bàn chải" -> "Bàn chải điện sóng âm"
+- "Bàn Ủi Đồ Để Bàn Thép ERMA... | Index Living Mall" -> "Bàn ủi đồ thép ERMA"
+- "Bàn Chải Nylon Vệ Sinh Khe Hở Cửa Sổ / Khe Hở Nhà Tắm" -> "Bàn chải nylon vệ sinh khe hở"
+- "Chổi Chà Sàn Nhà Tắm Kết Hợp Gạt Nước Đầu Chữ V Deli" -> "Chổi chà sàn Deli 2 trong 1"
+- "Dây Lò Xo Thông Tắc Cống, Nhà Vệ Sinh 5m 10m" -> "Dây lò xo thông tắc cống"
 
-2. Loại bỏ hoàn toàn:
-   - Marketing fluff & Tính từ chủ quan: sang chảnh, siêu xinh, trẻ trung, thoáng mát, cực đẹp, gợi cảm, quyến rũ, cao cấp...
-   - SKU/Mã sản phẩm: CV0016, MS123, SP99...
-   - Ký tự đặc biệt, hashtag, thông tin bán hàng (free ship, giá rẻ...).
-
-3. Ví dụ mẫu:
-   - "Chân Váy CV0016" -> "Chân váy"
-   - "Bikini 2 Mảnh Buộc Dây Sang Chảnh" -> "Bikini 2 mảnh buộc dây"
-   - "Áo Khoác Nữ Trẻ Trung Thoáng Mát" -> "Áo khoác nữ"
-   - "Bộ Đồ Bơi Nữ 1 Mảnh Sexy Quyến Rũ" -> "Bộ đồ bơi nữ 1 mảnh"
-
-4. Độ dài tối đa: 8–12 từ.
-5. Trả về CHỈ tên đã rút gọn, không kèm giải thích.
-6. Giữ nguyên ngôn ngữ gốc, viết hoa chữ cái đầu mỗi cụm chính.
+Yêu cầu định dạng:
+- Độ dài: 4-7 từ.
+- Trả về DUY NHẤT tên rút gọn.
+- Viết hoa chữ cái đầu tiên của mỗi từ (Title Case).
 
 Tên rút gọn:
 """
@@ -322,6 +322,11 @@ Tên rút gọn:
                     "Authorization": f"Bearer {current_key}",
                     "Content-Type": "application/json",
                 }
+
+                # OpenRouter specific headers (recommended)
+                if "openrouter.ai" in self.base_url:
+                    headers["HTTP-Referer"] = "https://github.com/SeikoP/tiki-data-pipeline"
+                    headers["X-Title"] = "Tiki Data Pipeline"
 
                 # Map model cũ sang model mới nếu cần
                 model = self.model

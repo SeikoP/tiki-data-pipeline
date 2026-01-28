@@ -17,11 +17,10 @@ except ImportError:
     Variable = None
 
 try:
-    from airflow.utils.task_group import TaskGroup
+    from airflow.sdk import TaskGroup
 except ImportError:
-    # Fallback for older Airflow versions or if running outside Airflow
     try:
-        from airflow.sdk import TaskGroup
+        from airflow.utils.task_group import TaskGroup
     except ImportError:
 
         class TaskGroup:

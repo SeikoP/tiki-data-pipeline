@@ -113,7 +113,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         already_crawled = 0
         db_hits = 0  # Products đã có trong DB
 
-        products_per_day = get_int_variable("TIKI_PRODUCTS_PER_DAY", default=1000)
+        products_per_day = get_int_variable("TIKI_PRODUCTS_PER_DAY", default=50)
         # Mặc định giới hạn số products/ngày để tránh quá tải server
         max_products = int(
             get_variable("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
@@ -438,8 +438,10 @@ def crawl_product_batch(
         logger.warning(f"⚠️  BATCH {batch_index} EMPTY")
         return []
 
-    ids_preview = [p.get("product_id", "unknown") for p in product_batch[:3]]
-    logger.info(f"📦 BATCH {batch_index}: {len(product_batch)} products. IDs={ids_preview}...")
+    ids_preview = ", ".join([str(p.get("product_id", "unknown")) for p in product_batch[:3]])
+    logger.info(
+        f"🚀 BATCH {batch_index}: Đang xử lý {len(product_batch)} sản phẩm (Mẫu: {ids_preview}...)"
+    )
 
     results = []
 

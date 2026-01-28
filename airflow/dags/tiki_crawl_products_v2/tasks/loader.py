@@ -178,7 +178,7 @@ def fix_missing_parent_categories(**context) -> dict[str, Any]:
                             ),
                         )
                         saved_count += 1
-                        logger.info(f"   ✅ Đã load: {cat.get('name')}")
+                        # logger.info(f"   ✅ Đã load: {cat.get('name')}")
                     except Exception as e:
                         logger.warning(f"   ⚠️  Lỗi khi load {cat.get('name')}: {e}")
 
@@ -497,19 +497,16 @@ def load_products(**context) -> dict[str, Any]:
                     logger.warning(f"⚠️  Không thể kiểm tra số lượng products sau khi load: {e}")
                     count_after = None
 
-                logger.info("=" * 70)
-                logger.info("📊 LOAD RESULTS (Optimized)")
-                logger.info("=" * 70)
-                logger.info(f"✅ DB loaded: {load_stats.get('db_loaded', 0)} products")
-
-                inserted = load_stats.get("inserted_count", 0)
-                updated = load_stats.get("updated_count", 0)
-                if inserted > 0 or updated > 0:
-                    logger.info(f"   - INSERT: {inserted}")
-                    logger.info(f"   - UPDATE: {updated}")
-
-                logger.info(f"✅ File loaded: {load_stats.get('file_loaded', 0)}")
-                logger.info(f"❌ Failed: {load_stats.get('failed_count', 0)}")
+                logger.info("=" * 40)
+                logger.info("💾 KẾT QUẢ LƯU DỮ LIỆU DB")
+                logger.info("-" * 40)
+                logger.info(f"• Thành công:  {load_stats.get('db_loaded', 0)}")
+                logger.info(f"• Insert mới:  {load_stats.get('inserted_count', 0)}")
+                logger.info(f"• Cập nhật:    {load_stats.get('updated_count', 0)}")
+                logger.info(f"• Lỗi/Thất bại: {load_stats.get('failed_count', 0)}")
+                if load_stats.get("errors"):
+                    logger.warning(f"• Mẫu lỗi: {str(load_stats['errors'][0])[:100]}...")
+                logger.info("=" * 40)
 
                 if load_stats.get("errors"):
                     logger.warning(
