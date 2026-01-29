@@ -1354,7 +1354,13 @@ class PostgresStorage:
                         rating_changed = prev.get("rating_average") != current_rating
                         reviews_changed = prev.get("review_count") != current_reviews
 
-                        if price_changed or original_changed or discount_changed or rating_changed or reviews_changed:
+                        if (
+                            price_changed
+                            or original_changed
+                            or discount_changed
+                            or rating_changed
+                            or reviews_changed
+                        ):
                             crawl_type = "price_change"
                             price_change = None
                             price_change_percent = None

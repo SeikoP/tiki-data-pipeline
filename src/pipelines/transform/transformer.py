@@ -338,15 +338,19 @@ class DataTransformer:
         rating = product.get("rating", {})
         if isinstance(rating, dict):
             db_product["rating_average"] = rating.get("average") or 0.0
-            db_product["review_count"] = rating.get("total_reviews") or rating.get("review_count") or 0
+            db_product["review_count"] = (
+                rating.get("total_reviews") or rating.get("review_count") or 0
+            )
         else:
             db_product["rating_average"] = 0.0
             db_product["review_count"] = 0
-        
+
         # Đảm bảo stock_available có giá trị boolean mặc định
         stock = product.get("stock", {})
         if isinstance(stock, dict):
-            db_product["stock_available"] = stock.get("available") if stock.get("available") is not None else True
+            db_product["stock_available"] = (
+                stock.get("available") if stock.get("available") is not None else True
+            )
         else:
             db_product["stock_available"] = True
 
