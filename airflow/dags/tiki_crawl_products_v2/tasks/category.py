@@ -170,13 +170,10 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
         )  # Mặc định 20 trang để tránh timeout
         use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
         timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300"))  # 5 phút mặc định
-        rate_limit_delay = float(
-            get_variable("TIKI_RATE_LIMIT_DELAY", default="1.0")
-        )  # Delay 1s giữa các request
+        float(get_variable("TIKI_RATE_LIMIT_DELAY", default="1.0"))  # Delay 1s giữa các request
 
-        # Rate limiting: delay trước khi crawl
-        if rate_limit_delay > 0:
-            time.sleep(rate_limit_delay)
+        # Rate limiting: được xử lý bên trong crawl_category_products (smart rate limit / cache check)
+        # Không sleep ở đây để tránh chậm khi hit cache
 
         # Crawl với timeout và circuit breaker
         start_time = time.time()
@@ -293,3 +290,50 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
         # Không raise để tiếp tục với danh mục khác
 
     return result
+
+
+def crawl_category_batch(
+    category_batch: list[dict[str, Any]] = None, batch_index: int = -1, **context
+) -> list[dict[str, Any]]:
+    """
+    Task 3: Crawl sản phẩm từ một batch danh mục (Giảm overhead của Airflow)
+
+    Args:
+        category_batch: List các danh mục trong batch
+        batch_index: Index của batch
+        context: Airflow context
+
+    Returns:
+        List[Dict]: Kết quả crawl cho toàn bộ batch
+    """
+    logger = get_logger(context)
+
+    # Lấy category_batch từ op_kwargs nếu chưa có
+    if not category_batch:
+        ti = context.get("ti")
+        if ti:
+            op_kwargs = getattr(ti, "op_kwargs", {})
+            if op_kwargs:
+                category_batch = op_kwargs.get("category_batch")
+                batch_index = op_kwargs.get("batch_index", -1)
+
+    if not category_batch:
+        logger.error(f"❌ MISSING CATEGORY_BATCH! Batch index: {batch_index}")
+        return []
+
+    logger.info(f"🚀 BATCH CATEGORY {batch_index}: Đang xử lý {len(category_batch)} danh mục")
+
+    results = []
+    for _i, category in enumerate(category_batch):
+        try:
+            # Re-use crawl_single_category logic for each category in batch
+            cat_result = crawl_single_category(category=category, **context)
+            results.append(cat_result)
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi xử lý category trong batch: {e}")
+            results.append(
+                {"category_id": category.get("id", "unknown"), "status": "failed", "error": str(e)}
+            )
+
+    logger.info(f"✅ Hoàn thành BATCH CATEGORY {batch_index}: {len(results)} kết quả")
+    return results

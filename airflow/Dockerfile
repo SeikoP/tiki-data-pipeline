@@ -30,4 +30,5 @@ RUN pip install --no-cache-dir \
     lxml>=4.9.0 \
     tqdm>=4.65.0 \
     webdriver-manager>=4.0.0 \
-    psycopg2-binary>=2.9.0
+    psycopg2-binary>=2.9.0 \
+    aiohttp>=3.9.0

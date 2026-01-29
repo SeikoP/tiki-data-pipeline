@@ -115,7 +115,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         already_crawled = 0
         db_hits = 0  # Products đã có trong DB
 
-        products_per_day = get_int_variable("TIKI_PRODUCTS_PER_DAY", default=50)
+        products_per_day = get_int_variable("TIKI_PRODUCTS_PER_DAY", default=1000)
         # Mặc định giới hạn số products/ngày để tránh quá tải server
         max_products = int(
             get_variable("TIKI_MAX_PRODUCTS_FOR_DETAIL", default="0")
@@ -447,20 +447,20 @@ def crawl_product_batch(
 
     results = []
 
+    # Initialize Driver Pool for fallback Selenium
+    driver_pool = None
+    try:
+        from .common import get_selenium_driver_pool_class
+
+        DriverPool = get_selenium_driver_pool_class(logger)
+        pool_size = int(get_variable("TIKI_DETAIL_POOL_SIZE", default="2"))
+        driver_pool = DriverPool(pool_size=pool_size, headless=True)
+        logger.info(f"✅ Driver pool initialized with size {pool_size}")
+    except Exception as e:
+        logger.warning(f"⚠️  Không thể khởi tạo Driver Pool: {e}")
+
     try:
         import asyncio
-
-        # Import SeleniumDriverPool using the common helper to reduce complexity
-        _SeleniumDriverPool = get_selenium_driver_pool_class(logger)
-
-        # Sử dụng hàm đã được import ở đầu file
-        # crawl_product_detail_async và SeleniumDriverPool đã được import ở đầu file
-        pool_size = int(
-            get_variable("TIKI_DETAIL_POOL_SIZE", default="2")
-        )  # Tối ưu: tăng từ 5 -> 15
-        driver_pool = _SeleniumDriverPool(
-            pool_size=pool_size, headless=True, timeout=120
-        )  # Tối ưu: tăng từ 60 -> 120s để trang load đầy đủ
 
         # Tạo event loop trước
         try:
@@ -491,8 +491,12 @@ def crawl_product_batch(
             try:
                 # Thử async crawl trước
                 if session:
+                    # FAST DAG: Disable Selenium fallback
                     detail = await crawl_product_detail_async(
-                        product_url, session=session, use_selenium_fallback=True, verbose=False
+                        product_url,
+                        session=session,
+                        use_selenium_fallback=False,  # Disable fallback for Fast DAG
+                        verbose=False,
                     )
 
                     # Kiểm tra nếu crawl_product_detail_async trả về HTML string (do fallback về Selenium)
@@ -704,10 +708,10 @@ def crawl_product_batch(
         # Crawl tất cả products trong batch song song với async
         # (Event loop đã được tạo ở trên)
         # Sử dụng asyncio.gather() để crawl parallel
-        rate_limit_delay = float(get_variable("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.1"))
+        rate_limit_delay = float(get_variable("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.05"))
 
         # Tạo semaphore để limit concurrent tasks (tối ưu throughput)
-        max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="12"))
+        max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="30"))
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def bounded_task(task_coro):
@@ -816,7 +820,12 @@ def crawl_product_batch(
             loop.run_until_complete(session.close())
 
         # Cleanup driver pool
-        driver_pool.cleanup()
+        if driver_pool:
+            try:
+                driver_pool.close_all()
+                logger.info("✅ Driver pool closed")
+            except Exception as e:
+                logger.warning(f"⚠️  Lỗi khi đóng driver pool: {e}")
 
         # Thống kê
         success_count = sum(1 for r in results if r.get("status") == "success")
@@ -1753,6 +1762,7 @@ def merge_product_details(**context) -> dict[str, Any]:
         logger.info(f"📊 Đang xử lý {len(all_detail_results)} detail results...")
 
         # Kiểm tra nếu có quá nhiều kết quả None hoặc invalid
+        # Reset valid_results
         valid_results = 0
         error_details = {}  # Thống kê chi tiết các loại lỗi
         failed_products = []  # Danh sách products bị fail để phân tích
@@ -1782,8 +1792,10 @@ def merge_product_details(**context) -> dict[str, Any]:
 
                     if status == "success":
                         stats["with_detail"] += 1
+                        valid_results += 1
                     elif status == "cached":
                         stats["cached"] += 1
+                        valid_results += 1
                     elif status == "timeout":
                         stats["timeout"] += 1
                         error_details["timeout"] = error_details.get("timeout", 0) + 1
@@ -1982,14 +1994,28 @@ def merge_product_details(**context) -> dict[str, Any]:
                     brand = product_with_detail.get("brand")
 
                     # Only skip if BRAND is missing/empty (seller can be "Unknown")
+                    # Only skip if BRAND is missing/empty (seller can be "Unknown")
                     if not brand or (isinstance(brand, str) and not brand.strip()):
+                        # 2 DAGs Strategy: Mark for enrichment
                         logger.warning(
-                            f"⚠️  Product {product_id} ({product_with_detail.get('name', 'Unknown')[:50]}) "
-                            f"có brand null/empty, sẽ bỏ qua để crawl lại lần sau"
+                            f"ℹ️  Product {product_id} missing brand. Marked for enrichment."
                         )
-                        products_no_brand += 1
-                        products_failed += 1
-                        continue
+                        product_with_detail["needs_enrichment"] = True
+                        product_with_detail["crawl_quality"] = "basic"
+                        # Keep brand as None/Empty (will be filled by Enrichment DAG)
+                    else:
+                        product_with_detail["needs_enrichment"] = False
+                        product_with_detail["crawl_quality"] = "full"
+                        # Don't increment products_no_brand since we are fixing it
+                        # Don't increment products_failed since we are keeping it
+
+                        # logger.warning(
+                        #     f"⚠️  Product {product_id} ({product_with_detail.get('name', 'Unknown')[:50]}) "
+                        #     f"có brand null/empty, sẽ bỏ qua để crawl lại lần sau"
+                        # )
+                        # products_no_brand += 1
+                        # products_failed += 1
+                        # continue
 
                     products_with_detail.append(product_with_detail)
                 elif status == "cached":

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from airflow.datasets import Dataset
 from tiki_crawl_products_v2.bootstrap import (
     DAG,
     DAG_CONFIG,
     PythonOperator,
     TaskGroup,
     crawl_category_batch,
+    get_int_variable,
     get_variable,
     timedelta,
 )
@@ -17,7 +19,7 @@ from tiki_crawl_products_v2.tasks import (
     cleanup_orphan_categories_wrapper,
     cleanup_redis_cache,
     cleanup_redundant_categories_wrapper,
-    crawl_product_batch,
+    crawl_product_batch_fast,
     crawl_single_category,
     load_categories,
     load_categories_to_db_wrapper,
@@ -33,10 +35,14 @@ from tiki_crawl_products_v2.tasks import (
 )
 
 # Safe Mode: airflow DAG
-# This file is an Airflow DAG for Tiki product crawling.
+# This file is an Airflow DAG for Tiki product crawling (Speed Layer).
 
 
-with DAG(**DAG_CONFIG) as dag:
+with DAG(
+    dag_id="tiki_crawl_fast",
+    description="Speed Layer: API-based Fast Crawling",
+    **{k: v for k, v in DAG_CONFIG.items() if k not in ["dag_id", "description"]},
+) as dag:
     # ===== STEP 1: PRE-CRAWL CLEANUP & LOAD =====
     with TaskGroup("pre_crawl") as pre_crawl_group:
         task_cleanup_products = PythonOperator(
@@ -86,7 +92,7 @@ with DAG(**DAG_CONFIG) as dag:
             if not categories:
                 logger.error("❌ Không thể lấy categories từ XCom!")
                 return []
-            batch_size = int(get_variable("TIKI_CATEGORY_BATCH_SIZE", default="10"))
+            batch_size = int(get_variable("TIKI_CATEGORY_BATCH_SIZE", default="20"))
             batches = [
                 categories[i : i + batch_size] for i in range(0, len(categories), batch_size)
             ]
@@ -156,7 +162,10 @@ with DAG(**DAG_CONFIG) as dag:
             )
             if not products_to_crawl:
                 return []
-            batch_size = 15  # Optimized batch size
+
+            # Tăng batch size để tận dụng tốc độ API (mặc định 100 thay vì 15)
+            batch_size = get_int_variable("TIKI_DETAIL_BATCH_SIZE", default=100)
+
             batches = [
                 products_to_crawl[i : i + batch_size]
                 for i in range(0, len(products_to_crawl), batch_size)
@@ -179,7 +188,7 @@ with DAG(**DAG_CONFIG) as dag:
 
         task_crawl_product_detail = PythonOperator.partial(
             task_id="crawl_product_detail",
-            python_callable=crawl_product_batch,
+            python_callable=crawl_product_batch_fast,
             execution_timeout=timedelta(minutes=15),
             pool="crawl_pool",
             retries=1,
@@ -225,6 +234,7 @@ with DAG(**DAG_CONFIG) as dag:
             python_callable=load_products,
             execution_timeout=timedelta(minutes=30),
             pool="crawl_pool",
+            outlets=[Dataset("tiki-postgres://tiki_postgres/tiki/public/products")],
         )
         task_transform_products >> task_load_products
 

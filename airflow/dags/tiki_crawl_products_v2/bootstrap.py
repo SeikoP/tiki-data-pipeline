@@ -30,11 +30,6 @@ from threading import Lock
 from typing import Any
 
 try:
-    import pandas as pd
-except ImportError:
-    pd = None
-
-try:
     import psycopg2
 except ImportError:
     psycopg2 = None
@@ -46,7 +41,6 @@ except ImportError:
 
 try:
     from airflow import DAG
-    from airflow.models import Pool
 
     # Airflow 3.0+ compatible imports
     try:
@@ -67,7 +61,7 @@ except ImportError:
         def __enter__(self):
             return self
 
-        def __exit__(self, exc_type, exc_val, exc_tb):
+        def __exit__(self, exc_type, *args):
             pass
 
     class Pool:
@@ -118,14 +112,6 @@ except ImportError:
 
         def __rlshift__(self, other):
             return self
-
-
-try:
-    from airflow.exceptions import AirflowSkipException
-except ImportError:
-
-    class AirflowSkipException(Exception):
-        pass
 
 
 def load_env_file():
@@ -330,11 +316,6 @@ try:
 except ImportError:
     OptimizedDataLoader = None
 
-try:
-    from pipelines.transform.merger import combine_products
-except ImportError:
-    combine_products = None
-
 
 # Import module crawl_products_detail
 crawl_products_detail_path = None
@@ -500,8 +481,11 @@ if crawl_categories_batch_path and os.path.exists(crawl_categories_batch_path):
         # Tạo dummy function để tránh NameError
         crawl_category_batch = None
 else:
-    # Module chưa tồn tại, sẽ fallback về crawl_single_category
-    crawl_category_batch = None
+    # Module chưa tồn tại, thử load từ tasks.category (vị trí chuẩn mới)
+    try:
+        from tiki_crawl_products_v2.tasks.category import crawl_category_batch
+    except (ImportError, ModuleNotFoundError):
+        crawl_category_batch = None
 
 # Import resilience patterns
 # Import trực tiếp từng module con để tránh vấn đề relative imports

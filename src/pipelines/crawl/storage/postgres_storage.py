@@ -1530,30 +1530,41 @@ class PostgresStorage:
                         print("⚠️  Continuing without crawl history (will retry on next crawl)")
 
     def update_category_product_counts(self) -> int:
-        """Update product_count for all categories based on actual products in DB. Match products
-        với categories theo category_url hoặc category_id để đảm bảo tính đúng. Call this after
-        saving products.
+        """Update product_count for all categories based on actual products in DB. Sửa lỗi tính
+        trùng (double counting) bằng cách ưu tiên khớp category_id trước, sau đó mới đến
+        category_url. Mỗi sản phẩm chỉ được tính vào một category duy nhất.
 
         Returns:
             Number of categories updated
         """
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                # Match products với categories theo cả category_url và category_id
-                # Sử dụng UPDATE FROM để tối ưu hóa thay vì subquery cho từng dòng
+                # 1. Reset product_count về 0 cho tất cả leaf categories trước khi tính lại
+                cur.execute("UPDATE categories SET product_count = 0 WHERE is_leaf = TRUE")
+
+                # 2. Sử dụng CTE để resolve category duy nhất cho mỗi product
+                # Ưu tiên khớp theo ID, nếu không có/không khớp mới dùng URL
                 cur.execute("""
+                    WITH product_mapping AS (
+                        SELECT
+                            p.product_id,
+                            COALESCE(c_id.url, c_url.url) as resolved_url
+                        FROM products p
+                        LEFT JOIN categories c_id ON p.category_id = c_id.category_id AND c_id.is_leaf = TRUE
+                        LEFT JOIN categories c_url ON p.category_url = c_url.url AND c_url.is_leaf = TRUE
+                        WHERE p.category_id IS NOT NULL OR p.category_url IS NOT NULL
+                    ),
+                    counted_matches AS (
+                        SELECT resolved_url, COUNT(*) as actual_count
+                        FROM product_mapping
+                        WHERE resolved_url IS NOT NULL
+                        GROUP BY resolved_url
+                    )
                     UPDATE categories c
-                    SET product_count = counts.cnt,
+                    SET product_count = cm.actual_count,
                         updated_at = CURRENT_TIMESTAMP
-                    FROM (
-                        SELECT c.url, COUNT(DISTINCT p.product_id) as cnt
-                        FROM categories c
-                        LEFT JOIN products p ON p.category_url = c.url
-                           OR (c.category_id IS NOT NULL AND p.category_id = c.category_id)
-                        WHERE c.is_leaf = TRUE
-                        GROUP BY c.url
-                    ) counts
-                    WHERE c.url = counts.url AND c.is_leaf = TRUE;
+                    FROM counted_matches cm
+                    WHERE c.url = cm.resolved_url AND c.is_leaf = TRUE;
                 """)
                 return cur.rowcount
 

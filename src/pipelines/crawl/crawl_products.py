@@ -22,6 +22,7 @@ try:
         RateLimiter,
         atomic_write_json,
         ensure_dir,
+        extract_category_id_from_url,
         extract_product_id_from_url,
         normalize_url,
         parse_price,
@@ -49,6 +50,7 @@ except ImportError:
             ensure_dir = utils_module.ensure_dir
             atomic_write_json = utils_module.atomic_write_json
             safe_read_json = utils_module.safe_read_json
+            extract_category_id_from_url = utils_module.extract_category_id_from_url
             extract_product_id_from_url = utils_module.extract_product_id_from_url
             normalize_url = utils_module.normalize_url
             RateLimiter = utils_module.RateLimiter
@@ -748,6 +750,98 @@ def get_category_page_url(category_url, page=1):
         return f"{category_url}?page={page}"
 
 
+def get_products_via_listing_api(category_url, max_pages=5, use_rate_limiting=True):
+    """Lấy danh sách sản phẩm qua Tiki Listing API (Cực nhanh).
+
+    Args:
+        category_url: URL danh mục
+        max_pages: Số trang tối đa
+        use_rate_limiting: Có dùng rate limiting không
+
+    Returns:
+        List[Dict]: Danh sách sản phẩm
+    """
+    category_id = extract_category_id_from_url(category_url)
+    if not category_id:
+        return None
+
+    # Strip 'c' from category_id if present (e.g., 'c1882' -> '1882')
+    numeric_cat_id = re.sub(r"\D", "", category_id)
+
+    all_products = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "X-Guest-Token": "no-token",  # Tiki API often works without token but headers help
+    }
+
+    # Adaptive Rate Limiting
+    adaptive_limiter = None
+    if use_rate_limiting:
+        try:
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
+
+            adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
+        except Exception:
+            pass
+
+    for page in range(1, max_pages + 1):
+        if adaptive_limiter:
+            adaptive_limiter.wait("tiki.vn")
+
+        api_url = f"https://tiki.vn/api/v2/products?limit=48&include=advertisement&aggregations=2&version=home-perso&category={numeric_cat_id}&page={page}"
+
+        try:
+            response = requests.get(api_url, headers=headers, timeout=15)
+            if response.status_code != 200:
+                break
+
+            data = response.json()
+            products_data = data.get("data", [])
+            if not products_data:
+                break
+
+            for item in products_data:
+                # Map API fields to our internal format
+                product_id = str(item.get("id"))
+                product_url = item.get("url_path")
+                if product_url and not product_url.startswith("http"):
+                    product_url = f"https://tiki.vn/{product_url}"
+
+                all_products.append(
+                    {
+                        "product_id": product_id,
+                        "name": item.get("name"),
+                        "url": product_url or f"https://tiki.vn/p/{product_id}.html",
+                        "price": item.get("price"),
+                        "original_price": item.get("original_price"),
+                        "sales_count": item.get("quantity_sold")
+                        and int(item.get("quantity_sold").get("value", 0))
+                        if isinstance(item.get("quantity_sold"), dict)
+                        else item.get("quantity_sold"),
+                        "image_url": item.get("thumbnail_url"),
+                        "stock": {"available": True}
+                        if item.get("inventory_status") == "available"
+                        else {"available": False},
+                        "shipping": item.get("badges_new") or item.get("badges"),
+                        "thumbnail_url": item.get("thumbnail_url"),
+                        "rating_average": item.get("rating_average"),
+                        "review_count": item.get("review_count"),
+                        "extraction_method": "listing_api",
+                    }
+                )
+
+            # If we got fewer than 48 products, it's likely the last page
+            if len(products_data) < 40:
+                break
+
+        except Exception as e:
+            print(f"⚠️ Error fetching listing API (page {page}): {e}")
+            break
+
+    return all_products
+
+
 def crawl_category_products(
     category_url,
     max_pages=None,
@@ -768,7 +862,18 @@ def crawl_category_products(
 
     all_products = []
 
-    # Thử Redis cache trước (nhanh hơn, distributed)
+    # Tier 1: Thử Listing API (Nhanh nhất)
+    api_products = get_products_via_listing_api(
+        category_url, max_pages=max_pages or 5, use_rate_limiting=use_rate_limiting
+    )
+    if api_products:
+        print(f"[Listing API] ✅ Lấy được {len(api_products)} sản phẩm cho {category_url[:60]}...")
+        # Inject category_url for downstream usage
+        for p in api_products:
+            p["category_url"] = category_url
+        return api_products
+
+    # Tier 2: Thử Redis cache
     redis_cache = None
     if use_redis_cache:
         try:

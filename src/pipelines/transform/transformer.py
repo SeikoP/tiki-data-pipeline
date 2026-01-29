@@ -843,7 +843,6 @@ class DataTransformer:
             "chống",
             "tặng",
             "kèm",
-            "bộ",
             "set",
             "combo",
             "mẫu mã",

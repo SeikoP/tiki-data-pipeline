@@ -17,22 +17,20 @@ def get_config() -> dict[str, Any]:
 MAX_CATEGORY_LEVELS = 5  # Tiki categories can have up to 5 levels with parent category included
 
 # Category crawling configuration - OPTIMIZED
-CATEGORY_BATCH_SIZE = 12  # Categories per batch
-CATEGORY_TIMEOUT = 120  # Seconds - tối ưu: 120 thay vì 180 (2 phút)
-CATEGORY_CONCURRENT_REQUESTS = 5  # Tối ưu: 5 thay vì 3 concurrent requests
-CATEGORY_POOL_SIZE = 8  # Tối ưu: selenium drivers cho category crawl
+CATEGORY_BATCH_SIZE = 20  # Categories per batch (tăng từ 12)
+CATEGORY_TIMEOUT = 120  # Seconds
+CATEGORY_CONCURRENT_REQUESTS = 10  # Tối ưu: 10 concurrent requests
+CATEGORY_POOL_SIZE = 8  # Selenium drivers cho category crawl (vẫn giữ thấp vì API lo phần lớn)
 
 # Product crawling configuration - OPTIMIZED
-PRODUCT_BATCH_SIZE = 12  # Products per batch (từ 15)
-PRODUCT_TIMEOUT = 120  # Seconds for product detail fetch (tăng từ 60 -> 120 để trang load đầy đủ)
-PRODUCT_POOL_SIZE = (
-    12  # Selenium drivers - match với crawl_pool (Airflow 12 slots), tiết kiệm ~150-300MB RAM
-)
+PRODUCT_BATCH_SIZE = 50  # Products per batch (tăng mạnh từ 15 -> 50)
+PRODUCT_TIMEOUT = 60  # Seconds (API rất nhanh, 60s là đủ cho cả batch lớn)
+PRODUCT_POOL_SIZE = 12  # Selenium drivers - match với crawl_pool
 
 # HTTP client configuration - OPTIMIZED
-HTTP_CONNECTOR_LIMIT = 150  # Tổng concurrent HTTP connections (tăng từ 100)
-HTTP_CONNECTOR_LIMIT_PER_HOST = 15  # Per-host limit (tăng từ 10)
-HTTP_TIMEOUT_TOTAL = 20  # Seconds (từ 30)
+HTTP_CONNECTOR_LIMIT = 300  # Tổng concurrent HTTP connections (tăng gấp đôi để hỗ trợ batch lớn)
+HTTP_CONNECTOR_LIMIT_PER_HOST = 50  # Per-host limit (tăng cho listing API)
+HTTP_TIMEOUT_TOTAL = 15  # Seconds (giảm timeout vì API response nhanh)
 HTTP_TIMEOUT_CONNECT = 10  # Seconds
 HTTP_DNS_CACHE_TTL = 1800  # Seconds (30 phút - tăng từ 5 phút để giảm DNS lookups)
 

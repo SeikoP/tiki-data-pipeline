@@ -241,9 +241,10 @@ class OptimizedDataLoader:
                 product_id, category_url, category_id, name, short_name, url, price, original_price,
                 discount_percent, rating_average, sales_count, brand,
                 seller_name, seller_id, seller_is_official,
-                crawled_at, updated_at
+                crawled_at, updated_at,
+                crawl_quality, needs_enrichment
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (product_id) DO UPDATE SET
                 category_url = EXCLUDED.category_url,
@@ -260,7 +261,9 @@ class OptimizedDataLoader:
                 seller_name = EXCLUDED.seller_name,
                 seller_id = EXCLUDED.seller_id,
                 seller_is_official = EXCLUDED.seller_is_official,
-                updated_at = EXCLUDED.updated_at
+                updated_at = EXCLUDED.updated_at,
+                crawl_quality = EXCLUDED.crawl_quality,
+                needs_enrichment = EXCLUDED.needs_enrichment
         """
 
         cursor.execute(
@@ -283,6 +286,8 @@ class OptimizedDataLoader:
                 product.get("seller_is_official"),
                 product.get("crawled_at"),
                 datetime.now(),
+                product.get("crawl_quality", "basic"),
+                product.get("needs_enrichment", False),
             ),
         )
 

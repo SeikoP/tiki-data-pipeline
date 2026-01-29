@@ -6,7 +6,7 @@ tiki_crawl_products_v2.tasks import *`.
 
 from __future__ import annotations
 
-from .category import crawl_single_category, load_categories
+from .category import crawl_category_batch, crawl_single_category, load_categories
 from .common import _fix_sys_path_for_pipelines_import, atomic_write_file, get_logger
 from .detail import (
     crawl_product_batch,
@@ -14,6 +14,10 @@ from .detail import (
     merge_product_details,
     prepare_products_for_detail,
     save_products_with_detail,
+)
+from .detail_new import (
+    crawl_product_batch_fast,
+    crawl_product_batch_selenium,
 )
 from .loader import (
     _import_postgres_storage,
@@ -40,6 +44,7 @@ __all__ = [
     "atomic_write_file",
     "load_categories",
     "crawl_single_category",
+    "crawl_category_batch",
     "merge_products",
     "save_products",
     "transform_products",
@@ -48,6 +53,8 @@ __all__ = [
     "crawl_single_product_detail",
     "merge_product_details",
     "save_products_with_detail",
+    "crawl_product_batch_fast",
+    "crawl_product_batch_selenium",
     "fix_missing_parent_categories",
     "load_categories_to_db_wrapper",
     "_import_postgres_storage",

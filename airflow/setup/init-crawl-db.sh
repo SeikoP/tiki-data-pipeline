@@ -88,6 +88,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         brand VARCHAR(255),
         stock_available BOOLEAN,
         shipping JSONB,
+        crawl_quality VARCHAR(50) DEFAULT 'basic',
+        needs_enrichment BOOLEAN DEFAULT TRUE,
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );

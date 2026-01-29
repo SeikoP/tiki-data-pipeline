@@ -1587,6 +1587,118 @@ def extract_product_detail(
     return product_data
 
 
+def extract_product_detail_from_json(data: dict[str, Any], url: str) -> dict[str, Any]:
+    """Extract thông tin chi tiết sản phẩm từ JSON API của Tiki.
+
+    Args:
+        data: JSON data từ Tiki API
+        url: URL của product
+    """
+    product_data = {
+        "url": url,
+        "product_id": str(data.get("id")),
+        "name": data.get("name", ""),
+        "price": {
+            "current_price": data.get("price"),
+            "original_price": data.get("list_price") or data.get("original_price"),
+            "discount_percent": data.get("discount_rate"),
+            "currency": "VND",
+        },
+        "rating": {
+            "average": data.get("rating_average"),
+            "total_reviews": data.get("review_count") or 0,
+            "rating_distribution": {},
+        },
+        "seller": {
+            "name": data.get("current_seller", {}).get("name")
+            if isinstance(data.get("current_seller"), dict)
+            else "",
+            "is_official": data.get("current_seller", {}).get("is_best_store")
+            if isinstance(data.get("current_seller"), dict)
+            else False,
+            "seller_id": str(data.get("current_seller", {}).get("id"))
+            if isinstance(data.get("current_seller"), dict)
+            else "",
+        },
+        "description": data.get("description", ""),
+        "specifications": {
+            s.get("name"): s.get("value")
+            for s in data.get("specifications", [])
+            if isinstance(s, dict) and "name" in s and "value" in s
+        },
+        "images": [
+            img.get("base_url")
+            for img in data.get("images", [])
+            if isinstance(img, dict) and img.get("base_url")
+        ],
+        "category_path": [],
+        "brand": data.get("brand", {}).get("name") if isinstance(data.get("brand"), dict) else "",
+        "warranty": "",
+        "sales_count": data.get("all_time_quantity_sold"),
+        "stock": {
+            "available": data.get("stock_item", {}).get("qty", 0) > 0
+            if isinstance(data.get("stock_item"), dict)
+            else True,
+            "quantity": data.get("stock_item", {}).get("qty", 0)
+            if isinstance(data.get("stock_item"), dict)
+            else 0,
+            "stock_status": "",
+        },
+        "shipping": {"free_shipping": False, "fast_delivery": False, "delivery_time": ""},
+        "promotions": [],
+        "_metadata": {
+            "extracted_at": datetime.now().isoformat(),
+            "source_url": url,
+            "extraction_method": "api",
+        },
+    }
+
+    # Extract category_path from breadcrumbs if available
+    breadcrumbs = data.get("breadcrumbs", [])
+    if breadcrumbs:
+        product_data["category_path"] = [
+            b.get("name") for b in breadcrumbs if isinstance(b, dict) and b.get("name")
+        ]
+
+    return product_data
+
+
+async def crawl_product_detail_via_api(
+    url: str, session: Any, verbose: bool = False
+) -> dict[str, Any] | None:
+    """Crawl chi tiết sản phẩm qua Tiki API v2.
+
+    Args:
+        url: URL sản phẩm
+        session: aiohttp ClientSession
+        verbose: Có in log không
+    """
+    product_id = extract_product_id_from_url(url)
+    if not product_id:
+        return None
+
+    api_url = f"https://tiki.vn/api/v2/products/{product_id}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://tiki.vn/",
+    }
+
+    try:
+        async with session.get(api_url, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                return extract_product_detail_from_json(data, url)
+            else:
+                if verbose:
+                    print(f"[API] ⚠️  HTTP {response.status} cho ID {product_id}")
+                return None
+    except Exception as e:
+        if verbose:
+            print(f"[API] ❌ Lỗi: {e}")
+        return None
+
+
 async def crawl_product_detail_async(
     url: str,
     session=None,
@@ -1647,7 +1759,24 @@ async def crawl_product_detail_async(
         )
 
     try:
-        # Thử crawl bằng aiohttp
+        # Tier 1: Thử crawl bằng Tiki API (Nhanh nhất & Chính xác nhất)
+        print(f"[Async] 🚀 Thử API cho {url[:60]}...")
+        product_data = await crawl_product_detail_via_api(url, session, verbose=verbose)
+
+        if product_data:
+            has_name = bool(product_data.get("name"))
+            has_price = product_data.get("price", {}).get("current_price") is not None
+
+            if has_name and has_price:
+                # API thành công thì dùng luôn
+                product_data["_metadata"]["extraction_method"] = "api"
+                print(f"[Async] ✅ API thành công cho {url[:60]}...")
+                return product_data
+            else:
+                print(f"[Async] ⚠️ API thiếu thông tin cơ bản (Name/Price) cho {url[:60]}")
+
+        # Tier 2: Thử crawl bằng aiohttp (HTML scraping)
+        print(f"[Async] ℹ️ Thử HTML scraping cho {url[:60]}...")
         async with session.get(url) as response:
             if response.status != 200:
                 if verbose:
@@ -1663,18 +1792,23 @@ async def crawl_product_detail_async(
             # Extract product detail từ HTML
             product_data = extract_product_detail(html_content, url, verbose=verbose)
 
-            # Kiểm tra xem có đầy đủ thông tin không (đặc biệt là sales_count và rating)
-            has_sales_count = product_data.get("sales_count") is not None
-            has_rating = product_data.get("rating", {}).get("average") is not None
+            # Kiểm tra xem có đầy đủ thông tin cơ bản không
+            has_name = bool(product_data.get("name"))
+            has_price = product_data.get("price", {}).get("current_price") is not None
+            # Check for brand as well
+            has_brand = bool(product_data.get("brand")) and product_data.get("brand") != "Unknown"
 
-            # Nếu thiếu critical data và có fallback, dùng Selenium
-            if (not has_sales_count or not has_rating) and use_selenium_fallback:
+            # Nếu thiếu thông tin cực kỳ quan trọng, dùng Selenium (Tier 3)
+            # Tier 3: triggered if name, price OR BRAND is missing
+            if (not has_name or not has_price or not has_brand) and use_selenium_fallback:
                 if verbose:
                     missing = []
-                    if not has_sales_count:
-                        missing.append("sales_count")
-                    if not has_rating:
-                        missing.append("rating")
+                    if not has_name:
+                        missing.append("name")
+                    if not has_price:
+                        missing.append("price")
+                    if not has_brand:
+                        missing.append("brand")
                     print(
                         f"[Async] ⚠️  Thiếu {', '.join(missing)}, fallback về Selenium cho {url[:60]}..."
                     )
@@ -1683,12 +1817,10 @@ async def crawl_product_detail_async(
                 return crawl_product_detail_with_selenium(url, verbose=verbose)
 
             # Cập nhật metadata
-            product_data["_metadata"]["extraction_method"] = (
-                "aiohttp" if (has_sales_count and has_rating) else "aiohttp+selenium_fallback"
-            )
+            product_data["_metadata"]["extraction_method"] = "aiohttp"
+            product_data["_metadata"]["extraction_status"] = "success"
 
-            if verbose:
-                print(f"[Async] ✅ Crawl thành công: {product_data.get('name', 'Unknown')[:50]}...")
+            print(f"[Async] ✅ HTML scraping thành công cho {url[:60]}...")
 
             # Fix: Ensure category_path is never None, use empty list if not populated
             if product_data.get("category_path") is None:
