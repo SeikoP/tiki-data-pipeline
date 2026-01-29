@@ -1760,7 +1760,8 @@ async def crawl_product_detail_async(
 
     try:
         # Tier 1: Thử crawl bằng Tiki API (Nhanh nhất & Chính xác nhất)
-        print(f"[Async] 🚀 Thử API cho {url[:60]}...")
+        if verbose:
+            print(f"[Async] 🚀 Thử API cho {url[:60]}...")
         product_data = await crawl_product_detail_via_api(url, session, verbose=verbose)
 
         if product_data:
@@ -1770,13 +1771,16 @@ async def crawl_product_detail_async(
             if has_name and has_price:
                 # API thành công thì dùng luôn
                 product_data["_metadata"]["extraction_method"] = "api"
-                print(f"[Async] ✅ API thành công cho {url[:60]}...")
+                if verbose:
+                    print(f"[Async] ✅ API thành công cho {url[:60]}...")
                 return product_data
             else:
-                print(f"[Async] ⚠️ API thiếu thông tin cơ bản (Name/Price) cho {url[:60]}")
+                if verbose:
+                    print(f"[Async] ⚠️ API thiếu thông tin cơ bản (Name/Price) cho {url[:60]}")
 
         # Tier 2: Thử crawl bằng aiohttp (HTML scraping)
-        print(f"[Async] ℹ️ Thử HTML scraping cho {url[:60]}...")
+        if verbose:
+            print(f"[Async] ℹ️ Thử HTML scraping cho {url[:60]}...")
         async with session.get(url) as response:
             if response.status != 200:
                 if verbose:
@@ -1820,7 +1824,8 @@ async def crawl_product_detail_async(
             product_data["_metadata"]["extraction_method"] = "aiohttp"
             product_data["_metadata"]["extraction_status"] = "success"
 
-            print(f"[Async] ✅ HTML scraping thành công cho {url[:60]}...")
+            if verbose:
+                print(f"[Async] ✅ HTML scraping thành công cho {url[:60]}...")
 
             # Fix: Ensure category_path is never None, use empty list if not populated
             if product_data.get("category_path") is None:

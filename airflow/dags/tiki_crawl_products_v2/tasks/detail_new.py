@@ -19,7 +19,8 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
     import asyncio
 
     # Setup aiohttp session
-    if session is None:
+    own_session = session is None
+    if own_session:
         try:
             import aiohttp
 
@@ -121,8 +122,8 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Close session
-    if session:
+    # Close session if we created it
+    if own_session and session:
         await session.close()
 
     return results
@@ -195,7 +196,7 @@ def crawl_product_batch_selenium(
     logger.info(f"🐢 SELENIUM BATCH {batch_index}: {len(product_batch)} items")
 
     # Initialize Driver Pool
-    DriverPool = get_selenium_driver_pool_class()
+    DriverPool = get_selenium_driver_pool_class(logger)
     pool_size = int(get_variable("TIKI_DETAIL_POOL_SIZE", default="2"))
     driver_pool = DriverPool(pool_size=pool_size, headless=True)
 

@@ -23,10 +23,8 @@ from tiki_crawl_products_v2.bootstrap import (
     time,
 )
 
-from .common import (
-    _fix_sys_path_for_pipelines_import,  # noqa: F401
-    get_logger,  # noqa: F401
-)
+from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
+from .common import get_logger  # noqa: F401
 
 
 def load_categories(**context) -> list[dict[str, Any]]:
@@ -170,7 +168,6 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
         )  # Mặc định 20 trang để tránh timeout
         use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
         timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300"))  # 5 phút mặc định
-        float(get_variable("TIKI_RATE_LIMIT_DELAY", default="1.0"))  # Delay 1s giữa các request
 
         # Rate limiting: được xử lý bên trong crawl_category_products (smart rate limit / cache check)
         # Không sleep ở đây để tránh chậm khi hit cache

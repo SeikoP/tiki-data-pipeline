@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from airflow.datasets import Dataset
 from tiki_crawl_products_v2.bootstrap import (
     DAG,
     DAG_CONFIG,
@@ -33,6 +32,8 @@ from tiki_crawl_products_v2.tasks import (
     transform_products,
     validate_data,
 )
+
+from airflow.datasets import Dataset
 
 # Safe Mode: airflow DAG
 # This file is an Airflow DAG for Tiki product crawling (Speed Layer).
