@@ -23,8 +23,10 @@ from tiki_crawl_products_v2.bootstrap import (
     time,
 )
 
-from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
-from .common import get_logger  # noqa: F401
+from .common import (
+    _fix_sys_path_for_pipelines_import,  # noqa: F401
+    get_logger,  # noqa: F401
+)
 
 
 def load_categories(**context) -> list[dict[str, Any]]:
