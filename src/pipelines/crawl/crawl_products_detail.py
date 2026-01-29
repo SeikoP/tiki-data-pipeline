@@ -915,7 +915,10 @@ def extract_product_detail(
     # 3. Extract đánh giá
     rating_selectors = [
         '[data-view-id="pdp_rating_score"]',
+        '[data-view-id="pdp-rating-score"]',
         ".rating-score",
+        '[class*="rating-score"]',
+        '[class*="rating-average"]',
         '[class*="rating"]',
         '[class*="review"]',
     ]
@@ -1226,7 +1229,10 @@ def extract_product_detail(
 
                 # Cập nhật đánh giá
                 rating_info = (
-                    product_from_next.get("rating") or product_from_next.get("review") or {}
+                    product_from_next.get("rating_summary")
+                    or product_from_next.get("rating")
+                    or product_from_next.get("review")
+                    or {}
                 )
                 if isinstance(rating_info, dict):
                     if not product_data["rating"]["average"]:
@@ -1234,11 +1240,13 @@ def extract_product_detail(
                             rating_info.get("average")
                             or rating_info.get("score")
                             or rating_info.get("rating")
+                            or rating_info.get("rating_average")
                         )
                     if not product_data["rating"]["total_reviews"]:
                         product_data["rating"]["total_reviews"] = (
                             rating_info.get("total")
                             or rating_info.get("count")
+                            or rating_info.get("review_count")
                             or rating_info.get("reviewCount")
                             or 0
                         )

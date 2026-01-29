@@ -955,6 +955,7 @@ class PostgresStorage:
                                 product.get("original_price"),
                                 product.get("discount_percent"),
                                 product.get("rating_average"),
+                                product.get("review_count"),
                                 # Seller fields
                                 product.get("seller_name"),
                                 product.get("seller_id"),
@@ -983,7 +984,7 @@ class PostgresStorage:
                                 """
                                 INSERT INTO products
                                     (product_id, name, short_name, url, image_url, category_url, category_id, sales_count,
-                                     price, original_price, discount_percent, rating_average,
+                                     price, original_price, discount_percent, rating_average, review_count,
                                      seller_name, seller_id, seller_is_official, brand,
                                      stock_available, shipping)
                                 VALUES %s
@@ -1000,6 +1001,7 @@ class PostgresStorage:
                                     original_price = COALESCE(EXCLUDED.original_price, products.original_price),
                                     discount_percent = COALESCE(EXCLUDED.discount_percent, products.discount_percent),
                                     rating_average = COALESCE(EXCLUDED.rating_average, products.rating_average),
+                                    review_count = COALESCE(EXCLUDED.review_count, products.review_count),
                                     seller_name = COALESCE(NULLIF(EXCLUDED.seller_name, ''), products.seller_name),
                                     seller_id = COALESCE(NULLIF(EXCLUDED.seller_id, ''), products.seller_id),
                                     seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
@@ -1029,7 +1031,7 @@ class PostgresStorage:
                                 """
                                 INSERT INTO products
                                     (product_id, name, url, image_url, category_url, category_id, sales_count,
-                                     price, original_price, discount_percent, rating_average,
+                                     price, original_price, discount_percent, rating_average, review_count,
                                      seller_name, seller_id, seller_is_official, brand,
                                      stock_available, shipping)
                                 VALUES %s
@@ -1285,7 +1287,7 @@ class PostgresStorage:
                 cur.execute(
                     """
                     SELECT DISTINCT ON (product_id)
-                        product_id, price, original_price, discount_percent, sales_count
+                        product_id, price, original_price, discount_percent, sales_count, rating_average, review_count
                     FROM crawl_history
                     WHERE product_id = ANY(%s)
                     ORDER BY product_id, crawled_at DESC
@@ -1300,6 +1302,8 @@ class PostgresStorage:
                         "original_price": row[2],
                         "discount_percent": row[3],
                         "sales_count": row[4],
+                        "rating_average": row[5],
+                        "review_count": row[6],
                     }
                     for row in cur.fetchall()
                 }
@@ -1312,7 +1316,9 @@ class PostgresStorage:
                     current_price = p.get("price")
                     current_original_price = p.get("original_price")
                     current_discount = p.get("discount_percent")
-                    current_sales = p.get("sales_count")  # NEW
+                    current_sales = p.get("sales_count")
+                    current_rating = p.get("rating_average")
+                    current_reviews = p.get("review_count")
 
                     prev = previous_data.get(product_id)
 
@@ -1345,8 +1351,10 @@ class PostgresStorage:
                         price_changed = prev_price != current_price_float
                         original_changed = prev_original != current_original_float
                         discount_changed = prev_discount != current_discount
+                        rating_changed = prev.get("rating_average") != current_rating
+                        reviews_changed = prev.get("review_count") != current_reviews
 
-                        if price_changed or original_changed or discount_changed:
+                        if price_changed or original_changed or discount_changed or rating_changed or reviews_changed:
                             crawl_type = "price_change"
                             price_change = None
                             price_change_percent = None
@@ -1427,6 +1435,8 @@ class PostgresStorage:
                                 "previous_discount_percent": prev_discount,
                                 "sales_count": current_sales,
                                 "sales_change": sales_change,
+                                "rating_average": current_rating,
+                                "review_count": current_reviews,
                                 "is_flash_sale": is_flash_sale,
                                 "crawl_type": crawl_type,
                             }
@@ -1444,7 +1454,7 @@ class PostgresStorage:
                                 (product_id, price, original_price, discount_percent, discount_amount,
                                  price_change, price_change_percent,
                                  previous_price, previous_original_price, previous_discount_percent,
-                                 sales_count, sales_change, is_flash_sale, crawl_type)
+                                 sales_count, sales_change, rating_average, review_count, is_flash_sale, crawl_type)
                             VALUES %s
                             """,
                             [
@@ -1461,6 +1471,8 @@ class PostgresStorage:
                                     r["previous_discount_percent"],
                                     r["sales_count"],
                                     r["sales_change"],
+                                    r["rating_average"],
+                                    r["review_count"],
                                     r["is_flash_sale"],  # NEW
                                     r["crawl_type"],
                                 )

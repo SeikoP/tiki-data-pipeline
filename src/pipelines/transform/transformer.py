@@ -300,14 +300,12 @@ class DataTransformer:
             "name": product.get("name"),
             "short_name": self._get_short_name(product.get("name")),
             "url": product.get("url"),
-            "image_url": product.get("image_url"),
+            "image_url": product.get("image_url")
+            or (product.get("images")[0] if product.get("images") else None),
             "category_url": product.get("category_url"),
-            "category_id": product.get("category_id"),  # Extract từ category_url nếu chưa có
-            "category_path": product.get("category_path")
-            or [],  # Default [] nếu không có breadcrumb
-            "sales_count": product.get("sales_count")
-            if product.get("sales_count") is not None
-            else 0,
+            "category_id": product.get("category_id"),
+            "category_path": product.get("category_path") or [],
+            "sales_count": int(product.get("sales_count") or 0),
         }
 
         # Extract category_id từ category_url nếu chưa có
@@ -325,25 +323,32 @@ class DataTransformer:
         price = product.get("price", {})
         if isinstance(price, dict):
             db_product["price"] = price.get("current_price")
-            db_product["original_price"] = price.get("original_price")
+            db_product["original_price"] = price.get("original_price") or db_product["price"]
             db_product["discount_percent"] = (
                 int(round(price["discount_percent"]))
                 if price.get("discount_percent") is not None
-                else None
+                else 0
             )
         else:
-            db_product["price"] = None
-            db_product["original_price"] = None
-            db_product["discount_percent"] = None
+            db_product["price"] = 0
+            db_product["original_price"] = 0
+            db_product["discount_percent"] = 0
 
         # Rating fields (flatten từ dict)
         rating = product.get("rating", {})
         if isinstance(rating, dict):
-            db_product["rating_average"] = rating.get("average")
-            db_product["review_count"] = rating.get("total_reviews") or rating.get("review_count")
+            db_product["rating_average"] = rating.get("average") or 0.0
+            db_product["review_count"] = rating.get("total_reviews") or rating.get("review_count") or 0
         else:
-            db_product["rating_average"] = None
-            db_product["review_count"] = None
+            db_product["rating_average"] = 0.0
+            db_product["review_count"] = 0
+        
+        # Đảm bảo stock_available có giá trị boolean mặc định
+        stock = product.get("stock", {})
+        if isinstance(stock, dict):
+            db_product["stock_available"] = stock.get("available") if stock.get("available") is not None else True
+        else:
+            db_product["stock_available"] = True
 
         # Description
         db_product["description"] = product.get("description")
