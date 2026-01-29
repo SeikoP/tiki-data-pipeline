@@ -49,14 +49,14 @@ with DAG(
             task_id="cleanup_incomplete_products",
             python_callable=cleanup_incomplete_products_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_load_categories = PythonOperator(
             task_id="load_categories",
             python_callable=load_categories,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         # Tối ưu: Cho phép chạy song song vì task_cleanup_products và task_load_categories độc lập
@@ -110,7 +110,7 @@ with DAG(
                 task_id="crawl_category",
                 python_callable=crawl_category_batch,
                 execution_timeout=timedelta(minutes=12),
-                pool="crawl_pool",
+                pool="fast_pool",
                 retries=1,
                 retry_delay=timedelta(seconds=15),
             ).expand(op_kwargs=task_prepare.output)
@@ -124,7 +124,7 @@ with DAG(
                 task_id="crawl_category",
                 python_callable=crawl_single_category,
                 execution_timeout=timedelta(minutes=10),
-                pool="crawl_pool",
+                pool="fast_pool",
                 retries=1,
             ).expand(op_kwargs=task_prepare.output)
 
@@ -134,7 +134,7 @@ with DAG(
             task_id="merge_products",
             python_callable=merge_products,
             execution_timeout=timedelta(minutes=30),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 
@@ -142,7 +142,7 @@ with DAG(
             task_id="save_products",
             python_callable=save_products,
             execution_timeout=timedelta(minutes=10),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
         task_merge_products >> task_save_products
 
@@ -190,7 +190,7 @@ with DAG(
             task_id="crawl_product_detail",
             python_callable=crawl_product_batch_fast,
             execution_timeout=timedelta(minutes=15),
-            pool="crawl_pool",
+            pool="fast_pool",
             retries=1,
             retry_delay=timedelta(seconds=30),
         ).expand(op_kwargs=task_prepare_detail_kwargs.output)
@@ -199,7 +199,7 @@ with DAG(
             task_id="merge_product_details",
             python_callable=merge_product_details,
             execution_timeout=timedelta(minutes=30),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 
@@ -207,7 +207,7 @@ with DAG(
             task_id="save_products_with_detail",
             python_callable=save_products_with_detail,
             execution_timeout=timedelta(minutes=10),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         (
@@ -226,14 +226,14 @@ with DAG(
             task_id="transform_products",
             python_callable=transform_products,
             execution_timeout=timedelta(minutes=30),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_load_products = PythonOperator(
             task_id="load_products",
             python_callable=load_products,
             execution_timeout=timedelta(minutes=30),
-            pool="crawl_pool",
+            pool="fast_pool",
             outlets=[Dataset("tiki-postgres://tiki_postgres/tiki/public/products")],
         )
         task_transform_products >> task_load_products
@@ -244,49 +244,49 @@ with DAG(
             task_id="load_categories_to_db",
             python_callable=load_categories_to_db_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_reconcile = PythonOperator(
             task_id="reconcile_categories",
             python_callable=reconcile_categories_wrapper,
             execution_timeout=timedelta(minutes=10),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_cleanup_orphans = PythonOperator(
             task_id="cleanup_orphan_categories",
             python_callable=cleanup_orphan_categories_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_cleanup_redundant = PythonOperator(
             task_id="cleanup_redundant_categories",
             python_callable=cleanup_redundant_categories_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_cleanup_history = PythonOperator(
             task_id="cleanup_old_history",
             python_callable=cleanup_old_history_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_validate_data = PythonOperator(
             task_id="validate_data",
             python_callable=validate_data,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_aggregate_and_notify = PythonOperator(
             task_id="aggregate_and_notify",
             python_callable=aggregate_and_notify,
             execution_timeout=timedelta(minutes=10),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 
@@ -294,7 +294,7 @@ with DAG(
             task_id="cleanup_redis_cache",
             python_callable=cleanup_redis_cache,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 
@@ -302,7 +302,7 @@ with DAG(
             task_id="backup_database",
             python_callable=backup_database,
             execution_timeout=timedelta(minutes=15),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 

@@ -828,22 +828,41 @@ import sys
 import os
 import pkgutil
 
-os.environ['AIRFLOW_HOME'] = os.path.abspath('airflow')
+# Detect dags folder
+if os.path.exists('airflow/dags'):
+    dag_folder = 'airflow/dags'
+    if 'AIRFLOW_HOME' not in os.environ:
+        os.environ['AIRFLOW_HOME'] = os.path.abspath('airflow')
+elif os.path.exists('dags'):
+    dag_folder = 'dags'
+    if 'AIRFLOW_HOME' not in os.environ:
+        os.environ['AIRFLOW_HOME'] = os.getcwd()
+else:
+    print('❌ Could not find dags folder!')
+    sys.exit(1)
 
-if not pkgutil.find_loader('airflow'):
-    print('SKIP: Airflow not installed locally')
+# Check if airflow is installed
+try:
+    from airflow.models import DagBag
+    airflow_installed = True
+except ImportError:
+    airflow_installed = False
+
+if not airflow_installed:
+    print('SKIP: Airflow not installed')
     sys.exit(0)
 
-from airflow.models import DagBag
-dag_bag = DagBag(dag_folder='airflow/dags', include_examples=False)
+dag_bag = DagBag(dag_folder=dag_folder, include_examples=False)
 
 if dag_bag.import_errors:
     print('❌ DAG Import Errors:')
     for filename, error in dag_bag.import_errors.items():
         print(f'  {filename}: {error}')
+    sys.stdout.flush()
     sys.exit(1)
 else:
     print(f'✅ All DAGs validated! Found {len(dag_bag.dags)} DAG(s)')
+    sys.stdout.flush()
     sys.exit(0)
 """
 
@@ -854,7 +873,8 @@ else:
                 capture_output=True,
             )
 
-            if "SKIP" in result.stdout:
+            stdout = result.stdout or ""
+            if "SKIP" in stdout:
                 self._print_warning("Airflow not installed, trying Docker...")
                 # Try Docker validation
                 # Try Docker validation - use pipe to avoid shell escaping issues
@@ -862,6 +882,7 @@ else:
                     "docker-compose",
                     "run",
                     "--rm",
+                    "-T",  # No TTY
                     "-i",  # Interactive to read from stdin
                     "--entrypoint",
                     "python3",

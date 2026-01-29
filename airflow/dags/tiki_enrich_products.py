@@ -155,6 +155,7 @@ enrich_task = PythonOperator(
     task_id="enrich_product_batch",
     python_callable=_enrich_task_wrapper,
     dag=dag,
+    pool="crawl_pool",
     execution_timeout=timedelta(minutes=60),  # Allow time for Selenium
 )
 

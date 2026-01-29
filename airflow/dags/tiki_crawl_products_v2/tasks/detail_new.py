@@ -11,6 +11,7 @@ from tiki_crawl_products_v2.bootstrap import (
 )
 
 from .common import (
+    get_postgres_storage_class,
     get_selenium_driver_pool_class,
 )
 
@@ -162,16 +163,58 @@ def crawl_product_batch_fast(
 
     results = loop.run_until_complete(_crawl_fast_internal(product_batch, logger))
 
-    # Determine stats
-    success = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "success")
-    needs_enrich = sum(
-        1 for r in results if isinstance(r, dict) and r.get("detail", {}).get("needs_enrichment")
-    )
+    # Post-process: Save successful products to DB
+    saved_count = 0
+    try:
+        PostgresStorage = get_postgres_storage_class(logger)
+        storage = PostgresStorage(logger=logger)
+
+        products_to_save = []
+        for r in results:
+            if isinstance(r, dict) and r.get("status") == "success":
+                detail = r.get("detail")
+                if detail:
+                    products_to_save.append(detail)
+
+        if products_to_save:
+            save_stats = storage.save_products(products_to_save, upsert=True)
+            saved_count = save_stats.get("saved_count", 0)
+            logger.info(f"💾 Scraped Batch Saved: {saved_count} items")
+
+    except Exception as e:
+        logger.error(f"❌ Batch Save Error: {e}")
+
+    # Determine stats & Clean up results for XCom
+    final_results = []
+    success = 0
+    needs_enrich = 0
+
+    for r in results:
+        status = r.get("status")
+        detail = r.get("detail") or {}
+        is_success = status == "success"
+
+        if is_success:
+            success += 1
+            if detail.get("needs_enrichment"):
+                needs_enrich += 1
+
+        # Minimal payload
+        final_results.append(
+            {
+                "product_id": r.get("product_id"),
+                "url": r.get("url"),
+                "status": status,
+                "error": r.get("error"),
+                "needs_enrichment": detail.get("needs_enrichment", False),
+                "crawl_quality": detail.get("crawl_quality", "unknown"),
+            }
+        )
 
     logger.info(
-        f"✅ FAST BATCH DONE: {success}/{len(product_batch)} success. Needs Enrichment: {needs_enrich}"
+        f"✅ FAST BATCH DONE: {success}/{len(product_batch)} success. Needs Enrichment: {needs_enrich}. Saved: {saved_count}"
     )
-    return results
+    return final_results
 
 
 def crawl_product_batch_selenium(
@@ -261,7 +304,41 @@ def crawl_product_batch_selenium(
     finally:
         driver_pool.close_all()
 
-    success = sum(1 for r in results if r.get("status") == "success")
-    logger.info(f"✅ SELENIUM BATCH DONE: {success}/{len(product_batch)} success")
+    # Save to DB
+    saved_count = 0
+    try:
+        PostgresStorage = get_postgres_storage_class(logger)
+        storage = PostgresStorage(logger=logger)
+        products_to_save = [
+            r["detail"] for r in results if r.get("status") == "success" and r.get("detail")
+        ]
+        if products_to_save:
+            save_stats = storage.save_products(products_to_save, upsert=True)
+            saved_count = save_stats.get("saved_count", 0)
+            logger.info(f"💾 Selenium Batch Saved: {saved_count}")
+    except Exception as e:
+        logger.error(f"❌ DB Save Error: {e}")
 
-    return results
+    # Minify for XCom
+    final_results = []
+    success = 0
+    for r in results:
+        if r.get("status") == "success":
+            success += 1
+
+        final_results.append(
+            {
+                "product_id": r.get("product_id"),
+                "url": r.get("url"),
+                "status": r.get("status"),
+                "error": r.get("error"),
+                "crawl_quality": r.get("detail", {}).get("crawl_quality", "full")
+                if r.get("detail")
+                else "failed",
+                "needs_enrichment": False,  # Selenium is the end of line
+            }
+        )
+
+    logger.info(f"✅ SELENIUM BATCH DONE: {success}/{len(product_batch)} success. Saved: {saved_count}")
+
+    return final_results

@@ -63,6 +63,7 @@ def merge_products(**context) -> dict[str, Any]:
             "timeout_categories": 0,
             "total_products": 0,
             "unique_products": 0,
+            "total_saved_directly": 0,
         }
 
         # Lấy kết quả từ các task crawl (Dynamic Task Mapping)
@@ -89,6 +90,7 @@ def merge_products(**context) -> dict[str, Any]:
                                     products = single_result.get("products", [])
                                     all_products.extend(products)
                                     stats["total_products"] += len(products)
+                                    stats["total_saved_directly"] += single_result.get("saved_count", 0)
                                 elif single_result.get("status") == "timeout":
                                     stats["timeout_categories"] += 1
                                     logger.warning(
@@ -138,6 +140,7 @@ def merge_products(**context) -> dict[str, Any]:
                     products = all_results.get("products", [])
                     all_products.extend(products)
                     stats["total_products"] += len(products)
+                    stats["total_saved_directly"] += all_results.get("saved_count", 0)
                 elif all_results.get("status") == "timeout":
                     stats["timeout_categories"] += 1
                     logger.warning(f"⏱️  Category {all_results.get('category_name')} timeout")
@@ -162,6 +165,7 @@ def merge_products(**context) -> dict[str, Any]:
                                 products = result.get("products", [])
                                 all_products.extend(products)
                                 stats["total_products"] += len(products)
+                                stats["total_saved_directly"] += result.get("saved_count", 0)
                             elif result.get("status") == "timeout":
                                 stats["timeout_categories"] += 1
                                 logger.warning(f"⏱️  Category {result.get('category_name')} timeout")
@@ -213,6 +217,7 @@ def merge_products(**context) -> dict[str, Any]:
         )
         logger.info(f"• Tổng sản phẩm:   {stats['total_products']}")
         logger.info(f"• Sau khi lọc trùng: {stats['unique_products']}")
+        logger.info(f"• Saved Directly:    {stats['total_saved_directly']}")
         logger.info("=" * 40)
 
         result = {
@@ -220,8 +225,29 @@ def merge_products(**context) -> dict[str, Any]:
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
         }
-
-        return result
+        
+        # ANTI-PATTERN FIX: Write to disk instead of returning huge dict to XCom
+        try:
+            merged_filename = f"products_merged_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            merged_file_path = DATA_DIR / "interim" / merged_filename
+            ensure_output_dirs() # Ensure dirs exist
+            (DATA_DIR / "interim").mkdir(parents=True, exist_ok=True)
+            
+            logger.info(f"💾 Saving merged products to interim file: {merged_file_path}")
+            # Use atomic write helper
+            atomic_write_file(str(merged_file_path), result, **context)
+            
+            # Return pointer to file
+            return {
+                "merged_file": str(merged_file_path),
+                "stats": stats,
+                "merged_at": datetime.now().isoformat(),
+                "count": len(unique_products)
+            }
+        except Exception as write_err:
+            logger.error(f"❌ Failed to write interim merged file: {write_err}")
+            # Fallback to legacy XCom if write fails (though unsafe)
+            return result
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi merge products: {e}", exc_info=True)
@@ -268,8 +294,28 @@ def save_products(**context) -> str:
         if not merge_result:
             raise ValueError("Không tìm thấy kết quả merge từ XCom")
 
-        products = merge_result.get("products", [])
-        stats = merge_result.get("stats", {})
+        if not merge_result:
+            raise ValueError("Không tìm thấy kết quả merge từ XCom")
+
+        products = []
+        stats = {}
+        
+        # Check if we received a file path (new pattern) or data (legacy pattern)
+        if "merged_file" in merge_result and merge_result["merged_file"]:
+            merged_file_path = merge_result["merged_file"]
+            logger.info(f"📂 Reading products from interim file: {merged_file_path}")
+            if os.path.exists(merged_file_path):
+                with open(merged_file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    products = data.get("products", [])
+                    stats = data.get("stats", {})
+            else:
+                raise FileNotFoundError(f"Interim merged file not found: {merged_file_path}")
+        else:
+            # Legacy fallback
+            logger.warning("⚠️ Using legacy XCom data transfer (High Memory Usage)")
+            products = merge_result.get("products", [])
+            stats = merge_result.get("stats", {})
 
         logger.info(f"Đang lưu {len(products)} sản phẩm...")
 

@@ -82,7 +82,26 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         if not merge_result:
             raise ValueError("Không tìm thấy products từ XCom hoặc file")
 
-        products = merge_result.get("products", [])
+        # Handle file-based XCom (Low Memory)
+        if "merged_file" in merge_result and merge_result["merged_file"]:
+            try:
+                merged_file_path = merge_result["merged_file"]
+                logger.info(f"📂 Reading products from interim file: {merged_file_path}")
+                if os.path.exists(merged_file_path):
+                    with open(merged_file_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        products = data.get("products", [])
+                else:
+                    # Should not happen if upstream succeeded, but handle safety
+                    logger.warning(f"⚠️ Interim file missing: {merged_file_path}")
+                    products = []
+            except Exception as e:
+                logger.error(f"❌ Error reading interim file: {e}")
+                products = []
+        else:
+            # Legacy XCom (High Memory)
+            products = merge_result.get("products", [])
+
         logger.info(f"📊 Tổng số products: {len(products)}")
 
         # Đọc progress file để biết đã crawl đến đâu
@@ -1425,7 +1444,25 @@ def merge_product_details(**context) -> dict[str, Any]:
         if not merge_result:
             raise ValueError("Không tìm thấy products từ XCom hoặc file")
 
-        products = merge_result.get("products", [])
+        # Handle file-based XCom (Low Memory)
+        if "merged_file" in merge_result and merge_result["merged_file"]:
+            try:
+                merged_file_path = merge_result["merged_file"]
+                logger.info(f"📂 Reading products from interim file: {merged_file_path}")
+                if os.path.exists(merged_file_path):
+                    with open(merged_file_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        products = data.get("products", [])
+                else:
+                    logger.warning(f"⚠️ Interim file missing: {merged_file_path}")
+                    products = []
+            except Exception as e:
+                logger.error(f"❌ Error reading interim file: {e}")
+                products = []
+        else:
+             # Legacy XCom (High Memory)
+            products = merge_result.get("products", [])
+            
         logger.info(f"Tổng số products: {len(products)}")
 
         # Lấy số lượng products thực tế được crawl từ prepare_products_for_detail
@@ -2099,8 +2136,28 @@ def merge_product_details(**context) -> dict[str, Any]:
             "merged_at": datetime.now().isoformat(),
             "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' và brand/seller không null (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_no_brand} không có brand, {products_without_detail} không có detail)",
         }
-
-        return result
+        
+        # ANTI-PATTERN FIX: Write to disk
+        try:
+            from tiki_crawl_products_v2.bootstrap import DATA_DIR
+            merged_filename = f"products_with_detail_merged_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            merged_file_path = DATA_DIR / "interim" / merged_filename
+            ensure_output_dirs()
+            (DATA_DIR / "interim").mkdir(parents=True, exist_ok=True)
+            
+            logger.info(f"💾 Saving merged details to interim file: {merged_file_path}")
+            atomic_write_file(str(merged_file_path), result, **context)
+            
+            return {
+                "merged_file": str(merged_file_path),
+                "stats": stats,
+                "merged_at": datetime.now().isoformat(),
+                "note": result["note"]
+            }
+        except Exception as write_err:
+            logger.error(f"❌ Failed to write interim merged details file: {write_err}")
+            # Fallback
+            return result
 
     except ValueError as e:
         logger.error(f"❌ Validation error khi merge details: {e}", exc_info=True)
@@ -2160,9 +2217,30 @@ def save_products_with_detail(**context) -> str:
         if not merge_result:
             raise ValueError("Không tìm thấy merge result từ XCom")
 
-        products = merge_result.get("products", [])
-        stats = merge_result.get("stats", {})
-        note = merge_result.get("note", "Crawl từ Airflow DAG với product details")
+        if not merge_result:
+            raise ValueError("Không tìm thấy merge result từ XCom")
+
+        products = []
+        stats = {}
+        note = "Crawl từ Airflow DAG với product details"
+
+        # Handle file-based XCom
+        if "merged_file" in merge_result and merge_result["merged_file"]:
+            merged_file_path = merge_result["merged_file"]
+            logger.info(f"📂 Reading products from interim file: {merged_file_path}")
+            if os.path.exists(merged_file_path):
+                with open(merged_file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    products = data.get("products", [])
+                    stats = data.get("stats", {})
+                    note = data.get("note", note)
+            else:
+                 raise FileNotFoundError(f"Interim merged file not found: {merged_file_path}")
+        else:
+            # Legacy Fallback
+            products = merge_result.get("products", [])
+            stats = merge_result.get("stats", {})
+            note = merge_result.get("note", note)
 
         logger.info(f"💾 Đang lưu {len(products)} products với detail...")
 

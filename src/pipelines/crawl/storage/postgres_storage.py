@@ -6,6 +6,7 @@ error handling.
 import csv
 import io
 import json
+import logging
 import os
 import re
 import time
@@ -72,6 +73,7 @@ class PostgresStorage:
         keepalives_idle: int = 600,
         keepalives_interval: int = 10,
         keepalives_count: int = 5,
+        logger: logging.Logger | None = None,
     ):
         """Khởi tạo connection pool đến PostgreSQL với tối ưu hóa.
 
@@ -88,6 +90,7 @@ class PostgresStorage:
             keepalives_interval: Seconds between keepalive probes
             keepalives_count: Number of keepalive probes before considering connection dead
         """
+        self.logger = logger or logging.getLogger(__name__)
         self.host = host or os.getenv("POSTGRES_HOST", "postgres")
         self.port = port
         self.database = database or os.getenv("POSTGRES_DB", "tiki")
@@ -182,7 +185,7 @@ class PostgresStorage:
                             if normalized_id:
                                 used_ids.add(normalized_id)
         except Exception as e:
-            print(f"⚠️  Error getting used category IDs: {e}")
+            self.logger.warning(f" Error getting used category IDs: {e}")
         return used_ids
 
     @contextmanager
@@ -404,10 +407,10 @@ class PostgresStorage:
         # Nếu có parent URLs cần thiết nhưng chưa có trong danh sách,
         # thử load từ file JSON categories (nếu có)
         if needed_parent_urls:
-            print(
+            self.logger.info(
                 f"📂 Tìm thấy {len(needed_parent_urls)} parent URLs cần thiết nhưng chưa có trong danh sách"
             )
-            print(f"   Các parent URLs: {list(needed_parent_urls)[:5]}...")
+            self.logger.info(f"   Các parent URLs: {list(needed_parent_urls)[:5]}...")
 
             # Thử load từ file JSON categories
             json_paths = [
@@ -435,12 +438,12 @@ class PostgresStorage:
                             url = cat_json.get("url")
                             if url:
                                 categories_from_json[url] = cat_json
-                        print(
+                        self.logger.info(
                             f"📂 Loaded {len(categories_from_json)} categories from JSON: {json_path}"
                         )
                         break
                     except Exception as e:
-                        print(f"⚠️  Could not load categories JSON from {json_path}: {e}")
+                        self.logger.warning(f" Could not load categories JSON from {json_path}: {e}")
 
             # Include missing parent categories từ JSON
             if categories_from_json:
@@ -470,7 +473,7 @@ class PostgresStorage:
                                 depth += 1
 
                 if added_count > 0:
-                    print(f"✅ Đã thêm {added_count} parent categories từ file JSON vào danh sách")
+                    self.logger.info(f"Đã thêm {added_count} parent categories từ file JSON vào danh sách")
                     # Update all_urls sau khi thêm
                     all_urls = set(url_to_cat.keys())
 
@@ -553,7 +556,7 @@ class PostgresStorage:
                     except Exception as e:
                         # Lỗi khi query, log nhưng không fail
                         # Tiếp tục với path hiện tại
-                        print(f"⚠️  Warning: Error querying parent {parent_url}: {e}")
+                        self.logger.warning(f" Warning: Error querying parent {parent_url}: {e}")
                         break
                 else:
                     # Không có cursor để query, dừng lại
@@ -567,7 +570,7 @@ class PostgresStorage:
 
         if sync_with_products:
             used_category_ids = self.get_used_category_ids()
-            print(f"🔍 Found {len(used_category_ids)} active categories in products table")
+            self.logger.info(f"Found {len(used_category_ids)} active categories in products table")
 
             # IMPORTANT: If no products exist yet, disable filtering to load all categories
             if not used_category_ids:
@@ -605,7 +608,7 @@ class PostgresStorage:
                                 parent_url = current.get("parent_url")
                                 current = url_to_cat.get(parent_url) if parent_url else None
 
-                print(f"📂 Keeping {len(urls_to_keep)} categories (leaves + parents)")
+                self.logger.info(f"Keeping {len(urls_to_keep)} categories (leaves + parents)")
 
         # Build category paths với connection đến DB để query parent nếu cần
         # Trước tiên, load tất cả parent categories từ DB vào url_to_cat để đảm bảo path đầy đủ
@@ -693,7 +696,7 @@ class PostgresStorage:
                                     f"📂 Loaded {loaded_count} parent categories from DB for path building"
                                 )
                         except Exception as e:
-                            print(f"⚠️  Warning: Could not load all parent categories from DB: {e}")
+                            self.logger.warning(f" Warning: Could not load all parent categories from DB: {e}")
 
                 prepared_categories = []
                 for cat in categories:
@@ -851,7 +854,7 @@ class PostgresStorage:
                                     """,
                                     (cat_id, cat_id, parent_url),  # Tạm dùng ID làm tên
                                 )
-                        print(f"📂 Auto-added {len(missing_parents)} missing parent categories")
+                        self.logger.info(f"Auto-added {len(missing_parents)} missing parent categories")
 
                 # CRITICAL: If only_leaf=True, ensure NO non-leaf categories remain
                 if only_leaf:
@@ -886,21 +889,21 @@ class PostgresStorage:
             products = fix_products_category_paths(products, hierarchy_map=None, auto_fix=True)
         except Exception as e:
             # Log nhưng không fail nếu fix có lỗi
-            print(f"⚠️  Warning: Could not auto-fix category_path: {e}")
+            self.logger.warning(f" Warning: Could not auto-fix category_path: {e}")
 
         # Auto-sync: Ensure all categories from products exist in categories table BEFORE saving products
         # This prevents Foreign Key constraint violations (Referential Integrity)
         try:
             self._ensure_categories_from_products(products)
         except Exception as e:
-            print(f"⚠️  Failed to pre-sync missing categories: {e}")
+            self.logger.warning(f" Failed to pre-sync missing categories: {e}")
 
         # Tối ưu: Sử dụng Bulk COPY cho batch lớn (>200 items)
         if len(products) >= 200:
             try:
                 return self._save_products_bulk_copy(products, upsert)
             except Exception as e:
-                print(f"⚠️  Bulk COPY process failed: {e}. Falling back to standard batch insert.")
+                self.logger.warning(f" Bulk COPY process failed: {e}. Falling back to standard batch insert.")
                 # Fallback to standard flow below
 
         saved_count = 0
@@ -930,7 +933,7 @@ class PostgresStorage:
                                     }
             except Exception as e:
                 # Nếu không lấy được, tiếp tục với upsert bình thường
-                print(f"⚠️  Không thể lấy danh sách products đã có: {e}")
+                self.logger.warning(f" Không thể lấy danh sách products đã có: {e}")
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
@@ -1069,7 +1072,7 @@ class PostgresStorage:
             # Use the robust batch history logging method - OUTSIDE of the main products transaction
             self._log_batch_crawl_history(products, previous_state=existing_products_info)
         except Exception as e:
-            print(f"⚠️  Failed to log crawl history: {e}")
+            self.logger.warning(f" Failed to log crawl history: {e}")
 
         return {
             "saved_count": saved_count,
@@ -1135,7 +1138,7 @@ class PostgresStorage:
                     )
                     break
                 except Exception as e:
-                    print(f"⚠️  Could not load categories JSON: {e}")
+                    self.logger.warning(f" Could not load categories JSON: {e}")
 
         # Find categories that exist in JSON and match product URLs
         categories_to_add = []
@@ -1245,7 +1248,7 @@ class PostgresStorage:
                         added_count += 1
 
         if added_count > 0:
-            print(f"📂 Auto-added/updated {added_count} categories from products with full data")
+            self.logger.info(f"Auto-added/updated {added_count} categories from products with full data")
 
         return added_count
 
@@ -1493,17 +1496,17 @@ class PostgresStorage:
                             type_counts[ct] = type_counts.get(ct, 0) + 1
 
                         type_str = ", ".join(f"{k}: {v}" for k, v in type_counts.items())
-                        print(f"📊 Crawl history: {len(records_to_insert)} records ({type_str})")
+                        self.logger.info(f"Crawl history: {len(records_to_insert)} records ({type_str})")
                         conn.commit()  # Commit history inserts
                     except Exception as e:
                         import traceback
 
                         error_trace = traceback.format_exc()
-                        print(f"❌ Error inserting crawl history: {e}")
-                        print(f"Error type: {type(e).__name__}")
-                        print(f"Error trace: {error_trace}")
+                        self.logger.error(f"Error inserting crawl history: {e}")
+                        self.logger.error(f"Error type: {type(e).__name__}")
+                        self.logger.error(f"Error trace: {error_trace}")
                         if "foreign key" in str(e).lower() or "does not exist" in str(e).lower():
-                            print(
+                            self.logger.info(
                                 "💡 FK constraint error or missing column: ensure products exist and schema is updated"
                             )
                             # Try to get which product IDs are missing
@@ -1517,17 +1520,17 @@ class PostgresStorage:
                                     if not cur.fetchone():
                                         missing_ids.append(r["product_id"])
                                 if missing_ids:
-                                    print(f"⚠️  Missing product_ids (first 5): {missing_ids[:5]}")
+                                    self.logger.warning(f" Missing product_ids (first 5): {missing_ids[:5]}")
                                 else:
-                                    print(
+                                    self.logger.info(
                                         "💡 All product_ids exist - likely a schema mismatch issue"
                                     )
-                                    print("💡 Run _ensure_history_schema() to add missing columns")
+                                    self.logger.info("💡 Run _ensure_history_schema() to add missing columns")
                             except Exception as inner_e:
-                                print(f"⚠️  Could not check missing products: {inner_e}")
+                                self.logger.warning(f" Could not check missing products: {inner_e}")
                         conn.rollback()  # Rollback on error
                         # Don't re-raise - log the error but continue
-                        print("⚠️  Continuing without crawl history (will retry on next crawl)")
+                        self.logger.warning("⚠️  Continuing without crawl history (will retry on next crawl)")
 
     def update_category_product_counts(self) -> int:
         """Update product_count for all categories based on actual products in DB. Sửa lỗi tính
@@ -1602,13 +1605,13 @@ class PostgresStorage:
             if dry_run:
                 cur.execute(select_query)
                 count = cur.fetchone()[0]
-                print(f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
+                self.logger.info(f"[DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
                 return 0
 
             cur.execute(delete_query)
             count = cur.rowcount
             if count > 0:
-                print(f"🧹 Cleanup: Removed {count} non-leaf categories from DB")
+                self.logger.info(f"Cleanup: Removed {count} non-leaf categories from DB")
             return count
         else:
             with self.get_connection() as conn:
@@ -1624,7 +1627,7 @@ class PostgresStorage:
                     standalone_cur.execute(delete_query)
                     count = standalone_cur.rowcount
                     if count > 0:
-                        print(f"🧹 Cleanup: Removed {count} non-leaf categories from DB")
+                        self.logger.info(f"Cleanup: Removed {count} non-leaf categories from DB")
                     return count
 
     def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
@@ -1813,9 +1816,9 @@ class PostgresStorage:
             try:
                 print("🔄 Updating category product counts...")
                 updated_cats = self.update_category_product_counts()
-                print(f"✅ Updated counts for {updated_cats} categories")
+                self.logger.info(f"Updated counts for {updated_cats} categories")
             except Exception as e:
-                print(f"⚠️ Failed to update category counts: {e}")
+                self.logger.warning(f"Failed to update category counts: {e}")
 
         return {
             "deleted_count": deleted_count,
@@ -1921,7 +1924,7 @@ class PostgresStorage:
                 deleted_count = cur.rowcount
 
                 if deleted_count > 0:
-                    print(f"🧹 Cleaned up {deleted_count} orphan categories")
+                    self.logger.info(f"Cleaned up {deleted_count} orphan categories")
 
                 return deleted_count
 
@@ -1981,7 +1984,7 @@ class PostgresStorage:
             # Use the robust batch history logging method
             self._log_batch_crawl_history(products)
         except Exception as e:
-            print(f"⚠️  Failed to log bulk history: {e}")
+            self.logger.warning(f" Failed to log bulk history: {e}")
 
         return {
             "saved_count": saved_count,

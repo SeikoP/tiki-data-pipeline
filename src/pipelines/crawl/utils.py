@@ -136,19 +136,32 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
         if not chrome_options:
             return None
 
-        driver = None
+        driver_container = {"instance": None}
         driver_created = threading.Event()
-        error_occurred = [None]  # Dùng list để có thể modify trong nested function
+        abort_creation = threading.Event()
+        error_occurred = [None]
 
         def create_driver():
             """
             Helper function để tạo driver trong thread riêng.
             """
-            nonlocal driver
+            temp_driver = None
             try:
                 # Ưu tiên 1: Thử dùng ChromeDriver có sẵn trong PATH (nhanh nhất)
                 try:
-                    driver = webdriver.Chrome(options=chrome_options)
+                    if abort_creation.is_set():
+                        return
+                        
+                    temp_driver = webdriver.Chrome(options=chrome_options)
+                    
+                    if abort_creation.is_set():
+                        try:
+                            temp_driver.quit()
+                        except Exception:
+                            pass
+                        return
+                        
+                    driver_container["instance"] = temp_driver
                     driver_created.set()
                 except Exception as e:
                     # Nếu không có ChromeDriver trong PATH, thử webdriver-manager
@@ -171,11 +184,13 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
                         wdm_logger = logging.getLogger("WDM")
                         wdm_logger.setLevel(logging.WARNING)
 
+                        if abort_creation.is_set():
+                            return
+
                         # Install với cache để tránh download lại
                         driver_path = ChromeDriverManager().install()
 
                         # QUAN TRỌNG: Set quyền thực thi cho ChromeDriver (fix lỗi status code 127)
-                        # Đặc biệt cần thiết trong WSL2/Linux
                         try:
                             os.chmod(
                                 driver_path,
@@ -201,13 +216,24 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
                                     "Chạy: bash scripts/install_chromedriver_dependencies.sh"
                                 )
                         except (subprocess.TimeoutExpired, FileNotFoundError, RuntimeError):
-                            # Nếu kiểm tra fail, vẫn thử tiếp (có thể là vấn đề khác)
                             pass
                         except Exception:
                             pass
 
+                        if abort_creation.is_set():
+                            return
+
                         service = Service(driver_path)
-                        driver = webdriver.Chrome(service=service, options=chrome_options)
+                        temp_driver = webdriver.Chrome(service=service, options=chrome_options)
+
+                        if abort_creation.is_set():
+                            try:
+                                temp_driver.quit()
+                            except Exception:
+                                pass
+                            return
+
+                        driver_container["instance"] = temp_driver
                         driver_created.set()
                     except ImportError:
                         # Không có webdriver-manager, raise lỗi gốc
@@ -219,9 +245,9 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
                         if "127" in error_msg or "unexpectedly exited" in error_msg.lower():
                             enhanced_error = RuntimeError(
                                 f"ChromeDriver không thể khởi động (status code 127). "
-                                f"Thiếu dependencies hệ thống (libnss3, libnspr4, etc.).\n"
-                                f"Giải pháp: Chạy script sau để cài đặt dependencies:\n"
-                                f"  bash scripts/install_chromedriver_dependencies.sh\n"
+                                f"Thiếu dependencies hệ thống (libnss3, libnspr4, etc.).\\n"
+                                f"Giải pháp: Chạy script sau để cài đặt dependencies:\\n"
+                                f"  bash scripts/install_chromedriver_dependencies.sh\\n"
                                 f"Lỗi gốc: {error_msg}"
                             )
                             error_occurred[0] = enhanced_error
@@ -231,6 +257,11 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
             except Exception as e:
                 error_occurred[0] = e
                 driver_created.set()
+                if temp_driver:
+                    try:
+                        temp_driver.quit()
+                    except Exception:
+                        pass
 
         # Tạo driver trong thread riêng với timeout
         thread = threading.Thread(target=create_driver, daemon=True)
@@ -240,9 +271,11 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
         if driver_created.wait(timeout=timeout):
             if error_occurred[0]:
                 raise error_occurred[0]
-            return driver
+            return driver_container["instance"]
         else:
             # Timeout - thread vẫn đang chạy nhưng quá lâu
+            # Signal thread to abort and clean up if it eventually succeeds
+            abort_creation.set()
             raise TimeoutError(f"Tạo Selenium driver timeout sau {timeout} giây")
 
     except ImportError:

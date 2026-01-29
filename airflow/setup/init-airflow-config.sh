@@ -29,9 +29,13 @@ echo "✅ Airflow DB is ready"
 echo ""
 echo "📦 Creating Airflow Pools..."
 
-# crawl_pool: Controls concurrency for crawling tasks
-# 6 slots recommended for 16GB RAM, i7 with 8 cores
-airflow pools set crawl_pool 6 "Pool for Tiki crawling tasks (Selenium)" 2>/dev/null || \
+# fast_pool: Optimized for API-based and data processing tasks (high concurrency)
+airflow pools set fast_pool 32 "Pool for Fast API and Data Processing tasks" 2>/dev/null || \
+    echo "   Pool 'fast_pool' already exists or update failed"
+
+# crawl_pool: Restricted concurrency for Selenium tasks to avoid OOM
+# 8 slots recommended for systems with 16GB+ RAM
+airflow pools set crawl_pool 8 "Pool for Tiki crawling tasks (Selenium)" 2>/dev/null || \
     echo "   Pool 'crawl_pool' already exists or update failed"
 
 echo "✅ Pools configured"
@@ -73,6 +77,25 @@ airflow variables set POSTGRES_USER "${POSTGRES_USER:-airflow_user}" 2>/dev/null
 airflow variables set REDIS_URL "redis://redis:6379/1" 2>/dev/null || true
 
 echo "✅ Variables configured"
+
+# =============================================================================
+# CONFIGURE CONNECTIONS
+# =============================================================================
+echo ""
+echo "🔌 Configuring Airflow Connections..."
+
+# tiki_postgres: Connection to the project database
+# Using environment variables from .env / docker-compose
+airflow connections add tiki_postgres \
+    --conn-type postgres \
+    --conn-host "${POSTGRES_HOST:-postgres}" \
+    --conn-login "${POSTGRES_USER:-admin}" \
+    --conn-password "${POSTGRES_PASSWORD:-admin}" \
+    --conn-port "${POSTGRES_PORT:-5432}" \
+    --conn-schema "${POSTGRES_DB:-tiki}" 2>/dev/null || \
+    echo "   Connection 'tiki_postgres' already exists or update failed"
+
+echo "✅ Connections configured"
 
 # =============================================================================
 # FORCE DAG PARSING

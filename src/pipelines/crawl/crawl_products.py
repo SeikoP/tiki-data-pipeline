@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import time
@@ -849,6 +850,8 @@ def crawl_category_products(
     cache_dir=DEFAULT_PRODUCT_LIST_CACHE_DIR,
     use_redis_cache=True,
     use_rate_limiting=True,
+    allow_selenium_fallback=True,  # Tối ưu: Cho phép tắt fallback Selenium
+    logger: logging.Logger | None = None,
 ):
     """Crawl tất cả sản phẩm từ một danh mục.
 
@@ -859,6 +862,7 @@ def crawl_category_products(
         cache_dir: Thư mục cache (fallback nếu Redis không available)
         use_redis_cache: Có dùng Redis cache không (mặc định True)
     """
+    logger = logger or logging.getLogger(__name__)
 
     all_products = []
 
@@ -867,7 +871,7 @@ def crawl_category_products(
         category_url, max_pages=max_pages or 5, use_rate_limiting=use_rate_limiting
     )
     if api_products:
-        print(f"[Listing API] ✅ Lấy được {len(api_products)} sản phẩm cho {category_url[:60]}...")
+        logger.info(f"[Listing API] ✅ Lấy được {len(api_products)} sản phẩm cho {category_url[:60]}...")
         # Inject category_url for downstream usage
         for p in api_products:
             p["category_url"] = category_url
@@ -883,7 +887,7 @@ def crawl_category_products(
             if redis_cache:
                 cached_products = redis_cache.get_cached_products(category_url)
                 if cached_products:
-                    print(f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}...")
+                    logger.info(f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}...")
                     return cached_products
         except Exception:
             # Redis không available, fallback về file cache
@@ -901,7 +905,7 @@ def crawl_category_products(
         if cached_data:
             cached_products = cached_data.get("products", [])
             if cached_products:  # Chỉ return cache nếu có sản phẩm
-                print(f"[File Cache] ✅ Hit cache cho {category_url[:60]}...")
+                logger.info(f"[File Cache] ✅ Hit cache cho {category_url[:60]}...")
                 return cached_products
 
     try:
@@ -915,7 +919,7 @@ def crawl_category_products(
                     use_rate_limiting=use_rate_limiting,
                 )
             else:
-                print("⚠️  Selenium chưa được cài đặt, dùng requests thay thế")
+                logger.warning("⚠️  Selenium chưa được cài đặt, dùng requests thay thế")
                 html = get_page_with_requests(
                     category_url,
                     use_redis_cache=use_redis_cache,
@@ -925,11 +929,11 @@ def crawl_category_products(
             html = get_page_with_requests(
                 category_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting
             )
-            # Nếu không tìm thấy sản phẩm với requests, thử Selenium
+            # Nếu không tìm thấy sản phẩm với requests, thử Selenium (nếu cho phép)
             if html:
                 products_test = parse_products_from_html(html, category_url)
-                if not products_test and _check_selenium_available():
-                    print("⚠️  Không tìm thấy sản phẩm với requests, thử Selenium...")
+                if not products_test and allow_selenium_fallback and _check_selenium_available():
+                    logger.warning("⚠️  Không tìm thấy sản phẩm với requests, thử Selenium fallback...")
                     html = get_page_with_selenium(category_url)
                     use_selenium = True  # Đánh dấu đã dùng Selenium
 
@@ -1011,11 +1015,11 @@ def crawl_category_products(
         if redis_cache:
             try:
                 redis_cache.cache_products(category_url, unique_products, ttl=43200)  # 12 giờ
-                print(
+                logger.info(
                     f"[Redis Cache] ✅ Đã cache {len(unique_products)} products cho {category_url[:60]}..."
                 )
             except Exception as e:
-                print(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
+                logger.error(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
 
         # File cache (fallback)
         if cache_file:
