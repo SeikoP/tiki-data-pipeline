@@ -1960,7 +1960,7 @@ def merge_product_details(**context) -> dict[str, Any]:
                             continue
 
                         try:
-                            import json
+
 
                             detail = json.loads(detail)
                         except (json.JSONDecodeError, TypeError) as e:

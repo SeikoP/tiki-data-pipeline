@@ -194,7 +194,7 @@ def crawl_single_category(
             else get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
         )
         # timeout hiện tại không được dùng trong _crawl_with_params nhưng vẫn giữ để không leak DB hit nếu mở rộng sau này
-        # timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300"))
+        timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300"))
 
         # Rate limiting: được xử lý bên trong crawl_category_products (smart rate limit / cache check)
         # Không sleep ở đây để tránh chậm khi hit cache
