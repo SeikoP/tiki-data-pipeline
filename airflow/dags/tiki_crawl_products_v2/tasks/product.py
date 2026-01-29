@@ -90,7 +90,9 @@ def merge_products(**context) -> dict[str, Any]:
                                     products = single_result.get("products", [])
                                     all_products.extend(products)
                                     stats["total_products"] += len(products)
-                                    stats["total_saved_directly"] += single_result.get("saved_count", 0)
+                                    stats["total_saved_directly"] += single_result.get(
+                                        "saved_count", 0
+                                    )
                                 elif single_result.get("status") == "timeout":
                                     stats["timeout_categories"] += 1
                                     logger.warning(
@@ -225,24 +227,24 @@ def merge_products(**context) -> dict[str, Any]:
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
         }
-        
+
         # ANTI-PATTERN FIX: Write to disk instead of returning huge dict to XCom
         try:
             merged_filename = f"products_merged_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             merged_file_path = DATA_DIR / "interim" / merged_filename
-            ensure_output_dirs() # Ensure dirs exist
+            ensure_output_dirs()  # Ensure dirs exist
             (DATA_DIR / "interim").mkdir(parents=True, exist_ok=True)
-            
+
             logger.info(f"💾 Saving merged products to interim file: {merged_file_path}")
             # Use atomic write helper
             atomic_write_file(str(merged_file_path), result, **context)
-            
+
             # Return pointer to file
             return {
                 "merged_file": str(merged_file_path),
                 "stats": stats,
                 "merged_at": datetime.now().isoformat(),
-                "count": len(unique_products)
+                "count": len(unique_products),
             }
         except Exception as write_err:
             logger.error(f"❌ Failed to write interim merged file: {write_err}")
@@ -299,13 +301,13 @@ def save_products(**context) -> str:
 
         products = []
         stats = {}
-        
+
         # Check if we received a file path (new pattern) or data (legacy pattern)
         if "merged_file" in merge_result and merge_result["merged_file"]:
             merged_file_path = merge_result["merged_file"]
             logger.info(f"📂 Reading products from interim file: {merged_file_path}")
             if os.path.exists(merged_file_path):
-                with open(merged_file_path, "r", encoding="utf-8") as f:
+                with open(merged_file_path, encoding="utf-8") as f:
                     data = json.load(f)
                     products = data.get("products", [])
                     stats = data.get("stats", {})

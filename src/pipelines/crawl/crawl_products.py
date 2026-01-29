@@ -871,7 +871,9 @@ def crawl_category_products(
         category_url, max_pages=max_pages or 5, use_rate_limiting=use_rate_limiting
     )
     if api_products:
-        logger.info(f"[Listing API] ✅ Lấy được {len(api_products)} sản phẩm cho {category_url[:60]}...")
+        logger.info(
+            f"[Listing API] ✅ Lấy được {len(api_products)} sản phẩm cho {category_url[:60]}..."
+        )
         # Inject category_url for downstream usage
         for p in api_products:
             p["category_url"] = category_url
@@ -933,7 +935,9 @@ def crawl_category_products(
             if html:
                 products_test = parse_products_from_html(html, category_url)
                 if not products_test and allow_selenium_fallback and _check_selenium_available():
-                    logger.warning("⚠️  Không tìm thấy sản phẩm với requests, thử Selenium fallback...")
+                    logger.warning(
+                        "⚠️  Không tìm thấy sản phẩm với requests, thử Selenium fallback..."
+                    )
                     html = get_page_with_selenium(category_url)
                     use_selenium = True  # Đánh dấu đã dùng Selenium
 

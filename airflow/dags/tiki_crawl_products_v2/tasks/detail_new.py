@@ -339,6 +339,8 @@ def crawl_product_batch_selenium(
             }
         )
 
-    logger.info(f"✅ SELENIUM BATCH DONE: {success}/{len(product_batch)} success. Saved: {saved_count}")
+    logger.info(
+        f"✅ SELENIUM BATCH DONE: {success}/{len(product_batch)} success. Saved: {saved_count}"
+    )
 
     return final_results

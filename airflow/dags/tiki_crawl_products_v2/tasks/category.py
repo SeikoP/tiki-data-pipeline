@@ -64,18 +64,20 @@ def load_categories(**context) -> list[dict[str, Any]]:
         # 1. Xác định is_leaf cho từng danh mục
         # Một danh mục là leaf nếu URL của nó không được dùng làm parent_url của bất kỳ danh mục nào khác
         parent_urls = {cat.get("parent_url") for cat in categories if cat.get("parent_url")}
-        
+
         for cat in categories:
             cat["is_leaf"] = cat.get("url") not in parent_urls
 
         # 2. Lọc danh mục: Chỉ lấy leaf categories theo đúng định hướng
         # Cho phép override bằng variable nếu cần (mặc định crawl_only_leaf=True)
         crawl_only_leaf = get_variable("TIKI_CRAWL_ONLY_LEAF", default="true").lower() == "true"
-        
+
         if crawl_only_leaf:
             original_count = len(categories)
             categories = [cat for cat in categories if cat.get("is_leaf")]
-            logger.info(f"🍃 Đã lọc lấy {len(categories)} leaf categories (từ {original_count} ban đầu)")
+            logger.info(
+                f"🍃 Đã lọc lấy {len(categories)} leaf categories (từ {original_count} ban đầu)"
+            )
         else:
             # Fallback về lọc theo level nếu không chỉ lọc leaf
             try:
@@ -83,8 +85,12 @@ def load_categories(**context) -> list[dict[str, Any]]:
                 max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
             except Exception:
                 min_level, max_level = 2, 4
-            categories = [cat for cat in categories if min_level <= cat.get("level", 0) <= max_level]
-            logger.info(f"📊 Lọc theo Level: {len(categories)} danh mục (Level {min_level}-{max_level})")
+            categories = [
+                cat for cat in categories if min_level <= cat.get("level", 0) <= max_level
+            ]
+            logger.info(
+                f"📊 Lọc theo Level: {len(categories)} danh mục (Level {min_level}-{max_level})"
+            )
 
         # Push categories lên XCom để các task khác dùng
         return categories
@@ -177,13 +183,18 @@ def crawl_single_category(
             return result
 
         # Lấy cấu hình từ Airflow Variables hoặc tham số truyền vào (để giảm DB hit trong batch)
-        max_pages = max_pages_param if max_pages_param is not None else int(
-            get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20")
+        max_pages = (
+            max_pages_param
+            if max_pages_param is not None
+            else int(get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20"))
         )
-        use_selenium = use_selenium_param if use_selenium_param is not None else \
-            get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
+        use_selenium = (
+            use_selenium_param
+            if use_selenium_param is not None
+            else get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
+        )
         # timeout hiện tại không được dùng trong _crawl_with_params nhưng vẫn giữ để không leak DB hit nếu mở rộng sau này
-        # timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300")) 
+        # timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300"))
 
         # Rate limiting: được xử lý bên trong crawl_category_products (smart rate limit / cache check)
         # Không sleep ở đây để tránh chậm khi hit cache
@@ -352,16 +363,16 @@ def crawl_category_batch(
     # Lấy cấu hình một lần duy nhất cho cả batch để giảm DB hit (Airflow Variables)
     max_pages = int(get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20"))
     use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
-    
+
     results = []
     for _i, category in enumerate(category_batch):
         try:
             # Re-use crawl_single_category logic with pre-fetched params
             cat_result = crawl_single_category(
-                category=category, 
+                category=category,
                 max_pages_param=max_pages,
                 use_selenium_param=use_selenium,
-                **context
+                **context,
             )
             results.append(cat_result)
         except Exception as e:

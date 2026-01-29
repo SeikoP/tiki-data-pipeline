@@ -189,7 +189,9 @@ def get_postgres_storage_class(logger):
 
         storage_path = src_path / "pipelines" / "crawl" / "storage" / "postgres_storage.py"
         if storage_path.exists():
-            spec = importlib.util.spec_from_file_location("postgres_storage_task", str(storage_path))
+            spec = importlib.util.spec_from_file_location(
+                "postgres_storage_task", str(storage_path)
+            )
             if spec and spec.loader:
                 storage_mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(storage_mod)

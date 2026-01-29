@@ -443,7 +443,9 @@ class PostgresStorage:
                         )
                         break
                     except Exception as e:
-                        self.logger.warning(f" Could not load categories JSON from {json_path}: {e}")
+                        self.logger.warning(
+                            f" Could not load categories JSON from {json_path}: {e}"
+                        )
 
             # Include missing parent categories từ JSON
             if categories_from_json:
@@ -473,7 +475,9 @@ class PostgresStorage:
                                 depth += 1
 
                 if added_count > 0:
-                    self.logger.info(f"Đã thêm {added_count} parent categories từ file JSON vào danh sách")
+                    self.logger.info(
+                        f"Đã thêm {added_count} parent categories từ file JSON vào danh sách"
+                    )
                     # Update all_urls sau khi thêm
                     all_urls = set(url_to_cat.keys())
 
@@ -696,7 +700,9 @@ class PostgresStorage:
                                     f"📂 Loaded {loaded_count} parent categories from DB for path building"
                                 )
                         except Exception as e:
-                            self.logger.warning(f" Warning: Could not load all parent categories from DB: {e}")
+                            self.logger.warning(
+                                f" Warning: Could not load all parent categories from DB: {e}"
+                            )
 
                 prepared_categories = []
                 for cat in categories:
@@ -854,7 +860,9 @@ class PostgresStorage:
                                     """,
                                     (cat_id, cat_id, parent_url),  # Tạm dùng ID làm tên
                                 )
-                        self.logger.info(f"Auto-added {len(missing_parents)} missing parent categories")
+                        self.logger.info(
+                            f"Auto-added {len(missing_parents)} missing parent categories"
+                        )
 
                 # CRITICAL: If only_leaf=True, ensure NO non-leaf categories remain
                 if only_leaf:
@@ -903,7 +911,9 @@ class PostgresStorage:
             try:
                 return self._save_products_bulk_copy(products, upsert)
             except Exception as e:
-                self.logger.warning(f" Bulk COPY process failed: {e}. Falling back to standard batch insert.")
+                self.logger.warning(
+                    f" Bulk COPY process failed: {e}. Falling back to standard batch insert."
+                )
                 # Fallback to standard flow below
 
         saved_count = 0
@@ -1248,7 +1258,9 @@ class PostgresStorage:
                         added_count += 1
 
         if added_count > 0:
-            self.logger.info(f"Auto-added/updated {added_count} categories from products with full data")
+            self.logger.info(
+                f"Auto-added/updated {added_count} categories from products with full data"
+            )
 
         return added_count
 
@@ -1496,7 +1508,9 @@ class PostgresStorage:
                             type_counts[ct] = type_counts.get(ct, 0) + 1
 
                         type_str = ", ".join(f"{k}: {v}" for k, v in type_counts.items())
-                        self.logger.info(f"Crawl history: {len(records_to_insert)} records ({type_str})")
+                        self.logger.info(
+                            f"Crawl history: {len(records_to_insert)} records ({type_str})"
+                        )
                         conn.commit()  # Commit history inserts
                     except Exception as e:
                         import traceback
@@ -1520,17 +1534,23 @@ class PostgresStorage:
                                     if not cur.fetchone():
                                         missing_ids.append(r["product_id"])
                                 if missing_ids:
-                                    self.logger.warning(f" Missing product_ids (first 5): {missing_ids[:5]}")
+                                    self.logger.warning(
+                                        f" Missing product_ids (first 5): {missing_ids[:5]}"
+                                    )
                                 else:
                                     self.logger.info(
                                         "💡 All product_ids exist - likely a schema mismatch issue"
                                     )
-                                    self.logger.info("💡 Run _ensure_history_schema() to add missing columns")
+                                    self.logger.info(
+                                        "💡 Run _ensure_history_schema() to add missing columns"
+                                    )
                             except Exception as inner_e:
                                 self.logger.warning(f" Could not check missing products: {inner_e}")
                         conn.rollback()  # Rollback on error
                         # Don't re-raise - log the error but continue
-                        self.logger.warning("⚠️  Continuing without crawl history (will retry on next crawl)")
+                        self.logger.warning(
+                            "⚠️  Continuing without crawl history (will retry on next crawl)"
+                        )
 
     def update_category_product_counts(self) -> int:
         """Update product_count for all categories based on actual products in DB. Sửa lỗi tính
@@ -1605,7 +1625,9 @@ class PostgresStorage:
             if dry_run:
                 cur.execute(select_query)
                 count = cur.fetchone()[0]
-                self.logger.info(f"[DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
+                self.logger.info(
+                    f"[DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB"
+                )
                 return 0
 
             cur.execute(delete_query)
