@@ -34,9 +34,9 @@
 ```
 Tổng: 88+ parameters
 
-├─ Airflow Variables (23)
-│  ├─ Category Crawling (7)
-│  ├─ Product Crawling (3)
+├─ Airflow Variables (26)
+│  ├─ Category Crawling (8)
+│  ├─ Product Crawling (5)
 │  ├─ Selenium Pool (3)
 │  ├─ Circuit Breaker (2)
 │  ├─ Degradation Mode (2)
@@ -121,6 +121,21 @@ Tổng: 88+ parameters
 - Min: 5s, Max: 60s
 - Impact: Fast fail vs slow tolerance
 - Use case: Low for responsive, high for slow network
+
+### 6. `TIKI_FORCE_REFRESH` (Bypass all caches)
+- Default: false
+- Impact: Complete re-crawl from scratch
+- Use case: Force update when data is stale or corrupted
+
+### 7. `TIKI_CACHE_TTL` (Cache expiration time)
+- Default: 86400 (24h)
+- Impact: Control frequency of data refresh
+- Use case: Set lower for more frequent updates
+
+### 8. `TIKI_CATEGORY_NUM_BATCHES` (Dynamic Category Distribution)
+- Default: 4
+- Impact: Fill Airflow worker pool efficiently
+- Use case: Match with `max_active_tasks` to minimize orchestration overhead
 
 ---
 
@@ -249,5 +264,5 @@ Risk: Very low
 
 ---
 
-**Last Updated**: 18/11/2025  
-**Status**: ✅ Complete & Organized
+**Last Updated**: 31/01/2026  
+**Status**: ✅ Complete & Organized (v1.2)

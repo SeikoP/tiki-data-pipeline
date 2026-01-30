@@ -130,22 +130,36 @@ CREATE TABLE categories (
 -- Products table
 CREATE TABLE products (
   id SERIAL PRIMARY KEY,
-  tiki_id VARCHAR UNIQUE,
+  product_id VARCHAR UNIQUE, -- ID từ Tiki
   name VARCHAR,
-  category_id INTEGER REFERENCES categories(id),
+  short_name VARCHAR,
+  url VARCHAR,
+  image_url VARCHAR,
+  category_url VARCHAR,
+  category_id VARCHAR, -- c1234
   price NUMERIC,
+  original_price NUMERIC,
   discount_percent NUMERIC,
-  rating NUMERIC,
+  rating_average NUMERIC,
   review_count INTEGER,
-  meta JSONB,  -- Flexible schema
-  created_at TIMESTAMP,
-  updated_at TIMESTAMP
+  sales_count INTEGER,
+  stock_available BOOLEAN,
+  shipping JSONB,
+  brand VARCHAR,
+  seller_name VARCHAR,
+  seller_id VARCHAR,
+  seller_is_official BOOLEAN,
+  crawled_at TIMESTAMP,
+  updated_at TIMESTAMP,
+  crawl_quality VARCHAR, -- 'basic' or 'enriched'
+  needs_enrichment BOOLEAN
 );
 
 -- Indexes for performance
 CREATE INDEX idx_products_category_id ON products(category_id);
-CREATE INDEX idx_products_tiki_id ON products(tiki_id);
+CREATE INDEX idx_products_product_id ON products(product_id);
 CREATE INDEX idx_products_price ON products(price);
+CREATE INDEX idx_products_quality ON products(crawl_quality);
 ```
 
 ---

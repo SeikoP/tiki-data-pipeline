@@ -12,9 +12,12 @@ except ImportError:
 
 # Try to import Airflow components, handle missing imports gracefull for non-airflow environments
 try:
-    from airflow.models import Variable
+    from airflow.sdk import Variable
 except ImportError:
-    Variable = None
+    try:
+        from airflow.models import Variable
+    except ImportError:
+        Variable = None
 
 try:
     from airflow.sdk import TaskGroup

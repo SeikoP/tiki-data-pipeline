@@ -226,28 +226,7 @@ def merge_products(**context) -> dict[str, Any]:
             "merged_at": datetime.now().isoformat(),
         }
         
-        # ANTI-PATTERN FIX: Write to disk instead of returning huge dict to XCom
-        try:
-            merged_filename = f"products_merged_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            merged_file_path = DATA_DIR / "interim" / merged_filename
-            ensure_output_dirs() # Ensure dirs exist
-            (DATA_DIR / "interim").mkdir(parents=True, exist_ok=True)
-            
-            logger.info(f"💾 Saving merged products to interim file: {merged_file_path}")
-            # Use atomic write helper
-            atomic_write_file(str(merged_file_path), result, **context)
-            
-            # Return pointer to file
-            return {
-                "merged_file": str(merged_file_path),
-                "stats": stats,
-                "merged_at": datetime.now().isoformat(),
-                "count": len(unique_products)
-            }
-        except Exception as write_err:
-            logger.error(f"❌ Failed to write interim merged file: {write_err}")
-            # Fallback to legacy XCom if write fails (though unsafe)
-            return result
+        return result
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi merge products: {e}", exc_info=True)
@@ -297,25 +276,8 @@ def save_products(**context) -> str:
         if not merge_result:
             raise ValueError("Không tìm thấy kết quả merge từ XCom")
 
-        products = []
-        stats = {}
-        
-        # Check if we received a file path (new pattern) or data (legacy pattern)
-        if "merged_file" in merge_result and merge_result["merged_file"]:
-            merged_file_path = merge_result["merged_file"]
-            logger.info(f"📂 Reading products from interim file: {merged_file_path}")
-            if os.path.exists(merged_file_path):
-                with open(merged_file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    products = data.get("products", [])
-                    stats = data.get("stats", {})
-            else:
-                raise FileNotFoundError(f"Interim merged file not found: {merged_file_path}")
-        else:
-            # Legacy fallback
-            logger.warning("⚠️ Using legacy XCom data transfer (High Memory Usage)")
-            products = merge_result.get("products", [])
-            stats = merge_result.get("stats", {})
+        products = merge_result.get("products", [])
+        stats = merge_result.get("stats", {})
 
         logger.info(f"Đang lưu {len(products)} sản phẩm...")
 

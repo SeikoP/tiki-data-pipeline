@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
+from concurrent.futures import ThreadPoolExecutor
 from tiki_crawl_products_v2.bootstrap import (
     CACHE_DIR,
     CATEGORIES_FILE,
@@ -26,7 +27,6 @@ from tiki_crawl_products_v2.bootstrap import (
 from .common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
     get_logger,  # noqa: F401
-    get_postgres_storage_class,
 )
 
 
@@ -143,7 +143,12 @@ def crawl_single_category(
 
     category_url = category.get("url", "")
     category_name = category.get("name", "Unknown")
-    category_id = category.get("id", "")
+    category_id = category.get("id", "") or category.get("category_id", "")
+
+    # Bổ sung category_id nếu thiếu
+    if not category_id and category_url:
+        from tiki_crawl_products_v2.bootstrap import extract_category_id_from_url
+        category_id = extract_category_id_from_url(category_url)
 
     # Clean log for workers
     logger.info(f"▶️  START: Category [{category_id}] {category_name}")
@@ -163,8 +168,6 @@ def crawl_single_category(
     try:
         # Lazily initialize expensive singletons only when the task runs
         ensure_output_dirs()
-        PostgresStorage = get_postgres_storage_class(logger)
-        storage = PostgresStorage(logger=logger)
         tiki_degradation = get_tiki_degradation()
         tiki_circuit_breaker = get_tiki_circuit_breaker()
         tiki_dlq = get_tiki_dlq()
@@ -182,8 +185,11 @@ def crawl_single_category(
         )
         use_selenium = use_selenium_param if use_selenium_param is not None else \
             get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
-        # timeout hiện tại không được dùng trong _crawl_with_params nhưng vẫn giữ để không leak DB hit nếu mở rộng sau này
-        # timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300")) 
+        timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300")) 
+        
+        # Thêm cấu hình cache
+        force_refresh = get_variable("TIKI_FORCE_REFRESH", default="false").lower() == "true"
+        cache_ttl = int(get_variable("TIKI_CACHE_TTL", default="86400"))
 
         # Rate limiting: được xử lý bên trong crawl_category_products (smart rate limit / cache check)
         # Không sleep ở đây để tránh chậm khi hit cache
@@ -204,6 +210,8 @@ def crawl_single_category(
                 allow_selenium_fallback=use_selenium,  # Nếu use_selenium=False thì cũng tắt fallback cho nhanh
                 use_rate_limiting=True,  # Sử dụng rate limiting
                 logger=logger,
+                force_refresh=force_refresh,
+                cache_ttl=cache_ttl,
             )
 
         try:
@@ -245,24 +253,15 @@ def crawl_single_category(
         if elapsed > timeout:
             raise TimeoutError(f"Crawl vượt quá timeout {timeout}s")
 
-        # Direct-to-DB Write
-        saved_stats = {"saved_count": 0}
-        if products:
-            try:
-                saved_stats = storage.save_products(products, upsert=True)
-                logger.info(f"💾 Saved products to DB: {saved_stats}")
-            except Exception as e:
-                logger.error(f"❌ Error saving to DB: {e}")
-                raise e
-
-        result["products"] = []  # Clear XCom payload
+        # Trả về products qua XCom thay vì lưu trực tiếp vào DB
+        # Việc load vào DB sẽ được thực hiện bởi task transform_and_load sau này
+        result["products"] = products
         result["status"] = "success"
         result["products_count"] = len(products)
-        result["saved_count"] = saved_stats.get("saved_count", 0)
         result["elapsed_time"] = elapsed
 
         logger.info(
-            f"✅ Crawl thành công: {len(products)} sản phẩm (Saved: {saved_stats.get('saved_count', 0)}) trong {elapsed:.1f}s"
+            f"✅ Crawl thành công: {len(products)} sản phẩm qua XCom trong {elapsed:.1f}s"
         )
 
     except TimeoutError as e:
@@ -349,26 +348,32 @@ def crawl_category_batch(
         logger.error(f"❌ MISSING CATEGORY_BATCH! Batch index: {batch_index}")
         return []
 
-    # Lấy cấu hình một lần duy nhất cho cả batch để giảm DB hit (Airflow Variables)
+    # Lấy cấu hình cho cả batch
     max_pages = int(get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20"))
     use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
-    
-    results = []
-    for _i, category in enumerate(category_batch):
+    concurrency = int(get_variable("TIKI_CATEGORY_CONCURRENCY", default="10"))
+
+    def process_category(cat):
         try:
-            # Re-use crawl_single_category logic with pre-fetched params
-            cat_result = crawl_single_category(
-                category=category, 
+            # Re-use crawl_single_category logic
+            return crawl_single_category(
+                category=cat,
                 max_pages_param=max_pages,
                 use_selenium_param=use_selenium,
-                **context
+                **context,
             )
-            results.append(cat_result)
         except Exception as e:
-            logger.error(f"❌ Lỗi khi xử lý category trong batch: {e}")
-            results.append(
-                {"category_id": category.get("id", "unknown"), "status": "failed", "error": str(e)}
-            )
+            logger.error(f"❌ Batch error for category {cat.get('name')}: {e}")
+            return {
+                "category_id": cat.get("id", "unknown"),
+                "status": "failed",
+                "error": str(e),
+            }
+
+    # Chạy song song dùng ThreadPoolExecutor
+    logger.info(f"🚀 Chạy batch {batch_index} với {len(category_batch)} categories, concurrency={concurrency}")
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        results = list(executor.map(process_category, category_batch))
 
     logger.info(f"✅ Hoàn thành BATCH CATEGORY {batch_index}: {len(results)} kết quả")
     return results

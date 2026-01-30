@@ -84,6 +84,7 @@ with DAG(
             """
             Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing.
             """
+            import math
             import logging
 
             logger = logging.getLogger("airflow.task")
@@ -92,24 +93,37 @@ with DAG(
             if not categories:
                 logger.error("❌ Không thể lấy categories từ XCom!")
                 return []
-            batch_size = int(get_variable("TIKI_CATEGORY_BATCH_SIZE", default="20"))
+            
+            # Tối ưu: Chia thành n batch task để tận dụng tối đa pool (mặc định 4)
+            num_batches = get_int_variable("TIKI_CATEGORY_NUM_BATCHES", default=4)
+            total_categories = len(categories)
+            
+            if total_categories <= num_batches:
+                # Nếu ít category hơn số batch mong muốn, mỗi category 1 task
+                batch_size = 1
+            else:
+                batch_size = math.ceil(total_categories / num_batches)
+                
             batches = [
-                categories[i : i + batch_size] for i in range(0, len(categories), batch_size)
+                categories[i : i + batch_size] for i in range(0, total_categories, batch_size)
             ]
+            
+            logger.info(f"📦 Chia {total_categories} categories thành {len(batches)} batches (size ~{batch_size}) để tối ưu pool")
+            
             return [
                 {"category_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
             ]
 
         if crawl_category_batch is not None:
             task_prepare = PythonOperator(
-                task_id="prepare_batch_kwargs",
+                task_id="prepare_crawl_kwargs",
                 python_callable=prepare_category_batch_kwargs,
                 execution_timeout=timedelta(minutes=1),
             )
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_category_batch,
-                execution_timeout=timedelta(minutes=12),
+                execution_timeout=timedelta(hours=2),
                 pool="fast_pool",
                 retries=1,
                 retry_delay=timedelta(seconds=15),
@@ -123,7 +137,7 @@ with DAG(
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_single_category,
-                execution_timeout=timedelta(minutes=10),
+                execution_timeout=timedelta(hours=2),
                 pool="fast_pool",
                 retries=1,
             ).expand(op_kwargs=task_prepare.output)

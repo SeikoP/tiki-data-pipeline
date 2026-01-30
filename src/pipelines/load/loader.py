@@ -239,28 +239,29 @@ class OptimizedDataLoader:
         query = """
             INSERT INTO products (
                 product_id, category_url, category_id, name, short_name, url, price, original_price,
-                discount_percent, rating_average, sales_count, brand,
+                discount_percent, rating_average, review_count, sales_count, brand,
                 seller_name, seller_id, seller_is_official,
                 crawled_at, updated_at,
                 crawl_quality, needs_enrichment
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (product_id) DO UPDATE SET
-                category_url = EXCLUDED.category_url,
-                category_id = EXCLUDED.category_id,
-                name = EXCLUDED.name,
-                short_name = EXCLUDED.short_name,
-                url = EXCLUDED.url,
-                price = EXCLUDED.price,
-                original_price = EXCLUDED.original_price,
-                discount_percent = EXCLUDED.discount_percent,
-                rating_average = EXCLUDED.rating_average,
-                sales_count = EXCLUDED.sales_count,
-                brand = EXCLUDED.brand,
-                seller_name = EXCLUDED.seller_name,
-                seller_id = EXCLUDED.seller_id,
-                seller_is_official = EXCLUDED.seller_is_official,
+                category_url = COALESCE(EXCLUDED.category_url, products.category_url),
+                category_id = COALESCE(EXCLUDED.category_id, products.category_id),
+                name = COALESCE(NULLIF(EXCLUDED.name, ''), products.name),
+                short_name = COALESCE(NULLIF(EXCLUDED.short_name, ''), products.short_name),
+                url = COALESCE(NULLIF(EXCLUDED.url, ''), products.url),
+                price = COALESCE(EXCLUDED.price, products.price),
+                original_price = COALESCE(EXCLUDED.original_price, products.original_price),
+                discount_percent = COALESCE(EXCLUDED.discount_percent, products.discount_percent),
+                rating_average = COALESCE(EXCLUDED.rating_average, products.rating_average),
+                review_count = COALESCE(EXCLUDED.review_count, products.review_count),
+                sales_count = COALESCE(EXCLUDED.sales_count, products.sales_count),
+                brand = COALESCE(NULLIF(EXCLUDED.brand, ''), products.brand),
+                seller_name = COALESCE(NULLIF(EXCLUDED.seller_name, ''), products.seller_name),
+                seller_id = COALESCE(NULLIF(EXCLUDED.seller_id, ''), products.seller_id),
+                seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
                 updated_at = EXCLUDED.updated_at,
                 crawl_quality = EXCLUDED.crawl_quality,
                 needs_enrichment = EXCLUDED.needs_enrichment
@@ -279,6 +280,7 @@ class OptimizedDataLoader:
                 product.get("original_price"),
                 product.get("discount_percent"),
                 product.get("rating_average"),
+                product.get("review_count"),
                 product.get("sales_count"),
                 product.get("brand"),
                 product.get("seller_name"),
@@ -307,11 +309,11 @@ class OptimizedDataLoader:
         query = """
             INSERT INTO products (
                 product_id, category_url, category_id, name, short_name, url, price, original_price,
-                discount_percent, rating_average, sales_count, brand,
+                discount_percent, rating_average, review_count, sales_count, brand,
                 seller_name, seller_id, seller_is_official,
                 crawled_at, updated_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
         """
 
@@ -328,6 +330,7 @@ class OptimizedDataLoader:
                 product.get("original_price"),
                 product.get("discount_percent"),
                 product.get("rating_average"),
+                product.get("review_count"),
                 product.get("sales_count"),
                 product.get("brand"),
                 product.get("seller_name"),
@@ -424,7 +427,7 @@ class OptimizedDataLoader:
         """
         history_query = """
             INSERT INTO crawl_history (
-                product_id, price, original_price, discount_percent, sales_count,
+                product_id, price, original_price, discount_percent, rating_average, review_count, sales_count,
                 crawled_at, updated_at
             ) VALUES %s
         """
@@ -435,6 +438,8 @@ class OptimizedDataLoader:
                 p.get("price"),
                 p.get("original_price"),
                 p.get("discount_percent"),
+                p.get("rating_average"),
+                p.get("review_count"),
                 p.get("sales_count"),
                 p.get("crawled_at") or datetime.now(),
                 datetime.now(),

@@ -130,26 +130,43 @@ conn.close()
 "
 ```
 
-## 6. Thông Số Cấu Hình
+## 6. Thông Số Cấu Hình & Cache
 
 | Tham Số | Giá Trị | Ghi Chú |
 |---------|--------|--------|
 | Root URL | `https://tiki.vn/nha-cua-doi-song/c1883` | Danh mục gốc |
 | Max Level (Categories) | 3 | Độ sâu tối đa |
 | Max Level (Category Path) | 4 | Tối đa 4 level trong product |
-| Thread Pool Size | 3 | Số thread parallel |
 | Cache Dir | `data/raw/cache/` | Cache crawl results |
+| Redis Cache | `redis://redis:6379/1` | Distributed cache (L2) |
+| Cache TTL | 86400s (24h) | Thời gian sống của cache |
+| Force Refresh | `TIKI_FORCE_REFRESH` | Biến môi trường để bỏ qua cache |
 
-## 7. Troubleshooting
+## 7. Resilience & Reliability (Độ Tin Cậy)
+
+Hệ thống tích hợp các pattern giúp pipeline vận hành bền bỉ:
+
+- **Circuit Breaker:** Tự động ngắt kết nối khi Tiki trả về 429 (Rate Limit) hoặc timeout quá nhiều, tránh bị ban IP.
+- **Dead Letter Queue (DLQ):** Các sản phẩm lỗi được đẩy vào hàng chờ riêng để xử lý lại thay vì làm chết toàn bộ tiến trình.
+- **Multi-level Cache (L1-L2-L3):** Tối ưu tốc độ cực đại (hit cache trong 0ms) và cho phép fallback linh hoạt khi Redis hoặc File system có vấn đề.
+- **Adaptive Rate Limiting:** Tự động điều chỉnh tốc độ crawl dựa trên phản hồi của server.
+
+## 8. Cải Tiến Dữ Liệu (v1.2) - MỚI ⭐
+
+- **`review_count`:** Đã thêm cột số lượng đánh giá vào bảng `products`.
+- **Preserve Data (COALESCE):** Khi crawl lại, nếu dữ liệu mới bị thiếu (NULL), hệ thống sẽ **giữ lại dữ liệu cũ** trong Database thay vì ghi đè giá trị rỗng.
+- **Improved Pagination:** Phân trang dựa trên `paging` metadata của Tiki API, đảm bảo lấy đủ 100% sản phẩm mà không bị kẹt ở con số 40.
+
+## 9. Troubleshooting
 
 | Lỗi | Nguyên Nhân | Giải Pháp |
 |-----|-----------|----------|
-| 465 products with 3 levels (CỐ ĐỊNH ✅) | Missing Level 0 (parent) | Dùng `build_category_hierarchy.py` + auto-detect trong `extract_product_detail` |
-| Breadcrumb không tìm thấy | HTML không render | Dùng `__NEXT_DATA__` từ JSON thay vì HTML parsing |
-| Category path có tên sản phẩm | Breadcrumb bị lộn | Filter product names từ breadcrumb |
+| Luôn crawl ra 40 sản phẩm | Cache cũ hoặc lỗi phân trang | Set `TIKI_FORCE_REFRESH=true` và cập nhật logic paging |
+| Review count bị NULL | Sản phẩm chưa có đánh giá | Đã hỗ trợ lấy `review_count` từ API |
+| Dữ liệu bị ghi đè rỗng | Missing fields trong HTML | Đã sửa logic Load (Upsert với COALESCE) |
 | Driver Selenium error | Chrome chưa cài | Cài: `pip install webdriver-manager` |
 
-## 8. Pipeline Initialization Checklist
+## 10. Pipeline Initialization Checklist
 
 Khi setup lần đầu:
 
@@ -159,14 +176,15 @@ Khi setup lần đầu:
 - [ ] Kiểm tra `data/raw/category_hierarchy_map.json` tồn tại
 - [ ] Start Docker: `docker-compose up -d`
 - [ ] Trigger DAG `tiki_crawl_products` trong Airflow UI
-- [ ] Kiểm tra products trong DB có 4 levels
+- [ ] Kiểm tra products trong DB có 4 levels và `review_count`
 
 ---
 
-**Cập nhật lần cuối:** 2024-11-28
+**Cập nhật lần cuối:** 2026-01-30
 
-### Tính Năng Mới (v1.1)
-- ✅ Auto-detect parent category cho products (3 → 4 levels)
-- ✅ Category hierarchy mapping
-- ✅ DAG integration với hierarchy_map caching
-- ✅ Comprehensive README with troubleshooting
+### Tính Năng Mới (v1.2)
+- ✅ `review_count` field support
+- ✅ Smart pagination (Tiki API paging)
+- ✅ Cache TTL & Force Refresh logic
+- ✅ Data persistence (COALESCE logic)
+- ✅ Adaptive Rate Limiting integration

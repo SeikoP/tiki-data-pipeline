@@ -8,7 +8,7 @@ data/test_output/*.html/
 
 airflow/config/airflow.cfg
 airflow/passwords.json
-
+data/
 # C extensions
 *.so
 

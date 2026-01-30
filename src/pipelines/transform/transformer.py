@@ -327,32 +327,30 @@ class DataTransformer:
             db_product["discount_percent"] = (
                 int(round(price["discount_percent"]))
                 if price.get("discount_percent") is not None
-                else 0
+                else None
             )
         else:
-            db_product["price"] = 0
-            db_product["original_price"] = 0
-            db_product["discount_percent"] = 0
+            db_product["price"] = None
+            db_product["original_price"] = None
+            db_product["discount_percent"] = None
 
         # Rating fields (flatten từ dict)
         rating = product.get("rating", {})
         if isinstance(rating, dict):
-            db_product["rating_average"] = rating.get("average") or 0.0
+            db_product["rating_average"] = rating.get("average")
             db_product["review_count"] = (
-                rating.get("total_reviews") or rating.get("review_count") or 0
+                rating.get("total_reviews") or rating.get("review_count")
             )
         else:
-            db_product["rating_average"] = 0.0
-            db_product["review_count"] = 0
+            db_product["rating_average"] = None
+            db_product["review_count"] = None
 
         # Đảm bảo stock_available có giá trị boolean mặc định
         stock = product.get("stock", {})
         if isinstance(stock, dict):
-            db_product["stock_available"] = (
-                stock.get("available") if stock.get("available") is not None else True
-            )
+            db_product["stock_available"] = stock.get("available")
         else:
-            db_product["stock_available"] = True
+            db_product["stock_available"] = None
 
         # Description
         db_product["description"] = product.get("description")
@@ -425,7 +423,7 @@ class DataTransformer:
 
         # CRITICAL: Validate seller_name (Task: Xóa seller_name null trước khi load db)
         if not product.get("seller_name"):
-            return False, "Missing or invalid seller_name"
+            return False, f"Missing or invalid seller_name for product {product.get('product_id')}"
 
         # Validate product_id format (chỉ số)
         product_id = str(product["product_id"]).strip()

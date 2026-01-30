@@ -93,7 +93,7 @@ Redis Connection Pool:
 ├─ Active: 6/20 connections
 ├─ Cache Size: 850 MB / 1.2 GB (71%)
 ├─ Hit Ratio: 38% (2,340 hits / 6,157 requests)
-├─ TTL: 1 hour (refresh at 30 min mark)
+├─ TTL: 24 hours (configurable)
 └─ Eviction Policy: LRU
 ```
 

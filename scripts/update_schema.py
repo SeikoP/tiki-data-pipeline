@@ -34,6 +34,20 @@ def update_schema():
             else:
                 print("'crawl_quality' column already exists.")
 
+            # Check review_count column
+            cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='products' AND column_name='review_count';
+            """)
+            if not cur.fetchone():
+                print("Adding 'review_count' column...")
+                cur.execute(
+                    "ALTER TABLE products ADD COLUMN review_count INTEGER DEFAULT 0;"
+                )
+            else:
+                print("'review_count' column already exists.")
+
             # Check needs_enrichment column
             cur.execute("""
                 SELECT column_name

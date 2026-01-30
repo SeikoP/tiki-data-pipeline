@@ -62,6 +62,7 @@ W6     | Day 36-42| 5-15 min  | 7-22x   | ✅ Completed
 | 3 | Connection Pooling (DB+HTTP) | -14% (55→47 min) | W3 | ✅ |
 | 4 | Fail-Fast & Timeout (90→60s) | -29% (47→33 min) | W4 | ✅ |
 | 5 | Response Caching (Redis) | -35% (33→21 min) | W5 | ✅ |
+| 6 | Dynamic Category Batching (4-tasks) | -15% (NEW) | W6 | ✅ |
 | BONUS | Async Pre-validation | -24% (21→16 min) | W6 | ✅ |
 
 **Total Impact**: 110 min → 5-15 min (22x faster)

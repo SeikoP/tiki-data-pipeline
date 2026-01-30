@@ -141,7 +141,8 @@ redis_client = redis.Redis(connection_pool=redis_pool)
 # Cache performance:
 # - Hit ratio: 34-42% on subsequent runs
 # - Memory: 1.2 GB allocated
-# - TTL: 1 hour per cache entry
+# - TTL: 24 hours (configurable via TIKI_CACHE_TTL)
+# - Force Refresh: Supported via TIKI_FORCE_REFRESH variable
 ```
 
 ### HTTP Client Pool (aiohttp)
