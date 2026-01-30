@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-from tiki_crawl_products_v2.bootstrap import (
+from tiki_crawl_products_v2.bootstrap import (  # crawl_product_detail_async,  <-- REMOVED
     Any,
-    # crawl_product_detail_async,  <-- REMOVED
     crawl_product_detail_with_driver,
     datetime,
     get_hierarchy_map,
     get_logger,
     get_variable,
 )
-
 from tiki_crawl_products_v2.tasks.common import (
-    get_postgres_storage_class,
     get_selenium_driver_pool_class,
 )
 
@@ -46,9 +43,10 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
                 },
             )
-            
+
             # FORCE IMPORT DIRECTLY FROM SRC TO AVOID BOOTSTRAP ISSUES
             import sys
+
             if "/opt/airflow/src" not in sys.path:
                 sys.path.append("/opt/airflow/src")
             try:
@@ -327,6 +325,8 @@ def crawl_product_batch_selenium(
             }
         )
 
-    logger.info(f"✅ SELENIUM BATCH DONE: {success}/{len(product_batch)} success. Saved: {saved_count}")
+    logger.info(
+        f"✅ SELENIUM BATCH DONE: {success}/{len(product_batch)} success. Saved: {saved_count}"
+    )
 
     return final_results

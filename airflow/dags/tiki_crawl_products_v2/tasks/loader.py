@@ -14,7 +14,6 @@ from tiki_crawl_products_v2.bootstrap import (
     os,
     sys,
 )
-
 from tiki_crawl_products_v2.tasks.common import _fix_sys_path_for_pipelines_import  # noqa: F401
 
 

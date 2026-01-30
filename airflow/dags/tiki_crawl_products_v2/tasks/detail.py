@@ -28,10 +28,8 @@ from tiki_crawl_products_v2.bootstrap import (
     re,
     redis_cache,
     shutil,
-    sys,
     time,
 )
-
 from tiki_crawl_products_v2.tasks.common import (  # noqa: F401
     _fix_sys_path_for_pipelines_import,
     get_selenium_driver_pool_class,
@@ -408,6 +406,7 @@ def crawl_product_batch(
     # DEBUG PRINT BOMB
     print("🔥🔥🔥 DEBUG: CRAWL_PRODUCT_BATCH EXECUTION START V1 🔥🔥🔥")
     import sys
+
     sys.stdout.flush()
 
     try:
@@ -416,7 +415,7 @@ def crawl_product_batch(
         import logging
 
         logger = logging.getLogger("airflow.task")
-    
+
     logger.info("🔥🔥🔥 DEBUG: LOGGER INFO TEST 🔥🔥🔥")
 
     # Lấy product_batch từ op_kwargs nếu chưa có
@@ -481,9 +480,10 @@ def crawl_product_batch(
 
         # FORCE IMPORT DIRECTLY FROM SRC TO AVOID BOOTSTRAP ISSUES
         import sys
+
         if "/opt/airflow/src" not in sys.path:
             sys.path.append("/opt/airflow/src")
-        
+
         try:
             from pipelines.crawl.crawl_products_detail import crawl_product_detail_async
         except ImportError:
@@ -715,11 +715,13 @@ def crawl_product_batch(
                 else:
                     result["error"] = "Không thể crawl detail hoặc extract detail không hợp lệ"
                     result["status"] = "failed"
-                    
+
                     # FORCE DEBUG LOG TO FILE (Graceful Failure Case)
                     try:
                         with open("/tmp/debug_crawl.log", "a") as f:
-                            f.write(f"[{datetime.now()}] FAIL_GRACEFUL {product_id}: Crawl returned None or Invalid Dict\n")
+                            f.write(
+                                f"[{datetime.now()}] FAIL_GRACEFUL {product_id}: Crawl returned None or Invalid Dict\n"
+                            )
                     except:
                         pass
 
@@ -727,7 +729,7 @@ def crawl_product_batch(
                 result["error"] = str(e)
                 result["status"] = "failed"
                 logger.warning(f"⚠️  Lỗi khi crawl product {product_id}: {e}")
-                
+
                 # FORCE DEBUG LOG TO FILE
                 try:
                     with open("/tmp/debug_crawl.log", "a") as f:
@@ -1456,7 +1458,7 @@ def merge_product_details(**context) -> dict[str, Any]:
             raise ValueError("Không tìm thấy products từ XCom hoặc file")
 
         products = merge_result.get("products", [])
-            
+
         logger.info(f"Tổng số products: {len(products)}")
 
         # Lấy số lượng products thực tế được crawl từ prepare_products_for_detail
@@ -2128,7 +2130,7 @@ def merge_product_details(**context) -> dict[str, Any]:
             "merged_at": datetime.now().isoformat(),
             "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' và brand/seller không null (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_no_brand} không có brand, {products_without_detail} không có detail)",
         }
-        
+
         return result
 
     except ValueError as e:

@@ -26,7 +26,6 @@ import warnings
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
-from threading import Lock
 from typing import Any
 
 try:
@@ -133,7 +132,6 @@ else:
 # Import Custom Utilities
 try:
     from common.airflow_utils import (
-        TaskGroup,
         get_int_variable,
         get_variable,
         load_env_file,
@@ -244,35 +242,58 @@ DEBUG_ENRICH_CATEGORY_PATH = (
 )
 
 
-
 # Import resilience patterns
 try:
-    from pipelines.crawl.resilience.exceptions import CrawlError, classify_error
     from pipelines.crawl.resilience.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
     from pipelines.crawl.resilience.dead_letter_queue import DeadLetterQueue, get_dlq
+    from pipelines.crawl.resilience.exceptions import CrawlError, classify_error
     from pipelines.crawl.resilience.graceful_degradation import (
-        GracefulDegradation,
         DegradationLevel,
+        GracefulDegradation,
         get_service_health,
     )
 except ImportError:
+
     class CircuitBreaker:
-        def __init__(self, *args, **kwargs): pass
-        def call(self, func, *args, **kwargs): return func(*args, **kwargs)
-    class CircuitBreakerOpenError(Exception): pass
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def call(self, func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+    class CircuitBreakerOpenError(Exception):
+        pass
+
     class DeadLetterQueue:
-        def add(self, *args, **kwargs): pass
-    def get_dlq(*args, **kwargs): return DeadLetterQueue()
+        def add(self, *args, **kwargs):
+            pass
+
+    def get_dlq(*args, **kwargs):
+        return DeadLetterQueue()
+
     class GracefulDegradation:
-        def should_skip(self): return False
-        def record_success(self): pass
-        def record_failure(self): pass
+        def should_skip(self):
+            return False
+
+        def record_success(self):
+            pass
+
+        def record_failure(self):
+            pass
+
     class DegradationLevel:
         FULL, REDUCED, MINIMAL, FAILED = "full", "reduced", "minimal", "failed"
+
     def get_service_health():
-        return type("ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()})()
-    def classify_error(error, **kwargs): return error
-    class CrawlError(Exception): pass
+        return type(
+            "ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()}
+        )()
+
+    def classify_error(error, **kwargs):
+        return error
+
+    class CrawlError(Exception):
+        pass
 
 
 # Cấu hình mặc định
@@ -327,14 +348,18 @@ DAG_CONFIG = {
 
 @lru_cache(maxsize=1)
 def ensure_output_dirs() -> None:
-    """Ensure output/cache directories exist."""
+    """
+    Ensure output/cache directories exist.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _fix_sys_path_for_pipelines_import(logger=None):
-    """Sửa sys.path và sys.modules để đảm bảo import được pipelines."""
+    """
+    Sửa sys.path và sys.modules để đảm bảo import được pipelines.
+    """
     if logger:
         logger.info("🔧 Fixing sys.path for pipelines import...")
 
@@ -346,7 +371,9 @@ def _fix_sys_path_for_pipelines_import(logger=None):
             logger.info(f"   Added {src_path_str} to sys.path")
 
     # 2. Xóa các entries giả trong sys.modules
-    modules_to_remove = [m for m in sys.modules.keys() if m.startswith("pipelines") or m.startswith("common")]
+    modules_to_remove = [
+        m for m in sys.modules.keys() if m.startswith("pipelines") or m.startswith("common")
+    ]
     count = 0
     for module_name in modules_to_remove:
         if sys.modules[module_name] is None:
@@ -453,19 +480,25 @@ try:
         extract_product_detail,
     )
 except ImportError:
+
     def crawl_product_detail_with_selenium(*args, **kwargs):
         raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
+
     def crawl_product_detail_with_driver(*args, **kwargs):
         raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
+
     def extract_product_detail(*args, **kwargs):
         raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
+
     async def crawl_product_detail_async(*args, **kwargs):
         raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
+
 
 # Import crawl_category_products
 try:
     from pipelines.crawl.crawl_products import crawl_category_products
 except ImportError:
+
     def crawl_category_products(*args, **kwargs):
         raise ImportError("Module pipelines.crawl.crawl_products not found")
 
@@ -481,8 +514,6 @@ except ImportError:
     SeleniumDriverPool = None
     extract_category_id_from_url = None
     extract_product_id_from_url = None
-
-
 
 
 # Define paths for lazy imports
@@ -530,8 +561,6 @@ def get_load_categories_db_func():
     if not func:
         warnings.warn("load_categories_to_db not available; DB load will be skipped", stacklevel=2)
     return func
-
-
 
 
 @lru_cache(maxsize=1)

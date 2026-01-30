@@ -5,6 +5,7 @@ Crawl pipeline package.
 # Export utilities modules from crawl_utils.py
 try:
     from .crawl_utils import SeleniumDriverPool  # noqa: F401
+
     _UTILS_AVAILABLE = True
 except ImportError:
     _UTILS_AVAILABLE = False

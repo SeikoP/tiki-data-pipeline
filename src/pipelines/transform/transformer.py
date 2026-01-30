@@ -300,7 +300,6 @@ class DataTransformer:
             "name": product.get("name"),
             "short_name": self._get_short_name(product.get("name")),
             "url": product.get("url"),
-
             "category_url": product.get("category_url"),
             "category_id": product.get("category_id"),
             "category_path": product.get("category_path") or [],
@@ -337,14 +336,10 @@ class DataTransformer:
         rating = product.get("rating", {})
         if isinstance(rating, dict):
             db_product["rating_average"] = rating.get("average")
-            db_product["review_count"] = (
-                rating.get("total_reviews") or rating.get("review_count")
-            )
+            db_product["review_count"] = rating.get("total_reviews") or rating.get("review_count")
         else:
             db_product["rating_average"] = None
             db_product["review_count"] = None
-
-
 
         # Description
         db_product["description"] = product.get("description")
@@ -363,10 +358,6 @@ class DataTransformer:
 
         # Brand
         db_product["brand"] = product.get("brand")
-
-
-
-
 
         # JSONB fields
         db_product["specifications"] = product.get("specifications")

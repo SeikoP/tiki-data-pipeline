@@ -12,7 +12,6 @@ from typing import Any
 
 # Import shared utilities
 from .crawl_utils import (
-    atomic_write_json,
     create_selenium_driver,
     ensure_dir,
     extract_product_id_from_url,
@@ -967,9 +966,9 @@ def extract_product_detail(
                     href = seller_elem.get("href", "")
                     seller_id_match = re.search(r"seller[_-]?id[=:](\d+)|/seller/(\d+)", href, re.I)
                     if seller_id_match:
-                        product_data["seller"]["seller_id"] = (
-                            seller_id_match.group(1) or seller_id_match.group(2)
-                        )
+                        product_data["seller"]["seller_id"] = seller_id_match.group(
+                            1
+                        ) or seller_id_match.group(2)
 
                 break
 
@@ -1082,11 +1081,19 @@ def extract_product_detail(
     shipping_text = soup.get_text()
     if "freeship" in shipping_text.lower() or "miễn phí vận chuyển" in shipping_text.lower():
         if "shipping" not in product_data:
-            product_data["shipping"] = {"free_shipping": False, "fast_delivery": False, "delivery_time": ""}
+            product_data["shipping"] = {
+                "free_shipping": False,
+                "fast_delivery": False,
+                "delivery_time": "",
+            }
         product_data["shipping"]["free_shipping"] = True
     if "giao nhanh" in shipping_text.lower() or "fast_delivery" in shipping_text.lower():
         if "shipping" not in product_data:
-            product_data["shipping"] = {"free_shipping": False, "fast_delivery": False, "delivery_time": ""}
+            product_data["shipping"] = {
+                "free_shipping": False,
+                "fast_delivery": False,
+                "delivery_time": "",
+            }
         product_data["shipping"]["fast_delivery"] = True
 
     # 11. Parse từ __NEXT_DATA__ (ưu tiên cao nhất vì chứa dữ liệu đầy đủ)
@@ -1122,7 +1129,7 @@ def extract_product_detail(
                 "props.pageProps.initialState.product.data",
                 "props.initialState.product.data",
             ]
-            
+
             product_from_next = None
             for path in possible_paths:
                 product_from_next = get_nested_value(next_data, path)
@@ -1358,7 +1365,11 @@ def extract_product_detail(
                     )
 
                 # Cập nhật brand (Robust extraction)
-                if not product_data.get("brand") or product_data.get("brand") == "Unknown" or str(product_data.get("brand", "")).startswith("Thương hiệu:"):
+                if (
+                    not product_data.get("brand")
+                    or product_data.get("brand") == "Unknown"
+                    or str(product_data.get("brand", "")).startswith("Thương hiệu:")
+                ):
                     brand_info = (
                         product_from_next.get("brand")
                         or product_from_next.get("brandName")
@@ -1367,7 +1378,9 @@ def extract_product_detail(
                     )
                     if brand_info:
                         if isinstance(brand_info, dict):
-                            product_data["brand"] = brand_info.get("name") or brand_info.get("label") or ""
+                            product_data["brand"] = (
+                                brand_info.get("name") or brand_info.get("label") or ""
+                            )
                         else:
                             product_data["brand"] = str(brand_info)
 
@@ -1679,6 +1692,7 @@ async def crawl_product_detail_via_api(
         verbose: Có in log không
     """
     import asyncio  # Ensure asyncio is available
+
     product_id = extract_product_id_from_url(url)
     if not product_id:
         return None
@@ -1688,7 +1702,7 @@ async def crawl_product_detail_via_api(
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
-        "Referer": url, # Use actual product URL as Referer
+        "Referer": url,  # Use actual product URL as Referer
         "Origin": "https://tiki.vn",
         "X-Guest-Token": "no-token",
     }
@@ -1704,27 +1718,34 @@ async def crawl_product_detail_via_api(
                     return extract_product_detail_from_json(data, url)
                 elif response.status in [429, 502, 503, 504]:
                     if verbose:
-                        print(f"[API] ⚠️ Attempt {attempt+1} failed with HTTP {response.status} for ID {product_id}. Retrying...")
-                    await asyncio.sleep(retry_delay * (2 ** attempt))
+                        print(
+                            f"[API] ⚠️ Attempt {attempt + 1} failed with HTTP {response.status} for ID {product_id}. Retrying..."
+                        )
+                    await asyncio.sleep(retry_delay * (2**attempt))
                     continue
                 else:
                     # Non-retriable error (404, 403, 400...)
                     if verbose:
                         text = await response.text()
-                        print(f"[API] ❌ Failed ID {product_id}: HTTP {response.status} - Body: {text[:200]}")
+                        print(
+                            f"[API] ❌ Failed ID {product_id}: HTTP {response.status} - Body: {text[:200]}"
+                        )
                         # LOG TO FILE
                         try:
                             with open("/tmp/debug_crawl.log", "a") as f:
                                 import datetime
-                                f.write(f"[{datetime.datetime.now()}] API_FAIL {product_id}: HTTP {response.status} - {text[:200]}\n")
+
+                                f.write(
+                                    f"[{datetime.datetime.now()}] API_FAIL {product_id}: HTTP {response.status} - {text[:200]}\n"
+                                )
                         except:
                             pass
                     return None
         except Exception as e:
             if verbose:
-                print(f"[API] ❌ Lỗi attempt {attempt+1}: {e}")
+                print(f"[API] ❌ Lỗi attempt {attempt + 1}: {e}")
             if attempt < max_retries - 1:
-                await asyncio.sleep(retry_delay * (2 ** attempt))
+                await asyncio.sleep(retry_delay * (2**attempt))
                 continue
             return None
     return None
@@ -1733,10 +1754,11 @@ async def crawl_product_detail_via_api(
 async def crawl_product_detail_async(
     url: str,
     session=None,
-    use_selenium_fallback: bool = False, # Force False
+    use_selenium_fallback: bool = False,  # Force False
     verbose: bool = False,
 ) -> dict[str, Any] | None:
-    """Crawl product detail bằng aiohttp (async). 
+    """Crawl product detail bằng aiohttp (async).
+
     LITE MODE: Đã loại bỏ hoàn toàn Selenium.
     """
     # Force use_selenium_fallback to False since browser is removed

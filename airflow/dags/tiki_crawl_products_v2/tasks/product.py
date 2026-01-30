@@ -18,7 +18,6 @@ from tiki_crawl_products_v2.bootstrap import (
     json,
     os,
 )
-
 from tiki_crawl_products_v2.tasks.common import _fix_sys_path_for_pipelines_import  # noqa: F401
 
 
@@ -90,7 +89,9 @@ def merge_products(**context) -> dict[str, Any]:
                                     products = single_result.get("products", [])
                                     all_products.extend(products)
                                     stats["total_products"] += len(products)
-                                    stats["total_saved_directly"] += single_result.get("saved_count", 0)
+                                    stats["total_saved_directly"] += single_result.get(
+                                        "saved_count", 0
+                                    )
                                 elif single_result.get("status") == "timeout":
                                     stats["timeout_categories"] += 1
                                     logger.warning(
@@ -225,7 +226,7 @@ def merge_products(**context) -> dict[str, Any]:
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
         }
-        
+
         return result
 
     except Exception as e:
@@ -408,7 +409,14 @@ def transform_products(**context) -> dict[str, Any]:
                 "/opt/airflow/src/pipelines/crawl/crawl_utils.py",
                 os.path.abspath(
                     os.path.join(
-                        dag_file_dir, "..", "..", "..", "src", "pipelines", "crawl", "crawl_utils.py"
+                        dag_file_dir,
+                        "..",
+                        "..",
+                        "..",
+                        "src",
+                        "pipelines",
+                        "crawl",
+                        "crawl_utils.py",
                     )
                 ),
                 os.path.join(os.getcwd(), "src", "pipelines", "crawl", "crawl_utils.py"),

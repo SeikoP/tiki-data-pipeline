@@ -443,7 +443,9 @@ class PostgresStorage:
                         )
                         break
                     except Exception as e:
-                        self.logger.warning(f" Could not load categories JSON from {json_path}: {e}")
+                        self.logger.warning(
+                            f" Could not load categories JSON from {json_path}: {e}"
+                        )
 
             # Include missing parent categories từ JSON
             if categories_from_json:
@@ -473,7 +475,9 @@ class PostgresStorage:
                                 depth += 1
 
                 if added_count > 0:
-                    self.logger.info(f"Đã thêm {added_count} parent categories từ file JSON vào danh sách")
+                    self.logger.info(
+                        f"Đã thêm {added_count} parent categories từ file JSON vào danh sách"
+                    )
                     # Update all_urls sau khi thêm
                     all_urls = set(url_to_cat.keys())
 
@@ -696,7 +700,9 @@ class PostgresStorage:
                                     f"📂 Loaded {loaded_count} parent categories from DB for path building"
                                 )
                         except Exception as e:
-                            self.logger.warning(f" Warning: Could not load all parent categories from DB: {e}")
+                            self.logger.warning(
+                                f" Warning: Could not load all parent categories from DB: {e}"
+                            )
 
                 prepared_categories = []
                 for cat in categories:
@@ -854,7 +860,9 @@ class PostgresStorage:
                                     """,
                                     (cat_id, cat_id, parent_url),  # Tạm dùng ID làm tên
                                 )
-                        self.logger.info(f"Auto-added {len(missing_parents)} missing parent categories")
+                        self.logger.info(
+                            f"Auto-added {len(missing_parents)} missing parent categories"
+                        )
 
                 # CRITICAL: If only_leaf=True, ensure NO non-leaf categories remain
                 if only_leaf:
@@ -904,7 +912,9 @@ class PostgresStorage:
             try:
                 return self._save_products_bulk_copy(products, upsert)
             except Exception as e:
-                self.logger.warning(f" Bulk COPY process failed: {e}. Falling back to standard batch insert.")
+                self.logger.warning(
+                    f" Bulk COPY process failed: {e}. Falling back to standard batch insert."
+                )
                 # Fallback to standard flow below
 
         saved_count = 0
@@ -1249,7 +1259,9 @@ class PostgresStorage:
                         added_count += 1
 
         if added_count > 0:
-            self.logger.info(f"Auto-added/updated {added_count} categories from products with full data")
+            self.logger.info(
+                f"Auto-added/updated {added_count} categories from products with full data"
+            )
 
         return added_count
 
@@ -1258,7 +1270,8 @@ class PostgresStorage:
         products: list[dict[str, Any]],
         previous_state: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        """Log crawl history for ALL products (không chỉ khi có thay đổi giá).
+        """
+        Log crawl history for ALL products (không chỉ khi có thay đổi giá).
         """
         if not products:
             return
@@ -1279,8 +1292,8 @@ class PostgresStorage:
         previous_state: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """
-        Internal version of history logging that accepts a cursor,
-        avoiding nested connection management.
+        Internal version of history logging that accepts a cursor, avoiding nested connection
+        management.
         """
         if not products:
             return
@@ -1346,7 +1359,9 @@ class PostgresStorage:
                 prev_sales = prev.get("sales_count")
 
                 current_price_float = float(current_price) if current_price is not None else None
-                current_original_float = float(current_original_price) if current_original_price is not None else None
+                current_original_float = (
+                    float(current_original_price) if current_original_price is not None else None
+                )
 
                 price_changed = prev_price != current_price_float
                 original_changed = prev_original != current_original_float
@@ -1355,10 +1370,16 @@ class PostgresStorage:
                     rating_changed = prev["rating_average"] != current_rating
                 else:
                     rating_changed = prev.get("rating_average") != current_rating
-                
+
                 reviews_changed = prev.get("review_count") != current_reviews
 
-                if price_changed or original_changed or discount_changed or rating_changed or reviews_changed:
+                if (
+                    price_changed
+                    or original_changed
+                    or discount_changed
+                    or rating_changed
+                    or reviews_changed
+                ):
                     crawl_type = "price_change"
                     if prev_price is not None and current_price_float is not None:
                         price_change = current_price_float - prev_price
@@ -1385,30 +1406,35 @@ class PostgresStorage:
                 discount_amount = None
                 if current_original_price and current_price:
                     discount_amount = float(current_original_price) - float(current_price)
-                
-                is_flash_sale = (current_discount and current_discount >= 30) or (discount_amount and discount_amount >= 100000)
 
-                records_to_insert.append({
-                    "product_id": product_id,
-                    "price": current_price,
-                    "original_price": current_original_price,
-                    "discount_percent": current_discount,
-                    "discount_amount": discount_amount,
-                    "price_change": price_change,
-                    "price_change_percent": price_change_percent,
-                    "previous_price": prev_price,
-                    "previous_original_price": prev_original,
-                    "previous_discount_percent": prev_discount,
-                    "sales_count": current_sales,
-                    "sales_change": sales_change,
-                    "rating_average": current_rating,
-                    "review_count": current_reviews,
-                    "is_flash_sale": is_flash_sale,
-                    "crawl_type": crawl_type,
-                })
+                is_flash_sale = (current_discount and current_discount >= 30) or (
+                    discount_amount and discount_amount >= 100000
+                )
+
+                records_to_insert.append(
+                    {
+                        "product_id": product_id,
+                        "price": current_price,
+                        "original_price": current_original_price,
+                        "discount_percent": current_discount,
+                        "discount_amount": discount_amount,
+                        "price_change": price_change,
+                        "price_change_percent": price_change_percent,
+                        "previous_price": prev_price,
+                        "previous_original_price": prev_original,
+                        "previous_discount_percent": prev_discount,
+                        "sales_count": current_sales,
+                        "sales_change": sales_change,
+                        "rating_average": current_rating,
+                        "review_count": current_reviews,
+                        "is_flash_sale": is_flash_sale,
+                        "crawl_type": crawl_type,
+                    }
+                )
 
         if records_to_insert:
             from psycopg2.extras import execute_values
+
             if len(records_to_insert) >= 50:
                 self._log_history_bulk_copy(records_to_insert, cur)
             else:
@@ -1424,10 +1450,22 @@ class PostgresStorage:
                     """,
                     [
                         (
-                            r["product_id"], r["price"], r["original_price"], r["discount_percent"], r["discount_amount"],
-                            r["price_change"], r["price_change_percent"], r["previous_price"], r["previous_original_price"],
-                            r["previous_discount_percent"], r["sales_count"], r["sales_change"], r["rating_average"],
-                            r["review_count"], r["is_flash_sale"], r["crawl_type"],
+                            r["product_id"],
+                            r["price"],
+                            r["original_price"],
+                            r["discount_percent"],
+                            r["discount_amount"],
+                            r["price_change"],
+                            r["price_change_percent"],
+                            r["previous_price"],
+                            r["previous_original_price"],
+                            r["previous_discount_percent"],
+                            r["sales_count"],
+                            r["sales_change"],
+                            r["rating_average"],
+                            r["review_count"],
+                            r["is_flash_sale"],
+                            r["crawl_type"],
                         )
                         for r in records_to_insert
                     ],
@@ -1507,7 +1545,9 @@ class PostgresStorage:
             if dry_run:
                 cur.execute(select_query)
                 count = cur.fetchone()[0]
-                self.logger.info(f"[DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
+                self.logger.info(
+                    f"[DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB"
+                )
                 return 0
 
             cur.execute(delete_query)
@@ -1936,10 +1976,9 @@ class PostgresStorage:
         previous_state: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """
-        Internal version of history logging that accepts a cursor,
-        avoiding nested connection management.
+        Internal version of history logging that accepts a cursor, avoiding nested connection
+        management.
         """
         # Note: logic is already handled in the refactored version above.
         # This is kept for compatibility if needed, but the main logic is extracted.
         # Actually, let's keep the internal method as the source of truth.
-        pass

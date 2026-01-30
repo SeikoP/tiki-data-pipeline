@@ -1,13 +1,17 @@
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+
 from pipelines.crawl.crawl_products_detail import crawl_product_detail_via_api
+
 
 @pytest.mark.asyncio
 async def test_crawl_product_detail_via_api_success():
-    """Verify that valid product data is extracted when the API returns success."""
+    """
+    Verify that valid product data is extracted when the API returns success.
+    """
     url = "https://tiki.vn/some-product-p12345.html"
-    
+
     # Mock data returned by Tiki API
     mock_api_data = {
         "id": 12345,
@@ -17,15 +21,9 @@ async def test_crawl_product_detail_via_api_success():
         "discount_rate": 17,
         "rating_average": 4.5,
         "review_count": 100,
-        "current_seller": {
-            "name": "Test Seller",
-            "is_best_store": True,
-            "id": 888
-        },
+        "current_seller": {"name": "Test Seller", "is_best_store": True, "id": 888},
         "description": "<p>Description</p>",
-        "specifications": [
-            {"name": "Color", "value": "Blue"}
-        ],
+        "specifications": [{"name": "Color", "value": "Blue"}],
         "images": [{"base_url": "image.jpg"}],
         "brand": {"name": "Test Brand"},
         "all_time_quantity_sold": 99,
@@ -57,9 +55,11 @@ async def test_crawl_product_detail_via_api_success():
 
 @pytest.mark.asyncio
 async def test_crawl_product_detail_via_api_404():
-    """Verify that None is returned on API failure."""
+    """
+    Verify that None is returned on API failure.
+    """
     url = "https://tiki.vn/missing-product-p99999.html"
-    
+
     mock_response = AsyncMock()
     mock_response.status = 404
 
@@ -69,11 +69,14 @@ async def test_crawl_product_detail_via_api_404():
     result = await crawl_product_detail_via_api(url, mock_session, verbose=True)
     assert result is None
 
+
 @pytest.mark.asyncio
 async def test_crawl_product_detail_via_api_exception():
-    """Verify that None is returned on connection exception."""
+    """
+    Verify that None is returned on connection exception.
+    """
     url = "https://tiki.vn/error-product.html"
-    
+
     mock_session = MagicMock()
     # Simulate an exception during the get call
     mock_session.get.side_effect = Exception("Connection Error")
