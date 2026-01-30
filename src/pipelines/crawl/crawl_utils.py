@@ -151,16 +151,16 @@ def create_selenium_driver(headless: bool = True, timeout: int = 60) -> Any | No
                 try:
                     if abort_creation.is_set():
                         return
-                        
+
                     temp_driver = webdriver.Chrome(options=chrome_options)
-                    
+
                     if abort_creation.is_set():
                         try:
                             temp_driver.quit()
                         except Exception:
                             pass
                         return
-                        
+
                     driver_container["instance"] = temp_driver
                     driver_created.set()
                 except Exception as e:

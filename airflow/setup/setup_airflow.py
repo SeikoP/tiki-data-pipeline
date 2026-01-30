@@ -18,11 +18,12 @@ def setup_airflow():
             pool = session.query(Pool).filter(Pool.pool == name).first()
             if not pool:
                 print(f"   Creating pool: {name}")
-                session.add(Pool(pool=name, slots=slots, description=desc))
+                session.add(Pool(pool=name, slots=slots, description=desc, include_deferred=False))
             else:
                 print(f"   Updating pool: {name}")
                 pool.slots = slots
                 pool.description = desc
+                pool.include_deferred = False
         
         # 2. Setup Variables
         variables_data = {

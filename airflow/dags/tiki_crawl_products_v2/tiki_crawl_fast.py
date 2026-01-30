@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from airflow.datasets import Dataset
 from tiki_crawl_products_v2.bootstrap import (
     DAG,
     DAG_CONFIG,
     PythonOperator,
     TaskGroup,
-    crawl_category_batch,
     get_int_variable,
-    get_variable,
     timedelta,
 )
 from tiki_crawl_products_v2.tasks import (
@@ -19,6 +16,7 @@ from tiki_crawl_products_v2.tasks import (
     cleanup_orphan_categories_wrapper,
     cleanup_redis_cache,
     cleanup_redundant_categories_wrapper,
+    crawl_category_batch,
     crawl_product_batch_fast,
     crawl_single_category,
     load_categories,
@@ -33,6 +31,8 @@ from tiki_crawl_products_v2.tasks import (
     transform_products,
     validate_data,
 )
+
+from airflow.datasets import Dataset
 
 # Safe Mode: airflow DAG
 # This file is an Airflow DAG for Tiki product crawling (Speed Layer).
@@ -84,8 +84,8 @@ with DAG(
             """
             Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing.
             """
-            import math
             import logging
+            import math
 
             logger = logging.getLogger("airflow.task")
             ti = context["ti"]
@@ -93,23 +93,25 @@ with DAG(
             if not categories:
                 logger.error("❌ Không thể lấy categories từ XCom!")
                 return []
-            
+
             # Tối ưu: Chia thành n batch task để tận dụng tối đa pool (mặc định 4)
             num_batches = get_int_variable("TIKI_CATEGORY_NUM_BATCHES", default=4)
             total_categories = len(categories)
-            
+
             if total_categories <= num_batches:
                 # Nếu ít category hơn số batch mong muốn, mỗi category 1 task
                 batch_size = 1
             else:
                 batch_size = math.ceil(total_categories / num_batches)
-                
+
             batches = [
                 categories[i : i + batch_size] for i in range(0, total_categories, batch_size)
             ]
-            
-            logger.info(f"📦 Chia {total_categories} categories thành {len(batches)} batches (size ~{batch_size}) để tối ưu pool")
-            
+
+            logger.info(
+                f"📦 Chia {total_categories} categories thành {len(batches)} batches (size ~{batch_size}) để tối ưu pool"
+            )
+
             return [
                 {"category_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
             ]

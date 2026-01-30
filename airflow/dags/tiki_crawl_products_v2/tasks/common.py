@@ -130,10 +130,10 @@ def get_selenium_driver_pool_class(logger):
     try:
         # 1. Try standard package import first (preferred)
         _fix_sys_path_for_pipelines_import(logger)
-        from pipelines.crawl.utils import SeleniumDriverPool
+        from pipelines.crawl.crawl_utils import SeleniumDriverPool
 
         _SeleniumDriverPool = SeleniumDriverPool
-        logger.info("✅ Imported SeleniumDriverPool from pipelines.crawl.utils")
+        logger.info("✅ Imported SeleniumDriverPool from pipelines.crawl.crawl_utils")
         return _SeleniumDriverPool
     except ImportError:
         logger.warning("⚠️ Standard import failed, trying file-based import for SeleniumDriverPool")
@@ -146,7 +146,7 @@ def get_selenium_driver_pool_class(logger):
             # Try local dev path
             src_path = Path(__file__).parent.parent.parent.parent.parent / "src"
 
-        utils_path = src_path / "pipelines" / "crawl" / "utils.py"
+        utils_path = src_path / "pipelines" / "crawl" / "crawl_utils.py"
         if utils_path.exists():
             spec = importlib.util.spec_from_file_location("crawl_utils_task", str(utils_path))
             if spec and spec.loader:
@@ -189,7 +189,9 @@ def get_postgres_storage_class(logger):
 
         storage_path = src_path / "pipelines" / "crawl" / "storage" / "postgres_storage.py"
         if storage_path.exists():
-            spec = importlib.util.spec_from_file_location("postgres_storage_task", str(storage_path))
+            spec = importlib.util.spec_from_file_location(
+                "postgres_storage_task", str(storage_path)
+            )
             if spec and spec.loader:
                 storage_mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(storage_mod)

@@ -74,7 +74,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         name VARCHAR(1000) NOT NULL,
         short_name VARCHAR(255),
         url TEXT NOT NULL,
-        image_url TEXT,
         category_url TEXT,
         category_id VARCHAR(255),
         sales_count INTEGER,
@@ -87,8 +86,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         seller_id VARCHAR(255),
         seller_is_official BOOLEAN DEFAULT FALSE,
         brand VARCHAR(255),
-        stock_available BOOLEAN,
-        shipping JSONB,
+
         crawl_quality VARCHAR(50) DEFAULT 'basic',
         needs_enrichment BOOLEAN DEFAULT TRUE,
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -12,8 +12,6 @@ from tiki_crawl_products_v2.bootstrap import (
     Path,
     atomic_write_file,
     classify_error,
-    crawl_product_detail_async,
-    crawl_product_detail_with_driver,
     crawl_product_detail_with_selenium,
     datetime,
     ensure_output_dirs,
@@ -30,15 +28,13 @@ from tiki_crawl_products_v2.bootstrap import (
     re,
     redis_cache,
     shutil,
-    sys,
     time,
 )
-
-from .common import (  # noqa: F401
+from tiki_crawl_products_v2.tasks.common import (  # noqa: F401
     _fix_sys_path_for_pipelines_import,
     get_selenium_driver_pool_class,
 )
-from .loader import _import_postgres_storage  # noqa: F401
+from tiki_crawl_products_v2.tasks.loader import _import_postgres_storage  # noqa: F401
 
 
 def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
@@ -407,12 +403,20 @@ def crawl_product_batch(
     Returns:
         List[Dict]: List kết quả crawl cho batch
     """
+    # DEBUG PRINT BOMB
+    print("🔥🔥🔥 DEBUG: CRAWL_PRODUCT_BATCH EXECUTION START V1 🔥🔥🔥")
+    import sys
+
+    sys.stdout.flush()
+
     try:
         logger = get_logger(context)
     except Exception:
         import logging
 
         logger = logging.getLogger("airflow.task")
+
+    logger.info("🔥🔥🔥 DEBUG: LOGGER INFO TEST 🔥🔥🔥")
 
     # Lấy product_batch từ op_kwargs nếu chưa có
     if not product_batch:
@@ -474,6 +478,18 @@ def crawl_product_batch(
         # Session sẽ được tạo bên trong async function (cần async context)
         session = None
 
+        # FORCE IMPORT DIRECTLY FROM SRC TO AVOID BOOTSTRAP ISSUES
+        import sys
+
+        if "/opt/airflow/src" not in sys.path:
+            sys.path.append("/opt/airflow/src")
+
+        try:
+            from pipelines.crawl.crawl_products_detail import crawl_product_detail_async
+        except ImportError:
+            # Fallback local dev
+            from src.pipelines.crawl.crawl_products_detail import crawl_product_detail_async
+
         async def crawl_single_async(product_info: dict) -> dict[str, Any]:
             """
             Crawl một product với async.
@@ -498,7 +514,7 @@ def crawl_product_batch(
                         product_url,
                         session=session,
                         use_selenium_fallback=False,  # Disable fallback for Fast DAG
-                        verbose=False,
+                        verbose=True,  # Enable verbose logging for debugging
                     )
 
                     # Kiểm tra nếu crawl_product_detail_async trả về HTML string (do fallback về Selenium)
@@ -700,10 +716,26 @@ def crawl_product_batch(
                     result["error"] = "Không thể crawl detail hoặc extract detail không hợp lệ"
                     result["status"] = "failed"
 
+                    # FORCE DEBUG LOG TO FILE (Graceful Failure Case)
+                    try:
+                        with open("/tmp/debug_crawl.log", "a") as f:
+                            f.write(
+                                f"[{datetime.now()}] FAIL_GRACEFUL {product_id}: Crawl returned None or Invalid Dict\n"
+                            )
+                    except:
+                        pass
+
             except Exception as e:
                 result["error"] = str(e)
                 result["status"] = "failed"
                 logger.warning(f"⚠️  Lỗi khi crawl product {product_id}: {e}")
+
+                # FORCE DEBUG LOG TO FILE
+                try:
+                    with open("/tmp/debug_crawl.log", "a") as f:
+                        f.write(f"[{datetime.now()}] FAIL {product_id}: {str(e)}\n")
+                except:
+                    pass
 
             return result
 
@@ -761,7 +793,7 @@ def crawl_product_batch(
                         timeout=timeout,
                         connector=connector,
                         headers={
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
                         },
                     )
                     logger.info("✅ Đã tạo aiohttp session trong async context")
@@ -1426,7 +1458,7 @@ def merge_product_details(**context) -> dict[str, Any]:
             raise ValueError("Không tìm thấy products từ XCom hoặc file")
 
         products = merge_result.get("products", [])
-            
+
         logger.info(f"Tổng số products: {len(products)}")
 
         # Lấy số lượng products thực tế được crawl từ prepare_products_for_detail
@@ -2098,7 +2130,7 @@ def merge_product_details(**context) -> dict[str, Any]:
             "merged_at": datetime.now().isoformat(),
             "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' và brand/seller không null (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_no_brand} không có brand, {products_without_detail} không có detail)",
         }
-        
+
         return result
 
     except ValueError as e:

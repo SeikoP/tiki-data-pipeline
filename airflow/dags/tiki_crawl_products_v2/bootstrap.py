@@ -26,7 +26,6 @@ import warnings
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
-from threading import Lock
 from typing import Any
 
 try:
@@ -124,9 +123,8 @@ def load_env_file():
 src_path = Path("/opt/airflow/src")
 if src_path.exists() and str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
-
-# Fallback for local development
-if not src_path.exists():
+else:
+    # Fallback for local development
     local_src = Path(__file__).resolve().parent.parent.parent.parent / "src"
     if local_src.exists() and str(local_src) not in sys.path:
         sys.path.insert(0, str(local_src))
@@ -134,7 +132,6 @@ if not src_path.exists():
 # Import Custom Utilities
 try:
     from common.airflow_utils import (
-        TaskGroup,
         get_int_variable,
         get_variable,
         load_env_file,
@@ -144,7 +141,6 @@ try:
 except ImportError as e:
     logging.warning(f"⚠️ Could not import common utilities: {e}")
 
-    # Minimal fallback to allow DAG parse (though it will likely fail run)
     def get_variable(key, default=None):
         return os.getenv(key, default)
 
@@ -154,30 +150,12 @@ except ImportError as e:
     def load_env_file():
         pass
 
-    class TaskGroup:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def __rshift__(self, other):
-            return other
-
-        def __lshift__(self, other):
-            return self
-
-        def __rrshift__(self, other):
-            return self
-
-        def __rlshift__(self, other):
-            return self
-
-    def safe_import_attr(*args, **kwargs):
-        return None
+    def safe_import_attr(module_path, attr, **kwargs):
+        try:
+            mod = __import__(module_path, fromlist=[attr])
+            return getattr(mod, attr, None)
+        except ImportError:
+            return None
 
     def get_hierarchy_map(force_reload=False):
         return {}
@@ -264,158 +242,58 @@ DEBUG_ENRICH_CATEGORY_PATH = (
 )
 
 
-
 # Import resilience patterns
-# Import trực tiếp từng module con để tránh vấn đề relative imports
-resilience_module_path = None
-for path in possible_paths:
-    test_path = os.path.join(path, "resilience", "__init__.py")
-    if os.path.exists(test_path):
-        resilience_module_path = os.path.join(path, "resilience")
-        break
+try:
+    from pipelines.crawl.resilience.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
+    from pipelines.crawl.resilience.dead_letter_queue import DeadLetterQueue, get_dlq
+    from pipelines.crawl.resilience.exceptions import CrawlError, classify_error
+    from pipelines.crawl.resilience.graceful_degradation import (
+        DegradationLevel,
+        GracefulDegradation,
+        get_service_health,
+    )
+except ImportError:
 
-if resilience_module_path and os.path.exists(resilience_module_path):
-    try:
-        import importlib.util
-        import sys
-
-        # Thêm parent path (pipelines/crawl) vào sys.path
-        parent_path = os.path.dirname(resilience_module_path)  # .../crawl
-        if parent_path not in sys.path:
-            sys.path.insert(0, parent_path)
-
-        # Thêm grandparent path (pipelines) vào sys.path
-        grandparent_path = os.path.dirname(parent_path)  # .../pipelines
-        if grandparent_path not in sys.path:
-            sys.path.insert(0, grandparent_path)
-
-        # Import trực tiếp từng module con với tên module đầy đủ
-        # Điều này đảm bảo các module có thể import lẫn nhau nếu cần
-
-        # Tạo package structure trong sys.modules
-        import types
-
-        if "pipelines" not in sys.modules:
-            sys.modules["pipelines"] = types.ModuleType("pipelines")
-        if "pipelines.crawl" not in sys.modules:
-            sys.modules["pipelines.crawl"] = types.ModuleType("pipelines.crawl")
-        if "pipelines.crawl.resilience" not in sys.modules:
-            sys.modules["pipelines.crawl.resilience"] = types.ModuleType(
-                "pipelines.crawl.resilience"
-            )
-
-        # Đảm bảo utils module đã được import (cần thiết cho dead_letter_queue)
-        if "pipelines.crawl.utils" not in sys.modules and "crawl_utils" in sys.modules:
-            sys.modules["pipelines.crawl.utils"] = sys.modules["crawl_utils"]
-
-        # 1. Import exceptions trước (không có dependency)
-        exceptions_path = os.path.join(resilience_module_path, "exceptions.py")
-        if os.path.exists(exceptions_path):
-            spec = importlib.util.spec_from_file_location(
-                "pipelines.crawl.resilience.exceptions", exceptions_path
-            )
-            if spec and spec.loader:
-                exceptions_module = importlib.util.module_from_spec(spec)
-                sys.modules["pipelines.crawl.resilience.exceptions"] = exceptions_module
-                spec.loader.exec_module(exceptions_module)
-                CrawlError = exceptions_module.CrawlError
-                classify_error = exceptions_module.classify_error
-            else:
-                raise ImportError(f"Không thể load exceptions module từ {exceptions_path}")
-        else:
-            raise ImportError(f"Không tìm thấy exceptions.py tại {exceptions_path}")
-
-        # 2. Import circuit_breaker (không có dependency)
-        circuit_breaker_path = os.path.join(resilience_module_path, "circuit_breaker.py")
-        if os.path.exists(circuit_breaker_path):
-            spec = importlib.util.spec_from_file_location(
-                "pipelines.crawl.resilience.circuit_breaker", circuit_breaker_path
-            )
-            if spec and spec.loader:
-                circuit_breaker_module = importlib.util.module_from_spec(spec)
-                sys.modules["pipelines.crawl.resilience.circuit_breaker"] = circuit_breaker_module
-                spec.loader.exec_module(circuit_breaker_module)
-                CircuitBreaker = circuit_breaker_module.CircuitBreaker
-                CircuitBreakerOpenError = circuit_breaker_module.CircuitBreakerOpenError
-            else:
-                raise ImportError("Không thể load circuit_breaker module")
-        else:
-            raise ImportError("Không tìm thấy circuit_breaker.py")
-
-        # 3. Import dead_letter_queue (có thể import từ utils)
-        dlq_path = os.path.join(resilience_module_path, "dead_letter_queue.py")
-        if os.path.exists(dlq_path):
-            spec = importlib.util.spec_from_file_location(
-                "pipelines.crawl.resilience.dead_letter_queue", dlq_path
-            )
-            if spec and spec.loader:
-                dlq_module = importlib.util.module_from_spec(spec)
-                sys.modules["pipelines.crawl.resilience.dead_letter_queue"] = dlq_module
-                spec.loader.exec_module(dlq_module)
-                DeadLetterQueue = dlq_module.DeadLetterQueue
-                get_dlq = dlq_module.get_dlq
-            else:
-                raise ImportError("Không thể load dead_letter_queue module")
-        else:
-            raise ImportError("Không tìm thấy dead_letter_queue.py")
-
-        # 4. Import graceful_degradation (không có dependency)
-        degradation_path = os.path.join(resilience_module_path, "graceful_degradation.py")
-        if os.path.exists(degradation_path):
-            spec = importlib.util.spec_from_file_location(
-                "pipelines.crawl.resilience.graceful_degradation", degradation_path
-            )
-            if spec and spec.loader:
-                degradation_module = importlib.util.module_from_spec(spec)
-                sys.modules["pipelines.crawl.resilience.graceful_degradation"] = degradation_module
-                spec.loader.exec_module(degradation_module)
-                GracefulDegradation = degradation_module.GracefulDegradation
-                DegradationLevel = degradation_module.DegradationLevel
-                get_service_health = degradation_module.get_service_health
-            else:
-                raise ImportError("Không thể load graceful_degradation module")
-        else:
-            raise ImportError("Không tìm thấy graceful_degradation.py")
-
-    except Exception as e:
-        import warnings
-        warnings.warn(f"Không thể import resilience module: {e}", stacklevel=2)
-
-        class CircuitBreaker:
-            def __init__(self, *args, **kwargs): pass
-            def call(self, func, *args, **kwargs): return func(*args, **kwargs)
-        class CircuitBreakerOpenError(Exception): pass
-        class DeadLetterQueue:
-            def add(self, *args, **kwargs): pass
-        def get_dlq(*args, **kwargs): return DeadLetterQueue()
-        class GracefulDegradation:
-            def should_skip(self): return False
-            def record_success(self): pass
-            def record_failure(self): pass
-        class DegradationLevel:
-            FULL, REDUCED, MINIMAL, FAILED = "full", "reduced", "minimal", "failed"
-        def get_service_health():
-            return type("ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()})()
-        def classify_error(error, **kwargs): return error
-        class CrawlError(Exception): pass
-else:
     class CircuitBreaker:
-        def __init__(self, *args, **kwargs): pass
-        def call(self, func, *args, **kwargs): return func(*args, **kwargs)
-    class CircuitBreakerOpenError(Exception): pass
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def call(self, func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+    class CircuitBreakerOpenError(Exception):
+        pass
+
     class DeadLetterQueue:
-        def add(self, *args, **kwargs): pass
-    def get_dlq(*args, **kwargs): return DeadLetterQueue()
+        def add(self, *args, **kwargs):
+            pass
+
+    def get_dlq(*args, **kwargs):
+        return DeadLetterQueue()
+
     class GracefulDegradation:
-        def should_skip(self): return False
-        def record_success(self): pass
-        def record_failure(self): pass
+        def should_skip(self):
+            return False
+
+        def record_success(self):
+            pass
+
+        def record_failure(self):
+            pass
+
     class DegradationLevel:
         FULL, REDUCED, MINIMAL, FAILED = "full", "reduced", "minimal", "failed"
+
     def get_service_health():
-        return type("ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()})()
-    def classify_error(error, **kwargs): return error
-    class CrawlError(Exception): pass
+        return type(
+            "ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()}
+        )()
+
+    def classify_error(error, **kwargs):
+        return error
+
+    class CrawlError(Exception):
+        pass
 
 
 # Cấu hình mặc định
@@ -470,14 +348,18 @@ DAG_CONFIG = {
 
 @lru_cache(maxsize=1)
 def ensure_output_dirs() -> None:
-    """Ensure output/cache directories exist."""
+    """
+    Ensure output/cache directories exist.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _fix_sys_path_for_pipelines_import(logger=None):
-    """Sửa sys.path và sys.modules để đảm bảo import được pipelines."""
+    """
+    Sửa sys.path và sys.modules để đảm bảo import được pipelines.
+    """
     if logger:
         logger.info("🔧 Fixing sys.path for pipelines import...")
 
@@ -489,7 +371,9 @@ def _fix_sys_path_for_pipelines_import(logger=None):
             logger.info(f"   Added {src_path_str} to sys.path")
 
     # 2. Xóa các entries giả trong sys.modules
-    modules_to_remove = [m for m in sys.modules.keys() if m.startswith("pipelines") or m.startswith("common")]
+    modules_to_remove = [
+        m for m in sys.modules.keys() if m.startswith("pipelines") or m.startswith("common")
+    ]
     count = 0
     for module_name in modules_to_remove:
         if sys.modules[module_name] is None:
@@ -587,224 +471,56 @@ except ImportError:
     OptimizedDataLoader = None
 
 
-# Import module crawl_products_detail
-crawl_products_detail_path = None
-for path in possible_paths:
-    test_path = os.path.join(path, "crawl_products_detail.py")
-    if os.path.exists(test_path):
-        crawl_products_detail_path = test_path
-        break
-
-if crawl_products_detail_path and os.path.exists(crawl_products_detail_path):
-    try:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "crawl_products_detail", crawl_products_detail_path
-        )
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Không thể load spec từ {crawl_products_detail_path}")
-        crawl_products_detail_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(crawl_products_detail_module)
-
-        # Extract các functions cần thiết
-        crawl_product_detail_with_selenium = (
-            crawl_products_detail_module.crawl_product_detail_with_selenium
-        )
-        extract_product_detail = crawl_products_detail_module.extract_product_detail
-        crawl_product_detail_async = crawl_products_detail_module.crawl_product_detail_async
-        # Optional pooled-driver variant (present in optimized module)
-        crawl_product_detail_with_driver = getattr(
-            crawl_products_detail_module, "crawl_product_detail_with_driver", None
-        )
-    except Exception as e:
-        # Nếu import lỗi, log và tiếp tục (sẽ fail khi chạy task)
-        import warnings
-
-        warnings.warn(f"Không thể import crawl_products_detail module: {e}", stacklevel=2)
-
-        # Tạo dummy functions để tránh NameError
-        error_msg = str(e)
-
-        def crawl_product_detail_with_selenium(*args, **kwargs):
-            raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
-
-        def crawl_product_detail_with_driver(*args, **kwargs):
-            raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
-
-        extract_product_detail = crawl_product_detail_with_selenium
-
-        async def crawl_product_detail_async(*args, **kwargs):
-            raise ImportError(f"Module crawl_products_detail chưa được import: {error_msg}")
-
-        # Fallback SeleniumDriverPool
-        SeleniumDriverPool = None
-
-else:
-    # Fallback: thử import thông thường
-    try:
-        from crawl_products_detail import (
-            crawl_product_detail_with_selenium,
-        )
-
-        SeleniumDriverPool = None  # Không có trong crawl_products_detail, sẽ import từ utils
-    except ImportError as e:
-        raise ImportError(
-            f"Không tìm thấy module crawl_products_detail.\n"
-            f"Path: {crawl_products_detail_path}\n"
-            f"Lỗi gốc: {e}"
-        ) from e
-
-# Import crawl_category_products từ crawl_products
-crawl_products_path = None
-for path in possible_paths:
-    test_path = os.path.join(path, "crawl_products.py")
-    if os.path.exists(test_path):
-        crawl_products_path = test_path
-        break
-
-if crawl_products_path and os.path.exists(crawl_products_path):
-    try:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("crawl_products", crawl_products_path)
-        if spec and spec.loader:
-            crawl_products_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(crawl_products_module)
-            crawl_category_products = getattr(
-                crawl_products_module, "crawl_category_products", None
-            )
-        else:
-            crawl_category_products = None
-    except Exception as e:
-        err_msg = str(e)
-        warnings.warn(f"Không thể import crawl_products module: {err_msg}", stacklevel=2)
-
-        def crawl_category_products(*args, **kwargs):
-            raise ImportError(f"Module crawl_products chưa được import: {err_msg}")
-else:
-    try:
-        from pipelines.crawl.crawl_products import crawl_category_products
-    except ImportError:
-
-        def crawl_category_products(*args, **kwargs):
-            raise ImportError("Không tìm thấy module crawl_products")
-
-
-# Import SeleniumDriverPool từ utils ở module level
+# Import crawl_products_detail
 try:
-    # utils là file (.py), không phải package, nên import trực tiếp
-    import importlib.util
-    import sys
+    from pipelines.crawl.crawl_products_detail import (
+        crawl_product_detail_async,
+        crawl_product_detail_with_driver,
+        crawl_product_detail_with_selenium,
+        extract_product_detail,
+    )
+except ImportError:
 
-    src_path = Path("/opt/airflow/src")
-    if src_path.exists() and str(src_path) not in sys.path:
-        sys.path.insert(0, str(src_path))
+    def crawl_product_detail_with_selenium(*args, **kwargs):
+        raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
 
-    # Thử import từ pipelines.crawl.utils
-    try:
-        from pipelines.crawl.utils import (
-            SeleniumDriverPool,
-            extract_category_id_from_url,
-            extract_product_id_from_url,
-        )
-    except Exception:
-        # Fallback: direct import từ file
-        utils_path = src_path / "pipelines" / "crawl" / "utils.py"
-        if utils_path.exists():
-            spec = importlib.util.spec_from_file_location("crawl_utils", str(utils_path))
-            if spec and spec.loader:
-                crawl_utils_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(crawl_utils_module)
-                SeleniumDriverPool = getattr(crawl_utils_module, "SeleniumDriverPool", None)
-                extract_category_id_from_url = getattr(
-                    crawl_utils_module, "extract_category_id_from_url", None
-                )
-                extract_product_id_from_url = getattr(
-                    crawl_utils_module, "extract_product_id_from_url", None
-                )
-            else:
-                SeleniumDriverPool = None
-        else:
-            SeleniumDriverPool = None
-except Exception:
-    SeleniumDriverPool = None  # Fallback, sẽ import lại trong task nếu cần
+    def crawl_product_detail_with_driver(*args, **kwargs):
+        raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
+
+    def extract_product_detail(*args, **kwargs):
+        raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
+
+    async def crawl_product_detail_async(*args, **kwargs):
+        raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
+
+
+# Import crawl_category_products
+try:
+    from pipelines.crawl.crawl_products import crawl_category_products
+except ImportError:
+
+    def crawl_category_products(*args, **kwargs):
+        raise ImportError("Module pipelines.crawl.crawl_products not found")
+
+
+# Import crawl utilities from renamed crawl_utils.py (to avoid collision with utils/ dir)
+try:
+    from pipelines.crawl.crawl_utils import (
+        SeleniumDriverPool,
+        extract_category_id_from_url,
+        extract_product_id_from_url,
+    )
+except ImportError:
+    SeleniumDriverPool = None
     extract_category_id_from_url = None
     extract_product_id_from_url = None
 
-# Import module crawl_categories_batch (for category batch processing)
-crawl_category_batch = safe_import_attr(
-    "pipelines.crawl.crawl_categories_batch",
-    "crawl_category_batch",
-    fallback_paths=[Path(p).parent.parent for p in possible_paths],
-)
 
-if not crawl_category_batch:
-    # Thử load từ tasks.category (vị trí chuẩn mới)
-    crawl_category_batch = safe_import_attr(
-        "tiki_crawl_products_v2.tasks.category",
-        "crawl_category_batch",
-        fallback_paths=[Path(dag_file_dir).parent],
-    )
-
-
-# Import modules cho AI summarization và Discord notification
-# Tìm các thư mục: analytics/, ai/, notifications/ ở common/ (sau src/)
-analytics_path = None
-ai_path = None
-notifications_path = None
-config_path = None
-
-# Thử nhiều đường dẫn có thể cho các modules ở common/
-common_base_paths = [
-    # Từ /opt/airflow (Docker default - ưu tiên)
-    "/opt/airflow/src/common",
-    # Từ airflow/dags/ lên 2 cấp đến root (local development)
-    os.path.abspath(os.path.join(dag_file_dir, "..", "..", "src", "common")),
-    # Từ airflow/dags/ lên 1 cấp (nếu airflow/ là root)
-    os.path.abspath(os.path.join(dag_file_dir, "..", "src", "common")),
-    # Từ workspace root (nếu mount vào /workspace)
-    "/workspace/src/common",
-    # Từ current working directory
-    os.path.join(os.getcwd(), "src", "common"),
-]
-
-for common_base in common_base_paths:
-    test_analytics = os.path.join(common_base, "analytics", "aggregator.py")
-    test_ai = os.path.join(common_base, "ai", "summarizer.py")
-    test_notifications = os.path.join(common_base, "notifications", "discord.py")
-    test_config = os.path.join(common_base, "config.py")
-
-    if os.path.exists(test_analytics):
-        analytics_path = test_analytics
-    if os.path.exists(test_ai):
-        ai_path = test_ai
-    if os.path.exists(test_notifications):
-        notifications_path = test_notifications
-    if os.path.exists(test_config):
-        config_path = test_config
-
-    if analytics_path and ai_path and notifications_path and config_path:
-        break
-
-# Fallback for common_base_paths in local dev
-if not (analytics_path and ai_path and notifications_path and config_path):
-    project_root = Path(__file__).resolve().parent.parent.parent.parent
-    common_base = project_root / "src" / "common"
-    if common_base.exists():
-        test_analytics = common_base / "analytics" / "aggregator.py"
-        test_ai = common_base / "ai" / "summarizer.py"
-        test_notifications = common_base / "notifications" / "discord.py"
-        test_config = common_base / "config.py"
-
-        if test_analytics.exists():
-            analytics_path = str(test_analytics)
-        if test_ai.exists():
-            ai_path = str(test_ai)
-        if test_notifications.exists():
-            notifications_path = str(test_notifications)
-        if test_config.exists():
-            config_path = str(test_config)
+# Define paths for lazy imports
+analytics_path = os.path.join(src_path, "common", "analytics", "aggregator.py")
+ai_path = os.path.join(src_path, "common", "ai", "summarizer.py")
+notifications_path = os.path.join(src_path, "common", "notifications", "discord.py")
+config_path = os.path.join(src_path, "common", "config.py")
 
 
 def _lazy_import_from_file(module_name: str, file_path: str, attr: str):
@@ -845,8 +561,6 @@ def get_load_categories_db_func():
     if not func:
         warnings.warn("load_categories_to_db not available; DB load will be skipped", stacklevel=2)
     return func
-
-
 
 
 @lru_cache(maxsize=1)

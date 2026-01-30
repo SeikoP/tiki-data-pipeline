@@ -9,12 +9,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 
-# Try importing constants from utils
+# Try importing constants from crawl_utils
 try:
-    from utils import DEFAULT_CATEGORY_CACHE_DIR, DEFAULT_DATA_DIR
+    from crawl_utils import DEFAULT_CATEGORY_CACHE_DIR, DEFAULT_DATA_DIR
 except ImportError:
     try:
-        from src.pipelines.crawl.utils import DEFAULT_CATEGORY_CACHE_DIR, DEFAULT_DATA_DIR
+        from src.pipelines.crawl.crawl_utils import DEFAULT_CATEGORY_CACHE_DIR, DEFAULT_DATA_DIR
     except ImportError:
         # Fallback constants if imports fail
         DEFAULT_DATA_DIR = Path("data/raw")
@@ -328,7 +328,7 @@ def crawl_category_recursive_optimized(
         try:
             spec = importlib.util.spec_from_file_location(
                 "crawl_utils",
-                os.path.join(os.path.dirname(__file__), "utils.py"),
+                os.path.join(os.path.dirname(__file__), "crawl_utils.py"),
             )
             if spec and spec.loader:
                 utils_module = importlib.util.module_from_spec(spec)

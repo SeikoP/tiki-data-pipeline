@@ -42,9 +42,7 @@ def update_schema():
             """)
             if not cur.fetchone():
                 print("Adding 'review_count' column...")
-                cur.execute(
-                    "ALTER TABLE products ADD COLUMN review_count INTEGER DEFAULT 0;"
-                )
+                cur.execute("ALTER TABLE products ADD COLUMN review_count INTEGER DEFAULT 0;")
             else:
                 print("'review_count' column already exists.")
 

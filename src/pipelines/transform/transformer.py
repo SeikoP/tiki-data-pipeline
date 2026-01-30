@@ -300,8 +300,6 @@ class DataTransformer:
             "name": product.get("name"),
             "short_name": self._get_short_name(product.get("name")),
             "url": product.get("url"),
-            "image_url": product.get("image_url")
-            or (product.get("images")[0] if product.get("images") else None),
             "category_url": product.get("category_url"),
             "category_id": product.get("category_id"),
             "category_path": product.get("category_path") or [],
@@ -338,19 +336,10 @@ class DataTransformer:
         rating = product.get("rating", {})
         if isinstance(rating, dict):
             db_product["rating_average"] = rating.get("average")
-            db_product["review_count"] = (
-                rating.get("total_reviews") or rating.get("review_count")
-            )
+            db_product["review_count"] = rating.get("total_reviews") or rating.get("review_count")
         else:
             db_product["rating_average"] = None
             db_product["review_count"] = None
-
-        # Đảm bảo stock_available có giá trị boolean mặc định
-        stock = product.get("stock", {})
-        if isinstance(stock, dict):
-            db_product["stock_available"] = stock.get("available")
-        else:
-            db_product["stock_available"] = None
 
         # Description
         db_product["description"] = product.get("description")
@@ -369,20 +358,6 @@ class DataTransformer:
 
         # Brand
         db_product["brand"] = product.get("brand")
-
-        # Stock fields - chỉ giữ stock_available (stock_quantity, stock_status không sử dụng)
-        stock = product.get("stock", {})
-        if isinstance(stock, dict):
-            db_product["stock_available"] = stock.get("available")
-        else:
-            db_product["stock_available"] = None
-
-        # Shipping fields (có thể flatten hoặc giữ JSONB - giữ JSONB để dễ mở rộng)
-        shipping = product.get("shipping", {})
-        if shipping:
-            db_product["shipping"] = shipping if isinstance(shipping, dict) else None
-        else:
-            db_product["shipping"] = None
 
         # JSONB fields
         db_product["specifications"] = product.get("specifications")
