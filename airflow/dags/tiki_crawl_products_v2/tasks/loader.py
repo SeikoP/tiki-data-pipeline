@@ -26,7 +26,6 @@ def fix_missing_parent_categories(**context) -> dict[str, Any]:
     logger = get_logger(context)
 
     try:
-        import json
         import re
 
         from pipelines.crawl.storage.postgres_storage import PostgresStorage

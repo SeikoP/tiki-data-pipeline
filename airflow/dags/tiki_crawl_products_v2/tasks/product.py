@@ -63,6 +63,7 @@ def merge_products(**context) -> dict[str, Any]:
             "timeout_categories": 0,
             "total_products": 0,
             "unique_products": 0,
+            "total_saved_directly": 0,
         }
 
         # Lấy kết quả từ các task crawl (Dynamic Task Mapping)
@@ -89,6 +90,7 @@ def merge_products(**context) -> dict[str, Any]:
                                     products = single_result.get("products", [])
                                     all_products.extend(products)
                                     stats["total_products"] += len(products)
+                                    stats["total_saved_directly"] += single_result.get("saved_count", 0)
                                 elif single_result.get("status") == "timeout":
                                     stats["timeout_categories"] += 1
                                     logger.warning(
@@ -138,6 +140,7 @@ def merge_products(**context) -> dict[str, Any]:
                     products = all_results.get("products", [])
                     all_products.extend(products)
                     stats["total_products"] += len(products)
+                    stats["total_saved_directly"] += all_results.get("saved_count", 0)
                 elif all_results.get("status") == "timeout":
                     stats["timeout_categories"] += 1
                     logger.warning(f"⏱️  Category {all_results.get('category_name')} timeout")
@@ -162,6 +165,7 @@ def merge_products(**context) -> dict[str, Any]:
                                 products = result.get("products", [])
                                 all_products.extend(products)
                                 stats["total_products"] += len(products)
+                                stats["total_saved_directly"] += result.get("saved_count", 0)
                             elif result.get("status") == "timeout":
                                 stats["timeout_categories"] += 1
                                 logger.warning(f"⏱️  Category {result.get('category_name')} timeout")
@@ -213,6 +217,7 @@ def merge_products(**context) -> dict[str, Any]:
         )
         logger.info(f"• Tổng sản phẩm:   {stats['total_products']}")
         logger.info(f"• Sau khi lọc trùng: {stats['unique_products']}")
+        logger.info(f"• Saved Directly:    {stats['total_saved_directly']}")
         logger.info("=" * 40)
 
         result = {
@@ -220,7 +225,7 @@ def merge_products(**context) -> dict[str, Any]:
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
         }
-
+        
         return result
 
     except Exception as e:
@@ -264,6 +269,9 @@ def save_products(**context) -> str:
                 # Fallback to merge_products without prefix
             except Exception as e:
                 logger.warning(f"Không lấy được từ 'merge_products': {e}")
+
+        if not merge_result:
+            raise ValueError("Không tìm thấy kết quả merge từ XCom")
 
         if not merge_result:
             raise ValueError("Không tìm thấy kết quả merge từ XCom")

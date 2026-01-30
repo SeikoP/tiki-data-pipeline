@@ -160,3 +160,44 @@ def get_selenium_driver_pool_class(logger):
         raise ImportError("Could not import SeleniumDriverPool from any source")
 
     return _SeleniumDriverPool
+
+
+def get_postgres_storage_class(logger):
+    """
+    Import PostgresStorage helper to reduce complexity in tasks.
+    """
+    _PostgresStorage = None
+
+    try:
+        # 1. Try standard package import first (preferred)
+        _fix_sys_path_for_pipelines_import(logger)
+        from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
+        _PostgresStorage = PostgresStorage
+        logger.info("✅ Imported PostgresStorage from pipelines.crawl.storage.postgres_storage")
+        return _PostgresStorage
+    except ImportError:
+        logger.warning("⚠️ Standard import failed, trying file-based import for PostgresStorage")
+
+    try:
+        import importlib.util
+
+        src_path = Path("/opt/airflow/src")
+        if not src_path.exists():
+            # Try local dev path
+            src_path = Path(__file__).parent.parent.parent.parent.parent / "src"
+
+        storage_path = src_path / "pipelines" / "crawl" / "storage" / "postgres_storage.py"
+        if storage_path.exists():
+            spec = importlib.util.spec_from_file_location("postgres_storage_task", str(storage_path))
+            if spec and spec.loader:
+                storage_mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(storage_mod)
+                _PostgresStorage = getattr(storage_mod, "PostgresStorage", None)
+    except Exception as e:
+        logger.error(f"❌ Failed to import PostgresStorage: {e}")
+
+    if _PostgresStorage is None:
+        raise ImportError("Could not import PostgresStorage from any source")
+
+    return _PostgresStorage

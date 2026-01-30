@@ -7,70 +7,43 @@ x-airflow-common:
     &airflow-common-env
     TZ: Asia/Ho_Chi_Minh
     PYTHONPATH: "/opt/airflow:/opt/airflow/src:/opt/airflow/dags:/home/airflow/.local/lib/python3.12/site-packages"
-    # === Disable SDK task supervision to avoid execution API calls ===
     AIRFLOW__CORE__TASK_RUNNER: "StandardTaskRunner"
     AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES: ""
-    # === Internal API for Airflow 3.x task execution ===
     AIRFLOW__CORE__INTERNAL_API_URL: "http://airflow-webserver:8080"
-    # LocalExecutor reads this config for Execution API (double underscore notation)
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
-    # JWT secret for API authentication (must be same across all components)
-    # Generate: openssl rand -hex 32
-    # SECURITY: Must be set in .env file, no default value for production safety
     AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET}
     AIRFLOW__CORE__SECRET_KEY: ${_AIRFLOW__CORE__SECRET_KEY}
-    # Fernet key for Variable/Connection encryption (must be consistent across rebuilds)
-    # Generate new key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    # If not set in .env, will use empty string (Airflow will generate one, but it won't persist across restarts)
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-}
-
-    # === Local Executor Configuration (LITE MODE) ===
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__DATABASE_ACCESS_ISOLATION: 'false'
     AIRFLOW__CORE__PARALLELISM: 32
     AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 16
-    
-    # Database Connection
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
-    
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    
-    # Standalone DAG Processor is False in LocalExecutor (Scheduler handles it)
     AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: 'false'
-    
-    # Increase timeouts for large DAGs
     AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 300
     AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: 300
-    
-    # === Simple Auth Manager for Airflow 3.x ===
-    # Format: username:Admin (role can be Admin, Op, User, Viewer, Public)
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${_AIRFLOW_WWW_USER_USERNAME:-admin}:Admin
-    
-    # Note: Python packages (selenium, beautifulsoup4, etc.) are installed at build time in Dockerfile
-    # for faster startup. No runtime pip install needed.
+    AIRFLOW__CORE__LOGGING_LEVEL: "WARNING"
 
   volumes:
-    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - ./src:/opt/airflow/src:ro
     - ./airflow/logs:/opt/airflow/logs
-    - ./airflow/config:/opt/airflow/config
-    - ./src:/opt/airflow/src
     - ./data:/opt/airflow/data
-    - ./scripts:/opt/airflow/scripts
-    - ./airflow/passwords.json:/opt/airflow/simple_auth_manager_passwords.json.generated
-    - ./.env:/opt/airflow/.env
+    - ./airflow/config:/opt/airflow/config:ro
+    - ./scripts:/opt/airflow/scripts:ro
+    - ./.env:/opt/airflow/.env:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     postgres:
       condition: service_healthy
 
 services:
-  # ============================================
-  # POSTGRES
-  # ============================================
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
     environment:
       TZ: Asia/Ho_Chi_Minh
       POSTGRES_USER: ${POSTGRES_USER}
@@ -82,44 +55,40 @@ services:
       - postgres-shared-volume:/var/lib/postgresql/data
       - ./airflow/setup/init-airflow-db.sh:/docker-entrypoint-initdb.d/01-init-airflow-db.sh:ro
       - ./airflow/setup/init-crawl-db.sh:/docker-entrypoint-initdb.d/02-init-crawl-db.sh:ro
-    # Optimized for Local Performance
     command: >
       postgres
-      -c shared_buffers=256MB
-      -c effective_cache_size=1GB
+      -c shared_buffers=128MB
       -c work_mem=16MB
-      -c maintenance_work_mem=128MB
       -c max_connections=50
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     restart: unless-stopped
     networks:
       - backend
 
-  # ============================================
-  # REDIS (Cache & DLQ)
-  # ============================================
   redis:
     image: redis:7.2-alpine
-    # Optimized for Cache Use-case (256MB max)
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
     ports:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      interval: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     restart: unless-stopped
     networks:
       - backend
 
-  # ============================================
-  # AIRFLOW (API Server + Scheduler + Triggerer)
-  # ============================================
   airflow-webserver:
     <<: *airflow-common
     build:
@@ -129,17 +98,11 @@ services:
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 120s
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     networks:
       - backend
 
@@ -147,81 +110,46 @@ services:
     <<: *airflow-common
     command: scheduler
     hostname: airflow-scheduler
-    healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     networks:
       - backend
 
   airflow-triggerer:
     <<: *airflow-common
     command: triggerer
-    healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
-      interval: 30s
-      timeout: 10s
-      retries: 3
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     networks:
       - backend
 
-  # ============================================
-  # INITIALIZATION
-  # ============================================
   airflow-init:
     <<: *airflow-common
     entrypoint: /bin/bash
     command:
       - -c
       - |
+        echo "🚀 Starting optimized initialization..."
+        # Create standard directories
         mkdir -p /opt/airflow/{logs,dags,plugins,config,src,data}
-        chown -R "${AIRFLOW_UID}:0" /opt/airflow/{logs,dags,plugins,config,src,data}
         
-        echo "Initializing Airflow DB..."
-        su -s /bin/bash airflow -c "/home/airflow/.local/bin/airflow db migrate"
+        echo "Updating Airflow DB..."
+        airflow db migrate
         
-        echo "Creating Simple Auth Manager Password File..."
-        # Create the passwords.json file for Airflow 3.0 Simple Auth Manager
-        # Using jq if available, otherwise simple echo
-        su -s /bin/bash airflow -c "echo '{\"\${_AIRFLOW_WWW_USER_USERNAME:-admin}\": \"\${_AIRFLOW_WWW_USER_PASSWORD}\"}' > /opt/airflow/simple_auth_manager_passwords.json.generated"
+        echo "Updating Pools and Variables (One-shot)..."
+        # Using the unified setup script to save ~40-60s
+        python /opt/airflow/airflow/setup/setup_airflow.py
         
-        echo "Updating Pools and Variables..."
-        if [ -f /opt/airflow/setup/init-airflow-config.sh ]; then
-          chmod +x /opt/airflow/setup/init-airflow-config.sh
-          su -s /bin/bash airflow -c "cd /opt/airflow && /opt/airflow/setup/init-airflow-config.sh"
-        else
-          echo "Warning: init-airflow-config.sh not found, skipping pool/variable configuration"
-        fi
+        echo "Creating Simple Auth Password File..."
+        echo "{\"${_AIRFLOW_WWW_USER_USERNAME:-admin}\": \"${_AIRFLOW_WWW_USER_PASSWORD}\"}" > /opt/airflow/simple_auth_manager_passwords.json.generated
         
-        echo "Init Done."
+        echo "✅ Init Done."
     environment:
       <<: *airflow-common-env
-      # SECURITY: Username and password must be set in .env file
-      # Default values only for development - change in production!
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
-    user: "0:0"
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./airflow/config:/opt/airflow/config
-      - ./airflow/setup:/opt/airflow/setup
-      - ./src:/opt/airflow/src
-      - ./data:/opt/airflow/data
-      - ./scripts:/opt/airflow/scripts
     networks:
       - backend
 

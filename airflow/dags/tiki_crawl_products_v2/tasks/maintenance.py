@@ -25,10 +25,11 @@ def cleanup_incomplete_products_wrapper(**context):
         storage = PostgresStorage()
 
         # Clean up products missing seller OR brand (or both)
-        # Both are required for quality data
-        # require_rating=True to satisfy user request for deleting null ratings
+        # both are required for quality data
+        # require_rating=False (default) to prevent deleting products with null ratings
+        # which leads to data loss for items with no reviews.
         stats = storage.cleanup_incomplete_products(
-            require_seller=True, require_brand=True, require_rating=True
+            require_seller=True, require_brand=True, require_rating=False
         )
 
         deleted_count = stats["deleted_count"]

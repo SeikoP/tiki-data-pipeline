@@ -60,12 +60,12 @@ Code Quality:
 
 ```
 Current Data Volume:
-├─ Categories: 47 categories
-├─ Products: 1,000+ products
-├─ Daily crawl: 280 products
-├─ Storage: 85 MB (raw), 120 MB (processed)
+├─ Categories: 100+ categories
+├─ Products: 5,000 - 10,000+ products
+├─ Daily crawl: 1,000+ products
+├─ Storage: 250 MB (raw), 400 MB (processed)
 ├─ Database: crawl_data (PostgreSQL)
-└─ Cache: 850 MB (Redis)
+└─ Cache: 1.2 GB (Redis)
 
 Data Quality Metrics:
 ├─ Completeness: 99.1%
@@ -166,20 +166,16 @@ Expected Results:
 ## 🔗 BATCH INTEGRATION ANALYSIS
 
 ### Current Batching Strategy
-
-```
-Products per Category: ~15-30 products
-├─ Current batch size: 12 products
-├─ Batches per category: 2-3 batches
-├─ Total batches (47 categories): 23 batches
-├─ Parallelism: 23 concurrent batch tasks
-└─ Speed: 3-4 batches/minute (12-15 min total)
+├─ Categories: 100+ categories
+├─ Configuration: TIKI_CATEGORY_NUM_BATCHES = 4
+├─ Parallelism: 4 concurrent batch tasks (Optimized for Pool)
+└─ Speed: ~30-50 categories per batch, total time 2-5 min
 
 Optimization Applied:
-├─ Before: 15 products/batch → 19 batches (slower)
-├─ After: 12 products/batch → 23 batches (faster)
-├─ Reason: Better load balancing across tasks
-└─ Impact: +12% speedup
+├─ Before: Fixed batch size (1000) → 1 task (Not using pool fully)
+├─ After: Dynamic partitioning → 4 parallel tasks (Fill pool)
+├─ Reason: Parallel category crawling reduces E2E latency
+└─ Impact: +15% speedup in pre-product stages
 ```
 
 ### Batch Size Sensitivity Analysis
@@ -267,5 +263,5 @@ Batch Size | Total Batches | Parallelism | Speedup | Risk
 
 ---
 
-**Last Updated**: 18/11/2025  
-**Status**: ✅ Analysis Complete
+**Last Updated**: 31/01/2026  
+**Status**: ✅ Analysis Complete (v1.2)

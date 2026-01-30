@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import time
@@ -22,6 +23,7 @@ try:
         RateLimiter,
         atomic_write_json,
         ensure_dir,
+        extract_category_id_from_url,
         extract_product_id_from_url,
         normalize_url,
         parse_price,
@@ -49,6 +51,7 @@ except ImportError:
             ensure_dir = utils_module.ensure_dir
             atomic_write_json = utils_module.atomic_write_json
             safe_read_json = utils_module.safe_read_json
+            extract_category_id_from_url = utils_module.extract_category_id_from_url
             extract_product_id_from_url = utils_module.extract_product_id_from_url
             normalize_url = utils_module.normalize_url
             RateLimiter = utils_module.RateLimiter
@@ -748,6 +751,107 @@ def get_category_page_url(category_url, page=1):
         return f"{category_url}?page={page}"
 
 
+def get_products_via_listing_api(category_url, max_pages=5, use_rate_limiting=True):
+    """Lấy danh sách sản phẩm qua Tiki Listing API (Cực nhanh).
+
+    Args:
+        category_url: URL danh mục
+        max_pages: Số trang tối đa
+        use_rate_limiting: Có dùng rate limiting không
+
+    Returns:
+        List[Dict]: Danh sách sản phẩm
+    """
+    category_id = extract_category_id_from_url(category_url)
+    if not category_id:
+        return None
+
+    # Strip 'c' from category_id if present (e.g., 'c1882' -> '1882')
+    numeric_cat_id = re.sub(r"\D", "", category_id)
+
+    all_products = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "X-Guest-Token": "no-token",  # Tiki API often works without token but headers help
+    }
+
+    # Adaptive Rate Limiting
+    adaptive_limiter = None
+    if use_rate_limiting:
+        try:
+            from pipelines.crawl.storage.adaptive_rate_limiter import get_adaptive_rate_limiter
+
+            adaptive_limiter = get_adaptive_rate_limiter("redis://redis:6379/2")
+        except Exception:
+            pass
+
+    for page in range(1, max_pages + 1):
+        if adaptive_limiter:
+            adaptive_limiter.wait("tiki.vn")
+
+        api_url = f"https://tiki.vn/api/v2/products?limit=48&include=advertisement&aggregations=2&version=home-perso&category={numeric_cat_id}&page={page}"
+
+        try:
+            response = requests.get(api_url, headers=headers, timeout=15)
+            if response.status_code != 200:
+                break
+
+            data = response.json()
+            products_data = data.get("data", [])
+            if not products_data:
+                break
+
+            for item in products_data:
+                # Map API fields...
+                # (keep existing item mapping logic)
+                product_id = str(item.get("id"))
+                product_url = item.get("url_path")
+                if product_url and not product_url.startswith("http"):
+                    product_url = f"https://tiki.vn/{product_url}"
+
+                all_products.append(
+                    {
+                        "product_id": product_id,
+                        "name": item.get("name"),
+                        "url": product_url or f"https://tiki.vn/p/{product_id}.html",
+                        "price": item.get("price"),
+                        "original_price": item.get("original_price"),
+                        "sales_count": item.get("quantity_sold")
+                        and int(item.get("quantity_sold").get("value", 0))
+                        if isinstance(item.get("quantity_sold"), dict)
+                        else item.get("quantity_sold"),
+                        "image_url": item.get("thumbnail_url"),
+                        "stock": {"available": True}
+                        if item.get("inventory_status") == "available"
+                        else {"available": False},
+                        "shipping": item.get("badges_new") or item.get("badges"),
+                        "thumbnail_url": item.get("thumbnail_url"),
+                        "rating_average": item.get("rating_average"),
+                        "review_count": item.get("review_count"),
+                        "extraction_method": "listing_api",
+                    }
+                )
+
+            # Phân trang thông minh dựa trên paging metadata
+            paging = data.get("paging", {})
+            current_page = paging.get("current_page", page)
+            last_page = paging.get("last_page", 1)
+            
+            if current_page >= last_page:
+                break
+                
+            # Fallback nếu không có paging data
+            if len(products_data) < 20: # Tiki trả về 40, nếu < 20 chắc chắn là hết
+                break
+
+        except Exception as e:
+            print(f"⚠️ Error fetching listing API (page {page}): {e}")
+            break
+
+    return all_products
+
+
 def crawl_category_products(
     category_url,
     max_pages=None,
@@ -755,6 +859,10 @@ def crawl_category_products(
     cache_dir=DEFAULT_PRODUCT_LIST_CACHE_DIR,
     use_redis_cache=True,
     use_rate_limiting=True,
+    allow_selenium_fallback=True,  # Tối ưu: Cho phép tắt fallback Selenium
+    logger: logging.Logger | None = None,
+    force_refresh=False,
+    cache_ttl=86400, # 24 giờ mặc định
 ):
     """Crawl tất cả sản phẩm từ một danh mục.
 
@@ -765,39 +873,63 @@ def crawl_category_products(
         cache_dir: Thư mục cache (fallback nếu Redis không available)
         use_redis_cache: Có dùng Redis cache không (mặc định True)
     """
+    logger = logger or logging.getLogger(__name__)
 
     all_products = []
 
-    # Thử Redis cache trước (nhanh hơn, distributed)
+    # Tier 1: Thử Redis cache (Ưu tiên nhất)
     redis_cache = None
-    if use_redis_cache:
+    if use_redis_cache and not force_refresh:
         try:
             from pipelines.crawl.storage.redis_cache import get_redis_cache
-
             redis_cache = get_redis_cache("redis://redis:6379/1")
             if redis_cache:
                 cached_products = redis_cache.get_cached_products(category_url)
                 if cached_products:
-                    print(f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}...")
+                    logger.info(f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}... ({len(cached_products)} products)")
                     return cached_products
-        except Exception:
-            # Redis không available, fallback về file cache
-            pass  # Silent fallback
+        except Exception as e:
+            logger.debug(f"[Redis Cache] Error: {e}")
 
-    # Fallback: Kiểm tra file cache
+    # Tier 2: Thử File cache
     cache_file = None
     if cache_dir:
         import hashlib
-
         url_hash = hashlib.md5(category_url.encode()).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 
-        cached_data = safe_read_json(cache_file)
-        if cached_data:
-            cached_products = cached_data.get("products", [])
-            if cached_products:  # Chỉ return cache nếu có sản phẩm
-                print(f"[File Cache] ✅ Hit cache cho {category_url[:60]}...")
-                return cached_products
+        if os.path.exists(cache_file) and not force_refresh:
+            # Kiểm tra TTL của file
+            file_age = time.time() - os.path.getmtime(cache_file)
+            if file_age < cache_ttl:
+                cached_data = safe_read_json(cache_file)
+                if cached_data and "products" in cached_data:
+                    cached_products = cached_data["products"]
+                    logger.info(f"[File Cache] ✅ Hit cache ({int(file_age/3600)}h cũ) cho {category_url[:60]}... ({len(cached_products)} products)")
+                    return cached_products
+            else:
+                logger.info(f"[File Cache] 🔄 Cache quá hạn ({int(file_age/3600)}h), tiến hành crawl mới...")
+
+    # Tier 3: Thử Listing API (Nhanh nhất nếu cache miss)
+    # Tăng mặc định lên cao hơn để lấy nhiều sản phẩm hơn (comprehensive)
+    limit_max_pages = max_pages if max_pages is not None else 10
+    api_products = get_products_via_listing_api(
+        category_url, max_pages=limit_max_pages, use_rate_limiting=use_rate_limiting
+    )
+    if api_products:  # Fallback to HTML if API returns empty list
+        logger.info(f"[Listing API] ✅ Lấy được {len(api_products)} sản phẩm cho {category_url[:60]}...")
+        # Inject category_url for downstream usage
+        for p in api_products:
+            p["category_url"] = category_url
+            
+        # Tối ưu: Cache ngay lập tức sau khi lấy từ API thành công
+        if redis_cache:
+            try:
+                redis_cache.cache_products(category_url, api_products, ttl=43200) # 12h
+            except Exception:
+                pass
+                
+        return api_products
 
     try:
         # Lấy trang đầu để xác định số trang
@@ -810,7 +942,7 @@ def crawl_category_products(
                     use_rate_limiting=use_rate_limiting,
                 )
             else:
-                print("⚠️  Selenium chưa được cài đặt, dùng requests thay thế")
+                logger.warning("⚠️  Selenium chưa được cài đặt, dùng requests thay thế")
                 html = get_page_with_requests(
                     category_url,
                     use_redis_cache=use_redis_cache,
@@ -820,11 +952,11 @@ def crawl_category_products(
             html = get_page_with_requests(
                 category_url, use_redis_cache=use_redis_cache, use_rate_limiting=use_rate_limiting
             )
-            # Nếu không tìm thấy sản phẩm với requests, thử Selenium
+            # Nếu không tìm thấy sản phẩm với requests, thử Selenium (nếu cho phép)
             if html:
                 products_test = parse_products_from_html(html, category_url)
-                if not products_test and _check_selenium_available():
-                    print("⚠️  Không tìm thấy sản phẩm với requests, thử Selenium...")
+                if not products_test and allow_selenium_fallback and _check_selenium_available():
+                    logger.warning("⚠️  Không tìm thấy sản phẩm với requests, thử Selenium fallback...")
                     html = get_page_with_selenium(category_url)
                     use_selenium = True  # Đánh dấu đã dùng Selenium
 
@@ -906,11 +1038,11 @@ def crawl_category_products(
         if redis_cache:
             try:
                 redis_cache.cache_products(category_url, unique_products, ttl=43200)  # 12 giờ
-                print(
+                logger.info(
                     f"[Redis Cache] ✅ Đã cache {len(unique_products)} products cho {category_url[:60]}..."
                 )
             except Exception as e:
-                print(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
+                logger.error(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
 
         # File cache (fallback)
         if cache_file:

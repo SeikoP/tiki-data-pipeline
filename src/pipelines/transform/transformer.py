@@ -300,14 +300,12 @@ class DataTransformer:
             "name": product.get("name"),
             "short_name": self._get_short_name(product.get("name")),
             "url": product.get("url"),
-            "image_url": product.get("image_url"),
+            "image_url": product.get("image_url")
+            or (product.get("images")[0] if product.get("images") else None),
             "category_url": product.get("category_url"),
-            "category_id": product.get("category_id"),  # Extract từ category_url nếu chưa có
-            "category_path": product.get("category_path")
-            or [],  # Default [] nếu không có breadcrumb
-            "sales_count": product.get("sales_count")
-            if product.get("sales_count") is not None
-            else 0,
+            "category_id": product.get("category_id"),
+            "category_path": product.get("category_path") or [],
+            "sales_count": int(product.get("sales_count") or 0),
         }
 
         # Extract category_id từ category_url nếu chưa có
@@ -325,7 +323,7 @@ class DataTransformer:
         price = product.get("price", {})
         if isinstance(price, dict):
             db_product["price"] = price.get("current_price")
-            db_product["original_price"] = price.get("original_price")
+            db_product["original_price"] = price.get("original_price") or db_product["price"]
             db_product["discount_percent"] = (
                 int(round(price["discount_percent"]))
                 if price.get("discount_percent") is not None
@@ -340,10 +338,19 @@ class DataTransformer:
         rating = product.get("rating", {})
         if isinstance(rating, dict):
             db_product["rating_average"] = rating.get("average")
-            db_product["review_count"] = rating.get("total_reviews") or rating.get("review_count")
+            db_product["review_count"] = (
+                rating.get("total_reviews") or rating.get("review_count")
+            )
         else:
             db_product["rating_average"] = None
             db_product["review_count"] = None
+
+        # Đảm bảo stock_available có giá trị boolean mặc định
+        stock = product.get("stock", {})
+        if isinstance(stock, dict):
+            db_product["stock_available"] = stock.get("available")
+        else:
+            db_product["stock_available"] = None
 
         # Description
         db_product["description"] = product.get("description")
@@ -416,7 +423,7 @@ class DataTransformer:
 
         # CRITICAL: Validate seller_name (Task: Xóa seller_name null trước khi load db)
         if not product.get("seller_name"):
-            return False, "Missing or invalid seller_name"
+            return False, f"Missing or invalid seller_name for product {product.get('product_id')}"
 
         # Validate product_id format (chỉ số)
         product_id = str(product["product_id"]).strip()
@@ -834,7 +841,6 @@ class DataTransformer:
             "chống",
             "tặng",
             "kèm",
-            "bộ",
             "set",
             "combo",
             "mẫu mã",

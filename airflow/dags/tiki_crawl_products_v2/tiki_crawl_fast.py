@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from airflow.datasets import Dataset
 from tiki_crawl_products_v2.bootstrap import (
     DAG,
     DAG_CONFIG,
     PythonOperator,
     TaskGroup,
     crawl_category_batch,
+    get_int_variable,
     get_variable,
     timedelta,
 )
@@ -17,7 +19,7 @@ from tiki_crawl_products_v2.tasks import (
     cleanup_orphan_categories_wrapper,
     cleanup_redis_cache,
     cleanup_redundant_categories_wrapper,
-    crawl_product_batch,
+    crawl_product_batch_fast,
     crawl_single_category,
     load_categories,
     load_categories_to_db_wrapper,
@@ -33,24 +35,28 @@ from tiki_crawl_products_v2.tasks import (
 )
 
 # Safe Mode: airflow DAG
-# This file is an Airflow DAG for Tiki product crawling.
+# This file is an Airflow DAG for Tiki product crawling (Speed Layer).
 
 
-with DAG(**DAG_CONFIG) as dag:
+with DAG(
+    dag_id="tiki_crawl_fast",
+    description="Speed Layer: API-based Fast Crawling",
+    **{k: v for k, v in DAG_CONFIG.items() if k not in ["dag_id", "description"]},
+) as dag:
     # ===== STEP 1: PRE-CRAWL CLEANUP & LOAD =====
     with TaskGroup("pre_crawl") as pre_crawl_group:
         task_cleanup_products = PythonOperator(
             task_id="cleanup_incomplete_products",
             python_callable=cleanup_incomplete_products_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_load_categories = PythonOperator(
             task_id="load_categories",
             python_callable=load_categories,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         # Tối ưu: Cho phép chạy song song vì task_cleanup_products và task_load_categories độc lập
@@ -78,6 +84,7 @@ with DAG(**DAG_CONFIG) as dag:
             """
             Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing.
             """
+            import math
             import logging
 
             logger = logging.getLogger("airflow.task")
@@ -86,25 +93,38 @@ with DAG(**DAG_CONFIG) as dag:
             if not categories:
                 logger.error("❌ Không thể lấy categories từ XCom!")
                 return []
-            batch_size = int(get_variable("TIKI_CATEGORY_BATCH_SIZE", default="10"))
+            
+            # Tối ưu: Chia thành n batch task để tận dụng tối đa pool (mặc định 4)
+            num_batches = get_int_variable("TIKI_CATEGORY_NUM_BATCHES", default=4)
+            total_categories = len(categories)
+            
+            if total_categories <= num_batches:
+                # Nếu ít category hơn số batch mong muốn, mỗi category 1 task
+                batch_size = 1
+            else:
+                batch_size = math.ceil(total_categories / num_batches)
+                
             batches = [
-                categories[i : i + batch_size] for i in range(0, len(categories), batch_size)
+                categories[i : i + batch_size] for i in range(0, total_categories, batch_size)
             ]
+            
+            logger.info(f"📦 Chia {total_categories} categories thành {len(batches)} batches (size ~{batch_size}) để tối ưu pool")
+            
             return [
                 {"category_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
             ]
 
         if crawl_category_batch is not None:
             task_prepare = PythonOperator(
-                task_id="prepare_batch_kwargs",
+                task_id="prepare_crawl_kwargs",
                 python_callable=prepare_category_batch_kwargs,
                 execution_timeout=timedelta(minutes=1),
             )
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_category_batch,
-                execution_timeout=timedelta(minutes=12),
-                pool="crawl_pool",
+                execution_timeout=timedelta(hours=2),
+                pool="fast_pool",
                 retries=1,
                 retry_delay=timedelta(seconds=15),
             ).expand(op_kwargs=task_prepare.output)
@@ -117,8 +137,8 @@ with DAG(**DAG_CONFIG) as dag:
             task_crawl_category = PythonOperator.partial(
                 task_id="crawl_category",
                 python_callable=crawl_single_category,
-                execution_timeout=timedelta(minutes=10),
-                pool="crawl_pool",
+                execution_timeout=timedelta(hours=2),
+                pool="fast_pool",
                 retries=1,
             ).expand(op_kwargs=task_prepare.output)
 
@@ -128,7 +148,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="merge_products",
             python_callable=merge_products,
             execution_timeout=timedelta(minutes=30),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 
@@ -136,7 +156,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="save_products",
             python_callable=save_products,
             execution_timeout=timedelta(minutes=10),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
         task_merge_products >> task_save_products
 
@@ -156,7 +176,10 @@ with DAG(**DAG_CONFIG) as dag:
             )
             if not products_to_crawl:
                 return []
-            batch_size = 15  # Optimized batch size
+
+            # Tăng batch size để tận dụng tốc độ API (mặc định 100 thay vì 15)
+            batch_size = get_int_variable("TIKI_DETAIL_BATCH_SIZE", default=100)
+
             batches = [
                 products_to_crawl[i : i + batch_size]
                 for i in range(0, len(products_to_crawl), batch_size)
@@ -179,9 +202,9 @@ with DAG(**DAG_CONFIG) as dag:
 
         task_crawl_product_detail = PythonOperator.partial(
             task_id="crawl_product_detail",
-            python_callable=crawl_product_batch,
+            python_callable=crawl_product_batch_fast,
             execution_timeout=timedelta(minutes=15),
-            pool="crawl_pool",
+            pool="fast_pool",
             retries=1,
             retry_delay=timedelta(seconds=30),
         ).expand(op_kwargs=task_prepare_detail_kwargs.output)
@@ -190,7 +213,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="merge_product_details",
             python_callable=merge_product_details,
             execution_timeout=timedelta(minutes=30),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 
@@ -198,7 +221,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="save_products_with_detail",
             python_callable=save_products_with_detail,
             execution_timeout=timedelta(minutes=10),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         (
@@ -217,14 +240,15 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="transform_products",
             python_callable=transform_products,
             execution_timeout=timedelta(minutes=30),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_load_products = PythonOperator(
             task_id="load_products",
             python_callable=load_products,
             execution_timeout=timedelta(minutes=30),
-            pool="crawl_pool",
+            pool="fast_pool",
+            outlets=[Dataset("tiki-postgres://tiki_postgres/tiki/public/products")],
         )
         task_transform_products >> task_load_products
 
@@ -234,49 +258,49 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="load_categories_to_db",
             python_callable=load_categories_to_db_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_reconcile = PythonOperator(
             task_id="reconcile_categories",
             python_callable=reconcile_categories_wrapper,
             execution_timeout=timedelta(minutes=10),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_cleanup_orphans = PythonOperator(
             task_id="cleanup_orphan_categories",
             python_callable=cleanup_orphan_categories_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_cleanup_redundant = PythonOperator(
             task_id="cleanup_redundant_categories",
             python_callable=cleanup_redundant_categories_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_cleanup_history = PythonOperator(
             task_id="cleanup_old_history",
             python_callable=cleanup_old_history_wrapper,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_validate_data = PythonOperator(
             task_id="validate_data",
             python_callable=validate_data,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
         )
 
         task_aggregate_and_notify = PythonOperator(
             task_id="aggregate_and_notify",
             python_callable=aggregate_and_notify,
             execution_timeout=timedelta(minutes=10),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 
@@ -284,7 +308,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="cleanup_redis_cache",
             python_callable=cleanup_redis_cache,
             execution_timeout=timedelta(minutes=5),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 
@@ -292,7 +316,7 @@ with DAG(**DAG_CONFIG) as dag:
             task_id="backup_database",
             python_callable=backup_database,
             execution_timeout=timedelta(minutes=15),
-            pool="crawl_pool",
+            pool="fast_pool",
             trigger_rule="all_done",
         )
 

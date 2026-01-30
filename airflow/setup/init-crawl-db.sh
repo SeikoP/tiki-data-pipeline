@@ -82,12 +82,15 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         original_price DECIMAL(12, 2),
         discount_percent INTEGER,
         rating_average DECIMAL(3, 2),
+        review_count INTEGER,
         seller_name VARCHAR(500),
         seller_id VARCHAR(255),
         seller_is_official BOOLEAN DEFAULT FALSE,
         brand VARCHAR(255),
         stock_available BOOLEAN,
         shipping JSONB,
+        crawl_quality VARCHAR(50) DEFAULT 'basic',
+        needs_enrichment BOOLEAN DEFAULT TRUE,
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -126,6 +129,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         -- Promotion tracking
         is_flash_sale BOOLEAN DEFAULT FALSE,
         
+        -- Quality tracking
+        rating_average DECIMAL(3, 2),
+        review_count INTEGER,
+
         -- Metadata
         crawl_type VARCHAR(20) DEFAULT 'price_change',
         

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
+from concurrent.futures import ThreadPoolExecutor
 from tiki_crawl_products_v2.bootstrap import (
     CACHE_DIR,
     CATEGORIES_FILE,
@@ -60,26 +61,30 @@ def load_categories(**context) -> list[dict[str, Any]]:
 
         logger.info(f"✅ Đã load {len(categories)} danh mục")
 
-        # Lọc level
-        try:
-            min_level = get_int_variable("TIKI_MIN_CATEGORY_LEVEL", default=2)
-            max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
-        except Exception:
-            min_level, max_level = 2, 4
-        categories = [cat for cat in categories if min_level <= cat.get("level", 0) <= max_level]
+        # 1. Xác định is_leaf cho từng danh mục
+        # Một danh mục là leaf nếu URL của nó không được dùng làm parent_url của bất kỳ danh mục nào khác
+        parent_urls = {cat.get("parent_url") for cat in categories if cat.get("parent_url")}
+        
+        for cat in categories:
+            cat["is_leaf"] = cat.get("url") not in parent_urls
 
-        try:
-            max_categories = get_int_variable("TIKI_MAX_CATEGORIES", default=0)
-        except Exception:
-            max_categories = 0
-
-        if max_categories > 0:
-            categories = categories[:max_categories]
-            logger.info(
-                f"📊 Xử lý {len(categories)} danh mục (Level {min_level}-{max_level} | Giới hạn: {max_categories})"
-            )
+        # 2. Lọc danh mục: Chỉ lấy leaf categories theo đúng định hướng
+        # Cho phép override bằng variable nếu cần (mặc định crawl_only_leaf=True)
+        crawl_only_leaf = get_variable("TIKI_CRAWL_ONLY_LEAF", default="true").lower() == "true"
+        
+        if crawl_only_leaf:
+            original_count = len(categories)
+            categories = [cat for cat in categories if cat.get("is_leaf")]
+            logger.info(f"🍃 Đã lọc lấy {len(categories)} leaf categories (từ {original_count} ban đầu)")
         else:
-            logger.info(f"📊 Xử lý {len(categories)} danh mục (Level {min_level}-{max_level})")
+            # Fallback về lọc theo level nếu không chỉ lọc leaf
+            try:
+                min_level = get_int_variable("TIKI_MIN_CATEGORY_LEVEL", default=2)
+                max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
+            except Exception:
+                min_level, max_level = 2, 4
+            categories = [cat for cat in categories if min_level <= cat.get("level", 0) <= max_level]
+            logger.info(f"📊 Lọc theo Level: {len(categories)} danh mục (Level {min_level}-{max_level})")
 
         # Push categories lên XCom để các task khác dùng
         return categories
@@ -89,7 +94,12 @@ def load_categories(**context) -> list[dict[str, Any]]:
         raise
 
 
-def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[str, Any]:
+def crawl_single_category(
+    category: dict[str, Any] = None,
+    max_pages_param: int | None = None,
+    use_selenium_param: bool | None = None,
+    **context,
+) -> dict[str, Any]:
     """
     Task 2: Crawl sản phẩm từ một danh mục (Dynamic Task Mapping)
 
@@ -133,7 +143,12 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
 
     category_url = category.get("url", "")
     category_name = category.get("name", "Unknown")
-    category_id = category.get("id", "")
+    category_id = category.get("id", "") or category.get("category_id", "")
+
+    # Bổ sung category_id nếu thiếu
+    if not category_id and category_url:
+        from tiki_crawl_products_v2.bootstrap import extract_category_id_from_url
+        category_id = extract_category_id_from_url(category_url)
 
     # Clean log for workers
     logger.info(f"▶️  START: Category [{category_id}] {category_name}")
@@ -164,19 +179,20 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
             logger.warning(f"⚠️  Service degraded, skip category {category_name}")
             return result
 
-        # Lấy cấu hình từ Airflow Variables
-        max_pages = int(
+        # Lấy cấu hình từ Airflow Variables hoặc tham số truyền vào (để giảm DB hit trong batch)
+        max_pages = max_pages_param if max_pages_param is not None else int(
             get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20")
-        )  # Mặc định 20 trang để tránh timeout
-        use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
-        timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300"))  # 5 phút mặc định
-        rate_limit_delay = float(
-            get_variable("TIKI_RATE_LIMIT_DELAY", default="1.0")
-        )  # Delay 1s giữa các request
+        )
+        use_selenium = use_selenium_param if use_selenium_param is not None else \
+            get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
+        timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300")) 
+        
+        # Thêm cấu hình cache
+        force_refresh = get_variable("TIKI_FORCE_REFRESH", default="false").lower() == "true"
+        cache_ttl = int(get_variable("TIKI_CACHE_TTL", default="86400"))
 
-        # Rate limiting: delay trước khi crawl
-        if rate_limit_delay > 0:
-            time.sleep(rate_limit_delay)
+        # Rate limiting: được xử lý bên trong crawl_category_products (smart rate limit / cache check)
+        # Không sleep ở đây để tránh chậm khi hit cache
 
         # Crawl với timeout và circuit breaker
         start_time = time.time()
@@ -191,7 +207,11 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
                 use_selenium=use_selenium,
                 cache_dir=str(CACHE_DIR),
                 use_redis_cache=True,  # Sử dụng Redis cache
+                allow_selenium_fallback=use_selenium,  # Nếu use_selenium=False thì cũng tắt fallback cho nhanh
                 use_rate_limiting=True,  # Sử dụng rate limiting
+                logger=logger,
+                force_refresh=force_refresh,
+                cache_ttl=cache_ttl,
             )
 
         try:
@@ -233,12 +253,16 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
         if elapsed > timeout:
             raise TimeoutError(f"Crawl vượt quá timeout {timeout}s")
 
+        # Trả về products qua XCom thay vì lưu trực tiếp vào DB
+        # Việc load vào DB sẽ được thực hiện bởi task transform_and_load sau này
         result["products"] = products
         result["status"] = "success"
         result["products_count"] = len(products)
         result["elapsed_time"] = elapsed
 
-        logger.info(f"✅ Crawl thành công: {len(products)} sản phẩm trong {elapsed:.1f}s")
+        logger.info(
+            f"✅ Crawl thành công: {len(products)} sản phẩm qua XCom trong {elapsed:.1f}s"
+        )
 
     except TimeoutError as e:
         result["error"] = str(e)
@@ -293,3 +317,63 @@ def crawl_single_category(category: dict[str, Any] = None, **context) -> dict[st
         # Không raise để tiếp tục với danh mục khác
 
     return result
+
+
+def crawl_category_batch(
+    category_batch: list[dict[str, Any]] = None, batch_index: int = -1, **context
+) -> list[dict[str, Any]]:
+    """
+    Task 3: Crawl sản phẩm từ một batch danh mục (Giảm overhead của Airflow)
+
+    Args:
+        category_batch: List các danh mục trong batch
+        batch_index: Index của batch
+        context: Airflow context
+
+    Returns:
+        List[Dict]: Kết quả crawl cho toàn bộ batch
+    """
+    logger = get_logger(context)
+
+    # Lấy category_batch từ op_kwargs nếu chưa có
+    if not category_batch:
+        ti = context.get("ti")
+        if ti:
+            op_kwargs = getattr(ti, "op_kwargs", {})
+            if op_kwargs:
+                category_batch = op_kwargs.get("category_batch")
+                batch_index = op_kwargs.get("batch_index", -1)
+
+    if not category_batch:
+        logger.error(f"❌ MISSING CATEGORY_BATCH! Batch index: {batch_index}")
+        return []
+
+    # Lấy cấu hình cho cả batch
+    max_pages = int(get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20"))
+    use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
+    concurrency = int(get_variable("TIKI_CATEGORY_CONCURRENCY", default="10"))
+
+    def process_category(cat):
+        try:
+            # Re-use crawl_single_category logic
+            return crawl_single_category(
+                category=cat,
+                max_pages_param=max_pages,
+                use_selenium_param=use_selenium,
+                **context,
+            )
+        except Exception as e:
+            logger.error(f"❌ Batch error for category {cat.get('name')}: {e}")
+            return {
+                "category_id": cat.get("id", "unknown"),
+                "status": "failed",
+                "error": str(e),
+            }
+
+    # Chạy song song dùng ThreadPoolExecutor
+    logger.info(f"🚀 Chạy batch {batch_index} với {len(category_batch)} categories, concurrency={concurrency}")
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        results = list(executor.map(process_category, category_batch))
+
+    logger.info(f"✅ Hoàn thành BATCH CATEGORY {batch_index}: {len(results)} kết quả")
+    return results
