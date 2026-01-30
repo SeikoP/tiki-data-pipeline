@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from tiki_crawl_products_v2.bootstrap import (
     Any,
-    crawl_product_detail_async,
+    # crawl_product_detail_async,  <-- REMOVED
     crawl_product_detail_with_driver,
     datetime,
     get_hierarchy_map,
@@ -43,15 +43,25 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
                 timeout=timeout,
                 connector=connector,
                 headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
                 },
             )
+            
+            # FORCE IMPORT DIRECTLY FROM SRC TO AVOID BOOTSTRAP ISSUES
+            import sys
+            if "/opt/airflow/src" not in sys.path:
+                sys.path.append("/opt/airflow/src")
+            try:
+                from pipelines.crawl.crawl_products_detail import crawl_product_detail_async
+            except ImportError:
+                # Fallback local dev
+                from src.pipelines.crawl.crawl_products_detail import crawl_product_detail_async
         except Exception as e:
             logger.error(f"❌ Failed to create session: {e}")
             return []
 
     rate_limit_delay = float(get_variable("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.05"))
-    max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="30"))
+    max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="5"))
     semaphore = asyncio.Semaphore(max_concurrent)
 
     async def crawl_single(product_info):
@@ -75,7 +85,7 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
                     product_url,
                     session=session,
                     use_selenium_fallback=False,
-                    verbose=False,
+                    verbose=True,  # Enable Verbose Logging
                 )
 
                 if detail and isinstance(detail, dict):
@@ -106,6 +116,12 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
             except Exception as e:
                 result["error"] = str(e)
                 result["status"] = "failed"
+                # LOG TO FILE
+                try:
+                    with open("/tmp/debug_crawl.log", "a") as f:
+                        f.write(f"[{datetime.now()}] FAIL {product_id}: {str(e)}\n")
+                except:
+                    pass
 
             return result
 

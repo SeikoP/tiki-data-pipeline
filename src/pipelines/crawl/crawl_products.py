@@ -878,12 +878,14 @@ def crawl_category_products(
     all_products = []
 
     # Tier 1: Thử Redis cache (Ưu tiên nhất)
+    # Tier 1: Thử Redis cache (Ưu tiên nhất)
     redis_cache = None
-    if use_redis_cache and not force_refresh:
+    if use_redis_cache:
         try:
             from pipelines.crawl.storage.redis_cache import get_redis_cache
             redis_cache = get_redis_cache("redis://redis:6379/1")
-            if redis_cache:
+            
+            if redis_cache and not force_refresh:
                 cached_products = redis_cache.get_cached_products(category_url)
                 if cached_products:
                     logger.info(f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}... ({len(cached_products)} products)")
@@ -929,6 +931,23 @@ def crawl_category_products(
             except Exception:
                 pass
                 
+        # Bug fix: Save to File Cache as well to update timestamp and prevent re-crawl loop
+        if cache_file:
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "category_url": category_url,
+                            "products": api_products,
+                            "crawled_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        },
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+            except Exception as e:
+                logger.error(f"[File Cache] ❌ Error updating cache file {cache_file}: {e}")
+
         return api_products
 
     try:
@@ -1058,8 +1077,11 @@ def crawl_category_products(
                         ensure_ascii=False,
                         indent=2,
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                if logger:
+                    logger.error(f"[File Cache] ❌ Lỗi khi ghi cache file {cache_file}: {e}")
+                else:
+                    print(f"[File Cache] ❌ Lỗi khi ghi cache file {cache_file}: {e}")
 
         return unique_products
 

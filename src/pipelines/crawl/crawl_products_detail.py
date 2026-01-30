@@ -1705,13 +1705,14 @@ async def crawl_product_detail_via_api(
         session: aiohttp ClientSession
         verbose: Có in log không
     """
+    import asyncio  # Ensure asyncio is available
     product_id = extract_product_id_from_url(url)
     if not product_id:
         return None
 
     api_url = f"https://tiki.vn/api/v2/products/{product_id}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
         "Referer": url, # Use actual product URL as Referer
@@ -1720,7 +1721,7 @@ async def crawl_product_detail_via_api(
     }
 
     max_retries = 3
-    retry_delay = 1
+    retry_delay = 2  # Increased invalid delay
 
     for attempt in range(max_retries):
         try:
@@ -1734,8 +1735,17 @@ async def crawl_product_detail_via_api(
                     await asyncio.sleep(retry_delay * (2 ** attempt))
                     continue
                 else:
+                    # Non-retriable error (404, 403, 400...)
                     if verbose:
-                        print(f"[API] ⚠️  HTTP {response.status} cho ID {product_id}")
+                        text = await response.text()
+                        print(f"[API] ❌ Failed ID {product_id}: HTTP {response.status} - Body: {text[:200]}")
+                        # LOG TO FILE
+                        try:
+                            with open("/tmp/debug_crawl.log", "a") as f:
+                                import datetime
+                                f.write(f"[{datetime.datetime.now()}] API_FAIL {product_id}: HTTP {response.status} - {text[:200]}\n")
+                        except:
+                            pass
                     return None
         except Exception as e:
             if verbose:
@@ -1750,24 +1760,14 @@ async def crawl_product_detail_via_api(
 async def crawl_product_detail_async(
     url: str,
     session=None,
-    use_selenium_fallback: bool = True,
+    use_selenium_fallback: bool = False, # Force False
     verbose: bool = False,
 ) -> dict[str, Any] | None:
-    """Crawl product detail bằng aiohttp (async) với Selenium fallback.
-
-    Hybrid approach:
-    - Thử crawl bằng aiohttp trước (nhanh hơn)
-    - Nếu thiếu dynamic content (sales_count), fallback về Selenium
-
-    Args:
-        url: URL sản phẩm cần crawl
-        session: aiohttp ClientSession (nếu None sẽ tạo mới)
-        use_selenium_fallback: Có dùng Selenium fallback không
-        verbose: Có in log không
-
-    Returns:
-        Dict product detail hoặc None nếu lỗi
+    """Crawl product detail bằng aiohttp (async). 
+    LITE MODE: Đã loại bỏ hoàn toàn Selenium.
     """
+    # Force use_selenium_fallback to False since browser is removed
+    use_selenium_fallback = False
     try:
         import aiohttp
     except ImportError:
