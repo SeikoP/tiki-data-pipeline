@@ -12,57 +12,23 @@ import requests
 # Lazy import BeautifulSoup để tránh timeout khi load DAG
 # from bs4 import BeautifulSoup  # Moved to function level
 
-# Import shared utilities - hỗ trợ cả relative và absolute import
-try:
-    # Thử relative import trước (khi chạy như package)
-    from .utils import (
-        DEFAULT_CACHE_DIR,
-        DEFAULT_DATA_DIR,
-        DEFAULT_PRODUCT_LIST_CACHE_DIR,
-        DEFAULT_PRODUCTS_DIR,
-        RateLimiter,
-        atomic_write_json,
-        ensure_dir,
-        extract_category_id_from_url,
-        extract_product_id_from_url,
-        normalize_url,
-        parse_price,
-        parse_sales_count,
-        safe_read_json,
-        setup_utf8_encoding,
-    )
-except ImportError:
-    # Fallback: absolute import (khi được load qua importlib)
-    import os
-
-    # Tìm utils.py trong cùng thư mục
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    utils_path = os.path.join(current_dir, "utils.py")
-    if os.path.exists(utils_path):
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
-        if spec and spec.loader:
-            utils_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(utils_module)
-            setup_utf8_encoding = utils_module.setup_utf8_encoding
-            parse_sales_count = utils_module.parse_sales_count
-            parse_price = utils_module.parse_price
-            ensure_dir = utils_module.ensure_dir
-            atomic_write_json = utils_module.atomic_write_json
-            safe_read_json = utils_module.safe_read_json
-            extract_category_id_from_url = utils_module.extract_category_id_from_url
-            extract_product_id_from_url = utils_module.extract_product_id_from_url
-            normalize_url = utils_module.normalize_url
-            RateLimiter = utils_module.RateLimiter
-            DEFAULT_DATA_DIR = utils_module.DEFAULT_DATA_DIR
-            DEFAULT_CACHE_DIR = utils_module.DEFAULT_CACHE_DIR
-            DEFAULT_PRODUCT_LIST_CACHE_DIR = utils_module.DEFAULT_PRODUCT_LIST_CACHE_DIR
-            DEFAULT_PRODUCTS_DIR = utils_module.DEFAULT_PRODUCTS_DIR
-        else:
-            raise ImportError(f"Không thể load utils từ {utils_path}") from None
-    else:
-        raise ImportError(f"Không tìm thấy utils.py tại {utils_path}") from None
+# Import shared utilities
+from .crawl_utils import (
+    DEFAULT_CACHE_DIR,
+    DEFAULT_DATA_DIR,
+    DEFAULT_PRODUCT_LIST_CACHE_DIR,
+    DEFAULT_PRODUCTS_DIR,
+    RateLimiter,
+    atomic_write_json,
+    ensure_dir,
+    extract_category_id_from_url,
+    extract_product_id_from_url,
+    normalize_url,
+    parse_price,
+    parse_sales_count,
+    safe_read_json,
+    setup_utf8_encoding,
+)
 
 # Setup UTF-8 encoding
 setup_utf8_encoding()

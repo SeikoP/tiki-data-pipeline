@@ -15,7 +15,7 @@ from tiki_crawl_products_v2.bootstrap import (
     sys,
 )
 
-from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
+from tiki_crawl_products_v2.tasks.common import _fix_sys_path_for_pipelines_import  # noqa: F401
 
 
 def fix_missing_parent_categories(**context) -> dict[str, Any]:

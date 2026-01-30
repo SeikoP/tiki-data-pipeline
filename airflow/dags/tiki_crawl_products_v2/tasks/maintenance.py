@@ -4,7 +4,7 @@ from __future__ import annotations
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from tiki_crawl_products_v2.bootstrap import CATEGORIES_FILE, Any, datetime, get_variable, json, os
 
-from .common import (
+from tiki_crawl_products_v2.tasks.common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
     get_logger,  # noqa: F401
 )

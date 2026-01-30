@@ -32,11 +32,11 @@ from tiki_crawl_products_v2.bootstrap import (
     time,
 )
 
-from .common import (  # noqa: F401
+from tiki_crawl_products_v2.tasks.common import (  # noqa: F401
     _fix_sys_path_for_pipelines_import,
     get_selenium_driver_pool_class,
 )
-from .loader import _import_postgres_storage  # noqa: F401
+from tiki_crawl_products_v2.tasks.loader import _import_postgres_storage  # noqa: F401
 
 
 def prepare_products_for_detail(**context) -> list[dict[str, Any]]:

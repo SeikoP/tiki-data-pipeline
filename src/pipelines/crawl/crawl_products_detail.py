@@ -10,43 +10,16 @@ import time
 from datetime import datetime
 from typing import Any
 
-# Import shared utilities - hỗ trợ cả relative và absolute import
-try:
-    # Thử relative import trước (khi chạy như package)
-    from .utils import (
-        atomic_write_json,
-        create_selenium_driver,
-        ensure_dir,
-        extract_product_id_from_url,
-        parse_price,
-        parse_sales_count,
-        setup_utf8_encoding,
-    )
-except ImportError:
-    # Fallback: absolute import (khi được load qua importlib)
-    import os
-
-    # Tìm utils.py trong cùng thư mục
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    utils_path = os.path.join(current_dir, "utils.py")
-    if os.path.exists(utils_path):
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
-        if spec and spec.loader:
-            utils_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(utils_module)
-            setup_utf8_encoding = utils_module.setup_utf8_encoding
-            parse_sales_count = utils_module.parse_sales_count
-            parse_price = utils_module.parse_price
-            extract_product_id_from_url = utils_module.extract_product_id_from_url
-            create_selenium_driver = utils_module.create_selenium_driver
-            atomic_write_json = utils_module.atomic_write_json
-            ensure_dir = utils_module.ensure_dir
-        else:
-            raise ImportError(f"Không thể load utils từ {utils_path}") from None
-    else:
-        raise ImportError(f"Không tìm thấy utils.py tại {utils_path}") from None
+# Import shared utilities
+from .crawl_utils import (
+    atomic_write_json,
+    create_selenium_driver,
+    ensure_dir,
+    extract_product_id_from_url,
+    parse_price,
+    parse_sales_count,
+    setup_utf8_encoding,
+)
 
 # Setup UTF-8 encoding
 setup_utf8_encoding()

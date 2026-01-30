@@ -86,7 +86,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         seller_id VARCHAR(255),
         seller_is_official BOOLEAN DEFAULT FALSE,
         brand VARCHAR(255),
-        brand VARCHAR(255),
+
         crawl_quality VARCHAR(50) DEFAULT 'basic',
         needs_enrichment BOOLEAN DEFAULT TRUE,
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

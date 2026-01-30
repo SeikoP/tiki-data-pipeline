@@ -12,7 +12,7 @@ from tiki_crawl_products_v2.bootstrap import (
     os,
 )
 
-from .common import (
+from tiki_crawl_products_v2.tasks.common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
     get_logger,  # noqa: F401
 )

@@ -10,7 +10,7 @@ from tiki_crawl_products_v2.bootstrap import (
     get_variable,
 )
 
-from .common import (
+from tiki_crawl_products_v2.tasks.common import (
     get_postgres_storage_class,
     get_selenium_driver_pool_class,
 )

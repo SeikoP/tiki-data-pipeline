@@ -19,7 +19,7 @@ from tiki_crawl_products_v2.bootstrap import (
     os,
 )
 
-from .common import _fix_sys_path_for_pipelines_import  # noqa: F401
+from tiki_crawl_products_v2.tasks.common import _fix_sys_path_for_pipelines_import  # noqa: F401
 
 
 def merge_products(**context) -> dict[str, Any]:
@@ -405,13 +405,13 @@ def transform_products(**context) -> dict[str, Any]:
         try:
             # Tìm đường dẫn utils module
             utils_paths = [
-                "/opt/airflow/src/pipelines/crawl/utils.py",
+                "/opt/airflow/src/pipelines/crawl/crawl_utils.py",
                 os.path.abspath(
                     os.path.join(
-                        dag_file_dir, "..", "..", "..", "src", "pipelines", "crawl", "utils.py"
+                        dag_file_dir, "..", "..", "..", "src", "pipelines", "crawl", "crawl_utils.py"
                     )
                 ),
-                os.path.join(os.getcwd(), "src", "pipelines", "crawl", "utils.py"),
+                os.path.join(os.getcwd(), "src", "pipelines", "crawl", "crawl_utils.py"),
             ]
 
             utils_path = None
