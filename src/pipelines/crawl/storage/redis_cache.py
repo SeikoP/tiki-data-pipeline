@@ -196,11 +196,16 @@ class RedisCache:
         url_hash = hashlib.md5(url.encode()).hexdigest()
         return f"{cache_type}:{url_hash}"
 
-    def get_cache_key(self, url: str, cache_type: str = "html") -> str:
+    def get_cache_key(
+        self, url: str, cache_type: str = "html", drop_params: Iterable[str] | None = None
+    ) -> str:
         """
-        Giữ API cũ: trả về key mới (đã canonicalize).
+        Trả về cache key (canonicalize URL).
+        Mặc định với 'products' sẽ drop 'page' để gom cache.
         """
-        return self._new_key_for_url(url, cache_type)
+        if cache_type == "products" and drop_params is None:
+            drop_params = {"page"}
+        return self._new_key_for_url(url, cache_type, drop_params=drop_params)
 
     def cache_html(self, url: str, html: str, ttl: int | None = None) -> bool:
         """
