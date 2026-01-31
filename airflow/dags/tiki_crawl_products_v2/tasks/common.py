@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import shutil
+
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
-from tiki_crawl_products_v2.bootstrap import Any, Path, json, logging, os, shutil, sys
+from tiki_crawl_products_v2.bootstrap import Any, Path, json, logging, os, sys
 
 
 def get_logger(context):
