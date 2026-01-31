@@ -303,7 +303,6 @@ with DAG(
         task_check_discord = ShortCircuitOperator(
             task_id="check_discord_enabled",
             python_callable=check_discord_enabled,
-            provide_context=True,
         )
 
         task_aggregate_and_notify = PythonOperator(
