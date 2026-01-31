@@ -1,11 +1,10 @@
 import os
-
-# Mock psycopg2 and its sub-modules
-# Mock dependencies for local testing
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
+# Mock psycopg2 and its sub-modules
+# Mock dependencies for local testing
 mock_psycopg2 = MagicMock()
 sys.modules["psycopg2"] = mock_psycopg2
 sys.modules["psycopg2.extras"] = MagicMock()
@@ -16,7 +15,7 @@ psycopg2 = mock_psycopg2
 # Ensure src is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
-from pipelines.crawl.storage.postgres_storage import PostgresStorage
+from pipelines.crawl.storage.postgres_storage import PostgresStorage  # noqa: E402
 
 
 class TestPostgresBulk(unittest.TestCase):

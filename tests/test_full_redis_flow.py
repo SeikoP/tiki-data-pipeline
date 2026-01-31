@@ -92,16 +92,16 @@ def test_redis_from_airflow_context():
         print(f"⚠️  Product count mismatch: {len(products2)} != {len(products1)}")
 
     if duration2 < duration1 * 0.3:  # Should be much faster
-        print(f"✅ Cache hit confirmed ({duration1/duration2:.1f}x faster)")
+        print(f"✅ Cache hit confirmed ({duration1 / duration2:.1f}x faster)")
     else:
-        print(f"⚠️  May not be from cache ({duration1/duration2:.1f}x faster)")
+        print(f"⚠️  May not be from cache ({duration1 / duration2:.1f}x faster)")
 
     # Check cache TTL
     print("\n5. Checking cache TTL...")
     try:
         full_key = cache._make_key(key)
         ttl = cache.client.ttl(full_key)
-        print(f"✅ Cache TTL: {ttl}s ({ttl/3600:.1f}h)")
+        print(f"✅ Cache TTL: {ttl}s ({ttl / 3600:.1f}h)")
         if ttl < 3600:
             print("⚠️  TTL is less than 1 hour")
     except Exception as e:
@@ -141,7 +141,7 @@ def test_redis_stats():
 
         # Show sample keys with TTL
         if product_keys:
-            print(f"\n📝 Sample product cache (with TTL):")
+            print("\n📝 Sample product cache (with TTL):")
             for key in product_keys[:5]:
                 try:
                     ttl = cache.client.ttl(key)
@@ -151,7 +151,9 @@ def test_redis_stats():
 
                         cached = json.loads(data)
                         products = cached.get("products", [])
-                        print(f"   - {key[-32:]}: {len(products)} products, TTL={ttl}s ({ttl/3600:.1f}h)")
+                        print(
+                            f"   - {key[-32:]}: {len(products)} products, TTL={ttl}s ({ttl / 3600:.1f}h)"
+                        )
                 except Exception as e:
                     print(f"   - {key[-32:]}: Error - {e}")
 

@@ -28,7 +28,7 @@ def analyze_dag_imports():
     print("\n" + "=" * 70)
     print("📊 DAG IMPORT TIME ANALYSIS")
     print("=" * 70)
-    
+
     modules = [
         ("airflow", "Airflow core"),
         ("airflow.operators.python", "PythonOperator"),
@@ -39,9 +39,9 @@ def analyze_dag_imports():
         ("pandas", "Pandas"),
         ("numpy", "NumPy"),
     ]
-    
+
     results = []
-    
+
     for module, description in modules:
         print(f"\n📦 Testing: {description} ({module})")
         elapsed = measure_import_time(module)
@@ -50,14 +50,14 @@ def analyze_dag_imports():
             results.append((module, description, elapsed))
         else:
             results.append((module, description, -1))
-    
+
     # Sort by time
     results.sort(key=lambda x: x[2] if x[2] >= 0 else 0, reverse=True)
-    
+
     print("\n" + "=" * 70)
     print("📈 SLOWEST IMPORTS")
     print("=" * 70)
-    
+
     for module, description, elapsed in results[:5]:
         if elapsed >= 0:
             print(f"{elapsed:6.3f}s - {description} ({module})")
@@ -68,42 +68,43 @@ def analyze_bootstrap_imports():
     print("\n" + "=" * 70)
     print("📊 BOOTSTRAP.PY IMPORT ANALYSIS")
     print("=" * 70)
-    
+
     print("\n⏱️  Measuring bootstrap import time...")
     start = time.time()
-    
+
     try:
         # Add DAG path
         dag_path = Path(__file__).parent.parent.parent / "airflow" / "dags"
         sys.path.insert(0, str(dag_path))
-        
+
         import tiki_crawl_products_v2.bootstrap as bootstrap
-        
+
         elapsed = time.time() - start
         print(f"   Total time: {elapsed:.3f}s")
-        
+
         # Check what's in bootstrap
         print("\n📋 Bootstrap contents:")
-        attrs = [attr for attr in dir(bootstrap) if not attr.startswith('_')]
+        attrs = [attr for attr in dir(bootstrap) if not attr.startswith("_")]
         print(f"   - {len(attrs)} exported symbols")
-        
+
         # Check for heavy objects
         heavy_imports = []
         for attr in attrs:
             obj = getattr(bootstrap, attr)
-            if hasattr(obj, '__module__'):
+            if hasattr(obj, "__module__"):
                 module = obj.__module__
-                if module and not module.startswith('builtins'):
+                if module and not module.startswith("builtins"):
                     heavy_imports.append((attr, module))
-        
+
         if heavy_imports:
-            print(f"\n   Heavy imports detected:")
+            print("\n   Heavy imports detected:")
             for attr, module in heavy_imports[:10]:
                 print(f"      - {attr} from {module}")
-        
+
     except Exception as e:
         print(f"   ❌ Failed: {e}")
         import traceback
+
         traceback.print_exc()
 
 
@@ -112,9 +113,9 @@ def check_airflow_config():
     print("\n" + "=" * 70)
     print("⚙️  AIRFLOW CONFIGURATION CHECK")
     print("=" * 70)
-    
+
     import os
-    
+
     configs = {
         "AIRFLOW__CORE__PARALLELISM": "Max parallel tasks",
         "AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG": "Max active tasks per DAG",
@@ -124,7 +125,7 @@ def check_airflow_config():
         "AIRFLOW__CORE__TASK_RUNNER": "Task runner",
         "AIRFLOW__CORE__EXECUTOR": "Executor type",
     }
-    
+
     print("\n📋 Current settings:")
     for key, description in configs.items():
         value = os.environ.get(key, "Not set")
@@ -136,26 +137,23 @@ def measure_task_overhead():
     print("\n" + "=" * 70)
     print("⏱️  TASK EXECUTION OVERHEAD")
     print("=" * 70)
-    
+
     print("\n1. Measuring Python startup time...")
     start = time.time()
     import subprocess
-    result = subprocess.run(
-        [sys.executable, "-c", "print('hello')"],
-        capture_output=True,
-        text=True
+
+    subprocess.run(
+        [sys.executable, "-c", "print('hello')"], capture_output=True, text=True
     )
     python_startup = time.time() - start
     print(f"   Python startup: {python_startup:.3f}s")
-    
+
     print("\n2. Measuring import overhead...")
     start = time.time()
-    import json
-    import logging
-    from datetime import datetime
+
     elapsed = time.time() - start
     print(f"   Basic imports: {elapsed:.3f}s")
-    
+
     print("\n3. Measuring sys.path overhead...")
     start = time.time()
     sys.path.insert(0, "/opt/airflow/src")
@@ -168,7 +166,7 @@ def recommendations():
     print("\n" + "=" * 70)
     print("💡 RECOMMENDATIONS")
     print("=" * 70)
-    
+
     print("""
 1. ⚡ Use lazy imports in tasks
    - Import heavy modules inside task functions, not at module level
@@ -214,22 +212,22 @@ def main():
     print("\n" + "=" * 70)
     print("🔍 AIRFLOW TASK STARTUP ANALYSIS")
     print("=" * 70)
-    
+
     # Analysis 1: Import times
     analyze_dag_imports()
-    
+
     # Analysis 2: Bootstrap import
     analyze_bootstrap_imports()
-    
+
     # Analysis 3: Airflow config
     check_airflow_config()
-    
+
     # Analysis 4: Task overhead
     measure_task_overhead()
-    
+
     # Recommendations
     recommendations()
-    
+
     print("\n" + "=" * 70)
     print("✅ Analysis complete")
     print("=" * 70)

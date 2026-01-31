@@ -845,12 +845,12 @@ def crawl_category_products(
             # Auto-detect working Redis URL (None = auto-detect)
             logger.info(f"[Redis Cache] 🔍 Checking cache for {category_url[:60]}...")
             redis_cache = get_redis_cache(None)  # Auto-detect
-            
+
             if redis_cache and not force_refresh:
                 # Debug: Log cache key being checked
                 cache_key = redis_cache.get_cache_key(category_url, "products")
                 logger.debug(f"[Redis Cache] Cache key: {cache_key}")
-                
+
                 cached_products = redis_cache.get_cached_products(category_url)
                 if cached_products:
                     logger.info(
@@ -860,11 +860,15 @@ def crawl_category_products(
                 else:
                     # Debug: Check if key exists
                     key_exists = redis_cache.exists(cache_key)
-                    logger.info(f"[Redis Cache] ❌ Cache miss cho {category_url[:60]}... (key exists: {key_exists})")
+                    logger.info(
+                        f"[Redis Cache] ❌ Cache miss cho {category_url[:60]}... (key exists: {key_exists})"
+                    )
             elif force_refresh:
-                logger.info(f"[Redis Cache] 🔄 Force refresh enabled, skipping cache")
+                logger.info("[Redis Cache] 🔄 Force refresh enabled, skipping cache")
             elif not redis_cache:
-                logger.info("[Redis Cache] ⚠️ Could not connect to Redis, falling back to file cache")
+                logger.info(
+                    "[Redis Cache] ⚠️ Could not connect to Redis, falling back to file cache"
+                )
         except Exception as e:
             logger.warning(f"[Redis Cache] ⚠️ Error: {e}, falling back to file cache")
 
@@ -888,15 +892,19 @@ def crawl_category_products(
                         logger.info(
                             f"[File Cache] ✅ Hit cache ({int(file_age / 3600)}h cũ) cho {category_url[:60]}... ({len(cached_products)} products)"
                         )
-                        
+
                         # Populate Redis cache from file cache if Redis is available
                         if redis_cache:
                             try:
-                                redis_cache.cache_products(category_url, cached_products, ttl=259200)
-                                logger.info(f"[Redis Cache] ✅ Populated from file cache ({len(cached_products)} products)")
+                                redis_cache.cache_products(
+                                    category_url, cached_products, ttl=259200
+                                )
+                                logger.info(
+                                    f"[Redis Cache] ✅ Populated from file cache ({len(cached_products)} products)"
+                                )
                             except Exception as e:
                                 logger.warning(f"[Redis Cache] ⚠️ Failed to populate: {e}")
-                        
+
                         return cached_products
                 else:
                     logger.info(
@@ -905,6 +913,7 @@ def crawl_category_products(
     elif cache_dir and redis_cache:
         # Prepare cache_file path for later saving (but don't read from it)
         import hashlib
+
         url_hash = hashlib.md5(category_url.encode()).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 

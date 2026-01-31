@@ -1270,7 +1270,7 @@ def extract_product_detail(
                         # Initialize images list if not exists
                         if "images" not in product_data:
                             product_data["images"] = []
-                        
+
                         for img in images:
                             if isinstance(img, dict):
                                 img_url = (
@@ -1299,7 +1299,7 @@ def extract_product_detail(
                         # Initialize images list if not exists
                         if "images" not in product_data:
                             product_data["images"] = []
-                        
+
                         configurable_products = product_from_next.get("configurable_products", [])
                         for variant in configurable_products:
                             variant_images = (
@@ -1746,7 +1746,7 @@ async def crawl_product_detail_via_api(
                                 f.write(
                                     f"[{datetime.datetime.now()}] API_FAIL {product_id}: HTTP {response.status} - {text[:200]}\n"
                                 )
-                        except:
+                        except Exception:
                             pass
                     return None
         except Exception as e:

@@ -160,7 +160,7 @@ if __name__ == "__main__":
         print("\nSlow imports (>0.5s):")
         for name, duration, _ in slow_imports:
             print(f"  - {name}: {duration:.3f}s")
-            print(f"    -> Consider lazy import in task functions")
+            print("    -> Consider lazy import in task functions")
     else:
         print("\nNo slow imports detected (all <0.5s)")
 

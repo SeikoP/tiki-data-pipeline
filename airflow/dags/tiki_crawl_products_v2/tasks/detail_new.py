@@ -118,7 +118,7 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
                 try:
                     with open("/tmp/debug_crawl.log", "a") as f:
                         f.write(f"[{datetime.now()}] FAIL {product_id}: {str(e)}\n")
-                except:
+                except Exception:
                     pass
 
             return result

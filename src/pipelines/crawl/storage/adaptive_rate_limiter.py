@@ -29,8 +29,8 @@ class AdaptiveRateLimiter:
         self,
         redis_url: str = "redis://redis:6379/2",
         initial_delay: float = 1.0,  # Tăng từ 0.7s để giảm 429 errors
-        min_delay: float = 0.5,      # Tăng từ 0.3s để an toàn hơn
-        max_delay: float = 3.0,      # Tăng từ 2.0s khi có nhiều errors
+        min_delay: float = 0.5,  # Tăng từ 0.3s để an toàn hơn
+        max_delay: float = 3.0,  # Tăng từ 2.0s khi có nhiều errors
         success_window: int = 100,
         error_threshold: float = 0.02,  # 2% error rate
     ):
@@ -181,8 +181,8 @@ _adaptive_rate_limiter_instance = None
 def get_adaptive_rate_limiter(
     redis_url: str = "redis://redis:6379/2",
     initial_delay: float = 1.0,  # Tăng từ 0.7s
-    min_delay: float = 0.5,      # Tăng từ 0.3s
-    max_delay: float = 3.0,      # Tăng từ 2.0s
+    min_delay: float = 0.5,  # Tăng từ 0.3s
+    max_delay: float = 3.0,  # Tăng từ 2.0s
 ) -> AdaptiveRateLimiter | None:
     """Lấy adaptive rate limiter instance (singleton)
 

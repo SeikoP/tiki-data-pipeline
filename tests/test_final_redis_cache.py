@@ -1,24 +1,25 @@
 """Final test: Verify Redis cache is Tier 1 and working correctly."""
 
-import sys
 import logging
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
 
 def main():
     """Test complete cache flow."""
     print("\n" + "=" * 70)
     print("FINAL TEST: Redis Cache as Tier 1")
     print("=" * 70)
-    
+
     from pipelines.crawl.crawl_products import crawl_category_products
     from pipelines.crawl.storage.redis_cache import get_redis_cache, get_working_redis_url
-    
+
     test_url = "https://tiki.vn/bo-quan-ao-nam-kich-co-lon/c49530"
-    
+
     # Step 1: Clear Redis cache
     print("\n📍 Step 1: Clear Redis cache")
     redis_url = get_working_redis_url(db=1)
@@ -28,18 +29,14 @@ def main():
             key = cache.get_cache_key(test_url, "products")
             cache.delete(key)
             print("   ✅ Redis cache cleared")
-    
+
     # Step 2: First crawl - should hit File cache and populate Redis
     print("\n📍 Step 2: First crawl (File cache → populate Redis)")
     products1 = crawl_category_products(
-        test_url,
-        max_pages=1,
-        use_redis_cache=True,
-        force_refresh=False,
-        cache_ttl=86400
+        test_url, max_pages=1, use_redis_cache=True, force_refresh=False, cache_ttl=86400
     )
     print(f"   ✅ Got {len(products1)} products")
-    
+
     # Step 3: Verify Redis was populated
     print("\n📍 Step 3: Verify Redis cache")
     if redis_url and cache:
@@ -49,30 +46,22 @@ def main():
         else:
             print("   ❌ Redis NOT populated")
             return False
-    
+
     # Step 4: Second crawl - should hit Redis (Tier 1)
     print("\n📍 Step 4: Second crawl (should hit Redis - Tier 1)")
     print("   Watch for '[Redis Cache] ✅ Hit cache' message...")
     products2 = crawl_category_products(
-        test_url,
-        max_pages=1,
-        use_redis_cache=True,
-        force_refresh=False,
-        cache_ttl=86400
+        test_url, max_pages=1, use_redis_cache=True, force_refresh=False, cache_ttl=86400
     )
     print(f"   ✅ Got {len(products2)} products")
-    
+
     # Step 5: Third crawl - confirm Redis is consistently hit
     print("\n📍 Step 5: Third crawl (confirm Redis consistency)")
     products3 = crawl_category_products(
-        test_url,
-        max_pages=1,
-        use_redis_cache=True,
-        force_refresh=False,
-        cache_ttl=86400
+        test_url, max_pages=1, use_redis_cache=True, force_refresh=False, cache_ttl=86400
     )
     print(f"   ✅ Got {len(products3)} products")
-    
+
     # Verify all results match
     if len(products1) == len(products2) == len(products3):
         print("\n" + "=" * 70)

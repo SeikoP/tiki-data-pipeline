@@ -105,9 +105,9 @@ def test_redis_priority():
 
     # Cache hit should be much faster
     if duration2 < duration1 * 0.5:  # At least 2x faster
-        print(f"✅ Redis cache hit confirmed (2nd call {duration1/duration2:.1f}x faster)")
+        print(f"✅ Redis cache hit confirmed (2nd call {duration1 / duration2:.1f}x faster)")
     else:
-        print(f"⚠️  Cache may not be working (2nd call only {duration1/duration2:.1f}x faster)")
+        print(f"⚠️  Cache may not be working (2nd call only {duration1 / duration2:.1f}x faster)")
 
     # Cleanup
     cache.delete(cache_key)
@@ -147,7 +147,7 @@ def test_redis_stats():
 
         # Sample some keys
         if product_keys:
-            print(f"\n📝 Sample product cache keys:")
+            print("\n📝 Sample product cache keys:")
             for key in product_keys[:3]:
                 try:
                     data = cache.client.get(key)

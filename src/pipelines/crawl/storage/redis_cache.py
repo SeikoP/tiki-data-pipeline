@@ -477,24 +477,24 @@ _redis_lock_instance = None
 def get_redis_cache(redis_url: str | None = None) -> RedisCache | None:
     """
     Lấy Redis cache instance (singleton với URL caching)
-    
+
     Args:
         redis_url: Redis URL to connect to. If None, auto-detects working URL.
     """
     global _redis_cache_instance, _redis_cache_url
     if not REDIS_AVAILABLE:
         return None
-    
+
     # Auto-detect if no URL provided
     if redis_url is None:
         redis_url = get_working_redis_url(db=1, timeout=2)
         if not redis_url:
             return None
-    
+
     # Return cached instance if URL matches
     if _redis_cache_instance is not None and _redis_cache_url == redis_url:
         return _redis_cache_instance
-    
+
     # Create new instance
     try:
         _redis_cache_instance = RedisCache(redis_url)
@@ -536,26 +536,26 @@ def get_redis_lock(redis_url: str = "redis://redis:6379/2") -> RedisLock | None:
 
 def get_working_redis_url(db: int = 1, timeout: int = 2) -> str | None:
     """Auto-detect working Redis URL.
-    
+
     Tries multiple common Redis URLs and returns the first one that works.
-    
+
     Args:
         db: Redis database number (default: 1)
         timeout: Connection timeout in seconds (default: 2)
-        
+
     Returns:
         Working Redis URL or None if no connection works
     """
     if not REDIS_AVAILABLE:
         return None
-    
+
     # Common Redis URLs to try
     urls = [
-        f"redis://redis:6379/{db}",      # Docker internal network
+        f"redis://redis:6379/{db}",  # Docker internal network
         f"redis://localhost:6379/{db}",  # External/development
         f"redis://127.0.0.1:6379/{db}",  # Explicit localhost
     ]
-    
+
     for url in urls:
         try:
             parsed = urlparse(url)
@@ -573,5 +573,5 @@ def get_working_redis_url(db: int = 1, timeout: int = 2) -> str | None:
             return url
         except Exception:
             continue
-    
+
     return None
