@@ -44,8 +44,11 @@ AI_CONFIG = {
 
 # Discord configuration
 DISCORD_CONFIG = {
-    "webhook_url": os.getenv("DISCORD_WEBHOOK_URL", ""),
+    "webhook_url": os.getenv("DISCORD_WEBHOOK_URL", ""),  # Legacy support
+    "webhook_url_notification": os.getenv("DISCORD_WEBHOOK_URL_NOTIFICATION", ""),  # Kênh thông báo tổng hợp
+    "webhook_url_alert": os.getenv("DISCORD_WEBHOOK_URL_ALERT", ""),  # Kênh cảnh báo/chi tiết
     "enabled": os.getenv("DISCORD_ENABLED", "false").lower() == "true",
+    "fallback_webhook_url": os.getenv("DISCORD_FALLBACK_WEBHOOK_URL", ""),
 }
 
 # Short Name AI Configuration

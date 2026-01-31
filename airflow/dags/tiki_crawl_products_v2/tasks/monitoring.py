@@ -63,7 +63,7 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 
         logger.info(f"📊 Đang tổng hợp dữ liệu từ: {output_file}")
 
-        # 1. Tổng hợp dữ liệu
+        # 1. Tổng hợp dữ liệu (with caching and trend analysis)
         DataAggregator = get_DataAggregator()
         if DataAggregator is None:
             logger.warning("⚠️  DataAggregator module chưa được import, bỏ qua tổng hợp")
@@ -71,10 +71,16 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
             try:
                 aggregator = DataAggregator(output_file)
                 if aggregator.load_data():
-                    summary = aggregator.aggregate()
+                    summary = aggregator.aggregate()  # Now with caching
                     result["summary"] = summary
                     result["aggregation_success"] = True
                     logger.info("✅ Tổng hợp dữ liệu thành công")
+
+                    # Save to history for trend analysis
+                    try:
+                        aggregator.save_to_history(summary)
+                    except Exception as hist_err:
+                        logger.warning(f"⚠️  Could not save to history: {hist_err}")
 
                     # Log thống kê
                     stats = summary.get("statistics", {})
@@ -96,6 +102,12 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                         logger.info(
                             f"   📈 Tỷ lệ thành công: {with_detail}/{crawled_count} ({success_rate:.1f}%)"
                         )
+                        
+                        # Log trends if available
+                        trends = summary.get("trends", {})
+                        if trends.get("has_previous_data"):
+                            success_change = trends.get("success_rate_change", 0)
+                            logger.info(f"   📊 Trend: Success rate {success_change:+.1f}% vs previous run")
                     else:
                         logger.warning("   ⚠️  Không có products nào được crawl detail")
                 else:
@@ -103,14 +115,14 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
             except Exception as e:
                 logger.error(f"❌ Lỗi khi tổng hợp dữ liệu: {e}", exc_info=True)
 
-        # 2. Tổng hợp với AI
+        # 2. Tổng hợp với AI (with caching, shorter prompt, faster timeout)
         AISummarizer = get_AISummarizer()
         if AISummarizer is None:
             logger.warning("⚠️  AISummarizer module chưa được import, bỏ qua tổng hợp AI")
         elif result.get("summary"):
             try:
                 summarizer = AISummarizer()
-                ai_summary = summarizer.summarize_data(result["summary"])
+                ai_summary = summarizer.summarize_data(result["summary"])  # Now with caching
                 if ai_summary:
                     result["ai_summary"] = ai_summary
                     result["ai_summary_success"] = True
@@ -121,7 +133,7 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
             except Exception as e:
                 logger.error(f"❌ Lỗi khi tổng hợp với AI: {e}", exc_info=True)
 
-        # 3. Gửi thông báo qua Discord (rút gọn nội dung nhưng giữ lại lỗi chi tiết)
+        # 3. Gửi thông báo qua Discord (2 kênh: notification + alert)
         DiscordNotifier = get_DiscordNotifier()
         if DiscordNotifier is None:
             logger.warning("DiscordNotifier module chưa được import, bỏ qua gửi thông báo")
@@ -152,67 +164,97 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                         success_rate = 0
                         color = 0x95A5A6
 
-                    # Fields với error analysis đầy đủ
-                    fields = []
-                    fields.append({"name": "Total", "value": f"{total_products:,}", "inline": True})
-                    fields.append(
-                        {"name": "Crawled", "value": f"{crawled_count:,}", "inline": True}
-                    )
-                    fields.append(
-                        {
-                            "name": "Success",
-                            "value": f"{with_detail:,} ({success_rate:.1f}%)",
-                            "inline": True,
-                        }
-                    )
+                    # KÊNH 1: NOTIFICATION - Thông báo tổng hợp ngắn gọn
+                    fields_notification = [
+                        {"name": "📦 Total", "value": f"{total_products:,}", "inline": True},
+                        {"name": "🔄 Crawled", "value": f"{crawled_count:,}", "inline": True},
+                        {"name": "✅ Success", "value": f"{with_detail:,} ({success_rate:.1f}%)", "inline": True},
+                    ]
 
-                    # Thêm error analysis chi tiết
-                    if failed > 0 or timeout > 0:
-                        total_errors = failed + timeout
-                        error_rate = (
-                            (total_errors / crawled_count * 100) if crawled_count > 0 else 0
-                        )
-                        err_info = f"**Total Errors: {total_errors}** ({error_rate:.1f}%)\n"
-                        if failed > 0:
-                            failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0
-                            err_info += f"• Failed: {failed} ({failed_rate:.1f}%)\n"
-                        if timeout > 0:
-                            timeout_rate = (
-                                (timeout / crawled_count * 100) if crawled_count > 0 else 0
-                            )
-                            err_info += f"• Timeout: {timeout} ({timeout_rate:.1f}%)"
-                        fields.append(
-                            {"name": "Error Analysis", "value": err_info.strip(), "inline": False}
-                        )
+                    # Add trend if available
+                    trends = result["summary"].get("trends", {})
+                    if trends.get("has_previous_data"):
+                        success_change = trends.get("success_rate_change", 0)
+                        trend_emoji = "📈" if success_change > 0 else ("📉" if success_change < 0 else "➡️")
+                        fields_notification.append({
+                            "name": "📊 Trend",
+                            "value": f"{trend_emoji} {success_change:+.1f}% vs previous",
+                            "inline": False,
+                        })
 
-                    if products_saved:
-                        fields.append(
-                            {"name": "Saved to DB", "value": f"{products_saved:,}", "inline": True}
-                        )
+                    content_notification = f"Crawl hoàn tất: **{success_rate:.1f}%** thành công"
 
-                    # Nội dung rõ ràng
-                    content = "Tổng hợp dữ liệu crawl Tiki.vn\n"
-                    if crawled_count > 0:
-                        content += f"```\nThành công: {success_rate:.1f}% ({with_detail}/{crawled_count})\n```"
-                    else:
-                        content += "Chưa có sản phẩm được crawl detail."
-
-                    success = notifier.send_message(
-                        content=content,
-                        title="Tổng hợp dữ liệu Tiki",
+                    logger.info("📤 Sending to NOTIFICATION channel...")
+                    success_notif = notifier.send_message(
+                        content=content_notification,
+                        title="📊 Tổng hợp Crawl Tiki",
                         color=color,
-                        fields=fields,
-                        footer=f"Crawl lúc: {crawled_at}",
+                        fields=fields_notification,
+                        footer=f"⏰ {crawled_at}",
+                        max_retries=3,
+                        channel="notification",
                     )
-                    if success:
-                        result["discord_notification_success"] = True
-                        logger.info("Đã gửi thông báo Discord")
+
+                    # KÊNH 2: ALERT - Báo cáo chi tiết với AI summary
+                    if result.get("ai_summary"):
+                        logger.info("📤 Sending to ALERT channel (with AI summary)...")
+                        
+                        # Fields chi tiết cho alert channel
+                        fields_alert = []
+                        
+                        # Error analysis nếu có
+                        if failed > 0 or timeout > 0:
+                            total_errors = failed + timeout
+                            error_rate = (total_errors / crawled_count * 100) if crawled_count > 0 else 0
+                            err_info = f"**{total_errors}** errors ({error_rate:.1f}%)"
+                            if failed > 0:
+                                failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0
+                                err_info += f"\n• Failed: {failed} ({failed_rate:.1f}%)"
+                            if timeout > 0:
+                                timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0
+                                err_info += f"\n• Timeout: {timeout} ({timeout_rate:.1f}%)"
+                            fields_alert.append({
+                                "name": "⚠️ Errors",
+                                "value": err_info,
+                                "inline": False,
+                            })
+
+                        if products_saved:
+                            fields_alert.append({
+                                "name": "💾 Saved to DB",
+                                "value": f"{products_saved:,}",
+                                "inline": True,
+                            })
+
+                        # Determine color for alert (more strict)
+                        alert_color = 0x00B894 if success_rate >= 90 else (0xF39C12 if success_rate >= 70 else 0xE74C3C)
+
+                        success_alert = notifier.send_message(
+                            content=result["ai_summary"],
+                            title="🤖 Báo Cáo Chi Tiết (AI)",
+                            color=alert_color,
+                            fields=fields_alert if fields_alert else None,
+                            footer=f"⏰ {crawled_at}",
+                            max_retries=3,
+                            channel="alert",
+                        )
+
+                        if success_notif or success_alert:
+                            result["discord_notification_success"] = True
+                            logger.info(f"✅ Discord sent: Notification={success_notif}, Alert={success_alert}")
+                        else:
+                            logger.warning("⚠️  Both channels failed")
                     else:
-                        logger.warning("Không thể gửi thông báo qua Discord")
+                        # No AI summary, only send notification
+                        if success_notif:
+                            result["discord_notification_success"] = True
+                            logger.info("✅ Discord notification sent")
+                        else:
+                            logger.warning("⚠️  Notification channel failed")
                 else:
                     logger.warning("Không có dữ liệu để gửi thông báo")
             except Exception as e:
-                logger.error(f"Lỗi khi gửi thông báo Discord: {e}", exc_info=True)
+                logger.error(f"❌ Lỗi khi gửi thông báo Discord: {e}", exc_info=True)
 
         logger.info("=" * 70)
         logger.info("📊 KẾT QUẢ TỔNG HỢP VÀ THÔNG BÁO")
@@ -228,14 +270,18 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
         )
         logger.info("=" * 70)
 
-        # Performance Summary
+        # Performance Summary (FIXED: Use crawled_count instead of with_detail)
         try:
             dag_run = context.get("dag_run")
             if dag_run and dag_run.start_date:
                 start_time = dag_run.start_date
                 end_time = datetime.now()
                 duration = (end_time - start_time).total_seconds()
-                total_products = result.get("with_detail", 0)  # Use crawled products count
+                
+                # FIX: Use crawled_count (actual products crawled) not with_detail
+                stats = result.get("summary", {}).get("statistics", {})
+                total_products = stats.get("crawled_count", 0)
+                with_detail = stats.get("with_detail", 0)
 
                 # Calculate throughput
                 throughput = total_products / duration if duration > 0 else 0
@@ -243,7 +289,8 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 
                 logger.info("=" * 70)
                 logger.info("⚡ PERFORMANCE SUMMARY")
-                logger.info(f"⏱️  Duration: {duration / 60:.1f} min | Products: {total_products}")
+                logger.info(f"⏱️  Duration: {duration / 60:.1f} min")
+                logger.info(f"📦 Products crawled: {total_products} | Success: {with_detail}")
                 if throughput > 0:
                     logger.info(
                         f"📈 Throughput: {throughput:.2f} products/s | Avg: {avg_time:.1f}s/product"
@@ -253,6 +300,7 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
                 result["performance"] = {
                     "duration_minutes": round(duration / 60, 2),
                     "total_products": total_products,
+                    "with_detail": with_detail,
                     "throughput": round(throughput, 2),
                     "avg_time_per_product": round(avg_time, 2),
                 }

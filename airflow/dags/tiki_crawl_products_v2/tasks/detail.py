@@ -42,18 +42,20 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
     """
     Task: Chuẩn bị danh sách products để crawl detail
 
-    Tối ưu cho multi-day crawling:
-    - Chỉ crawl products chưa có detail
-    - Chia thành batches theo ngày (có thể crawl trong nhiều ngày)
-    - Kiểm tra cache và progress để tránh crawl lại
-    - Track progress để resume từ điểm dừng
+    Logic đơn giản:
+    - Lấy products từ crawl_categories
+    - Check DB: Skip products đã có detail đầy đủ + updated gần đây
+    - Giới hạn số lượng theo TIKI_PRODUCTS_PER_DAY
+    - Return list products cần crawl
+
+    Không dùng progress file (DB là source of truth)
 
     Returns:
         List[Dict]: List các dict chứa product info cho Dynamic Task Mapping
     """
     logger = get_logger(context)
     logger.info("=" * 70)
-    logger.info("📋 TASK: Prepare Products for Detail Crawling (Multi-Day Support)")
+    logger.info("📋 TASK: Prepare Products for Detail Crawling")
     logger.info("=" * 70)
 
     try:
@@ -83,34 +85,17 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         logger.info(f"📊 Tổng số products: {len(products)}")
 
-        # Đọc progress file để biết đã crawl đến đâu
-        progress = {
-            "crawled_product_ids": set(),
-            "last_crawled_index": 0,
-            "total_crawled": 0,
-            "last_updated": None,
-        }
-
-        if PROGRESS_FILE.exists():
-            try:
-                with open(PROGRESS_FILE, encoding="utf-8") as f:
-                    saved_progress = json.load(f)
-                    progress["crawled_product_ids"] = set(
-                        saved_progress.get("crawled_product_ids", [])
-                    )
-                    progress["last_crawled_index"] = saved_progress.get("last_crawled_index", 0)
-                    progress["total_crawled"] = saved_progress.get("total_crawled", 0)
-                    progress["last_updated"] = saved_progress.get("last_updated")
-                    logger.info(
-                        f"📂 Đã load progress: {len(progress['crawled_product_ids'])} products đã crawl"
-                    )
-            except Exception as e:
-                logger.warning(f"⚠️  Không đọc được progress file: {e}")
+        # ❌ REMOVED: Progress file tracking (replaced by DB check)
+        # Progress file was:
+        # - Accumulating IDs across all runs (confusing)
+        # - Redundant with DB check (DB is source of truth)
+        # - Growing indefinitely (71KB for 8,655 IDs)
+        # - Not reflecting actual DB state (deleted/outdated products)
+        # Solution: Use DB check only - simpler, more accurate
 
         # Lọc products cần crawl detail
         products_to_crawl = []
         cache_hits = 0
-        already_crawled = 0
         db_hits = 0  # Products đã có trong DB
 
         products_per_day = get_int_variable("TIKI_PRODUCTS_PER_DAY", default=1000)
@@ -227,28 +212,13 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         # Check Force Crawl flag
         force_crawl = get_variable("TIKI_FORCE_CRAWL", default="false").lower() == "true"
-        # Check Ignore Progress flag (Soft Force)
-        ignore_progress = get_variable("TIKI_IGNORE_PROGRESS", default="false").lower() == "true"
 
         if force_crawl:
-            logger.warning("🔥 FORCE CRAWL: ON")
-        elif ignore_progress:
-            logger.warning("🔄 IGNORE PROGRESS: ON (Re-scan list)")
+            logger.warning("🔥 FORCE CRAWL: ON - Will crawl all products")
 
-        logger.info(
-            f"🔄 Bắt đầu kiểm tra {len(products)} products (đã crawl {progress['total_crawled']} products)"
-        )
+        logger.info(f"🔄 Bắt đầu kiểm tra {len(products)} products...")
 
-        skipped_count = 0
-        products_to_crawl = []
-
-        # Reset counters
-        db_hits = 0
-        cache_hits = 0
-        already_crawled = 0
-        idx = -1
-
-        # Tối ưu: Duyệt tất cả products để tìm products chưa có trong DB
+        # Duyệt tất cả products để tìm products cần crawl
         for idx, product in enumerate(products):
             product_id = product.get("product_id")
             product_url = product.get("url")
@@ -256,48 +226,22 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             if not product_id or not product_url:
                 continue
 
-            # 1. Kiểm tra xem đã crawl chưa (từ progress) - Trừ khi force crawl hoặc ignore progress
-            if (
-                not force_crawl
-                and not ignore_progress
-                and product_id in progress["crawled_product_ids"]
-            ):
-                already_crawled += 1
-                skipped_count += 1
-                continue
-
-            # 2. Kiểm tra xem đã có trong database chưa (với detail đầy đủ) - Trừ khi force crawl
+            # Kiểm tra xem đã có trong database chưa (với detail đầy đủ) - Trừ khi force crawl
             if not force_crawl and product_id in existing_product_ids_in_db:
                 # Đã có trong DB với detail đầy đủ (có price và sales_count)
+                # AND updated gần đây (< TIKI_CACHE_RELAX_DAYS)
                 # → Skip crawl lại
                 db_hits += 1
-                progress["crawled_product_ids"].add(product_id)
-                already_crawled += 1
-                skipped_count += 1
                 continue
 
-            # 3. Kiểm tra cache với Redis (thay vì file cache)
-            cache_hit = False
-
-            if not force_crawl and redis_cache:
-                # Chuẩn hóa URL trước khi check cache (CRITICAL)
-                product_id_for_cache = product_id
-
-                # Thử lấy từ Redis cache với flexible validation
-                cached_detail, is_valid = redis_cache.get_product_detail_with_validation(
-                    product_id_for_cache
-                )
-
-                if is_valid:
-                    cache_hits += 1
-                    cache_hit = True
-                    progress["crawled_product_ids"].add(product_id)
-                    already_crawled += 1
-                    skipped_count += 1
-
-            # Nếu chưa có valid cache (hoặc force crawl), thêm vào danh sách crawl
-            if cache_hit:
-                continue
+            # 3. ❌ REMOVED: Cache check for detail crawl
+            # Detail crawl ALWAYS fetches fresh data to track price changes
+            # Cache was causing issues:
+            # - Price changes not tracked
+            # - Sales count not updated
+            # - crawl_history table bypassed
+            # - products table not updated
+            # Solution: Always crawl fresh data, use DB check with short interval instead
 
             products_to_crawl.append(
                 {
@@ -305,10 +249,8 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     "url": product_url,
                     "name": product.get("name", ""),
                     "product": product,  # Giữ nguyên product data
-                    "index": idx,  # Lưu index để track progress (nếu cần debug)
                 }
             )
-            skipped_count = 0  # Reset counter khi tìm thấy product mới
 
             # Giới hạn số lượng products crawl trong ngày này
             if len(products_to_crawl) >= products_per_day:
@@ -321,51 +263,24 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                 break
 
         # Stats Summary
-        total_checked = idx + 1
+        total_checked = len(products)
         cache_hit_rate = (cache_hits / total_checked * 100) if total_checked > 0 else 0.0
-        total_skipped = already_crawled
+        total_skipped = db_hits
 
-        progress["total_crawled"] = len(progress["crawled_product_ids"])
-
-        logger.info("-" * 30)
+        logger.info("=" * 70)
         logger.info(
             f"📊 SUMMARY: Input={len(products)} | ToCrawl={len(products_to_crawl)} | Skipped={total_skipped}"
         )
-        logger.info(f"   Hits: DB={db_hits}, Cache={cache_hits} ({cache_hit_rate:.1f}%)")
-        logger.info(f"   Total Unique Crawled: {progress['total_crawled']}")
-        logger.info("-" * 30)
+        logger.info(f"   DB Check: {db_hits} products (already in DB with recent data)")
+        logger.info(f"   Cache: {cache_hits} hits ({cache_hit_rate:.1f}%)")
+        logger.info("=" * 70)
 
         if len(products_to_crawl) == 0:
-            logger.warning(
-                f"⚠️  NO PRODUCTS TO CRAWL! (Check: Progress={not ignore_progress}, DB/Cache={not force_crawl})"
-            )
+            logger.warning("⚠️  NO PRODUCTS TO CRAWL!")
+            logger.info(f"   All {len(products)} products are already in DB with recent data")
             logger.info(
-                "   Hint: Set TIKI_FORCE_CRAWL=true to recrawl all, or TIKI_IGNORE_PROGRESS=true to rescan."
+                f"   Hint: Set TIKI_FORCE_CRAWL=true to recrawl all, or reduce TIKI_CACHE_RELAX_DAYS"
             )
-
-        # Lưu progress (list of IDs)
-        if products_to_crawl or skipped_count > 0:  # Lưu nếu có thay đổi hoặc skip
-            # Update last_crawled_index is mostly meaningless now, set to last checked
-            progress["last_crawled_index"] = idx
-            progress["last_updated"] = datetime.now().isoformat()
-
-            # Lưu progress vào file
-            try:
-                with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(
-                        {
-                            "crawled_product_ids": list(progress["crawled_product_ids"]),
-                            "last_crawled_index": progress["last_crawled_index"],
-                            "total_crawled": progress["total_crawled"] + already_crawled,
-                            "last_updated": progress["last_updated"],
-                        },
-                        f,
-                        ensure_ascii=False,
-                        indent=2,
-                    )
-                logger.info(f"💾 Đã lưu progress: index {progress['last_crawled_index']}")
-            except Exception as e:
-                logger.warning(f"⚠️  Không lưu được progress: {e}")
 
         # Debug: Log một vài products đầu tiên
         if products_to_crawl:
@@ -971,57 +886,22 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
     # Kiểm tra xem có force refresh không (từ Airflow Variable)
     force_refresh = get_variable("TIKI_FORCE_REFRESH_CACHE", default="false").lower() == "true"
 
+    # ❌ REMOVED: Cache check for detail crawl
+    # Detail crawl ALWAYS fetches fresh data to track price changes in crawl_history
+    # Cache was bypassing:
+    # - Price change tracking
+    # - crawl_history table updates
+    # - products table updates
+    # Solution: Always crawl fresh data
+
     if force_refresh:
         logger.info(f"🔄 FORCE REFRESH MODE: Bỏ qua cache cho product {product_id}")
     else:
-        # Thử Redis cache trước (nhanh hơn, distributed)
-        logger.info(f"🔍 Đang kiểm tra cache cho product {product_id}...")
-        redis_cache = None
-        try:
-            from pipelines.crawl.storage.redis_cache import get_redis_cache
+        logger.info(f"🔄 FRESH CRAWL MODE: Crawling fresh data to track price changes")
 
-            redis_cache = get_redis_cache("redis://redis:6379/1")
-            if redis_cache:
-                cached_detail = redis_cache.get_cached_product_detail(product_id)
-                if cached_detail:
-                    has_price = cached_detail.get("price", {}).get("current_price")
-                    has_sales_count = cached_detail.get("sales_count") is not None
-                    brand_value = cached_detail.get("brand")
-                    has_brand = bool(
-                        brand_value and (not isinstance(brand_value, str) or brand_value.strip())
-                    )
-                    seller_info = cached_detail.get("seller", {})
-                    seller_name = seller_info.get("name") if isinstance(seller_info, dict) else None
-                    has_seller = bool(
-                        seller_name and (not isinstance(seller_name, str) or seller_name.strip())
-                    )
-
-                    if has_price and has_sales_count and has_brand and has_seller:
-                        logger.info("=" * 70)
-                        logger.info(f"✅ SKIP CRAWL - Redis Cache Hit cho product {product_id}")
-                        logger.info(f"   - Có price: {has_price}")
-                        logger.info(f"   - Có sales_count: {has_sales_count}")
-                        logger.info(f"   - Có brand: {has_brand}")
-                        logger.info(f"   - Có seller: {has_seller}")
-                        logger.info("   - Sử dụng cache, không cần crawl lại")
-                        logger.info("=" * 70)
-                        result["detail"] = cached_detail
-                        result["status"] = "cached"
-                        return result
-                    if has_price or has_sales_count or has_brand or has_seller:
-                        logger.info(
-                            f"[Redis Cache] ⚠️  Cache thiếu dữ liệu cho product {product_id}, sẽ crawl lại"
-                        )
-                else:
-                    logger.info(
-                        f"[Redis Cache] ⚠️  Cache không đầy đủ cho product {product_id}, sẽ crawl lại"
-                    )
-        except Exception:
-            # Redis không available, fallback về file cache
-            pass
-
-        # Fallback: Kiểm tra file cache nếu Redis không available hoặc không có cache
-        if not force_refresh:
+    # Fallback: Kiểm tra file cache nếu Redis không available hoặc không có cache
+    # File cache chỉ dùng cho debugging, không dùng để skip crawl
+    if not force_refresh:
             cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
             if cache_file.exists():
                 try:
@@ -1270,20 +1150,15 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
         result["status"] = "success"
         result["elapsed_time"] = elapsed
 
-        # Lưu vào cache - ưu tiên Redis, fallback về file
-        # Redis cache (nhanh, distributed) - CRITICAL: Chuẩn hóa URL trước khi cache
-        if redis_cache:
-            try:
-                # IMPORTANT: Sử dụng product_id (không phụ thuộc vào URL) để cache
-                # Điều này đảm bảo rằng cùng 1 product từ category khác nhau sẽ hit cache
-                redis_cache.cache_product_detail(product_id, detail, ttl=604800)  # 7 ngày
-                logger.info(
-                    f"[Redis Cache] ✅ Đã cache detail cho product {product_id} (TTL: 7 days)"
-                )
-            except Exception as e:
-                logger.warning(f"[Redis Cache] ⚠️  Lỗi khi cache vào Redis: {e}")
+        # ❌ REMOVED: Cache save for detail crawl
+        # Detail data changes frequently (price, sales_count)
+        # Caching prevents:
+        # - Price change tracking in crawl_history
+        # - Fresh data updates in products table
+        # - Accurate updated_at timestamps
+        # Solution: Don't cache, always fetch fresh data
 
-        # File cache (fallback)
+        # File cache (kept for debugging only, not used to skip crawl)
         try:
             # Đảm bảo thư mục cache tồn tại
             DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)

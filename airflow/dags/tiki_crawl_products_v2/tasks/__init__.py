@@ -33,7 +33,7 @@ from .maintenance import (
     cleanup_redis_cache,
     cleanup_redundant_categories_wrapper,
     reconcile_categories_wrapper,
-    validate_data,
+    # validate_data - REMOVED: Not critical, only counted valid/invalid products
 )
 from .monitoring import aggregate_and_notify
 from .product import merge_products, save_products, transform_products
@@ -64,7 +64,7 @@ __all__ = [
     "cleanup_redundant_categories_wrapper",
     "reconcile_categories_wrapper",
     "cleanup_old_history_wrapper",
-    "validate_data",
+    # "validate_data",  # REMOVED
     "cleanup_redis_cache",
     "backup_database",
     "aggregate_and_notify",
