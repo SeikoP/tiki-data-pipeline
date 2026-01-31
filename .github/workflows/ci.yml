@@ -136,8 +136,12 @@ jobs:
               print('--- Falling back to direct import check ---')
               try:
                   # Kiểm tra import trực tiếp nếu Airflow không sẵn sàng
-                  from tiki_crawl_products_v2.main_dag import dag
-                  print('✅ Direct import of main_dag successful!')
+                  from tiki_crawl_products_v2 import tiki_crawl_fast
+                  print('✅ Direct import of tiki_crawl_fast successful!')
+                  if hasattr(tiki_crawl_fast, 'dag'):
+                      print(f'✅ DAG object found: {tiki_crawl_fast.dag.dag_id}')
+                  else:
+                      print('⚠️ No dag attribute in tiki_crawl_fast')
               except Exception as die:
                   print(f'❌ Direct import failed: {die}')
                   import traceback
