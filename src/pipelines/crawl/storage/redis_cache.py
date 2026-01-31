@@ -65,11 +65,11 @@ class RedisCache:
     Redis cache wrapper với connection pooling cho crawl pipeline.
     """
 
-    def __init__(self, redis_url: str = "redis://redis:6379/1", default_ttl: int = 86400):
+    def __init__(self, redis_url: str = "redis://redis:6379/1", default_ttl: int = 259200):
         """
         Args:
             redis_url: Redis connection URL (database 1 cho cache, database 0 đã dùng cho Celery)
-            default_ttl: Time to live mặc định (giây), mặc định 24 giờ
+            default_ttl: Time to live mặc định (giây), mặc định 3 ngày (259200s)
         """
         if not REDIS_AVAILABLE:
             raise ImportError("Redis chưa được cài đặt. Cài đặt: pip install redis")
@@ -469,23 +469,39 @@ class RedisLock:
 
 # Singleton instances (optional, có thể tạo mới mỗi lần)
 _redis_cache_instance = None
+_redis_cache_url = None
 _redis_rate_limiter_instance = None
 _redis_lock_instance = None
 
 
-def get_redis_cache(redis_url: str = "redis://redis:6379/1") -> RedisCache | None:
+def get_redis_cache(redis_url: str | None = None) -> RedisCache | None:
     """
-    Lấy Redis cache instance (singleton)
+    Lấy Redis cache instance (singleton với URL caching)
+
+    Args:
+        redis_url: Redis URL to connect to. If None, auto-detects working URL.
     """
-    global _redis_cache_instance
+    global _redis_cache_instance, _redis_cache_url
     if not REDIS_AVAILABLE:
         return None
-    if _redis_cache_instance is None:
-        try:
-            _redis_cache_instance = RedisCache(redis_url)
-        except Exception:
+
+    # Auto-detect if no URL provided
+    if redis_url is None:
+        redis_url = get_working_redis_url(db=1, timeout=2)
+        if not redis_url:
             return None
-    return _redis_cache_instance
+
+    # Return cached instance if URL matches
+    if _redis_cache_instance is not None and _redis_cache_url == redis_url:
+        return _redis_cache_instance
+
+    # Create new instance
+    try:
+        _redis_cache_instance = RedisCache(redis_url)
+        _redis_cache_url = redis_url
+        return _redis_cache_instance
+    except Exception:
+        return None
 
 
 def get_redis_rate_limiter(redis_url: str = "redis://redis:6379/2") -> RedisRateLimiter | None:
@@ -516,3 +532,46 @@ def get_redis_lock(redis_url: str = "redis://redis:6379/2") -> RedisLock | None:
         except Exception:
             return None
     return _redis_lock_instance
+
+
+def get_working_redis_url(db: int = 1, timeout: int = 2) -> str | None:
+    """Auto-detect working Redis URL.
+
+    Tries multiple common Redis URLs and returns the first one that works.
+
+    Args:
+        db: Redis database number (default: 1)
+        timeout: Connection timeout in seconds (default: 2)
+
+    Returns:
+        Working Redis URL or None if no connection works
+    """
+    if not REDIS_AVAILABLE:
+        return None
+
+    # Common Redis URLs to try
+    urls = [
+        f"redis://redis:6379/{db}",  # Docker internal network
+        f"redis://localhost:6379/{db}",  # External/development
+        f"redis://127.0.0.1:6379/{db}",  # Explicit localhost
+    ]
+
+    for url in urls:
+        try:
+            parsed = urlparse(url)
+            client = redis.Redis(
+                host=parsed.hostname or "localhost",
+                port=parsed.port or 6379,
+                db=int(parsed.path.lstrip("/")) if parsed.path else 0,
+                decode_responses=True,
+                socket_connect_timeout=timeout,
+                socket_timeout=timeout,
+            )
+            # Test connection
+            client.ping()
+            client.close()
+            return url
+        except Exception:
+            continue
+
+    return None

@@ -12,6 +12,7 @@ from tiki_crawl_products_v2.bootstrap import (
     Path,
     atomic_write_file,
     classify_error,
+    crawl_product_detail_with_driver,
     crawl_product_detail_with_selenium,
     datetime,
     ensure_output_dirs,
@@ -722,7 +723,7 @@ def crawl_product_batch(
                             f.write(
                                 f"[{datetime.now()}] FAIL_GRACEFUL {product_id}: Crawl returned None or Invalid Dict\n"
                             )
-                    except:
+                    except Exception:
                         pass
 
             except Exception as e:
@@ -734,7 +735,7 @@ def crawl_product_batch(
                 try:
                     with open("/tmp/debug_crawl.log", "a") as f:
                         f.write(f"[{datetime.now()}] FAIL {product_id}: {str(e)}\n")
-                except:
+                except Exception:
                     pass
 
             return result

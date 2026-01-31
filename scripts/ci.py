@@ -172,34 +172,45 @@ class CIRunner:
         """
         # Check virtual environment first
         if self.venv_path.exists():
-            if self.is_windows:
-                venv_python = self.venv_path / "Scripts" / "python.exe"
-            else:
-                venv_python = self.venv_path / "bin" / "python"
+            # Try both Windows and Linux paths (for WSL compatibility)
+            possible_paths = [
+                self.venv_path / "Scripts" / "python.exe",  # Windows
+                self.venv_path / "bin" / "python",  # Linux/Mac
+            ]
 
-            if venv_python.exists():
-                self._print_info(f"Using virtual environment: {venv_python}")
-                return str(venv_python)
+            for venv_python in possible_paths:
+                if venv_python.exists():
+                    self._print_info(f"Using virtual environment: {venv_python}")
+                    return str(venv_python)
 
         # Fallback to system Python
+        # First try sys.executable (current Python interpreter)
+        if sys.executable and Path(sys.executable).exists():
+            return sys.executable
+
+        # Then try common Python commands
         for cmd in ["python3", "python"]:
             if shutil.which(cmd):
                 return cmd
 
-        raise RuntimeError("Python executable not found!")
+        # Last resort: return sys.executable even if we can't verify it
+        # This handles edge cases like WSL where path detection might fail
+        return sys.executable
 
     def _detect_pip(self) -> str:
         """
         Detect the correct pip executable.
         """
         if self.venv_path.exists():
-            if self.is_windows:
-                venv_pip = self.venv_path / "Scripts" / "pip.exe"
-            else:
-                venv_pip = self.venv_path / "bin" / "pip"
+            # Try both Windows and Linux paths (for WSL compatibility)
+            possible_paths = [
+                self.venv_path / "Scripts" / "pip.exe",  # Windows
+                self.venv_path / "bin" / "pip",  # Linux/Mac
+            ]
 
-            if venv_pip.exists():
-                return str(venv_pip)
+            for venv_pip in possible_paths:
+                if venv_pip.exists():
+                    return str(venv_pip)
 
         return f"{self.python_cmd} -m pip"
 
