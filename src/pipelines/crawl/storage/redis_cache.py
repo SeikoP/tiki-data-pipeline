@@ -474,13 +474,22 @@ _redis_rate_limiter_instance = None
 _redis_lock_instance = None
 
 
-def get_redis_cache(redis_url: str = "redis://redis:6379/1") -> RedisCache | None:
+def get_redis_cache(redis_url: str | None = None) -> RedisCache | None:
     """
     Lấy Redis cache instance (singleton với URL caching)
+    
+    Args:
+        redis_url: Redis URL to connect to. If None, auto-detects working URL.
     """
     global _redis_cache_instance, _redis_cache_url
     if not REDIS_AVAILABLE:
         return None
+    
+    # Auto-detect if no URL provided
+    if redis_url is None:
+        redis_url = get_working_redis_url(db=1, timeout=2)
+        if not redis_url:
+            return None
     
     # Return cached instance if URL matches
     if _redis_cache_instance is not None and _redis_cache_url == redis_url:

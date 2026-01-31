@@ -145,7 +145,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
         try:
             from pipelines.crawl.storage.redis_cache import get_redis_cache
 
-            redis_cache = get_redis_cache("redis://redis:6379/1")
+            redis_cache = get_redis_cache(None)  # Auto-detect
             if redis_cache:
                 cached_html = redis_cache.get_cached_html(url)
                 if cached_html:
@@ -267,7 +267,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
                 from pipelines.crawl.config import REDIS_CACHE_TTL_HTML
                 from pipelines.crawl.storage.redis_cache import get_redis_cache
 
-                redis_cache = get_redis_cache("redis://redis:6379/1")
+                redis_cache = get_redis_cache(None)  # Auto-detect
                 if redis_cache:
                     # CRITICAL: Chuẩn hóa URL trước khi cache để maximize hit rate
                     canonical_url = redis_cache._canonicalize_url(url)
@@ -294,7 +294,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
         try:
             from pipelines.crawl.storage.redis_cache import get_redis_cache
 
-            redis_cache = get_redis_cache("redis://redis:6379/1")
+            redis_cache = get_redis_cache(None)  # Auto-detect
             if redis_cache:
                 cached_html = redis_cache.get_cached_html(url)
                 if cached_html:
@@ -339,7 +339,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
                     from pipelines.crawl.config import REDIS_CACHE_TTL_HTML
                     from pipelines.crawl.storage.redis_cache import get_redis_cache
 
-                    redis_cache = get_redis_cache("redis://redis:6379/1")
+                    redis_cache = get_redis_cache(None)  # Auto-detect
                     if redis_cache:
                         # CRITICAL: Chuẩn hóa URL trước khi cache để maximize hit rate
                         canonical_url = redis_cache._canonicalize_url(url)
@@ -840,49 +840,68 @@ def crawl_category_products(
     redis_cache = None
     if use_redis_cache:
         try:
-            from pipelines.crawl.storage.redis_cache import get_redis_cache, get_working_redis_url
+            from pipelines.crawl.storage.redis_cache import get_redis_cache
 
-            # Auto-detect working Redis URL
-            redis_url = get_working_redis_url(db=1, timeout=2)
+            # Auto-detect working Redis URL (None = auto-detect)
+            logger.info(f"[Redis Cache] 🔍 Checking cache for {category_url[:60]}...")
+            redis_cache = get_redis_cache(None)  # Auto-detect
             
-            if redis_url:
-                redis_cache = get_redis_cache(redis_url)
-                if redis_cache and not force_refresh:
-                    cached_products = redis_cache.get_cached_products(category_url)
-                    if cached_products:
-                        logger.info(
-                            f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}... ({len(cached_products)} products)"
-                        )
-                        return cached_products
-                logger.debug(f"[Redis Cache] Connected to {redis_url}")
-            else:
+            if redis_cache and not force_refresh:
+                # Debug: Log cache key being checked
+                cache_key = redis_cache.get_cache_key(category_url, "products")
+                logger.debug(f"[Redis Cache] Cache key: {cache_key}")
+                
+                cached_products = redis_cache.get_cached_products(category_url)
+                if cached_products:
+                    logger.info(
+                        f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}... ({len(cached_products)} products)"
+                    )
+                    return cached_products
+                else:
+                    # Debug: Check if key exists
+                    key_exists = redis_cache.exists(cache_key)
+                    logger.info(f"[Redis Cache] ❌ Cache miss cho {category_url[:60]}... (key exists: {key_exists})")
+            elif force_refresh:
+                logger.info(f"[Redis Cache] 🔄 Force refresh enabled, skipping cache")
+            elif not redis_cache:
                 logger.info("[Redis Cache] ⚠️ Could not connect to Redis, falling back to file cache")
         except Exception as e:
             logger.warning(f"[Redis Cache] ⚠️ Error: {e}, falling back to file cache")
 
-    # Tier 2: Thử File cache (chỉ khi Redis không available)
+    # Tier 2: Thử File cache (fallback khi Redis miss hoặc không available)
     cache_file = None
-    if cache_dir and not redis_cache:  # Only use file cache if Redis is not available
+    if cache_dir:  # Always prepare cache_file path
         import hashlib
 
         url_hash = hashlib.md5(category_url.encode()).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 
-        if os.path.exists(cache_file) and not force_refresh:
-            # Kiểm tra TTL của file
-            file_age = time.time() - os.path.getmtime(cache_file)
-            if file_age < cache_ttl:
-                cached_data = safe_read_json(cache_file)
-                if cached_data and "products" in cached_data:
-                    cached_products = cached_data["products"]
+        # Check file cache nếu Redis miss hoặc không available
+        if not redis_cache or (redis_cache and not force_refresh):
+            if os.path.exists(cache_file) and not force_refresh:
+                # Kiểm tra TTL của file
+                file_age = time.time() - os.path.getmtime(cache_file)
+                if file_age < cache_ttl:
+                    cached_data = safe_read_json(cache_file)
+                    if cached_data and "products" in cached_data:
+                        cached_products = cached_data["products"]
+                        logger.info(
+                            f"[File Cache] ✅ Hit cache ({int(file_age / 3600)}h cũ) cho {category_url[:60]}... ({len(cached_products)} products)"
+                        )
+                        
+                        # Populate Redis cache from file cache if Redis is available
+                        if redis_cache:
+                            try:
+                                redis_cache.cache_products(category_url, cached_products, ttl=259200)
+                                logger.info(f"[Redis Cache] ✅ Populated from file cache ({len(cached_products)} products)")
+                            except Exception as e:
+                                logger.warning(f"[Redis Cache] ⚠️ Failed to populate: {e}")
+                        
+                        return cached_products
+                else:
                     logger.info(
-                        f"[File Cache] ✅ Hit cache ({int(file_age / 3600)}h cũ) cho {category_url[:60]}... ({len(cached_products)} products)"
+                        f"[File Cache] 🔄 Cache quá hạn ({int(file_age / 3600)}h), tiến hành crawl mới..."
                     )
-                    return cached_products
-            else:
-                logger.info(
-                    f"[File Cache] 🔄 Cache quá hạn ({int(file_age / 3600)}h), tiến hành crawl mới..."
-                )
     elif cache_dir and redis_cache:
         # Prepare cache_file path for later saving (but don't read from it)
         import hashlib
@@ -906,8 +925,8 @@ def crawl_category_products(
         # Tối ưu: Cache ngay lập tức sau khi lấy từ API thành công
         if redis_cache:
             try:
-                redis_cache.cache_products(category_url, api_products, ttl=86400)  # 24h (increased from 12h)
-                logger.info(f"[Redis Cache] ✅ Cached {len(api_products)} products with TTL=24h")
+                redis_cache.cache_products(category_url, api_products, ttl=259200)  # 3 ngày
+                logger.info(f"[Redis Cache] ✅ Cached {len(api_products)} products with TTL=3 days")
             except Exception as e:
                 logger.warning(f"[Redis Cache] ⚠️ Failed to cache: {e}")
 
