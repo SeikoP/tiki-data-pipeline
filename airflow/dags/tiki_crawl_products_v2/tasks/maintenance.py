@@ -442,14 +442,12 @@ def cleanup_redis_cache(**context) -> dict[str, Any]:
         except Exception as e:
             logger.warning(f"⚠️  Không thể lấy stats trước cleanup: {e}")
 
-        # Reset cache
-        logger.info("🧹 Đang cleanup Redis cache...")
-        try:
-            redis_cache.client.flushdb()
-            result["redis_reset"] = True
-            logger.info("✅ Đã flush DB Redis cache thành công")
-        except Exception as e:
-            logger.error(f"❌ Flush DB thất bại: {e}")
+        # Reset cache - REMOVED: Redis already uses TTL for expiration.
+        # Calling flushdb() wipes the entire cache for every run, causing 100% miss rate in next run.
+        logger.info(
+            "ℹ️  Redis cleanup: Skipping flushdb() to preserve persistent cache. TTL will handle expiration."
+        )
+        result["redis_reset"] = False
 
         # Lấy stats sau khi cleanup
         try:

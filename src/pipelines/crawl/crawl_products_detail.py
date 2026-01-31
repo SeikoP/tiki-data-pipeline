@@ -824,6 +824,7 @@ def extract_product_detail(
         "sales_count": None,  # Số lượng sản phẩm đã bán
         "images": [],  # Initialize images list
         "promotions": [],
+        "stock": {"available": True, "quantity": 0, "stock_status": ""},
         "_metadata": {
             "extracted_at": datetime.now().isoformat(),
             "source_url": url,
@@ -1720,14 +1721,35 @@ async def crawl_product_detail_via_api(
 
     for attempt in range(max_retries):
         try:
-            async with session.get(api_url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return extract_product_detail_from_json(data, url)
-                elif response.status in [429, 502, 503, 504]:
+            async with session.get(api_url, headers=headers, allow_redirects=True) as response:
+                # Detect redirection to homepage (indicates bot block/redirect)
+                is_homepage_redirect = str(response.url).strip("/") == "https://tiki.vn"
+                is_html_response = "text/html" in response.content_type
+
+                if response.status == 200 and not is_homepage_redirect and not is_html_response:
+                    try:
+                        data = await response.json()
+                        return extract_product_detail_from_json(data, url)
+                    except Exception as json_err:
+                        if verbose:
+                            print(f"[API] ⚠️ Failed to decode JSON for {product_id}: {json_err}")
+                        # Fallback to retry/status handling
+
+                # Handling status 0 (connection issues) or 429/5xx
+                if (
+                    response.status in [0, 429, 502, 503, 504]
+                    or is_homepage_redirect
+                    or (response.status == 200 and is_html_response)
+                ):
+                    status_desc = response.status
+                    if is_homepage_redirect:
+                        status_desc = "302 (Redirected to Home)"
+                    elif is_html_response:
+                        status_desc = "200 (HTML instead of JSON)"
+
                     if verbose:
                         print(
-                            f"[API] ⚠️ Attempt {attempt + 1} failed with HTTP {response.status} for ID {product_id}. Retrying..."
+                            f"[API] ⚠️ Attempt {attempt + 1} failed with status {status_desc} for ID {product_id}. Retrying..."
                         )
                     await asyncio.sleep(retry_delay * (2**attempt))
                     continue

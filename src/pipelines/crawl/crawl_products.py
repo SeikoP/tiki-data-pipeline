@@ -896,14 +896,20 @@ def crawl_category_products(
                         # Populate Redis cache from file cache if Redis is available
                         if redis_cache:
                             try:
-                                redis_cache.cache_products(
+                                # CRITICAL: Drop 'page' param for category-level product listing cache
+                                success = redis_cache.cache_products(
                                     category_url, cached_products, ttl=259200
                                 )
-                                logger.info(
-                                    f"[Redis Cache] ✅ Populated from file cache ({len(cached_products)} products)"
-                                )
+                                if success:
+                                    logger.info(
+                                        f"[Redis Cache] ✅ Populated from file cache ({len(cached_products)} products)"
+                                    )
+                                else:
+                                    logger.warning(
+                                        "[Redis Cache] ⚠️ Failed to populate from file cache"
+                                    )
                             except Exception as e:
-                                logger.warning(f"[Redis Cache] ⚠️ Failed to populate: {e}")
+                                logger.warning(f"[Redis Cache] ⚠️ Error during population: {e}")
 
                         return cached_products
                 else:
