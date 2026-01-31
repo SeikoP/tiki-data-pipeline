@@ -2,11 +2,13 @@
 Module để tổng hợp dữ liệu sử dụng Groq AI.
 """
 
+import hashlib
 import json
 import logging
 import os
 import re
 import time
+from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -29,6 +31,10 @@ except ImportError:
     }
 
 logger = logging.getLogger(__name__)
+
+# Simple in-memory cache for AI summaries
+_AI_CACHE: dict[str, tuple[str, datetime]] = {}
+_AI_CACHE_TTL = timedelta(hours=1)
 
 
 class AISummarizer:
@@ -65,12 +71,12 @@ class AISummarizer:
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
         logger.info(f"🔄 Rotating API Key: {old_index} -> {self.current_key_index}")
 
-    def summarize_data(self, data_summary: dict[str, Any], max_tokens: int = 2000) -> str:
-        """Tổng hợp dữ liệu sử dụng Groq AI.
+    def summarize_data(self, data_summary: dict[str, Any], max_tokens: int = 1500) -> str:
+        """Tổng hợp dữ liệu sử dụng Groq AI (with caching).
 
         Args:
             data_summary: Dictionary chứa thông tin tổng hợp về dữ liệu
-            max_tokens: Số tokens tối đa cho response
+            max_tokens: Số tokens tối đa cho response (reduced from 2000 to 1500)
 
         Returns:
             String chứa bản tổng hợp từ AI
@@ -80,7 +86,14 @@ class AISummarizer:
             return ""
 
         try:
-            # Tạo prompt cho AI
+            # Check cache first
+            cache_key = self._get_summary_cache_key(data_summary)
+            cached_summary = self._get_summary_from_cache(cache_key)
+            if cached_summary:
+                logger.info("✅ Using cached AI summary")
+                return cached_summary
+
+            # Tạo prompt cho AI (optimized - shorter)
             prompt = self._create_prompt(data_summary)
 
             # Gọi Groq API
@@ -88,6 +101,8 @@ class AISummarizer:
 
             if response:
                 logger.info("✅ Tổng hợp dữ liệu thành công với Groq AI")
+                # Cache the result
+                self._save_summary_to_cache(cache_key, response)
                 return response
             else:
                 logger.warning("⚠️  Không nhận được response từ Groq AI")
@@ -97,93 +112,94 @@ class AISummarizer:
             logger.error(f"❌ Lỗi khi tổng hợp dữ liệu với Groq AI: {e}")
             return ""
 
+    def _get_summary_cache_key(self, data_summary: dict[str, Any]) -> str:
+        """Generate cache key from data summary."""
+        # Use only key stats for cache key (ignore metadata timestamps)
+        stats = data_summary.get("statistics", {})
+        key_data = {
+            "crawled": stats.get("crawled_count", 0),
+            "success": stats.get("with_detail", 0),
+            "failed": stats.get("failed", 0),
+            "timeout": stats.get("timeout", 0),
+        }
+        key_str = json.dumps(key_data, sort_keys=True)
+        return hashlib.md5(key_str.encode()).hexdigest()
+
+    def _get_summary_from_cache(self, key: str) -> str | None:
+        """Get AI summary from cache if not expired."""
+        if key in _AI_CACHE:
+            summary, timestamp = _AI_CACHE[key]
+            if datetime.now() - timestamp < _AI_CACHE_TTL:
+                return summary
+            else:
+                del _AI_CACHE[key]
+        return None
+
+    def _save_summary_to_cache(self, key: str, summary: str) -> None:
+        """Save AI summary to cache."""
+        _AI_CACHE[key] = (summary, datetime.now())
+        # Cleanup old entries (keep max 20)
+        if len(_AI_CACHE) > 20:
+            oldest_key = min(_AI_CACHE.keys(), key=lambda k: _AI_CACHE[k][1])
+            del _AI_CACHE[oldest_key]
+
     def _create_prompt(self, data_summary: dict[str, Any]) -> str:
         """
-        Tạo prompt cho AI từ dữ liệu tổng hợp.
+        Tạo prompt cho AI với layout cố định, ngắn gọn.
         """
-        # Lấy thống kê và làm rõ số liệu quan trọng
         stats = data_summary.get("statistics", {})
         total_products = stats.get("total_products", 0)
-        crawled_count = stats.get("crawled_count", 0)  # Số products được crawl detail
+        crawled_count = stats.get("crawled_count", 0)
         with_detail = stats.get("with_detail", 0)
         failed = stats.get("failed", 0)
         timeout = stats.get("timeout", 0)
 
-        # Validation: với_detail không nên lớn hơn crawled_count
         if with_detail > crawled_count:
-            logger.warning(
-                f"⚠️  with_detail ({with_detail}) > crawled_count ({crawled_count}), điều chỉnh..."
-            )
             with_detail = crawled_count
 
-        # Tính toán các tỷ lệ dựa trên crawled_count (số thực tế đã crawl)
         success_rate = (with_detail / crawled_count * 100) if crawled_count > 0 else 0.0
         timeout_rate = (timeout / crawled_count * 100) if crawled_count > 0 else 0.0
         failed_rate = (failed / crawled_count * 100) if crawled_count > 0 else 0.0
-        total_error_rate = ((timeout + failed) / crawled_count * 100) if crawled_count > 0 else 0.0
 
-        # Tạo bảng so sánh rõ ràng về các con số quan trọng
-        comparison_table = f"""
-📊 **BẢNG SO SÁNH SỐ LIỆU QUAN TRỌNG:**
-┌─ Tổng số sản phẩm trong danh sách (từ crawl list): {total_products:,}
-├─ Số lượng sản phẩm ĐÃ ĐƯỢC CRAWL DETAIL: {crawled_count:,} (đây là số chính để phân tích)
-├─ Sản phẩm có đầy đủ detail: {with_detail:,}
-├─ Sản phẩm timeout: {timeout:,}
-├─ Sản phẩm failed: {failed:,}
-└─ Tỷ lệ thành công: {success_rate:.1f}% ({with_detail}/{crawled_count})
+        # Get price and category analysis
+        price_analysis = data_summary.get("price_analysis", {})
+        category_analysis = data_summary.get("category_analysis", {})
 
-🔑 **NGUYÊN TẮC PHÂN TÍCH:**
-1. KHI PHÂN TÍCH: Luôn so sánh/tính toán dựa trên {crawled_count:,} (ĐÃ CRAWL DETAIL) chứ KHÔNG phải {total_products:,}
-2. Ví dụ: Nếu nói "X% sản phẩm có giá dưới 1 triệu", tính dựa trên {crawled_count:,} không phải {total_products:,}
-3. Khi nói "Top 5 danh mục", đó là top từ {with_detail:,} sản phẩm đã crawl detail
-4. So sánh DB stats: Hãy kiểm tra nếu các con số trong database khác với expected, có thể DB đã được cập nhật từ các nguồn khác
-"""
+        # Get trends
+        trends = data_summary.get("trends", {})
+        has_trends = trends.get("has_previous_data", False)
+        trend_text = ""
+        if has_trends:
+            success_change = trends.get("success_rate_change", 0)
+            trend_emoji = "📈" if success_change > 0 else ("📉" if success_change < 0 else "➡️")
+            trend_text = f"\n{trend_emoji} So với lần trước: {success_change:+.1f}%"
 
-        prompt = f"""Bạn là một chuyên gia phân tích dữ liệu. Hãy phân tích và tổng hợp thông tin sau về dữ liệu sản phẩm Tiki:
+        # FIXED LAYOUT PROMPT - AI phải giữ nguyên format này
+        prompt = f"""Tạo báo cáo crawl Tiki với LAYOUT CỐ ĐỊNH sau (KHÔNG thay đổi cấu trúc):
 
-{comparison_table}
+📊 **TỔNG QUAN**
+• Crawled: {crawled_count:,} products (từ {total_products:,} list)
+• Success: {with_detail:,} ({success_rate:.1f}%)
+• Errors: Timeout {timeout} ({timeout_rate:.1f}%), Failed {failed} ({failed_rate:.1f}%){trend_text}
 
-Data JSON:
-{json.dumps(data_summary, ensure_ascii=False, indent=2)}
+💰 **GIÁ CẢ**
+{json.dumps(price_analysis, ensure_ascii=False) if price_analysis else "Không có dữ liệu"}
 
-📝 **HƯỚNG DẪN TẠO BÁO CÁO:**
+📦 **DANH MỤC**
+{json.dumps(category_analysis, ensure_ascii=False) if category_analysis else "Không có dữ liệu"}
 
-**1. Tổng quan về dữ liệu:**
-- Số lượng sản phẩm đã crawl detail: {crawled_count:,} sản phẩm (từ {total_products:,} danh sách)
-- Tỷ lệ thành công: {success_rate:.1f}% ({with_detail} sản phẩm với đầy đủ detail)
-- Các sản phẩm không hoàn tất: Timeout {timeout} ({timeout_rate:.1f}%), Failed {failed} ({failed_rate:.1f}%)
-- Tỷ lệ hoàn thành: {success_rate:.1f}% - [Đánh giá: Tốt/Bình thường/Cần cải thiện]
+📝 **ĐÁNH GIÁ**
+[Viết 2-3 dòng đánh giá ngắn gọn về success rate và xu hướng]
 
-**2. Phân tích thống kê chi tiết (LUÔN dựa trên {crawled_count:,} sản phẩm):**
-- Giá cả: Min, Max, Trung bình (VND) + Insight về phân bố giá
-- Rating: Trung bình, Min, Max + % sản phẩm có rating trên 4.0
-- Sales: Min, Max, Trung bình + % bestsellers (>1000 sales)
-- Discount: Min, Max, Trung bình + % sản phẩm đang giảm giá
-- Top 5 danh mục: "Danh mục X: Y sản phẩm (Z% tổng)"
-- Top 5 seller: "Seller X: Y sản phẩm (Z% tổng)"
+⚠️ **YÊU CẦU QUAN TRỌNG:**
+1. GIỮ NGUYÊN cấu trúc 4 phần: TỔNG QUAN, GIÁ CẢ, DANH MỤC, ĐÁNH GIÁ
+2. Dùng emoji như mẫu: 📊 💰 📦 📝
+3. Format giá: 1,234,567đ (có dấu phẩy)
+4. Ngắn gọn, max 15 dòng
+5. KHÔNG dùng bảng markdown
+6. Dùng bullet points (•)
 
-**3. Các vấn đề / lỗi:**
-- Timeout: {timeout} products ({timeout_rate:.1f}%) - [Nguyên nhân có thể]
-- Failed: {failed} products ({failed_rate:.1f}%) - [Nguyên nhân có thể]
-- Tổng cộng: {timeout + failed} products ({total_error_rate:.1f}% lỗi)
-- [Đề xuất xử lý nếu có]
-
-**4. So sánh với database (nếu có sự khác biệt):**
-- Nếu DB stats khác với crawl data, ghi chú điểm khác biệt
-- Có thể DB đã được cập nhật từ các lần crawl trước
-- [Kiểm tra consistency]
-
-**5. Nhận xét & Đề xuất:**
-- Đánh giá hiệu quả: Tỷ lệ thành công {success_rate:.1f}% [Tốt/Bình thường/Cần cải]
-- Đề xuất cải thiện nếu tỷ lệ < 80%
-- Điểm mạnh và điểm yếu
-
-**⚠️ QUAN TRỌNG:**
-- KHÔNG dùng bảng markdown (| |) vì khó đọc Discord
-- Dùng bullet points: - hoặc •
-- Format số: 1,234 (với dấu phẩy)
-- Ngắn gọn, dễ đọc, tự nhiên
-- LUÔN nhớ: {crawled_count:,} là số chính, {total_products:,} là bối cảnh"""
+Trả về ĐÚNG format trên:"""
 
         return prompt
 
@@ -356,7 +372,7 @@ Tên rút gọn:
                     f"{self.base_url}/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=60,
+                    timeout=30,  # Reduced from 60 to 30 seconds
                 )
 
                 if response.status_code == 429:  # Rate Limit

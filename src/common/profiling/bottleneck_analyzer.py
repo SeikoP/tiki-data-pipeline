@@ -6,7 +6,6 @@ and categorize them by type (CPU, I/O, Memory, Database, Network).
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List
 
 from .component_profiler import ComponentStats
 from .function_profiler import ProfileStats
@@ -15,6 +14,7 @@ from .resource_monitor import ResourceSnapshot
 
 class BottleneckCategory(Enum):
     """Categories of performance bottlenecks."""
+
     CPU = "CPU"
     IO = "I/O"
     MEMORY = "Memory"
@@ -25,15 +25,16 @@ class BottleneckCategory(Enum):
 
 class BottleneckSeverity(Enum):
     """Severity levels for bottlenecks."""
-    HIGH = "HIGH"      # >20% of total execution time
+
+    HIGH = "HIGH"  # >20% of total execution time
     MEDIUM = "MEDIUM"  # 5-20% of total execution time
-    LOW = "LOW"        # <5% of total execution time
+    LOW = "LOW"  # <5% of total execution time
 
 
 @dataclass
 class Bottleneck:
     """Identified performance bottleneck.
-    
+
     Attributes:
         name: Name of the bottleneck (function or component name)
         category: Type of bottleneck (CPU, I/O, Memory, etc.)
@@ -42,15 +43,15 @@ class Bottleneck:
         description: Human-readable description
         recommendation: Suggested optimization approach
     """
-    
+
     name: str
     category: BottleneckCategory
     severity: BottleneckSeverity
     time_percentage: float
     description: str
     recommendation: str
-    
-    def to_dict(self) -> Dict:
+
+    def to_dict(self) -> dict:
         """Convert bottleneck to dictionary for serialization."""
         return {
             "name": self.name,
@@ -64,9 +65,9 @@ class Bottleneck:
 
 class BottleneckAnalyzer:
     """Analyzes profiling data to identify and rank bottlenecks.
-    
+
     Uses heuristics to categorize bottlenecks by type and rank by impact.
-    
+
     Example:
         >>> analyzer = BottleneckAnalyzer()
         >>> bottlenecks = analyzer.analyze(
@@ -77,54 +78,54 @@ class BottleneckAnalyzer:
         >>> for b in bottlenecks:
         ...     print(f"{b.severity.value}: {b.name} ({b.time_percentage:.1f}%)")
     """
-    
+
     def __init__(self):
         """Initialize the bottleneck analyzer."""
         pass
-    
+
     def analyze(
         self,
-        function_stats: Dict[str, ProfileStats] = None,
-        component_stats: Dict[str, ComponentStats] = None,
-        resource_snapshots: List[ResourceSnapshot] = None,
-    ) -> List[Bottleneck]:
+        function_stats: dict[str, ProfileStats] = None,
+        component_stats: dict[str, ComponentStats] = None,
+        resource_snapshots: list[ResourceSnapshot] = None,
+    ) -> list[Bottleneck]:
         """Analyze profiling data and identify bottlenecks.
-        
+
         Args:
             function_stats: Function-level profiling statistics
             component_stats: Component-level profiling statistics
             resource_snapshots: System resource snapshots
-            
+
         Returns:
             List of Bottleneck objects sorted by severity and time percentage
         """
         bottlenecks = []
-        
+
         # Calculate total execution time
         total_time_ms = 0.0
         if component_stats:
             total_time_ms = sum(s.execution_time_ms for s in component_stats.values())
         elif function_stats:
             total_time_ms = sum(s.total_time_ms for s in function_stats.values())
-        
+
         if total_time_ms == 0:
             return []
-        
+
         # Analyze component-level bottlenecks
         if component_stats:
             for stats in component_stats.values():
                 time_pct = (stats.execution_time_ms / total_time_ms) * 100
-                
+
                 # Categorize bottleneck
                 category = self._categorize_component(stats)
-                
+
                 # Determine severity
                 severity = self._determine_severity(time_pct)
-                
+
                 # Generate description and recommendation
                 description = self._generate_component_description(stats, time_pct)
                 recommendation = self._generate_recommendation(category)
-                
+
                 bottleneck = Bottleneck(
                     name=stats.component_name,
                     category=category,
@@ -134,33 +135,31 @@ class BottleneckAnalyzer:
                     recommendation=recommendation,
                 )
                 bottlenecks.append(bottleneck)
-        
+
         # Analyze function-level bottlenecks (top slowest functions)
         if function_stats:
             # Get top 10 slowest functions
             sorted_funcs = sorted(
-                function_stats.values(),
-                key=lambda s: s.total_time_ms,
-                reverse=True
+                function_stats.values(), key=lambda s: s.total_time_ms, reverse=True
             )[:10]
-            
+
             for stats in sorted_funcs:
                 time_pct = (stats.total_time_ms / total_time_ms) * 100
-                
+
                 # Only include if significant (>1%)
                 if time_pct < 1.0:
                     continue
-                
+
                 # Categorize bottleneck
                 category = self._categorize_function(stats)
-                
+
                 # Determine severity
                 severity = self._determine_severity(time_pct)
-                
+
                 # Generate description and recommendation
                 description = self._generate_function_description(stats, time_pct)
                 recommendation = self._generate_recommendation(category)
-                
+
                 bottleneck = Bottleneck(
                     name=stats.function_name,
                     category=category,
@@ -170,7 +169,7 @@ class BottleneckAnalyzer:
                     recommendation=recommendation,
                 )
                 bottlenecks.append(bottleneck)
-        
+
         # Sort by severity (HIGH > MEDIUM > LOW) then by time percentage
         severity_order = {
             BottleneckSeverity.HIGH: 0,
@@ -178,24 +177,24 @@ class BottleneckAnalyzer:
             BottleneckSeverity.LOW: 2,
         }
         bottlenecks.sort(key=lambda b: (severity_order[b.severity], -b.time_percentage))
-        
+
         return bottlenecks
-    
+
     def _categorize_component(self, stats: ComponentStats) -> BottleneckCategory:
         """Categorize a component bottleneck by type.
-        
+
         Uses heuristics based on CPU vs I/O wait time.
         """
         if stats.execution_time_ms == 0:
             return BottleneckCategory.UNKNOWN
-        
+
         cpu_ratio = stats.cpu_time_ms / stats.execution_time_ms
         io_ratio = stats.io_wait_ms / stats.execution_time_ms
-        
+
         # High CPU usage (>70%)
         if cpu_ratio > 0.7:
             return BottleneckCategory.CPU
-        
+
         # High I/O wait (>70%)
         if io_ratio > 0.7:
             # Distinguish between database and network I/O based on component name
@@ -206,43 +205,47 @@ class BottleneckAnalyzer:
                 return BottleneckCategory.NETWORK
             else:
                 return BottleneckCategory.IO
-        
+
         # Balanced CPU/I/O
         return BottleneckCategory.UNKNOWN
-    
+
     def _categorize_function(self, stats: ProfileStats) -> BottleneckCategory:
         """Categorize a function bottleneck by type.
-        
+
         Uses heuristics based on function name and CPU vs I/O wait time.
         """
         if stats.total_time_ms == 0:
             return BottleneckCategory.UNKNOWN
-        
+
         func_lower = stats.function_name.lower()
         cpu_ratio = stats.cpu_time_ms / stats.total_time_ms
         io_ratio = stats.io_wait_ms / stats.total_time_ms
-        
+
         # Check function name patterns
         if any(pattern in func_lower for pattern in ["request", "fetch", "get_page", "crawl"]):
             return BottleneckCategory.NETWORK
-        
-        if any(pattern in func_lower for pattern in ["database", "query", "insert", "upsert", "load"]):
+
+        if any(
+            pattern in func_lower for pattern in ["database", "query", "insert", "upsert", "load"]
+        ):
             return BottleneckCategory.DATABASE
-        
-        if any(pattern in func_lower for pattern in ["transform", "process", "calculate", "compute"]):
+
+        if any(
+            pattern in func_lower for pattern in ["transform", "process", "calculate", "compute"]
+        ):
             if cpu_ratio > 0.6:
                 return BottleneckCategory.CPU
             else:
                 return BottleneckCategory.IO
-        
+
         # Fallback to CPU/I/O ratio
         if cpu_ratio > 0.7:
             return BottleneckCategory.CPU
         elif io_ratio > 0.7:
             return BottleneckCategory.IO
-        
+
         return BottleneckCategory.UNKNOWN
-    
+
     def _determine_severity(self, time_percentage: float) -> BottleneckSeverity:
         """Determine severity based on time percentage."""
         if time_percentage > 20:
@@ -251,7 +254,7 @@ class BottleneckAnalyzer:
             return BottleneckSeverity.MEDIUM
         else:
             return BottleneckSeverity.LOW
-    
+
     def _generate_component_description(self, stats: ComponentStats, time_pct: float) -> str:
         """Generate human-readable description for component bottleneck."""
         return (
@@ -260,7 +263,7 @@ class BottleneckAnalyzer:
             f"Processed {stats.items_processed} items at "
             f"{stats.throughput_items_per_sec:.1f} items/sec."
         )
-    
+
     def _generate_function_description(self, stats: ProfileStats, time_pct: float) -> str:
         """Generate human-readable description for function bottleneck."""
         return (
@@ -268,13 +271,13 @@ class BottleneckAnalyzer:
             f"total {stats.total_time_ms:.0f}ms ({time_pct:.1f}% of total time). "
             f"Mean: {stats.mean_time_ms:.2f}ms, P95: {stats.p95_time_ms:.2f}ms."
         )
-    
+
     def _generate_recommendation(self, category: BottleneckCategory) -> str:
         """Generate optimization recommendation based on bottleneck category.
-        
+
         Args:
             category: Type of bottleneck
-            
+
         Returns:
             Recommendation string
         """
@@ -311,29 +314,29 @@ class BottleneckAnalyzer:
             ),
         }
         return recommendations.get(category, "No specific recommendation available")
-    
-    def generate_report(self, bottlenecks: List[Bottleneck]) -> str:
+
+    def generate_report(self, bottlenecks: list[Bottleneck]) -> str:
         """Generate a human-readable bottleneck analysis report.
-        
+
         Args:
             bottlenecks: List of identified bottlenecks
-            
+
         Returns:
             Formatted string report
         """
         if not bottlenecks:
             return "No significant bottlenecks identified."
-        
+
         lines = ["=" * 100]
         lines.append("BOTTLENECK ANALYSIS REPORT")
         lines.append("=" * 100)
         lines.append("")
-        
+
         # Group by severity
         high_bottlenecks = [b for b in bottlenecks if b.severity == BottleneckSeverity.HIGH]
         medium_bottlenecks = [b for b in bottlenecks if b.severity == BottleneckSeverity.MEDIUM]
         low_bottlenecks = [b for b in bottlenecks if b.severity == BottleneckSeverity.LOW]
-        
+
         if high_bottlenecks:
             lines.append("🔴 HIGH PRIORITY BOTTLENECKS (>20% of total time):")
             lines.append("-" * 100)
@@ -342,7 +345,7 @@ class BottleneckAnalyzer:
                 lines.append(f"  Description: {b.description}")
                 lines.append(f"  Recommendation: {b.recommendation}")
             lines.append("")
-        
+
         if medium_bottlenecks:
             lines.append("🟡 MEDIUM PRIORITY BOTTLENECKS (5-20% of total time):")
             lines.append("-" * 100)
@@ -351,14 +354,14 @@ class BottleneckAnalyzer:
                 lines.append(f"  Description: {b.description}")
                 lines.append(f"  Recommendation: {b.recommendation}")
             lines.append("")
-        
+
         if low_bottlenecks:
             lines.append("🟢 LOW PRIORITY BOTTLENECKS (<5% of total time):")
             lines.append("-" * 100)
             for b in low_bottlenecks:
                 lines.append(f"  • {b.name} [{b.category.value}] - {b.time_percentage:.1f}%")
             lines.append("")
-        
+
         lines.append("=" * 100)
         lines.append("")
         lines.append("OPTIMIZATION PRIORITY:")
@@ -366,7 +369,7 @@ class BottleneckAnalyzer:
         lines.append("2. Address MEDIUM priority bottlenecks after HIGH are resolved")
         lines.append("3. LOW priority bottlenecks may not be worth optimizing")
         lines.append("")
-        
+
         return "\n".join(lines)
 
 

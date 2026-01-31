@@ -5,19 +5,25 @@ __pycache__/
 
 backups/
 data/test_output/*.html/
-.kiro
+
 airflow/config/airflow.cfg
 airflow/passwords.json
 data/
 # C extensions
 *.so
-
 # Distribution / packaging
 build/
 dist/
 *.egg-info/
 .eggs/
 pip-wheel-metadata/
+
+# Hypothesis cache
+.hypothesis/
+
+# Kiro specs
+.kiro/specs/
+
 
 # Virtual environments
 .venv/

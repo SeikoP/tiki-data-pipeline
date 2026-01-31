@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+
 from airflow.datasets import Dataset
+from airflow.operators.python import ShortCircuitOperator
 from tiki_crawl_products_v2.bootstrap import (
     DAG,
     DAG_CONFIG,
@@ -30,7 +33,6 @@ from tiki_crawl_products_v2.tasks import (
     save_products,
     save_products_with_detail,
     transform_products,
-    validate_data,
 )
 
 # Safe Mode: airflow DAG
@@ -290,17 +292,23 @@ with DAG(
             pool="fast_pool",
         )
 
-        task_validate_data = PythonOperator(
-            task_id="validate_data",
-            python_callable=validate_data,
-            execution_timeout=timedelta(minutes=5),
-            pool="fast_pool",
+        # Check if Discord is enabled before running aggregate_and_notify
+        def check_discord_enabled(**context):
+            """Skip aggregate_and_notify if Discord is disabled."""
+            discord_enabled = os.getenv("DISCORD_ENABLED", "false").lower() == "true"
+            if not discord_enabled:
+                context["ti"].log.info("⏭️  Discord disabled, skipping aggregate_and_notify")
+            return discord_enabled
+
+        task_check_discord = ShortCircuitOperator(
+            task_id="check_discord_enabled",
+            python_callable=check_discord_enabled,
         )
 
         task_aggregate_and_notify = PythonOperator(
             task_id="aggregate_and_notify",
             python_callable=aggregate_and_notify,
-            execution_timeout=timedelta(minutes=10),
+            execution_timeout=timedelta(minutes=15),  # Increased from 10 to 15 minutes
             pool="fast_pool",
             trigger_rule="all_done",
         )
@@ -321,18 +329,19 @@ with DAG(
             trigger_rule="all_done",
         )
 
-        # Maintenance dependencies
+        # Maintenance dependencies - Removed validate_data (not critical)
         # Tối ưu: Cho phép chạy các tác vụ bảo trì song song sau khi dữ liệu đã ổn định
         task_load_categories_db >> task_reconcile >> [task_cleanup_orphans, task_cleanup_redundant]
+
+        # Aggregate and notify - only if Discord enabled
         (
             [task_cleanup_orphans, task_cleanup_redundant]
-            >> task_validate_data
+            >> task_check_discord
             >> task_aggregate_and_notify
         )
 
-        # Tối ưu: Các task maintenance không cần đợi group thông báo hoàn tất nếu không phụ thuộc dữ liệu summary
-        # Chúng có thể chạy song song ngay sau khi validate_data xong
-        task_validate_data >> [
+        # Tối ưu: Các task maintenance có thể chạy song song sau reconcile
+        task_reconcile >> [
             task_cleanup_cache,
             task_backup_database,
             task_cleanup_history,

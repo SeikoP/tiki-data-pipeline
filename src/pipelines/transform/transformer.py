@@ -9,6 +9,9 @@ from datetime import datetime
 from threading import Lock
 from typing import Any
 
+# Import profiling utilities
+from common.profiling import profile_transformer
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,6 +101,7 @@ class DataTransformer:
                     logger.warning(f"Could not import AISummarizer: {e}")
                     self.ai_summarizer = None
 
+    @profile_transformer
     def transform_products(
         self, products: list[dict[str, Any]], validate: bool = True
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:

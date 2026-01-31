@@ -130,9 +130,11 @@ services:
 
   redis:
     image: redis:7.2-alpine
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1 --appendonly yes
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -311,3 +313,4 @@ networks:
 
 volumes:
   postgres-shared-volume:
+  redis-data:

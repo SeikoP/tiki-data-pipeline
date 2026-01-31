@@ -1,0 +1,87 @@
+{
+  "exported_at": "2026-01-31T22:18:33.979585",
+  "entry_count": 7,
+  "operation_counts": {
+    "fetch": 3,
+    "transform": 2,
+    "load": 1,
+    "error": 1,
+    "other": 0
+  },
+  "entries": [
+    {
+      "timestamp": "2026-01-31T22:18:33.965441",
+      "operation": "fetch",
+      "status": "success",
+      "details": "Fetched from API",
+      "error_message": null,
+      "context": {
+        "resource_id": "product_123"
+      }
+    },
+    {
+      "timestamp": "2026-01-31T22:18:33.965508",
+      "operation": "fetch",
+      "status": "success",
+      "details": "Fetched from cache",
+      "error_message": null,
+      "context": {
+        "resource_id": "product_456"
+      }
+    },
+    {
+      "timestamp": "2026-01-31T22:18:33.965530",
+      "operation": "fetch",
+      "status": "failure",
+      "details": "Failed to fetch",
+      "error_message": "HTTP 404 Not Found",
+      "context": {
+        "resource_id": "product_789"
+      }
+    },
+    {
+      "timestamp": "2026-01-31T22:18:33.965847",
+      "operation": "transform",
+      "status": "success",
+      "details": "Transformed product batch",
+      "error_message": null,
+      "context": {
+        "batch_id": "batch_001",
+        "record_count": 100
+      }
+    },
+    {
+      "timestamp": "2026-01-31T22:18:33.965892",
+      "operation": "transform",
+      "status": "failure",
+      "details": "Transform failed",
+      "error_message": "Invalid data format",
+      "context": {
+        "batch_id": "batch_002",
+        "record_count": 50
+      }
+    },
+    {
+      "timestamp": "2026-01-31T22:18:33.966122",
+      "operation": "load",
+      "status": "success",
+      "details": "Loaded to database",
+      "error_message": null,
+      "context": {
+        "batch_id": "batch_001",
+        "record_count": 100
+      }
+    },
+    {
+      "timestamp": "2026-01-31T22:18:33.966145",
+      "operation": "error",
+      "status": "failure",
+      "details": "Error: database_connection",
+      "error_message": "Connection timeout after 30s",
+      "context": {
+        "host": "localhost",
+        "port": 5432
+      }
+    }
+  ]
+}

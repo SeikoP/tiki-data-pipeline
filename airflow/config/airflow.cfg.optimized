@@ -1,0 +1,167 @@
+# Optimized Airflow Configuration for Task Startup Performance
+# Generated for: Airflow Task Startup Optimization
+# Purpose: Reduce task startup latency by at least 50% through configuration tuning
+#
+# This configuration file contains optimized settings for:
+# - Scheduler responsiveness (faster task pickup)
+# - DAG parsing performance (caching and reduced intervals)
+# - Database connection pool sizing (higher concurrency)
+# - Task parallelism (increased throughput)
+#
+# Requirements validated: 1.1, 1.2, 1.3, 2.2, 2.3, 4.1, 4.2, 4.3, 4.4, 6.1, 6.2
+
+[core]
+# Parallelism Configuration
+# Maximum number of tasks that can run concurrently across all DAGs
+# Increased from default (16) to 20 for better resource utilization
+# Validates: Requirements 6.1, 6.2
+parallelism = 20
+
+# Maximum number of tasks that can run concurrently within a single DAG
+# Increased from default (16) to 10 for better per-DAG throughput
+# Validates: Requirements 6.2
+max_active_tasks_per_dag = 10
+
+# Maximum number of active DAG runs per DAG
+# Set to 3 to allow multiple runs while preventing queue buildup
+# Validates: Requirements 6.2
+max_active_runs_per_dag = 3
+
+# DAG Serialization Configuration
+# Enable DAG serialization to cache parsed DAG structures in the database
+# This avoids redundant parsing when DAG files haven't changed
+# Validates: Requirements 2.2, 2.3
+store_serialized_dags = True
+
+# Store DAG code in the database for faster access
+# Validates: Requirements 2.2, 2.3
+store_dag_code = True
+
+# Minimum interval (in seconds) to update serialized DAGs
+# Set to 30 seconds to balance freshness with parsing overhead
+# Validates: Requirements 2.2, 2.3
+min_serialized_dag_update_interval = 30
+
+[scheduler]
+# Scheduler Heartbeat Configuration
+# How often (in seconds) the scheduler checks for new tasks to schedule
+# Reduced from default (10) to 5 for faster task pickup
+# Validates: Requirements 1.1, 1.2
+scheduler_heartbeat_sec = 5
+
+# DAG File Processing Configuration
+# Minimum interval (in seconds) between processing the same DAG file
+# Reduced from default (30) to 15 for faster detection of DAG changes
+# Validates: Requirements 1.3
+min_file_process_interval = 15
+
+# How often (in seconds) to scan the DAGs directory for new files
+# Set to 30 seconds to balance discovery with filesystem overhead
+# Validates: Requirements 1.3
+dag_dir_list_interval = 30
+
+# Number of parallel processes for parsing DAG files
+# Set to 2 for faster DAG parsing without excessive CPU usage
+# Validates: Requirements 1.3
+parsing_processes = 2
+
+# File parsing sort mode
+# Use 'modified_time' to prioritize recently changed DAG files
+# This ensures updated DAGs are processed first
+file_parsing_sort_mode = modified_time
+
+[database]
+# Database Connection Pool Configuration
+# Size of the connection pool (minimum number of connections maintained)
+# Increased from default (10) to 20 for higher concurrency
+# Validates: Requirements 4.1
+sql_alchemy_pool_size = 20
+
+# Maximum overflow connections beyond pool_size
+# Increased from default (20) to 40 to handle traffic spikes
+# Validates: Requirements 4.2
+sql_alchemy_max_overflow = 40
+
+# Connection recycle time (in seconds)
+# Recycle connections after 3600 seconds (1 hour) to prevent stale connections
+# Validates: Requirements 4.4
+sql_alchemy_pool_recycle = 3600
+
+# Connection pool timeout (in seconds)
+# Wait up to 30 seconds for an available connection before timing out
+# Validates: Requirements 4.3
+sql_alchemy_pool_timeout = 30
+
+# Enable connection pre-ping to validate connections before use
+# This prevents errors from stale or broken connections
+# Validates: Requirements 4.4
+sql_alchemy_pool_pre_ping = True
+
+# Enable connection pool logging for monitoring
+# This helps track connection pool statistics and identify bottlenecks
+sql_alchemy_echo_pool = False
+
+[logging]
+# Logging Configuration
+# Set base log folder
+base_log_folder = /opt/airflow/logs
+
+# Remote logging (disabled by default)
+remote_logging = False
+
+# Log level for Airflow components
+logging_level = INFO
+
+# Log format
+log_format = [%%(asctime)s] {%%(filename)s:%%(lineno)d} %%(levelname)s - %%(message)s
+simple_log_format = %%(asctime)s %%(levelname)s - %%(message)s
+
+[metrics]
+# Metrics Configuration
+# Enable StatsD metrics for monitoring task startup latency
+statsd_on = False
+statsd_host = localhost
+statsd_port = 8125
+statsd_prefix = airflow
+
+[webserver]
+# Webserver Configuration
+# Default webserver settings (not part of optimization)
+web_server_port = 8080
+web_server_host = 0.0.0.0
+base_url = http://localhost:8080
+
+# Session configuration
+secret_key = temporary_key_change_in_production
+
+[celery]
+# Celery Configuration (not used with LocalExecutor)
+# These settings are included for completeness but not active
+worker_concurrency = 16
+
+[operators]
+# Operator Configuration
+# Default operator timeout
+default_task_execution_timeout = None
+
+# Default task retries
+default_task_retries = 0
+
+# Default retry delay
+default_task_retry_delay = 300
+
+[api]
+# API Configuration
+# Enable the REST API
+auth_backend = airflow.api.auth.backend.basic_auth
+
+[smtp]
+# SMTP Configuration (for email alerts)
+# Not part of optimization, included for completeness
+smtp_host = localhost
+smtp_starttls = True
+smtp_ssl = False
+smtp_port = 25
+smtp_mail_from = airflow@example.com
+
+# End of optimized configuration

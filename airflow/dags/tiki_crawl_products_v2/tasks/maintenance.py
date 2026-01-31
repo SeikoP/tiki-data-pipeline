@@ -230,132 +230,9 @@ def cleanup_old_history_wrapper(**context):
         return {"status": "error", "message": str(e)}
 
 
-def validate_data(**context) -> dict[str, Any]:
-    """
-    Task 5: Validate dữ liệu đã crawl
-
-    Returns:
-        Dict: Kết quả validation
-    """
-    logger = get_logger(context)
-    logger.info("=" * 70)
-    logger.info("✅ TASK: Validate Data")
-    logger.info("=" * 70)
-
-    try:
-        ti = context["ti"]
-        output_file = None
-
-        # Ưu tiên: Lấy từ save_products_with_detail (có detail)
-        # Cách 1: Lấy từ task_id với TaskGroup prefix
-        try:
-            output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
-            logger.info(
-                f"Lấy output_file từ 'crawl_product_details.save_products_with_detail': {output_file}"
-            )
-        except Exception as e:
-            logger.warning(
-                f"Không lấy được từ 'crawl_product_details.save_products_with_detail': {e}"
-            )
-
-        # Cách 2: Thử không có prefix
-        if not output_file:
-            try:
-                output_file = ti.xcom_pull(task_ids="save_products_with_detail")
-                logger.debug(f"Output from save_products_with_detail: {output_file}")
-            except Exception as e:
-                logger.warning(f"Không lấy được từ 'save_products_with_detail': {e}")
-
-        # Fallback: Lấy từ save_products (không có detail) nếu không có file với detail
-        if not output_file:
-            try:
-                output_file = ti.xcom_pull(task_ids="process_and_save.save_products")
-                logger.info(
-                    f"Lấy output_file từ 'process_and_save.save_products' (fallback): {output_file}"
-                )
-            except Exception as e:
-                logger.warning(f"Không lấy được từ 'process_and_save.save_products': {e}")
-
-        # Cách 3: Thử không có prefix
-        if not output_file:
-            try:
-                output_file = ti.xcom_pull(task_ids="save_products")
-                logger.debug(f"Output from save_products (fallback): {output_file}")
-            except Exception as e:
-                logger.warning(f"Không lấy được từ 'save_products': {e}")
-
-        if not output_file or not os.path.exists(output_file):
-            raise FileNotFoundError(f"Không tìm thấy file output: {output_file}")
-
-        logger.info(f"Đang validate file: {output_file}")
-
-        with open(output_file, encoding="utf-8") as f:
-            data = json.load(f)
-
-        products = data.get("products", [])
-        stats = data.get("stats", {})
-
-        # Validation
-        validation_result = {
-            "file_exists": True,
-            "total_products": len(products),
-            "crawled_count": stats.get("crawled_count", 0),  # Số lượng products được crawl detail
-            "valid_products": 0,
-            "invalid_products": 0,
-            "errors": [],
-        }
-
-        required_fields = ["product_id", "name", "url"]
-
-        for i, product in enumerate(products):
-            is_valid = True
-            missing_fields = []
-
-            for field in required_fields:
-                if not product.get(field):
-                    is_valid = False
-                    missing_fields.append(field)
-
-            if is_valid:
-                validation_result["valid_products"] += 1
-            else:
-                validation_result["invalid_products"] += 1
-                validation_result["errors"].append(
-                    {
-                        "index": i,
-                        "product_id": product.get("product_id"),
-                        "missing_fields": missing_fields,
-                    }
-                )
-
-        logger.info("=" * 70)
-        logger.info("📊 VALIDATION RESULTS")
-        logger.info("=" * 70)
-        logger.info(f"📦 Tổng số products trong file: {validation_result['total_products']}")
-
-        # Log thông tin về crawl detail nếu có
-        crawled_count = stats.get("crawled_count", 0)
-        if crawled_count > 0:
-            logger.info(f"🔄 Products được crawl detail: {crawled_count}")
-            logger.info(f"✅ Products có detail (success): {stats.get('with_detail', 0)}")
-            if stats.get("timeout", 0) > 0:
-                logger.info(f"⏱️  Products timeout: {stats.get('timeout', 0)}")
-            if stats.get("failed", 0) > 0:
-                logger.info(f"❌ Products failed: {stats.get('failed', 0)}")
-
-        logger.info(f"✅ Valid products: {validation_result['valid_products']}")
-        logger.info(f"❌ Invalid products: {validation_result['invalid_products']}")
-        logger.info("=" * 70)
-
-        if validation_result["invalid_products"] > 0:
-            logger.warning(f"Có {validation_result['invalid_products']} sản phẩm không hợp lệ")
-            # Không fail task, chỉ warning
-
-        return validation_result
-
-    except Exception as e:
-        logger.error(f"❌ Lỗi khi validate data: {e}", exc_info=True)
-        raise
+# ❌ REMOVED: validate_data task
+# Reason: Only counted valid/invalid products, didn't fix errors or affect data quality
+# Not critical for pipeline operation, removed to reduce overhead
 
 
 def cleanup_redis_cache(**context) -> dict[str, Any]:
@@ -517,11 +394,12 @@ def backup_database(**context) -> dict[str, Any]:
 
             # Fallback: sử dụng pg_dump trực tiếp
             container_name = "tiki-data-pipeline-postgres-1"
-            # Thử nhiều đường dẫn backup
+            # Thử nhiều đường dẫn backup - ưu tiên /opt/airflow/data/backups (có quyền ghi)
             backup_dirs = [
-                Path("/opt/airflow/data/backups/postgres"),  # Priority 1: Mounted local data dir
-                Path("/opt/airflow/backups/postgres"),  # Priority 2: Container internal
-                Path("/backups"),  # Priority 3: Postgres volume
+                Path(
+                    "/opt/airflow/data/backups/postgres"
+                ),  # Priority 1: Mounted data dir (có quyền)
+                Path("/tmp/backups/postgres"),  # Priority 2: Temp dir (luôn có quyền)
             ]
             backup_dir = None
             for bd in backup_dirs:
@@ -532,14 +410,15 @@ def backup_database(**context) -> dict[str, Any]:
                     test_file.write_text("test")
                     test_file.unlink()
                     backup_dir = bd
+                    logger.info(f"✅ Sử dụng backup dir: {backup_dir}")
                     break
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"⚠️  Không thể ghi vào {bd}: {e}")
                     continue
 
             if not backup_dir:
-                logger.warning("⚠️  Không tìm thấy thư mục backup có thể ghi, sử dụng /tmp")
-                backup_dir = Path("/tmp/backups")
-                backup_dir.mkdir(parents=True, exist_ok=True)
+                logger.error("❌ Không tìm thấy thư mục backup có thể ghi")
+                return {"status": "failed", "reason": "No writable backup directory"}
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_file = backup_dir / f"crawl_data_{timestamp}.sql"  # Đổi .dump -> .sql

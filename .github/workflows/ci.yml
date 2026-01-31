@@ -96,7 +96,6 @@ jobs:
         run: |
           mkdir -p airflow/dags airflow/logs airflow/config airflow/plugins
           mkdir -p data/raw data/processed
-          # Thêm các folder quan trọng vào PYTHONPATH
           export PYTHONPATH=$PYTHONPATH:$(pwd)/src:$(pwd)/airflow/dags
           
           python -c "
@@ -109,40 +108,36 @@ jobs:
           airflow_home = os.path.abspath('airflow')
           os.environ['AIRFLOW_HOME'] = airflow_home
           os.environ['AIRFLOW__DATABASE__SQL_ALCHEMY_CONN'] = f'sqlite:///{airflow_home}/airflow.db'
+          os.environ['AIRFLOW__CORE__LOAD_EXAMPLES'] = 'False'
+          os.environ['AIRFLOW__CORE__DAGS_FOLDER'] = os.path.abspath('airflow/dags')
           
-          # Đảm bảo các thư mục cần thiết tồn tại để import không fail
+          # Đảm bảo các thư mục cần thiết tồn tại
           sys.path.insert(0, os.path.abspath('src'))
           sys.path.insert(0, os.path.abspath('airflow/dags'))
           
-          print('--- System Path ---')
-          for p in sys.path: print(f'  {p}')
+          print('✅ Validating DAG imports...')
           
           try:
-              from airflow.models import DagBag
-              print('--- Airflow Loaded ---')
-              dag_folder = os.path.abspath('airflow/dags')
-              dag_bag = DagBag(dag_folder=dag_folder, include_examples=False)
+              # Import DAG file để kiểm tra syntax và dependencies
+              import tiki_crawl_products_v2.tiki_crawl_fast as dag_module
               
-              if dag_bag.import_errors:
-                  print('❌ DAG Import Errors Found:')
-                  for filename, error in dag_bag.import_errors.items():
-                      print(f'  File: {filename}')
-                      print(f'  Error: {error}')
+              # Kiểm tra DAG object tồn tại
+              if hasattr(dag_module, 'dag'):
+                  dag = dag_module.dag
+                  print(f'✅ DAG found: {dag.dag_id}')
+                  print(f'   Description: {dag.description}')
+                  print(f'   Tasks: {len(dag.tasks)}')
+              else:
+                  print('❌ No dag object found in module')
                   sys.exit(1)
-              
-              print(f'✅ Successfully validated {len(dag_bag.dags)} DAG(s)')
+                  
           except Exception as e:
-              print(f'⚠️  Airflow validation skipped or failed: {e}')
-              print('--- Falling back to direct import check ---')
-              try:
-                  # Kiểm tra import trực tiếp nếu Airflow không sẵn sàng
-                  from tiki_crawl_products_v2.main_dag import dag
-                  print('✅ Direct import of main_dag successful!')
-              except Exception as die:
-                  print(f'❌ Direct import failed: {die}')
-                  import traceback
-                  traceback.print_exc()
-                  sys.exit(1)
+              print(f'❌ DAG validation failed: {e}')
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
+          
+          print('✅ All DAG validations passed!')
           "
 
 

@@ -16,6 +16,9 @@ from typing import Any
 from common.batch_processor import BatchProcessor
 from common.monitoring import PerformanceTimer
 
+# Import profiling utilities
+from common.profiling import profile_loader
+
 from .db_pool import close_db_pool, get_db_pool, initialize_db_pool
 
 logger = logging.getLogger(__name__)
@@ -107,6 +110,7 @@ class OptimizedDataLoader:
             continue_on_error=continue_on_error,
         )
 
+    @profile_loader
     def load_products(
         self,
         products: list[dict[str, Any]],

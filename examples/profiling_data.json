@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-01-31T20:37:19.004559",
+  "function_stats": {},
+  "component_stats": {},
+  "resource_summary": {
+    "cpu_percent": {
+      "min": 0.0,
+      "max": 0.0,
+      "mean": 0.0
+    },
+    "memory_rss_mb": {
+      "min": 21.34,
+      "max": 21.82,
+      "mean": 21.65
+    },
+    "memory_vms_mb": {
+      "min": 15.18,
+      "max": 15.25,
+      "mean": 15.23
+    },
+    "disk_read_mb": 0.05,
+    "disk_write_mb": 0.11,
+    "network_sent_mb": 0.0,
+    "network_recv_mb": 0.0,
+    "sample_count": 3
+  },
+  "bottlenecks": []
+}

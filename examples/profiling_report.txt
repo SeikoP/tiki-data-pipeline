@@ -1,0 +1,35 @@
+====================================================================================================
+PIPELINE PROFILING REPORT
+====================================================================================================
+
+No profiling data collected.
+
+No component profiling data collected.
+
+================================================================================
+RESOURCE MONITORING REPORT
+================================================================================
+
+Samples collected: 3
+
+CPU USAGE:
+  Min:      0.00%
+  Max:      0.00%
+  Mean:     0.00%
+
+MEMORY USAGE (RSS):
+  Min:       21.34 MB
+  Max:       21.82 MB
+  Mean:      21.65 MB
+
+DISK I/O:
+  Read:        0.05 MB
+  Write:       0.11 MB
+
+NETWORK I/O:
+  Sent:           0.00 MB
+  Received:       0.00 MB
+
+================================================================================
+
+No significant bottlenecks identified.
