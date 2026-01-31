@@ -123,7 +123,7 @@ class BottleneckAnalyzer:
                 
                 # Generate description and recommendation
                 description = self._generate_component_description(stats, time_pct)
-                recommendation = self._generate_component_recommendation(stats, category)
+                recommendation = self._generate_recommendation(category)
                 
                 bottleneck = Bottleneck(
                     name=stats.component_name,
@@ -159,7 +159,7 @@ class BottleneckAnalyzer:
                 
                 # Generate description and recommendation
                 description = self._generate_function_description(stats, time_pct)
-                recommendation = self._generate_function_recommendation(stats, category)
+                recommendation = self._generate_recommendation(category)
                 
                 bottleneck = Bottleneck(
                     name=stats.function_name,
@@ -269,12 +269,15 @@ class BottleneckAnalyzer:
             f"Mean: {stats.mean_time_ms:.2f}ms, P95: {stats.p95_time_ms:.2f}ms."
         )
     
-    def _generate_component_recommendation(
-        self,
-        stats: ComponentStats,
-        category: BottleneckCategory
-    ) -> str:
-        """Generate optimization recommendation for component."""
+    def _generate_recommendation(self, category: BottleneckCategory) -> str:
+        """Generate optimization recommendation based on bottleneck category.
+        
+        Args:
+            category: Type of bottleneck
+            
+        Returns:
+            Recommendation string
+        """
         recommendations = {
             BottleneckCategory.CPU: (
                 "Consider: 1) Vectorization with NumPy/Pandas, "
@@ -308,15 +311,6 @@ class BottleneckAnalyzer:
             ),
         }
         return recommendations.get(category, "No specific recommendation available")
-    
-    def _generate_function_recommendation(
-        self,
-        stats: ProfileStats,
-        category: BottleneckCategory
-    ) -> str:
-        """Generate optimization recommendation for function."""
-        # Similar to component recommendations but more specific
-        return self._generate_component_recommendation(stats, category)
     
     def generate_report(self, bottlenecks: List[Bottleneck]) -> str:
         """Generate a human-readable bottleneck analysis report.

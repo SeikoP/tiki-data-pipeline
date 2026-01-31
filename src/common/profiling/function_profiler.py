@@ -43,8 +43,10 @@ class ProfileStats:
     cpu_time_ms: float = 0.0
     io_wait_ms: float = 0.0
     
-    # Internal: store all execution times for percentile calculation
+    # Internal: store recent execution times for percentile calculation
+    # Limited to 1000 samples to prevent unbounded memory growth
     _execution_times: List[float] = field(default_factory=list, repr=False)
+    _max_samples: int = field(default=1000, repr=False)
     
     def update(self, execution_time_ms: float, cpu_time_ms: float = 0.0):
         """Update statistics with a new execution time.
@@ -58,7 +60,12 @@ class ProfileStats:
         self.cpu_time_ms += cpu_time_ms
         self.min_time_ms = min(self.min_time_ms, execution_time_ms)
         self.max_time_ms = max(self.max_time_ms, execution_time_ms)
+        
+        # Add to execution times with sliding window to prevent unbounded growth
         self._execution_times.append(execution_time_ms)
+        if len(self._execution_times) > self._max_samples:
+            # Keep most recent samples (sliding window)
+            self._execution_times.pop(0)
         
         # Recalculate statistics
         self.mean_time_ms = self.total_time_ms / self.call_count

@@ -179,7 +179,8 @@ class ComponentProfiler:
             
             execution_time_ms = (end_time - start_data["start_time"]) * 1000
             cpu_time_ms = (end_cpu - start_data["start_cpu"]) * 1000
-            io_wait_ms = execution_time_ms - cpu_time_ms
+            # Clamp io_wait to 0 to handle timing precision issues
+            io_wait_ms = max(0.0, execution_time_ms - cpu_time_ms)
             
             # Add final memory sample if available
             if final_memory_mb is not None:
