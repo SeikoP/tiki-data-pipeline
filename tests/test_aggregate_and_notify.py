@@ -7,7 +7,7 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -122,6 +122,7 @@ class TestDataAggregator:
 
         # Clear cache to force re-aggregate
         from src.common.analytics.aggregator import _CACHE
+
         _CACHE.clear()
 
         # Modify data for second run
@@ -194,9 +195,7 @@ class TestAISummarizer:
         # Mock AI response
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "Test AI summary"}}]
-        }
+        mock_response.json.return_value = {"choices": [{"message": {"content": "Test AI summary"}}]}
         mock_post.return_value = mock_response
 
         summarizer = AISummarizer()

@@ -15,6 +15,7 @@ from typing import Any
 
 from common.batch_processor import BatchProcessor
 from common.monitoring import PerformanceTimer
+
 # Import profiling utilities
 from common.profiling import profile_loader
 

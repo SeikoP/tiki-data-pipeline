@@ -60,10 +60,10 @@ def test_data_aggregator_with_cache():
         # Second call - should use cache
         print("\n2️⃣  Second aggregate call (should use cache)...")
         start = time.time()
-        summary2 = aggregator.aggregate()
+        aggregator.aggregate()
         time2 = time.time() - start
         print(f"   ⏱️  Time: {time2:.4f}s")
-        print(f"   🚀 Speedup: {time1/time2:.1f}x faster")
+        print(f"   🚀 Speedup: {time1 / time2:.1f}x faster")
 
         # Save to history
         print("\n3️⃣  Saving to history...")
@@ -142,10 +142,10 @@ def test_ai_summarizer_with_cache():
 
         # Second call should use cache
         start = time.time()
-        summary2 = summarizer.summarize_data(sample_summary)
+        summarizer.summarize_data(sample_summary)
         time2 = time.time() - start
         print(f"   ⏱️  Second call: {time2:.2f}s (cached)")
-        print(f"   🚀 Speedup: {time1/time2:.1f}x faster")
+        print(f"   🚀 Speedup: {time1 / time2:.1f}x faster")
         print("\n✅ TEST 2 PASSED")
     else:
         print("   ⚠️  No AI summary returned")
@@ -168,9 +168,7 @@ def test_discord_notifier_with_retry():
     # Test split long content
     print("\n1️⃣  Testing split long content...")
     short_content = "Short message"
-    embeds_short = notifier._split_content_to_embeds(
-        short_content, "Title", 0x00FF00, None, None
-    )
+    embeds_short = notifier._split_content_to_embeds(short_content, "Title", 0x00FF00, None, None)
     print(f"   Short content: {len(embeds_short)} embed(s)")
 
     long_content = "A" * 3000
@@ -203,7 +201,7 @@ def test_trend_analysis():
     print("TEST 4: Trend Analysis")
     print("=" * 70)
 
-    from src.common.analytics.aggregator import DataAggregator, _CACHE
+    from src.common.analytics.aggregator import _CACHE, DataAggregator
 
     # Create sample data
     data = {

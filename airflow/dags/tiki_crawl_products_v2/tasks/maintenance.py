@@ -396,7 +396,9 @@ def backup_database(**context) -> dict[str, Any]:
             container_name = "tiki-data-pipeline-postgres-1"
             # Thử nhiều đường dẫn backup - ưu tiên /opt/airflow/data/backups (có quyền ghi)
             backup_dirs = [
-                Path("/opt/airflow/data/backups/postgres"),  # Priority 1: Mounted data dir (có quyền)
+                Path(
+                    "/opt/airflow/data/backups/postgres"
+                ),  # Priority 1: Mounted data dir (có quyền)
                 Path("/tmp/backups/postgres"),  # Priority 2: Temp dir (luôn có quyền)
             ]
             backup_dir = None

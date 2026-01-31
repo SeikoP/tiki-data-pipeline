@@ -18,10 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from common.configuration_analyzer import ConfigurationAnalyzer
 
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +32,7 @@ def format_config_as_env(config) -> str:
         "# ============================================",
         "",
         "# --- Async I/O Optimization ---",
-        f"USE_ASYNC_CRAWLER=true",
+        "USE_ASYNC_CRAWLER=true",
         f"ASYNC_CONNECTOR_LIMIT={config.http_connector_limit}",
         f"ASYNC_BATCH_SIZE={config.product_batch_size}",
         f"ASYNC_TIMEOUT_TOTAL={config.http_timeout_total}",
@@ -45,7 +42,7 @@ def format_config_as_env(config) -> str:
         f"USE_VECTORIZED_TRANSFORM={'true' if config.use_vectorization else 'false'}",
         "",
         "# --- Optimized Batch Loading ---",
-        f"USE_OPTIMIZED_LOADER=true",
+        "USE_OPTIMIZED_LOADER=true",
         f"OPTIMIZED_BATCH_SIZE={config.db_batch_size}",
         f"USE_COPY_COMMAND={'true' if config.use_copy_command else 'false'}",
         "",
@@ -61,9 +58,9 @@ def format_config_as_env(config) -> str:
         f"REDIS_CACHE_TTL={config.redis_cache_ttl}",
         f"MEMORY_CACHE_SIZE_MB={config.memory_cache_size_mb}",
         f"CACHE_EVICTION_THRESHOLD={config.cache_eviction_threshold}",
-        ""
+        "",
     ]
-    
+
     return "\n".join(lines)
 
 
@@ -80,7 +77,7 @@ def format_config_as_json(config, system) -> str:
             "disk_write_speed_mbps": system.disk_write_speed_mbps,
             "network_bandwidth_mbps": system.network_bandwidth_mbps,
             "platform": system.platform,
-            "python_version": system.python_version
+            "python_version": system.python_version,
         },
         "recommended_configuration": {
             "async_io": {
@@ -88,29 +85,29 @@ def format_config_as_json(config, system) -> str:
                 "connector_limit": config.http_connector_limit,
                 "batch_size": config.product_batch_size,
                 "timeout_total": config.http_timeout_total,
-                "timeout_connect": config.http_timeout_connect
+                "timeout_connect": config.http_timeout_connect,
             },
             "transformation": {
                 "use_vectorization": config.use_vectorization,
                 "thread_pool_size": config.thread_pool_size,
-                "process_pool_size": config.process_pool_size
+                "process_pool_size": config.process_pool_size,
             },
             "database": {
                 "use_optimized_loader": True,
                 "batch_size": config.db_batch_size,
                 "use_copy_command": config.use_copy_command,
                 "connection_pool_min": config.db_connection_pool_min,
-                "connection_pool_max": config.db_connection_pool_max
+                "connection_pool_max": config.db_connection_pool_max,
             },
             "cache": {
                 "redis_ttl": config.redis_cache_ttl,
                 "memory_size_mb": config.memory_cache_size_mb,
-                "eviction_threshold": config.cache_eviction_threshold
-            }
+                "eviction_threshold": config.cache_eviction_threshold,
+            },
         },
-        "rationale": config.rationale
+        "rationale": config.rationale,
     }
-    
+
     return json.dumps(data, indent=2)
 
 
@@ -132,7 +129,7 @@ def format_config_as_markdown(config, system) -> str:
         "",
         "### Async I/O Optimization",
         "",
-        f"- **USE_ASYNC_CRAWLER**: `true`",
+        "- **USE_ASYNC_CRAWLER**: `true`",
         f"- **ASYNC_CONNECTOR_LIMIT**: `{config.http_connector_limit}`",
         f"  - {config.rationale.get('http_connector_limit', '')}",
         f"- **ASYNC_BATCH_SIZE**: `{config.product_batch_size}`",
@@ -152,7 +149,7 @@ def format_config_as_markdown(config, system) -> str:
         "",
         "### Optimized Batch Loading",
         "",
-        f"- **USE_OPTIMIZED_LOADER**: `true`",
+        "- **USE_OPTIMIZED_LOADER**: `true`",
         f"- **OPTIMIZED_BATCH_SIZE**: `{config.db_batch_size}`",
         f"  - {config.rationale.get('db_batch_size', '')}",
         f"- **USE_COPY_COMMAND**: `{'true' if config.use_copy_command else 'false'}`",
@@ -207,70 +204,68 @@ def format_config_as_markdown(config, system) -> str:
         "4. **Phase 4**: Fine-tune configuration values",
         "   - Adjust batch sizes, pool sizes based on observed performance",
         "   - Monitor resource utilization",
-        ""
+        "",
     ]
-    
+
     return "\n".join(lines)
 
 
 def main():
     """Main function."""
-    parser = argparse.ArgumentParser(
-        description="Generate optimized configuration recommendations"
-    )
+    parser = argparse.ArgumentParser(description="Generate optimized configuration recommendations")
     parser.add_argument(
         "--format",
         choices=["env", "json", "markdown"],
         default="markdown",
-        help="Output format (default: markdown)"
+        help="Output format (default: markdown)",
     )
+    parser.add_argument("--output", type=str, help="Output file path (default: stdout)")
     parser.add_argument(
-        "--output",
-        type=str,
-        help="Output file path (default: stdout)"
+        "--validate", action="store_true", help="Validate configuration recommendations"
     )
-    parser.add_argument(
-        "--validate",
-        action="store_true",
-        help="Validate configuration recommendations"
-    )
-    
+
     args = parser.parse_args()
-    
+
     logger.info("=" * 60)
     logger.info("Optimized Configuration Generator")
     logger.info("=" * 60)
-    
+
     # Analyze system
     analyzer = ConfigurationAnalyzer()
     system = analyzer.analyze_system()
-    
+
     logger.info("\nSystem capabilities detected:")
-    logger.info(f"  CPU: {system.cpu_cores_physical} physical, {system.cpu_cores_logical} logical cores")
-    logger.info(f"  Memory: {system.total_memory_mb:.0f} MB total, {system.available_memory_mb:.0f} MB available")
-    logger.info(f"  Disk I/O: {system.disk_read_speed_mbps:.1f} MB/s read, {system.disk_write_speed_mbps:.1f} MB/s write")
+    logger.info(
+        f"  CPU: {system.cpu_cores_physical} physical, {system.cpu_cores_logical} logical cores"
+    )
+    logger.info(
+        f"  Memory: {system.total_memory_mb:.0f} MB total, {system.available_memory_mb:.0f} MB available"
+    )
+    logger.info(
+        f"  Disk I/O: {system.disk_read_speed_mbps:.1f} MB/s read, {system.disk_write_speed_mbps:.1f} MB/s write"
+    )
     logger.info(f"  Network: {system.network_bandwidth_mbps:.1f} MB/s bandwidth")
-    
+
     # Generate recommendations
     logger.info("\nGenerating configuration recommendations...")
     config = analyzer.recommend_config(system)
-    
+
     # Validate if requested
     if args.validate:
         logger.info("\nValidating configuration...")
         is_valid, warnings = analyzer.validate_config(config, system)
-        
+
         if warnings:
             logger.warning(f"\nValidation warnings ({len(warnings)}):")
             for warning in warnings:
                 logger.warning(f"  - {warning}")
-        
+
         if not is_valid:
             logger.error("\n❌ Configuration validation failed!")
             return 1
         else:
             logger.info("\n✅ Configuration validation passed")
-    
+
     # Format output
     if args.format == "env":
         output = format_config_as_env(config)
@@ -278,7 +273,7 @@ def main():
         output = format_config_as_json(config, system)
     else:  # markdown
         output = format_config_as_markdown(config, system)
-    
+
     # Write output
     if args.output:
         output_path = Path(args.output)
@@ -287,11 +282,11 @@ def main():
         logger.info(f"\n✅ Configuration written to: {args.output}")
     else:
         print("\n" + output)
-    
+
     logger.info("\n" + "=" * 60)
     logger.info("Configuration generation complete!")
     logger.info("=" * 60)
-    
+
     return 0
 
 

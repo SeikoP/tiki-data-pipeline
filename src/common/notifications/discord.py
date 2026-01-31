@@ -34,7 +34,9 @@ class DiscordNotifier:
     def __init__(self):
         # Support both old and new config
         self.webhook_url = DISCORD_CONFIG.get("webhook_url", "")
-        self.webhook_url_notification = DISCORD_CONFIG.get("webhook_url_notification", "") or self.webhook_url
+        self.webhook_url_notification = (
+            DISCORD_CONFIG.get("webhook_url_notification", "") or self.webhook_url
+        )
         self.webhook_url_alert = DISCORD_CONFIG.get("webhook_url_alert", "")
         self.fallback_webhook_url = DISCORD_CONFIG.get("fallback_webhook_url", "")
         self.enabled = DISCORD_CONFIG.get("enabled", False)
@@ -140,7 +142,9 @@ class DiscordNotifier:
                 response.raise_for_status()
 
                 if response.status_code == 204:
-                    logger.info(f"✅ Đã gửi thông báo thành công qua Discord (attempt {attempt + 1})")
+                    logger.info(
+                        f"✅ Đã gửi thông báo thành công qua Discord (attempt {attempt + 1})"
+                    )
                     return True
                 else:
                     logger.warning(f"⚠️  Response không mong đợi từ Discord: {response.status_code}")

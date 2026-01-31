@@ -6,7 +6,6 @@ This is a simplified version that avoids potential hanging issues.
 import argparse
 import json
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -14,8 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from common.profiling import (
-    get_global_profiler,
     get_global_component_profiler,
+    get_global_profiler,
     get_global_resource_monitor,
 )
 from pipelines.crawl.crawl_products import crawl_products_from_categories
@@ -30,7 +29,7 @@ def run_baseline_profiling(
     use_selenium: bool = False,
 ):
     """Run pipeline with profiling enabled.
-    
+
     Args:
         categories_file: Path to categories JSON file
         output_dir: Directory to save profiling reports
@@ -51,15 +50,15 @@ def run_baseline_profiling(
     print(f"  ⚙️  Worker threads: {max_workers}")
     print(f"  🔧 Use Selenium: {use_selenium}")
     print()
-    
+
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Get profilers
     function_profiler = get_global_profiler()
     component_profiler = get_global_component_profiler()
     resource_monitor = get_global_resource_monitor()
-    
+
     # Start monitoring
     print("▶️  Starting resource monitoring...")
     try:
@@ -68,19 +67,19 @@ def run_baseline_profiling(
     except Exception as e:
         print(f"⚠️  Could not start resource monitoring: {e}")
     print()
-    
+
     # Record start time
     start_time = datetime.now()
     print(f"⏱️  Pipeline started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print()
-    
+
     try:
         # Run pipeline with profiling
         print("▶️  Running pipeline with profiling enabled...")
         print("-" * 100)
-        
+
         products_output = output_dir / "baseline_products.json"
-        
+
         crawl_products_from_categories(
             categories_file=categories_file,
             output_file=str(products_output),
@@ -89,16 +88,17 @@ def run_baseline_profiling(
             max_workers=max_workers,
             use_selenium=use_selenium,
         )
-        
+
         print("-" * 100)
         print()
-        
+
     except Exception as e:
         print(f"❌ Pipeline execution failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
-    
+
     finally:
         # Stop monitoring
         print("⏹️  Stopping resource monitoring...")
@@ -108,54 +108,54 @@ def run_baseline_profiling(
         except Exception as e:
             print(f"⚠️  Error stopping resource monitoring: {e}")
         print()
-    
+
     # Record end time
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
-    
+
     print(f"⏱️  Pipeline completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"⏱️  Total duration: {duration:.2f} seconds")
     print()
-    
+
     # Generate reports manually (safer approach)
     print("📊 Generating profiling reports...")
     print()
-    
-    timestamp = start_time.strftime('%Y%m%d_%H%M%S')
-    
+
+    timestamp = start_time.strftime("%Y%m%d_%H%M%S")
+
     # 1. Function profiling report
     try:
         print("  Generating function profiling report...")
         func_report = function_profiler.generate_report()
         func_file = output_dir / f"baseline_function_report_{timestamp}.txt"
-        with open(func_file, 'w', encoding='utf-8') as f:
+        with open(func_file, "w", encoding="utf-8") as f:
             f.write(func_report)
         print(f"✅ Function report saved to: {func_file}")
     except Exception as e:
         print(f"⚠️  Could not generate function report: {e}")
-    
+
     # 2. Component profiling report
     try:
         print("  Generating component profiling report...")
         comp_report = component_profiler.generate_report()
         comp_file = output_dir / f"baseline_component_report_{timestamp}.txt"
-        with open(comp_file, 'w', encoding='utf-8') as f:
+        with open(comp_file, "w", encoding="utf-8") as f:
             f.write(comp_report)
         print(f"✅ Component report saved to: {comp_file}")
     except Exception as e:
         print(f"⚠️  Could not generate component report: {e}")
-    
+
     # 3. Resource monitoring report
     try:
         print("  Generating resource monitoring report...")
         resource_report = resource_monitor.generate_report()
         resource_file = output_dir / f"baseline_resource_report_{timestamp}.txt"
-        with open(resource_file, 'w', encoding='utf-8') as f:
+        with open(resource_file, "w", encoding="utf-8") as f:
             f.write(resource_report)
         print(f"✅ Resource report saved to: {resource_file}")
     except Exception as e:
         print(f"⚠️  Could not generate resource report: {e}")
-    
+
     # 4. Combined report
     try:
         print("  Generating combined report...")
@@ -171,21 +171,21 @@ def run_baseline_profiling(
         combined_lines.append("")
         combined_lines.append(resource_report)
         combined_lines.append("")
-        
+
         combined_file = output_dir / f"baseline_profiling_report_{timestamp}.txt"
-        with open(combined_file, 'w', encoding='utf-8') as f:
+        with open(combined_file, "w", encoding="utf-8") as f:
             f.write("\n".join(combined_lines))
         print(f"✅ Combined report saved to: {combined_file}")
-        
+
         # Print to console
         print()
         print("\n".join(combined_lines))
-        
+
     except Exception as e:
         print(f"⚠️  Could not generate combined report: {e}")
-    
+
     print()
-    
+
     # 5. Generate baseline metrics summary
     try:
         print("  Generating baseline metrics summary...")
@@ -197,11 +197,11 @@ def run_baseline_profiling(
             max_categories=max_categories,
             max_pages_per_category=max_pages_per_category,
         )
-        
+
         summary_file = output_dir / f"baseline_metrics_summary_{timestamp}.json"
-        with open(summary_file, 'w', encoding='utf-8') as f:
+        with open(summary_file, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
-        
+
         print()
         print("📊 BASELINE METRICS SUMMARY")
         print("=" * 100)
@@ -212,9 +212,10 @@ def run_baseline_profiling(
     except Exception as e:
         print(f"⚠️  Could not generate baseline summary: {e}")
         import traceback
+
         traceback.print_exc()
         print()
-    
+
     print("=" * 100)
     print("✅ BASELINE PROFILING COMPLETED")
     print("=" * 100)
@@ -225,7 +226,7 @@ def run_baseline_profiling(
     print("3. Implement targeted optimizations")
     print("4. Re-run profiling to measure improvements")
     print()
-    
+
     return True
 
 
@@ -238,7 +239,7 @@ def generate_baseline_summary(
     max_pages_per_category: int,
 ) -> dict:
     """Generate baseline metrics summary.
-    
+
     Args:
         function_profiler: Function profiler instance
         component_profiler: Component profiler instance
@@ -246,66 +247,70 @@ def generate_baseline_summary(
         duration: Total pipeline duration in seconds
         max_categories: Number of categories crawled
         max_pages_per_category: Pages per category
-        
+
     Returns:
         Dictionary with baseline metrics
     """
     # Get statistics
     function_stats = function_profiler.get_stats()
     component_stats = component_profiler.get_stats()
-    
+
     # Calculate throughput (items per second)
     total_items = sum(stats.items_processed for stats in component_stats.values())
     throughput = total_items / duration if duration > 0 else 0
-    
+
     # Calculate average latency (seconds per item)
     latency = duration / total_items if total_items > 0 else 0
-    
+
     # Get resource utilization
     avg_cpu = 0
     avg_memory_mb = 0
     peak_memory_mb = 0
-    
+
     try:
         resource_snapshots = resource_monitor.get_snapshots()
         if resource_snapshots:
             avg_cpu = sum(s.cpu_percent for s in resource_snapshots) / len(resource_snapshots)
-            avg_memory_mb = sum(s.memory_rss_mb for s in resource_snapshots) / len(resource_snapshots)
+            avg_memory_mb = sum(s.memory_rss_mb for s in resource_snapshots) / len(
+                resource_snapshots
+            )
             peak_memory_mb = max(s.memory_rss_mb for s in resource_snapshots)
     except Exception as e:
         print(f"⚠️  Could not get resource snapshots: {e}")
-    
+
     # Component breakdown
     component_breakdown = {}
     for name, stats in component_stats.items():
         component_breakdown[name] = {
             "execution_time_ms": stats.execution_time_ms,
             "execution_time_seconds": stats.execution_time_ms / 1000,
-            "percentage_of_total": (stats.execution_time_ms / (duration * 1000)) * 100 if duration > 0 else 0,
+            "percentage_of_total": (stats.execution_time_ms / (duration * 1000)) * 100
+            if duration > 0
+            else 0,
             "items_processed": stats.items_processed,
             "throughput_items_per_sec": stats.throughput_items_per_sec,
             "memory_peak_mb": stats.memory_peak_mb,
             "memory_avg_mb": stats.memory_avg_mb,
         }
-    
+
     # Top 10 slowest functions
     sorted_functions = sorted(
-        function_stats.items(),
-        key=lambda x: x[1].total_time_ms,
-        reverse=True
+        function_stats.items(), key=lambda x: x[1].total_time_ms, reverse=True
     )[:10]
-    
+
     slowest_functions = []
     for func_name, stats in sorted_functions:
-        slowest_functions.append({
-            "function": func_name,
-            "total_time_ms": stats.total_time_ms,
-            "call_count": stats.call_count,
-            "mean_time_ms": stats.mean_time_ms,
-            "p95_time_ms": stats.p95_time_ms,
-            "p99_time_ms": stats.p99_time_ms,
-        })
-    
+        slowest_functions.append(
+            {
+                "function": func_name,
+                "total_time_ms": stats.total_time_ms,
+                "call_count": stats.call_count,
+                "mean_time_ms": stats.mean_time_ms,
+                "p95_time_ms": stats.p95_time_ms,
+                "p99_time_ms": stats.p99_time_ms,
+            }
+        )
+
     return {
         "timestamp": datetime.now().isoformat(),
         "configuration": {
@@ -336,42 +341,36 @@ def main():
     parser.add_argument(
         "--categories-file",
         default="data/raw/categories_recursive_optimized.json",
-        help="Path to categories JSON file"
+        help="Path to categories JSON file",
     )
     parser.add_argument(
         "--output-dir",
         default="data/profiling/baseline",
-        help="Directory to save profiling reports"
+        help="Directory to save profiling reports",
     )
     parser.add_argument(
         "--max-categories",
         type=int,
         default=5,
-        help="Maximum number of categories to crawl (default: 5)"
+        help="Maximum number of categories to crawl (default: 5)",
     )
     parser.add_argument(
-        "--max-pages",
-        type=int,
-        default=2,
-        help="Maximum pages per category (default: 2)"
+        "--max-pages", type=int, default=2, help="Maximum pages per category (default: 2)"
     )
     parser.add_argument(
-        "--max-workers",
-        type=int,
-        default=5,
-        help="Number of worker threads (default: 5)"
+        "--max-workers", type=int, default=5, help="Number of worker threads (default: 5)"
     )
     parser.add_argument(
         "--use-selenium",
         action="store_true",
-        help="Use Selenium for enrichment (slower but more complete)"
+        help="Use Selenium for enrichment (slower but more complete)",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Convert output_dir to Path
     output_dir = Path(args.output_dir)
-    
+
     # Run baseline profiling
     success = run_baseline_profiling(
         categories_file=args.categories_file,
@@ -381,7 +380,7 @@ def main():
         max_workers=args.max_workers,
         use_selenium=args.use_selenium,
     )
-    
+
     sys.exit(0 if success else 1)
 
 

@@ -333,7 +333,7 @@ with DAG(
         # Maintenance dependencies - Removed validate_data (not critical)
         # Tối ưu: Cho phép chạy các tác vụ bảo trì song song sau khi dữ liệu đã ổn định
         task_load_categories_db >> task_reconcile >> [task_cleanup_orphans, task_cleanup_redundant]
-        
+
         # Aggregate and notify - only if Discord enabled
         (
             [task_cleanup_orphans, task_cleanup_redundant]

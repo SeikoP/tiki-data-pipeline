@@ -6,20 +6,17 @@ comparisons during optimization.
 """
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
-from .metrics_collector import PipelineRunMetrics, MetricsCollector
-from .profiling.resource_monitor import ResourceMonitor
+from .metrics_collector import PipelineRunMetrics
 
 
 @dataclass
 class BaselineMetrics:
     """Baseline performance metrics for comparison.
-    
+
     Attributes:
         baseline_id: Unique identifier for this baseline
         captured_at: When the baseline was captured
@@ -27,14 +24,14 @@ class BaselineMetrics:
         metrics: Pipeline run metrics
         environment: Environmental conditions during capture
     """
-    
+
     baseline_id: str
     captured_at: datetime
     description: str
     metrics: PipelineRunMetrics
-    environment: Dict
-    
-    def to_dict(self) -> Dict:
+    environment: dict
+
+    def to_dict(self) -> dict:
         """Convert baseline to dictionary for serialization."""
         return {
             "baseline_id": self.baseline_id,
@@ -43,14 +40,14 @@ class BaselineMetrics:
             "metrics": self.metrics.to_dict(),
             "environment": self.environment,
         }
-    
+
     @classmethod
-    def from_dict(cls, data: Dict) -> "BaselineMetrics":
+    def from_dict(cls, data: dict) -> "BaselineMetrics":
         """Create BaselineMetrics from dictionary.
-        
+
         Args:
             data: Dictionary representation
-        
+
         Returns:
             BaselineMetrics instance
         """
@@ -59,7 +56,9 @@ class BaselineMetrics:
         metrics = PipelineRunMetrics(
             run_id=metrics_data["run_id"],
             start_time=datetime.fromisoformat(metrics_data["start_time"]),
-            end_time=datetime.fromisoformat(metrics_data["end_time"]) if metrics_data["end_time"] else None,
+            end_time=datetime.fromisoformat(metrics_data["end_time"])
+            if metrics_data["end_time"]
+            else None,
             duration_seconds=metrics_data["duration_seconds"],
             products_processed=metrics_data["products_processed"],
             throughput_products_per_second=metrics_data["throughput_products_per_second"],
@@ -84,7 +83,7 @@ class BaselineMetrics:
             cache_l3_hit_rate=metrics_data["cache_l3_hit_rate"],
             data_completeness_percent=metrics_data["data_completeness_percent"],
         )
-        
+
         return cls(
             baseline_id=data["baseline_id"],
             captured_at=datetime.fromisoformat(data["captured_at"]),
@@ -96,11 +95,11 @@ class BaselineMetrics:
 
 class BaselineCaptureSystem:
     """System for capturing and managing baseline performance metrics.
-    
+
     Captures metrics from the original pipeline implementation and stores them
     for comparison with optimized versions. Supports multiple baselines for
     different configurations or dataset sizes.
-    
+
     Example:
         >>> capture_system = BaselineCaptureSystem()
         >>> # Run pipeline and collect metrics
@@ -116,39 +115,39 @@ class BaselineCaptureSystem:
         ... )
         >>> capture_system.save_baseline(baseline)
     """
-    
+
     def __init__(self, storage_dir: str = "data/profiling/baselines"):
         """Initialize the baseline capture system.
-        
+
         Args:
             storage_dir: Directory to store baseline metrics
         """
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
-        self._baselines: Dict[str, BaselineMetrics] = {}
+        self._baselines: dict[str, BaselineMetrics] = {}
         self._load_existing_baselines()
-    
+
     def capture_baseline(
         self,
         baseline_id: str,
         description: str,
         metrics: PipelineRunMetrics,
-        environment: Optional[Dict] = None
+        environment: dict | None = None,
     ) -> BaselineMetrics:
         """Capture a baseline from pipeline run metrics.
-        
+
         Args:
             baseline_id: Unique identifier for this baseline
             description: Description of the baseline
             metrics: Pipeline run metrics to capture
             environment: Optional environmental conditions
-        
+
         Returns:
             BaselineMetrics instance
         """
         if environment is None:
             environment = {}
-        
+
         baseline = BaselineMetrics(
             baseline_id=baseline_id,
             captured_at=datetime.now(),
@@ -156,171 +155,171 @@ class BaselineCaptureSystem:
             metrics=metrics,
             environment=environment,
         )
-        
+
         self._baselines[baseline_id] = baseline
         return baseline
-    
+
     def save_baseline(self, baseline: BaselineMetrics) -> None:
         """Save baseline to disk.
-        
+
         Args:
             baseline: BaselineMetrics to save
         """
         filepath = self.storage_dir / f"{baseline.baseline_id}.json"
-        
+
         with open(filepath, "w") as f:
             json.dump(baseline.to_dict(), f, indent=2)
-    
-    def load_baseline(self, baseline_id: str) -> Optional[BaselineMetrics]:
+
+    def load_baseline(self, baseline_id: str) -> BaselineMetrics | None:
         """Load baseline from disk.
-        
+
         Args:
             baseline_id: ID of baseline to load
-        
+
         Returns:
             BaselineMetrics or None if not found
         """
         # Check in-memory cache first
         if baseline_id in self._baselines:
             return self._baselines[baseline_id]
-        
+
         # Try loading from disk
         filepath = self.storage_dir / f"{baseline_id}.json"
-        
+
         if not filepath.exists():
             return None
-        
-        with open(filepath, "r") as f:
+
+        with open(filepath) as f:
             data = json.load(f)
-        
+
         baseline = BaselineMetrics.from_dict(data)
         self._baselines[baseline_id] = baseline
         return baseline
-    
-    def list_baselines(self) -> List[str]:
+
+    def list_baselines(self) -> list[str]:
         """List all available baseline IDs.
-        
+
         Returns:
             List of baseline IDs
         """
         # Get from memory
         memory_ids = set(self._baselines.keys())
-        
+
         # Get from disk
         disk_ids = set()
         for filepath in self.storage_dir.glob("*.json"):
             disk_ids.add(filepath.stem)
-        
+
         return sorted(memory_ids | disk_ids)
-    
-    def get_baseline(self, baseline_id: str) -> Optional[BaselineMetrics]:
+
+    def get_baseline(self, baseline_id: str) -> BaselineMetrics | None:
         """Get baseline by ID (loads from disk if needed).
-        
+
         Args:
             baseline_id: ID of baseline to retrieve
-        
+
         Returns:
             BaselineMetrics or None if not found
         """
         return self.load_baseline(baseline_id)
-    
+
     def delete_baseline(self, baseline_id: str) -> bool:
         """Delete a baseline.
-        
+
         Args:
             baseline_id: ID of baseline to delete
-        
+
         Returns:
             True if deleted, False if not found
         """
         # Remove from memory
         if baseline_id in self._baselines:
             del self._baselines[baseline_id]
-        
+
         # Remove from disk
         filepath = self.storage_dir / f"{baseline_id}.json"
         if filepath.exists():
             filepath.unlink()
             return True
-        
+
         return False
-    
+
     def _load_existing_baselines(self) -> None:
         """Load all existing baselines from disk into memory."""
         for filepath in self.storage_dir.glob("*.json"):
             try:
-                with open(filepath, "r") as f:
+                with open(filepath) as f:
                     data = json.load(f)
                 baseline = BaselineMetrics.from_dict(data)
                 self._baselines[baseline.baseline_id] = baseline
             except Exception as e:
                 print(f"Warning: Failed to load baseline from {filepath}: {e}")
-    
-    def get_latest_baseline(self) -> Optional[BaselineMetrics]:
+
+    def get_latest_baseline(self) -> BaselineMetrics | None:
         """Get the most recently captured baseline.
-        
+
         Returns:
             Most recent BaselineMetrics or None if no baselines exist
         """
         if not self._baselines:
             return None
-        
+
         return max(self._baselines.values(), key=lambda b: b.captured_at)
-    
+
     def export_baseline(self, baseline_id: str, output_path: str) -> None:
         """Export baseline to a specific file path.
-        
+
         Args:
             baseline_id: ID of baseline to export
             output_path: Path to export to
-        
+
         Raises:
             ValueError: If baseline not found
         """
         baseline = self.get_baseline(baseline_id)
         if baseline is None:
             raise ValueError(f"Baseline not found: {baseline_id}")
-        
+
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(output_file, "w") as f:
             json.dump(baseline.to_dict(), f, indent=2)
-    
+
     def import_baseline(self, input_path: str) -> BaselineMetrics:
         """Import baseline from a file.
-        
+
         Args:
             input_path: Path to baseline file
-        
+
         Returns:
             Imported BaselineMetrics
-        
+
         Raises:
             FileNotFoundError: If file doesn't exist
         """
         input_file = Path(input_path)
-        
+
         if not input_file.exists():
             raise FileNotFoundError(f"Baseline file not found: {input_path}")
-        
-        with open(input_file, "r") as f:
+
+        with open(input_file) as f:
             data = json.load(f)
-        
+
         baseline = BaselineMetrics.from_dict(data)
         self._baselines[baseline.baseline_id] = baseline
         self.save_baseline(baseline)
-        
+
         return baseline
 
 
 # Global baseline capture system instance
-_global_baseline_system: Optional[BaselineCaptureSystem] = None
+_global_baseline_system: BaselineCaptureSystem | None = None
 
 
 def get_global_baseline_system() -> BaselineCaptureSystem:
     """Get the global baseline capture system instance.
-    
+
     Creates the instance if it doesn't exist.
     """
     global _global_baseline_system

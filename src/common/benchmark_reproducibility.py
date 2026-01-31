@@ -7,7 +7,6 @@ multiple runs, calculating variance and flagging high-variance benchmarks.
 import statistics
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from .metrics_collector import PipelineRunMetrics
 
@@ -15,7 +14,7 @@ from .metrics_collector import PipelineRunMetrics
 @dataclass
 class ReproducibilityMetrics:
     """Metrics for assessing benchmark reproducibility.
-    
+
     Attributes:
         metric_name: Name of the metric being analyzed
         values: List of values from multiple runs
@@ -29,9 +28,9 @@ class ReproducibilityMetrics:
         range_percent: Range as percentage of mean
         is_reproducible: Whether variance is acceptable (<10%)
     """
-    
+
     metric_name: str
-    values: List[float]
+    values: list[float]
     mean: float
     median: float
     std_dev: float
@@ -41,8 +40,8 @@ class ReproducibilityMetrics:
     max_value: float
     range_percent: float
     is_reproducible: bool
-    
-    def to_dict(self) -> Dict:
+
+    def to_dict(self) -> dict:
         """Convert metrics to dictionary for serialization."""
         return {
             "metric_name": self.metric_name,
@@ -62,7 +61,7 @@ class ReproducibilityMetrics:
 @dataclass
 class ReproducibilityReport:
     """Report on benchmark reproducibility across multiple runs.
-    
+
     Attributes:
         benchmark_id: Identifier for the benchmark
         run_ids: List of run IDs included in analysis
@@ -73,17 +72,17 @@ class ReproducibilityReport:
         flagged_metrics: List of metrics with high variance
         summary: Human-readable summary
     """
-    
+
     benchmark_id: str
-    run_ids: List[str]
+    run_ids: list[str]
     num_runs: int
     analyzed_at: datetime
-    metrics: Dict[str, ReproducibilityMetrics]
+    metrics: dict[str, ReproducibilityMetrics]
     overall_reproducible: bool
-    flagged_metrics: List[str]
+    flagged_metrics: list[str]
     summary: str
-    
-    def to_dict(self) -> Dict:
+
+    def to_dict(self) -> dict:
         """Convert report to dictionary for serialization."""
         return {
             "benchmark_id": self.benchmark_id,
@@ -99,10 +98,10 @@ class ReproducibilityReport:
 
 class BenchmarkReproducibilityValidator:
     """Validates benchmark reproducibility across multiple runs.
-    
+
     Runs the same benchmark multiple times and calculates variance in results.
     Flags benchmarks with high variance (>10%) as potentially unreliable.
-    
+
     Example:
         >>> validator = BenchmarkReproducibilityValidator()
         >>> # Run benchmark multiple times
@@ -118,114 +117,100 @@ class BenchmarkReproducibilityValidator:
         >>> if not report.overall_reproducible:
         ...     print(f"Warning: High variance in {report.flagged_metrics}")
     """
-    
+
     # Variance threshold for reproducibility (10%)
     VARIANCE_THRESHOLD = 0.10
-    
+
     def __init__(self, variance_threshold: float = VARIANCE_THRESHOLD):
         """Initialize the reproducibility validator.
-        
+
         Args:
             variance_threshold: Maximum acceptable coefficient of variation (default: 0.10)
         """
         self.variance_threshold = variance_threshold
-    
+
     def validate_reproducibility(
-        self,
-        benchmark_id: str,
-        runs: List[PipelineRunMetrics],
-        min_runs: int = 3
+        self, benchmark_id: str, runs: list[PipelineRunMetrics], min_runs: int = 3
     ) -> ReproducibilityReport:
         """Validate reproducibility across multiple benchmark runs.
-        
+
         Args:
             benchmark_id: Identifier for the benchmark
             runs: List of pipeline run metrics from repeated executions
             min_runs: Minimum number of runs required (default: 3)
-        
+
         Returns:
             ReproducibilityReport with variance analysis
-        
+
         Raises:
             ValueError: If fewer than min_runs provided
         """
         if len(runs) < min_runs:
             raise ValueError(
-                f"At least {min_runs} runs required for reproducibility analysis, "
-                f"got {len(runs)}"
+                f"At least {min_runs} runs required for reproducibility analysis, got {len(runs)}"
             )
-        
+
         run_ids = [r.run_id for r in runs]
-        
+
         # Analyze each metric
         metrics = {}
         flagged_metrics = []
-        
+
         # Throughput
         throughput_metrics = self._analyze_metric(
-            "throughput_products_per_second",
-            [r.throughput_products_per_second for r in runs]
+            "throughput_products_per_second", [r.throughput_products_per_second for r in runs]
         )
         metrics["throughput"] = throughput_metrics
         if not throughput_metrics.is_reproducible:
             flagged_metrics.append("throughput")
-        
+
         # Latency
         latency_metrics = self._analyze_metric(
-            "latency_per_product_ms",
-            [r.latency_per_product_ms for r in runs]
+            "latency_per_product_ms", [r.latency_per_product_ms for r in runs]
         )
         metrics["latency"] = latency_metrics
         if not latency_metrics.is_reproducible:
             flagged_metrics.append("latency")
-        
+
         # CPU utilization
         cpu_metrics = self._analyze_metric(
-            "cpu_utilization_percent",
-            [r.cpu_utilization_percent for r in runs]
+            "cpu_utilization_percent", [r.cpu_utilization_percent for r in runs]
         )
         metrics["cpu"] = cpu_metrics
         if not cpu_metrics.is_reproducible:
             flagged_metrics.append("cpu")
-        
+
         # Memory peak
-        memory_metrics = self._analyze_metric(
-            "memory_peak_mb",
-            [r.memory_peak_mb for r in runs]
-        )
+        memory_metrics = self._analyze_metric("memory_peak_mb", [r.memory_peak_mb for r in runs])
         metrics["memory"] = memory_metrics
         if not memory_metrics.is_reproducible:
             flagged_metrics.append("memory")
-        
+
         # Error rate
-        error_metrics = self._analyze_metric(
-            "error_rate",
-            [r.error_rate for r in runs]
-        )
+        error_metrics = self._analyze_metric("error_rate", [r.error_rate for r in runs])
         metrics["error_rate"] = error_metrics
         if not error_metrics.is_reproducible:
             flagged_metrics.append("error_rate")
-        
+
         # Duration
         duration_metrics = self._analyze_metric(
-            "duration_seconds",
-            [r.duration_seconds for r in runs]
+            "duration_seconds", [r.duration_seconds for r in runs]
         )
         metrics["duration"] = duration_metrics
         if not duration_metrics.is_reproducible:
             flagged_metrics.append("duration")
-        
+
         # Overall reproducibility
         overall_reproducible = len(flagged_metrics) == 0
-        
+
         # Generate summary
         summary = self._generate_summary(
             num_runs=len(runs),
             overall_reproducible=overall_reproducible,
             flagged_metrics=flagged_metrics,
-            metrics=metrics
+            metrics=metrics,
         )
-        
+
         return ReproducibilityReport(
             benchmark_id=benchmark_id,
             run_ids=run_ids,
@@ -236,47 +221,43 @@ class BenchmarkReproducibilityValidator:
             flagged_metrics=flagged_metrics,
             summary=summary,
         )
-    
-    def _analyze_metric(
-        self,
-        metric_name: str,
-        values: List[float]
-    ) -> ReproducibilityMetrics:
+
+    def _analyze_metric(self, metric_name: str, values: list[float]) -> ReproducibilityMetrics:
         """Analyze reproducibility of a single metric.
-        
+
         Args:
             metric_name: Name of the metric
             values: List of values from multiple runs
-        
+
         Returns:
             ReproducibilityMetrics with variance analysis
         """
         # Filter out zero values for CV calculation
-        non_zero_values = [v for v in values if v != 0]
-        
+        [v for v in values if v != 0]
+
         mean = statistics.mean(values)
         median = statistics.median(values)
         std_dev = statistics.stdev(values) if len(values) > 1 else 0.0
         variance = statistics.variance(values) if len(values) > 1 else 0.0
-        
+
         # Coefficient of variation (CV)
         if mean != 0:
             cv = std_dev / abs(mean)
         else:
-            cv = 0.0 if std_dev == 0 else float('inf')
-        
+            cv = 0.0 if std_dev == 0 else float("inf")
+
         min_value = min(values)
         max_value = max(values)
-        
+
         # Range as percentage of mean
         if mean != 0:
             range_percent = ((max_value - min_value) / abs(mean)) * 100
         else:
             range_percent = 0.0
-        
+
         # Check if reproducible (CV within threshold)
         is_reproducible = cv <= self.variance_threshold
-        
+
         return ReproducibilityMetrics(
             metric_name=metric_name,
             values=values,
@@ -290,22 +271,22 @@ class BenchmarkReproducibilityValidator:
             range_percent=range_percent,
             is_reproducible=is_reproducible,
         )
-    
+
     def _generate_summary(
         self,
         num_runs: int,
         overall_reproducible: bool,
-        flagged_metrics: List[str],
-        metrics: Dict[str, ReproducibilityMetrics]
+        flagged_metrics: list[str],
+        metrics: dict[str, ReproducibilityMetrics],
     ) -> str:
         """Generate human-readable summary of reproducibility analysis.
-        
+
         Args:
             num_runs: Number of runs analyzed
             overall_reproducible: Whether all metrics are reproducible
             flagged_metrics: List of metrics with high variance
             metrics: Dictionary of reproducibility metrics
-        
+
         Returns:
             Formatted summary string
         """
@@ -313,11 +294,11 @@ class BenchmarkReproducibilityValidator:
         lines.append("BENCHMARK REPRODUCIBILITY REPORT")
         lines.append("=" * 80)
         lines.append("")
-        
+
         lines.append(f"Number of Runs: {num_runs}")
         lines.append(f"Variance Threshold: {self.variance_threshold * 100:.0f}%")
         lines.append("")
-        
+
         if overall_reproducible:
             lines.append("✓ BENCHMARK IS REPRODUCIBLE")
             lines.append("  All metrics show acceptable variance (<10%)")
@@ -326,47 +307,47 @@ class BenchmarkReproducibilityValidator:
             lines.append(f"  {len(flagged_metrics)} metric(s) exceed variance threshold:")
             for metric in flagged_metrics:
                 lines.append(f"    - {metric}")
-        
+
         lines.append("")
         lines.append("METRIC ANALYSIS:")
         lines.append("")
-        
-        for name, metric in metrics.items():
+
+        for metric in metrics.values():
             status = "✓" if metric.is_reproducible else "✗"
             lines.append(f"{status} {metric.metric_name}:")
             lines.append(f"    Mean: {metric.mean:.4f}")
             lines.append(f"    Std Dev: {metric.std_dev:.4f}")
             lines.append(f"    CV: {metric.coefficient_of_variation * 100:.2f}%")
-            lines.append(f"    Range: {metric.min_value:.4f} - {metric.max_value:.4f} "
-                        f"({metric.range_percent:.2f}% of mean)")
+            lines.append(
+                f"    Range: {metric.min_value:.4f} - {metric.max_value:.4f} "
+                f"({metric.range_percent:.2f}% of mean)"
+            )
             lines.append("")
-        
+
         lines.append("=" * 80)
-        
+
         return "\n".join(lines)
-    
+
     def format_report(self, report: ReproducibilityReport) -> str:
         """Format reproducibility report for display.
-        
+
         Args:
             report: ReproducibilityReport to format
-        
+
         Returns:
             Formatted string
         """
         return report.summary
-    
+
     def compare_reproducibility(
-        self,
-        report1: ReproducibilityReport,
-        report2: ReproducibilityReport
-    ) -> Dict:
+        self, report1: ReproducibilityReport, report2: ReproducibilityReport
+    ) -> dict:
         """Compare reproducibility between two benchmarks.
-        
+
         Args:
             report1: First reproducibility report
             report2: Second reproducibility report
-        
+
         Returns:
             Dictionary with comparison results
         """
@@ -377,78 +358,76 @@ class BenchmarkReproducibilityValidator:
             "benchmark2_reproducible": report2.overall_reproducible,
             "metric_comparisons": {},
         }
-        
+
         # Compare each metric
         for metric_name in report1.metrics.keys():
             if metric_name in report2.metrics:
                 m1 = report1.metrics[metric_name]
                 m2 = report2.metrics[metric_name]
-                
+
                 comparison["metric_comparisons"][metric_name] = {
                     "cv1": m1.coefficient_of_variation,
                     "cv2": m2.coefficient_of_variation,
                     "cv_difference": abs(m2.coefficient_of_variation - m1.coefficient_of_variation),
                     "both_reproducible": m1.is_reproducible and m2.is_reproducible,
                 }
-        
+
         return comparison
-    
+
     def recommend_min_runs(
-        self,
-        pilot_runs: List[PipelineRunMetrics],
-        target_confidence: float = 0.95
+        self, pilot_runs: list[PipelineRunMetrics], target_confidence: float = 0.95
     ) -> int:
         """Recommend minimum number of runs based on pilot data.
-        
+
         Analyzes variance in pilot runs to recommend how many runs are needed
         to achieve target confidence level.
-        
+
         Args:
             pilot_runs: Initial pilot runs (at least 3)
             target_confidence: Target confidence level (default: 0.95)
-        
+
         Returns:
             Recommended minimum number of runs
         """
         if len(pilot_runs) < 3:
             return 5  # Default recommendation
-        
+
         # Analyze throughput variance (key metric)
         throughput_values = [r.throughput_products_per_second for r in pilot_runs]
-        
+
         if not throughput_values or all(v == 0 for v in throughput_values):
             return 5  # Default if no valid data
-        
+
         mean = statistics.mean(throughput_values)
         std_dev = statistics.stdev(throughput_values) if len(throughput_values) > 1 else 0.0
-        
+
         if mean == 0:
             return 5  # Default if mean is zero
-        
+
         cv = std_dev / abs(mean)
-        
+
         # Use rule of thumb: n = (z * cv / margin_of_error)^2
         # For 95% confidence, z = 1.96
         # Target margin of error: 5% of mean
         z = 1.96
         margin_of_error = 0.05
-        
+
         n = ((z * cv) / margin_of_error) ** 2
-        
+
         # Round up and ensure minimum of 3
         recommended = max(3, int(n) + 1)
-        
+
         # Cap at reasonable maximum
         return min(recommended, 20)
 
 
 # Global reproducibility validator instance
-_global_reproducibility_validator: Optional[BenchmarkReproducibilityValidator] = None
+_global_reproducibility_validator: BenchmarkReproducibilityValidator | None = None
 
 
 def get_global_reproducibility_validator() -> BenchmarkReproducibilityValidator:
     """Get the global reproducibility validator instance.
-    
+
     Creates the instance if it doesn't exist.
     """
     global _global_reproducibility_validator

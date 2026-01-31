@@ -21,15 +21,13 @@ during DAG parsing. Heavy imports are deferred until actually needed.
 import json
 import logging
 import os
-import re
-import shutil
 import sys
 import time
 import warnings
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # ============================================================================
 # IMPORT TIME MEASUREMENT
@@ -42,7 +40,7 @@ def _measure_import(module_name: str, import_func):
     """Measure and log import time for a module."""
     if module_name in _import_times:
         return _import_times[module_name]
-    
+
     start = time.time()
     try:
         result = import_func()
@@ -70,14 +68,17 @@ def get_psycopg2():
     """Lazy import psycopg2 with caching."""
     global _psycopg2_cache
     if _psycopg2_cache is None:
+
         def _import():
             global _psycopg2_cache
             try:
                 import psycopg2
+
                 _psycopg2_cache = psycopg2
             except ImportError:
                 _psycopg2_cache = None
             return _psycopg2_cache
+
         return _measure_import("psycopg2", _import)
     return _psycopg2_cache
 
@@ -86,14 +87,17 @@ def get_aiohttp():
     """Lazy import aiohttp with caching."""
     global _aiohttp_cache
     if _aiohttp_cache is None:
+
         def _import():
             global _aiohttp_cache
             try:
                 import aiohttp
+
                 _aiohttp_cache = aiohttp
             except ImportError:
                 _aiohttp_cache = None
             return _aiohttp_cache
+
         return _measure_import("aiohttp", _import)
     return _aiohttp_cache
 
@@ -102,10 +106,12 @@ def get_airflow_dag():
     """Lazy import Airflow DAG with caching."""
     global _airflow_dag_cache
     if _airflow_dag_cache is None:
+
         def _import():
             global _airflow_dag_cache
             try:
                 from airflow import DAG
+
                 _airflow_dag_cache = DAG
             except ImportError:
                 # Mock for local development without airflow installed
@@ -118,8 +124,10 @@ def get_airflow_dag():
 
                     def __exit__(self, exc_type, *args):
                         pass
+
                 _airflow_dag_cache = DAG
             return _airflow_dag_cache
+
         return _measure_import("airflow.DAG", _import)
     return _airflow_dag_cache
 
@@ -128,6 +136,7 @@ def get_airflow_taskgroup():
     """Lazy import Airflow TaskGroup with caching."""
     global _airflow_taskgroup_cache
     if _airflow_taskgroup_cache is None:
+
         def _import():
             global _airflow_taskgroup_cache
             try:
@@ -160,8 +169,10 @@ def get_airflow_taskgroup():
 
                     def __rlshift__(self, other):
                         return self
+
                 _airflow_taskgroup_cache = TaskGroup
             return _airflow_taskgroup_cache
+
         return _measure_import("airflow.TaskGroup", _import)
     return _airflow_taskgroup_cache
 
@@ -170,6 +181,7 @@ def get_airflow_pythonoperator():
     """Lazy import Airflow PythonOperator with caching."""
     global _airflow_pythonoperator_cache
     if _airflow_pythonoperator_cache is None:
+
         def _import():
             global _airflow_pythonoperator_cache
             try:
@@ -202,8 +214,10 @@ def get_airflow_pythonoperator():
 
                     def __rlshift__(self, other):
                         return self
+
                 _airflow_pythonoperator_cache = PythonOperator
             return _airflow_pythonoperator_cache
+
         return _measure_import("airflow.PythonOperator", _import)
     return _airflow_pythonoperator_cache
 
@@ -219,25 +233,19 @@ PythonOperator = None
 def _ensure_airflow_classes():
     """Ensure Airflow classes are loaded."""
     global DAG, TaskGroup, PythonOperator, _airflow_classes_initialized
-    
+
     if _airflow_classes_initialized:
         return DAG, TaskGroup, PythonOperator
-    
+
     if DAG is None:
         DAG = get_airflow_dag()
     if TaskGroup is None:
         TaskGroup = get_airflow_taskgroup()
     if PythonOperator is None:
         PythonOperator = get_airflow_pythonoperator()
-    
+
     _airflow_classes_initialized = True
     return DAG, TaskGroup, PythonOperator
-
-
-def load_env_file():
-    """
-    Dummy load_env_file for bootstrap.
-    """
 
 
 # Setup imports path
@@ -260,6 +268,7 @@ def get_common_utils():
     """Lazy import common utilities with caching."""
     global _common_utils_cache
     if _common_utils_cache is None:
+
         def _import():
             global _common_utils_cache
             try:
@@ -270,17 +279,17 @@ def get_common_utils():
                     safe_import_attr,
                 )
                 from pipelines.crawl.hierarchy import get_hierarchy_map
-                
+
                 _common_utils_cache = {
-                    'get_variable': get_variable,
-                    'get_int_variable': get_int_variable,
-                    'load_env_file': load_env_file,
-                    'safe_import_attr': safe_import_attr,
-                    'get_hierarchy_map': get_hierarchy_map,
+                    "get_variable": get_variable,
+                    "get_int_variable": get_int_variable,
+                    "load_env_file": load_env_file,
+                    "safe_import_attr": safe_import_attr,
+                    "get_hierarchy_map": get_hierarchy_map,
                 }
             except ImportError as e:
                 logging.warning(f"⚠️ Could not import common utilities: {e}")
-                
+
                 def get_variable(key, default=None):
                     return os.getenv(key, default)
 
@@ -299,15 +308,16 @@ def get_common_utils():
 
                 def get_hierarchy_map(force_reload=False):
                     return {}
-                
+
                 _common_utils_cache = {
-                    'get_variable': get_variable,
-                    'get_int_variable': get_int_variable,
-                    'load_env_file': load_env_file,
-                    'safe_import_attr': safe_import_attr,
-                    'get_hierarchy_map': get_hierarchy_map,
+                    "get_variable": get_variable,
+                    "get_int_variable": get_int_variable,
+                    "load_env_file": load_env_file,
+                    "safe_import_attr": safe_import_attr,
+                    "get_hierarchy_map": get_hierarchy_map,
                 }
             return _common_utils_cache
+
         return _measure_import("common.airflow_utils", _import)
     return _common_utils_cache
 
@@ -315,27 +325,27 @@ def get_common_utils():
 # Expose utility functions at module level for backward compatibility
 def get_variable(key, default=None):
     """Get Airflow variable or environment variable."""
-    return get_common_utils()['get_variable'](key, default)
+    return get_common_utils()["get_variable"](key, default)
 
 
 def get_int_variable(key, default=0):
     """Get integer Airflow variable or environment variable."""
-    return get_common_utils()['get_int_variable'](key, default)
+    return get_common_utils()["get_int_variable"](key, default)
 
 
 def load_env_file():
     """Load environment file."""
-    return get_common_utils()['load_env_file']()
+    return get_common_utils()["load_env_file"]()
 
 
 def safe_import_attr(module_path, attr, **kwargs):
     """Safely import attribute from module."""
-    return get_common_utils()['safe_import_attr'](module_path, attr, **kwargs)
+    return get_common_utils()["safe_import_attr"](module_path, attr, **kwargs)
 
 
 def get_hierarchy_map(force_reload=False):
     """Get hierarchy map."""
-    return get_common_utils()['get_hierarchy_map'](force_reload)
+    return get_common_utils()["get_hierarchy_map"](force_reload)
 
 
 # NOTE: Avoid heavy work at DAG parse time.
@@ -474,10 +484,14 @@ def get_resilience_patterns():
     """Lazy import resilience patterns with caching."""
     global _resilience_cache
     if _resilience_cache is None:
+
         def _import():
             global _resilience_cache
             try:
-                from pipelines.crawl.resilience.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
+                from pipelines.crawl.resilience.circuit_breaker import (
+                    CircuitBreaker,
+                    CircuitBreakerOpenError,
+                )
                 from pipelines.crawl.resilience.dead_letter_queue import DeadLetterQueue, get_dlq
                 from pipelines.crawl.resilience.exceptions import CrawlError, classify_error
                 from pipelines.crawl.resilience.graceful_degradation import (
@@ -485,17 +499,17 @@ def get_resilience_patterns():
                     GracefulDegradation,
                     get_service_health,
                 )
-                
+
                 _resilience_cache = {
-                    'CircuitBreaker': CircuitBreaker,
-                    'CircuitBreakerOpenError': CircuitBreakerOpenError,
-                    'DeadLetterQueue': DeadLetterQueue,
-                    'get_dlq': get_dlq,
-                    'CrawlError': CrawlError,
-                    'classify_error': classify_error,
-                    'DegradationLevel': DegradationLevel,
-                    'GracefulDegradation': GracefulDegradation,
-                    'get_service_health': get_service_health,
+                    "CircuitBreaker": CircuitBreaker,
+                    "CircuitBreakerOpenError": CircuitBreakerOpenError,
+                    "DeadLetterQueue": DeadLetterQueue,
+                    "get_dlq": get_dlq,
+                    "CrawlError": CrawlError,
+                    "classify_error": classify_error,
+                    "DegradationLevel": DegradationLevel,
+                    "GracefulDegradation": GracefulDegradation,
+                    "get_service_health": get_service_health,
                 }
             except ImportError:
                 # Fallback implementations
@@ -531,7 +545,9 @@ def get_resilience_patterns():
 
                 def get_service_health():
                     return type(
-                        "ServiceHealth", (), {"register_service": lambda *args, **kwargs: GracefulDegradation()}
+                        "ServiceHealth",
+                        (),
+                        {"register_service": lambda *args, **kwargs: GracefulDegradation()},
                     )()
 
                 def classify_error(error, **kwargs):
@@ -539,19 +555,20 @@ def get_resilience_patterns():
 
                 class CrawlError(Exception):
                     pass
-                
+
                 _resilience_cache = {
-                    'CircuitBreaker': CircuitBreaker,
-                    'CircuitBreakerOpenError': CircuitBreakerOpenError,
-                    'DeadLetterQueue': DeadLetterQueue,
-                    'get_dlq': get_dlq,
-                    'CrawlError': CrawlError,
-                    'classify_error': classify_error,
-                    'DegradationLevel': DegradationLevel,
-                    'GracefulDegradation': GracefulDegradation,
-                    'get_service_health': get_service_health,
+                    "CircuitBreaker": CircuitBreaker,
+                    "CircuitBreakerOpenError": CircuitBreakerOpenError,
+                    "DeadLetterQueue": DeadLetterQueue,
+                    "get_dlq": get_dlq,
+                    "CrawlError": CrawlError,
+                    "classify_error": classify_error,
+                    "DegradationLevel": DegradationLevel,
+                    "GracefulDegradation": GracefulDegradation,
+                    "get_service_health": get_service_health,
                 }
             return _resilience_cache
+
         return _measure_import("pipelines.crawl.resilience", _import)
     return _resilience_cache
 
@@ -559,47 +576,47 @@ def get_resilience_patterns():
 # Expose resilience classes at module level for backward compatibility
 def get_CircuitBreaker():
     """Get CircuitBreaker class."""
-    return get_resilience_patterns()['CircuitBreaker']
+    return get_resilience_patterns()["CircuitBreaker"]
 
 
 def get_CircuitBreakerOpenError():
     """Get CircuitBreakerOpenError class."""
-    return get_resilience_patterns()['CircuitBreakerOpenError']
+    return get_resilience_patterns()["CircuitBreakerOpenError"]
 
 
 def get_DeadLetterQueue():
     """Get DeadLetterQueue class."""
-    return get_resilience_patterns()['DeadLetterQueue']
+    return get_resilience_patterns()["DeadLetterQueue"]
 
 
 def get_dlq(*args, **kwargs):
     """Get dead letter queue instance."""
-    return get_resilience_patterns()['get_dlq'](*args, **kwargs)
+    return get_resilience_patterns()["get_dlq"](*args, **kwargs)
 
 
 def get_CrawlError():
     """Get CrawlError class."""
-    return get_resilience_patterns()['CrawlError']
+    return get_resilience_patterns()["CrawlError"]
 
 
 def classify_error(error, **kwargs):
     """Classify error."""
-    return get_resilience_patterns()['classify_error'](error, **kwargs)
+    return get_resilience_patterns()["classify_error"](error, **kwargs)
 
 
 def get_DegradationLevel():
     """Get DegradationLevel class."""
-    return get_resilience_patterns()['DegradationLevel']
+    return get_resilience_patterns()["DegradationLevel"]
 
 
 def get_GracefulDegradation():
     """Get GracefulDegradation class."""
-    return get_resilience_patterns()['GracefulDegradation']
+    return get_resilience_patterns()["GracefulDegradation"]
 
 
 def get_service_health():
     """Get service health instance."""
-    return get_resilience_patterns()['get_service_health']()
+    return get_resilience_patterns()["get_service_health"]()
 
 
 # Cấu hình mặc định
@@ -618,11 +635,12 @@ DEFAULT_ARGS = {
 # Đọc cấu hình từ Airflow Variable/Env (lazy evaluation)
 # Note: These are now functions to avoid triggering imports at module load time
 
+
 def _get_dag_schedule_config():
     """Get DAG schedule configuration with lazy evaluation."""
     schedule_mode = get_schedule_mode()
     schedule_hours = get_schedule_hours()
-    
+
     # Xác định schedule dựa trên mode
     if schedule_mode == "scheduled":
         # Sử dụng timedelta để đảm bảo khoảng cách giữa các lần chạy
@@ -635,7 +653,7 @@ def _get_dag_schedule_config():
         dag_schedule = None  # Chỉ chạy khi trigger thủ công
         dag_description = "Crawl sản phẩm Tiki với Dynamic Task Mapping (Chạy thủ công - Test mode)"
         dag_tags = ["tiki", "crawl", "products", "data-pipeline", "manual"]
-    
+
     return dag_schedule, dag_description, dag_tags
 
 
@@ -654,14 +672,16 @@ def get_dag_tags():
     """Get DAG tags."""
     return _get_dag_schedule_config()[2]
 
+
 # Documentation đơn giản cho DAG
 dag_doc_md = "Crawl sản phẩm từ Tiki.vn với Dynamic Task Mapping và Selenium"
+
 
 # DAG_CONFIG with lazy evaluation
 def get_dag_config():
     """Get DAG configuration with lazy evaluation."""
     dag_schedule, dag_description, dag_tags = _get_dag_schedule_config()
-    
+
     return {
         "dag_id": "tiki_crawl_products_v2",
         "description": dag_description,
@@ -833,14 +853,17 @@ def get_DataTransformer():
     """Lazy import DataTransformer with caching."""
     global _data_transformer_cache
     if _data_transformer_cache is None:
+
         def _import():
             global _data_transformer_cache
             try:
                 from pipelines.transform.transformer import DataTransformer
+
                 _data_transformer_cache = DataTransformer
             except ImportError:
                 _data_transformer_cache = None
             return _data_transformer_cache
+
         return _measure_import("pipelines.transform.transformer", _import)
     return _data_transformer_cache
 
@@ -849,14 +872,17 @@ def get_OptimizedDataLoader():
     """Lazy import OptimizedDataLoader with caching."""
     global _optimized_loader_cache
     if _optimized_loader_cache is None:
+
         def _import():
             global _optimized_loader_cache
             try:
                 from pipelines.load.optimized_loader import OptimizedDataLoader
+
                 _optimized_loader_cache = OptimizedDataLoader
             except ImportError:
                 _optimized_loader_cache = None
             return _optimized_loader_cache
+
         return _measure_import("pipelines.load.optimized_loader", _import)
     return _optimized_loader_cache
 
@@ -865,6 +891,7 @@ def get_crawl_detail_functions():
     """Lazy import crawl detail functions with caching."""
     global _crawl_detail_cache
     if _crawl_detail_cache is None:
+
         def _import():
             global _crawl_detail_cache
             try:
@@ -874,13 +901,15 @@ def get_crawl_detail_functions():
                     crawl_product_detail_with_selenium,
                     extract_product_detail,
                 )
+
                 _crawl_detail_cache = {
-                    'crawl_product_detail_async': crawl_product_detail_async,
-                    'crawl_product_detail_with_driver': crawl_product_detail_with_driver,
-                    'crawl_product_detail_with_selenium': crawl_product_detail_with_selenium,
-                    'extract_product_detail': extract_product_detail,
+                    "crawl_product_detail_async": crawl_product_detail_async,
+                    "crawl_product_detail_with_driver": crawl_product_detail_with_driver,
+                    "crawl_product_detail_with_selenium": crawl_product_detail_with_selenium,
+                    "extract_product_detail": extract_product_detail,
                 }
             except ImportError:
+
                 def crawl_product_detail_with_selenium(*args, **kwargs):
                     raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
 
@@ -892,52 +921,58 @@ def get_crawl_detail_functions():
 
                 async def crawl_product_detail_async(*args, **kwargs):
                     raise ImportError("Module pipelines.crawl.crawl_products_detail not found")
-                
+
                 _crawl_detail_cache = {
-                    'crawl_product_detail_async': crawl_product_detail_async,
-                    'crawl_product_detail_with_driver': crawl_product_detail_with_driver,
-                    'crawl_product_detail_with_selenium': crawl_product_detail_with_selenium,
-                    'extract_product_detail': extract_product_detail,
+                    "crawl_product_detail_async": crawl_product_detail_async,
+                    "crawl_product_detail_with_driver": crawl_product_detail_with_driver,
+                    "crawl_product_detail_with_selenium": crawl_product_detail_with_selenium,
+                    "extract_product_detail": extract_product_detail,
                 }
             return _crawl_detail_cache
+
         return _measure_import("pipelines.crawl.crawl_products_detail", _import)
     return _crawl_detail_cache
 
 
 def crawl_product_detail_with_selenium(*args, **kwargs):
     """Crawl product detail with Selenium."""
-    return get_crawl_detail_functions()['crawl_product_detail_with_selenium'](*args, **kwargs)
+    return get_crawl_detail_functions()["crawl_product_detail_with_selenium"](*args, **kwargs)
 
 
 def crawl_product_detail_with_driver(*args, **kwargs):
     """Crawl product detail with driver."""
-    return get_crawl_detail_functions()['crawl_product_detail_with_driver'](*args, **kwargs)
+    return get_crawl_detail_functions()["crawl_product_detail_with_driver"](*args, **kwargs)
 
 
 def extract_product_detail(*args, **kwargs):
     """Extract product detail."""
-    return get_crawl_detail_functions()['extract_product_detail'](*args, **kwargs)
+    return get_crawl_detail_functions()["extract_product_detail"](*args, **kwargs)
 
 
 async def crawl_product_detail_async(*args, **kwargs):
     """Crawl product detail async."""
-    return await get_crawl_detail_functions()['crawl_product_detail_async'](*args, **kwargs)
+    return await get_crawl_detail_functions()["crawl_product_detail_async"](*args, **kwargs)
 
 
 def get_crawl_category_products():
     """Lazy import crawl_category_products with caching."""
     global _crawl_products_cache
     if _crawl_products_cache is None:
+
         def _import():
             global _crawl_products_cache
             try:
                 from pipelines.crawl.crawl_products import crawl_category_products
+
                 _crawl_products_cache = crawl_category_products
             except ImportError:
+
                 def crawl_category_products(*args, **kwargs):
                     raise ImportError("Module pipelines.crawl.crawl_products not found")
+
                 _crawl_products_cache = crawl_category_products
             return _crawl_products_cache
+
         return _measure_import("pipelines.crawl.crawl_products", _import)
     return _crawl_products_cache
 
@@ -951,6 +986,7 @@ def get_crawl_utils():
     """Lazy import crawl utilities with caching."""
     global _crawl_utils_cache
     if _crawl_utils_cache is None:
+
         def _import():
             global _crawl_utils_cache
             try:
@@ -959,18 +995,20 @@ def get_crawl_utils():
                     extract_category_id_from_url,
                     extract_product_id_from_url,
                 )
+
                 _crawl_utils_cache = {
-                    'SeleniumDriverPool': SeleniumDriverPool,
-                    'extract_category_id_from_url': extract_category_id_from_url,
-                    'extract_product_id_from_url': extract_product_id_from_url,
+                    "SeleniumDriverPool": SeleniumDriverPool,
+                    "extract_category_id_from_url": extract_category_id_from_url,
+                    "extract_product_id_from_url": extract_product_id_from_url,
                 }
             except ImportError:
                 _crawl_utils_cache = {
-                    'SeleniumDriverPool': None,
-                    'extract_category_id_from_url': None,
-                    'extract_product_id_from_url': None,
+                    "SeleniumDriverPool": None,
+                    "extract_category_id_from_url": None,
+                    "extract_product_id_from_url": None,
                 }
             return _crawl_utils_cache
+
         return _measure_import("pipelines.crawl.crawl_utils", _import)
     return _crawl_utils_cache
 
@@ -978,12 +1016,12 @@ def get_crawl_utils():
 # Expose crawl utils at module level for backward compatibility
 def SeleniumDriverPool():
     """Get SeleniumDriverPool class."""
-    return get_crawl_utils()['SeleniumDriverPool']
+    return get_crawl_utils()["SeleniumDriverPool"]
 
 
 def extract_category_id_from_url(url):
     """Get extract_category_id_from_url function."""
-    func = get_crawl_utils()['extract_category_id_from_url']
+    func = get_crawl_utils()["extract_category_id_from_url"]
     if func:
         return func(url)
     return None
@@ -991,7 +1029,7 @@ def extract_category_id_from_url(url):
 
 def extract_product_id_from_url(url):
     """Get extract_product_id_from_url function."""
-    func = get_crawl_utils()['extract_product_id_from_url']
+    func = get_crawl_utils()["extract_product_id_from_url"]
     if func:
         return func(url)
     return None
@@ -1031,6 +1069,7 @@ def get_DataAggregator():
     """Lazy import DataAggregator with caching."""
     global _data_aggregator_cache
     if _data_aggregator_cache is None:
+
         def _import():
             global _data_aggregator_cache
             ensure_env_loaded()
@@ -1040,11 +1079,14 @@ def get_DataAggregator():
                         "common.analytics.aggregator", analytics_path, "DataAggregator"
                     )
                 except Exception as e:
-                    warnings.warn(f"Không thể import common.analytics.aggregator module: {e}", stacklevel=2)
+                    warnings.warn(
+                        f"Không thể import common.analytics.aggregator module: {e}", stacklevel=2
+                    )
                     _data_aggregator_cache = None
             else:
                 _data_aggregator_cache = None
             return _data_aggregator_cache
+
         return _measure_import("common.analytics.aggregator", _import)
     return _data_aggregator_cache
 
@@ -1054,6 +1096,7 @@ def get_load_categories_db_func():
     """Lazy import load_categories function with caching."""
     global _load_categories_db_cache
     if _load_categories_db_cache is None:
+
         def _import():
             global _load_categories_db_cache
             ensure_env_loaded()
@@ -1063,9 +1106,12 @@ def get_load_categories_db_func():
                 fallback_paths=[Path(p).parent.parent for p in possible_paths],
             )
             if not func:
-                warnings.warn("load_categories_to_db not available; DB load will be skipped", stacklevel=2)
+                warnings.warn(
+                    "load_categories_to_db not available; DB load will be skipped", stacklevel=2
+                )
             _load_categories_db_cache = func
             return _load_categories_db_cache
+
         return _measure_import("pipelines.load.load_categories_to_db", _import)
     return _load_categories_db_cache
 
@@ -1075,18 +1121,24 @@ def get_AISummarizer():
     """Lazy import AISummarizer with caching."""
     global _ai_summarizer_cache
     if _ai_summarizer_cache is None:
+
         def _import():
             global _ai_summarizer_cache
             ensure_env_loaded()
             if ai_path and os.path.exists(ai_path):
                 try:
-                    _ai_summarizer_cache = _lazy_import_from_file("common.ai.summarizer", ai_path, "AISummarizer")
+                    _ai_summarizer_cache = _lazy_import_from_file(
+                        "common.ai.summarizer", ai_path, "AISummarizer"
+                    )
                 except Exception as e:
-                    warnings.warn(f"Không thể import common.ai.summarizer module: {e}", stacklevel=2)
+                    warnings.warn(
+                        f"Không thể import common.ai.summarizer module: {e}", stacklevel=2
+                    )
                     _ai_summarizer_cache = None
             else:
                 _ai_summarizer_cache = None
             return _ai_summarizer_cache
+
         return _measure_import("common.ai.summarizer", _import)
     return _ai_summarizer_cache
 
@@ -1096,6 +1148,7 @@ def get_DiscordNotifier():
     """Lazy import DiscordNotifier with caching."""
     global _discord_notifier_cache
     if _discord_notifier_cache is None:
+
         def _import():
             global _discord_notifier_cache
             ensure_env_loaded()
@@ -1112,6 +1165,7 @@ def get_DiscordNotifier():
             else:
                 _discord_notifier_cache = None
             return _discord_notifier_cache
+
         return _measure_import("common.notifications.discord", _import)
     return _discord_notifier_cache
 
@@ -1123,13 +1177,13 @@ def log_bootstrap_import_time():
     """Log total bootstrap module import time."""
     total_time = time.time() - _bootstrap_import_start_time
     logging.info(f"⏱️  Bootstrap module total import time: {total_time:.3f}s")
-    
+
     # Log individual import times
     if _import_times:
         logging.info("📊 Individual import times:")
         for module, duration in sorted(_import_times.items(), key=lambda x: x[1], reverse=True):
             logging.info(f"   - {module}: {duration:.3f}s")
-    
+
     return total_time
 
 
@@ -1162,15 +1216,15 @@ except Exception as e:
 # We wrap this in a try-except to handle cases where the modules aren't available
 try:
     _resilience_initialized = False
-    
+
     def _ensure_resilience_initialized():
         """Ensure resilience patterns are initialized."""
         global _resilience_initialized, CircuitBreaker, CircuitBreakerOpenError
         global DeadLetterQueue, CrawlError, DegradationLevel, GracefulDegradation
-        
+
         if _resilience_initialized:
             return
-        
+
         try:
             CircuitBreaker = get_CircuitBreaker()
             CircuitBreakerOpenError = get_CircuitBreakerOpenError()
@@ -1188,10 +1242,10 @@ try:
             CrawlError = None
             DegradationLevel = None
             GracefulDegradation = None
-    
+
     # Initialize immediately for import availability
     _ensure_resilience_initialized()
-    
+
 except Exception as e:
     logging.warning(f"⚠️ Could not initialize resilience patterns: {e}")
     # Fallback to None - will be initialized on first use

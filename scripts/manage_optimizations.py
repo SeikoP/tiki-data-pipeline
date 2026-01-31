@@ -6,9 +6,8 @@ This script helps manage performance optimization feature flags in Airflow.
 """
 
 import argparse
-import sys
 import subprocess
-from typing import Dict, List
+import sys
 
 
 class OptimizationManager:

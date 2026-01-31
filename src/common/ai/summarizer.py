@@ -164,7 +164,7 @@ class AISummarizer:
         # Get price and category analysis
         price_analysis = data_summary.get("price_analysis", {})
         category_analysis = data_summary.get("category_analysis", {})
-        
+
         # Get trends
         trends = data_summary.get("trends", {})
         has_trends = trends.get("has_previous_data", False)

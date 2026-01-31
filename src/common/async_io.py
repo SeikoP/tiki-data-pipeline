@@ -7,31 +7,30 @@ for improved concurrency and throughput in network operations.
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import aiohttp
-
 
 logger = logging.getLogger(__name__)
 
 
 class AsyncHTTPClient:
     """Async HTTP client with connection pooling and rate limiting.
-    
+
     This client uses aiohttp for non-blocking HTTP requests, enabling
     high concurrency for network-bound operations.
     """
-    
+
     def __init__(
         self,
         connector_limit: int = 300,
         timeout_total: int = 15,
         timeout_connect: int = 10,
-        rate_limiter: Optional[Any] = None
+        rate_limiter: Any | None = None,
     ):
         """Initialize async HTTP client with connection pooling.
-        
+
         Args:
             connector_limit: Maximum concurrent connections
             timeout_total: Total request timeout in seconds
@@ -40,44 +39,35 @@ class AsyncHTTPClient:
         """
         self.connector_limit = connector_limit
         self.rate_limiter = rate_limiter
-        
+
         # Create timeout configuration
-        self.timeout = aiohttp.ClientTimeout(
-            total=timeout_total,
-            connect=timeout_connect
-        )
-        
+        self.timeout = aiohttp.ClientTimeout(total=timeout_total, connect=timeout_connect)
+
         # Session will be created lazily
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._connector: Optional[aiohttp.TCPConnector] = None
-    
+        self._session: aiohttp.ClientSession | None = None
+        self._connector: aiohttp.TCPConnector | None = None
+
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """Ensure session is created (lazy initialization)."""
         if self._session is None or self._session.closed:
             self._connector = aiohttp.TCPConnector(
                 limit=self.connector_limit,
                 limit_per_host=30,  # Reasonable per-host limit
-                ttl_dns_cache=300  # Cache DNS for 5 minutes
+                ttl_dns_cache=300,  # Cache DNS for 5 minutes
             )
-            self._session = aiohttp.ClientSession(
-                connector=self._connector,
-                timeout=self.timeout
-            )
+            self._session = aiohttp.ClientSession(connector=self._connector, timeout=self.timeout)
         return self._session
-    
+
     async def get(
-        self,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        **kwargs
-    ) -> Optional[aiohttp.ClientResponse]:
+        self, url: str, headers: dict[str, str] | None = None, **kwargs
+    ) -> aiohttp.ClientResponse | None:
         """Async GET request with rate limiting.
-        
+
         Args:
             url: URL to fetch
             headers: Optional HTTP headers
             **kwargs: Additional arguments passed to aiohttp.ClientSession.get
-            
+
         Returns:
             ClientResponse object or None on error
         """
@@ -88,13 +78,13 @@ class AsyncHTTPClient:
                 await asyncio.to_thread(self.rate_limiter.wait, domain)
             except Exception as e:
                 logger.warning(f"Rate limiter error: {e}")
-        
+
         session = await self._ensure_session()
-        
+
         try:
             response = await session.get(url, headers=headers, **kwargs)
             return response
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"Timeout fetching {url}")
             return None
         except aiohttp.ClientError as e:
@@ -103,37 +93,34 @@ class AsyncHTTPClient:
         except Exception as e:
             logger.error(f"Unexpected error fetching {url}: {e}")
             return None
-    
+
     async def get_many(
-        self,
-        urls: List[str],
-        headers: Optional[Dict[str, str]] = None,
-        **kwargs
-    ) -> List[Optional[Dict[str, Any]]]:
+        self, urls: list[str], headers: dict[str, str] | None = None, **kwargs
+    ) -> list[dict[str, Any] | None]:
         """Fetch multiple URLs concurrently with connector limit enforcement.
-        
+
         Uses a semaphore to ensure concurrent requests don't exceed the
         configured connector limit.
-        
+
         Args:
             urls: List of URLs to fetch
             headers: Optional HTTP headers
             **kwargs: Additional arguments passed to get()
-            
+
         Returns:
             List of response data (dicts) in same order as input URLs.
             Failed requests return None.
         """
         # Create semaphore to limit concurrency
         semaphore = asyncio.Semaphore(self.connector_limit)
-        
+
         async def fetch_with_limit(url):
             async with semaphore:
                 return await self._fetch_json(url, headers, **kwargs)
-        
+
         tasks = [fetch_with_limit(url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Convert exceptions to None
         processed_results = []
         for result in results:
@@ -142,29 +129,26 @@ class AsyncHTTPClient:
                 processed_results.append(None)
             else:
                 processed_results.append(result)
-        
+
         return processed_results
-    
+
     async def _fetch_json(
-        self,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        **kwargs
-    ) -> Optional[Dict[str, Any]]:
+        self, url: str, headers: dict[str, str] | None = None, **kwargs
+    ) -> dict[str, Any] | None:
         """Fetch URL and parse JSON response.
-        
+
         Args:
             url: URL to fetch
             headers: Optional HTTP headers
             **kwargs: Additional arguments
-            
+
         Returns:
             Parsed JSON data or None on error
         """
         response = await self.get(url, headers=headers, **kwargs)
         if response is None:
             return None
-        
+
         try:
             if response.status == 200:
                 data = await response.json()
@@ -177,12 +161,12 @@ class AsyncHTTPClient:
             return None
         finally:
             response.close()
-    
+
     async def close(self) -> None:
         """Close session and cleanup connections."""
         if self._session and not self._session.closed:
             await self._session.close()
-        
+
         # Wait for connections to close gracefully
         if self._connector:
             await asyncio.sleep(0.25)
@@ -192,18 +176,18 @@ async def get_with_retry(
     client: AsyncHTTPClient,
     url: str,
     max_retries: int = 3,
-    headers: Optional[Dict[str, str]] = None,
-    **kwargs
-) -> Optional[Dict[str, Any]]:
+    headers: dict[str, str] | None = None,
+    **kwargs,
+) -> dict[str, Any] | None:
     """Fetch URL with exponential backoff retry.
-    
+
     Args:
         client: AsyncHTTPClient instance
         url: URL to fetch
         max_retries: Maximum number of retry attempts
         headers: Optional HTTP headers
         **kwargs: Additional arguments
-        
+
     Returns:
         Parsed JSON data or None after all retries exhausted
     """
@@ -212,7 +196,7 @@ async def get_with_retry(
             response = await client.get(url, headers=headers, **kwargs)
             if response is None:
                 raise aiohttp.ClientError("No response received")
-            
+
             if response.status == 200:
                 data = await response.json()
                 response.close()
@@ -224,36 +208,35 @@ async def get_with_retry(
             else:
                 response.close()
                 raise aiohttp.ClientError(f"HTTP {response.status}")
-                
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+
+        except (TimeoutError, aiohttp.ClientError) as e:
             if attempt == max_retries - 1:
                 logger.error(f"Failed to fetch {url} after {max_retries} attempts: {e}")
                 return None
-            
+
             # Exponential backoff: 2^attempt seconds
-            wait_time = 2 ** attempt
+            wait_time = 2**attempt
             logger.warning(f"Retry {attempt + 1}/{max_retries} for {url} after {wait_time}s: {e}")
             await asyncio.sleep(wait_time)
-    
-    return None
 
+    return None
 
 
 class AsyncCrawlerAdapter:
     """Adapter to wrap existing crawler with async I/O capabilities.
-    
+
     This adapter provides async methods for crawling products using
     the AsyncHTTPClient for improved concurrency.
     """
-    
+
     def __init__(
         self,
-        client: Optional[AsyncHTTPClient] = None,
+        client: AsyncHTTPClient | None = None,
         batch_size: int = 50,
-        connector_limit: int = 300
+        connector_limit: int = 300,
     ):
         """Initialize async crawler adapter.
-        
+
         Args:
             client: Optional AsyncHTTPClient instance (created if not provided)
             batch_size: Number of products to process concurrently
@@ -262,23 +245,23 @@ class AsyncCrawlerAdapter:
         self.client = client or AsyncHTTPClient(connector_limit=connector_limit)
         self.batch_size = batch_size
         self._owns_client = client is None
-    
+
     async def crawl_products_async(
         self,
-        product_ids: List[str],
+        product_ids: list[str],
         base_url_template: str = "https://tiki.vn/api/v2/products/{product_id}",
-        headers: Optional[Dict[str, str]] = None
+        headers: dict[str, str] | None = None,
     ):
         """Crawl products using async I/O (streaming generator).
-        
+
         Yields products as they are fetched, enabling streaming processing
         without loading all data into memory.
-        
+
         Args:
             product_ids: List of product IDs to crawl
             base_url_template: URL template with {product_id} placeholder
             headers: Optional HTTP headers
-            
+
         Yields:
             Product data dictionaries as they are fetched
         """
@@ -288,19 +271,19 @@ class AsyncCrawlerAdapter:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Accept": "application/json, text/plain, */*",
             }
-        
+
         # Process in batches for controlled concurrency
         for i in range(0, len(product_ids), self.batch_size):
-            batch = product_ids[i:i + self.batch_size]
-            
+            batch = product_ids[i : i + self.batch_size]
+
             # Build URLs for this batch
             urls = [base_url_template.format(product_id=pid) for pid in batch]
-            
+
             # Fetch batch concurrently
             results = await self.client.get_many(urls, headers=headers)
-            
+
             # Yield products as they are processed
-            for product_id, result in zip(batch, results):
+            for product_id, result in zip(batch, results, strict=False):
                 if result is not None:
                     # Add product_id to result if not present
                     if "id" not in result and "product_id" not in result:
@@ -309,22 +292,22 @@ class AsyncCrawlerAdapter:
                 else:
                     # Log failed fetch but continue processing
                     logger.warning(f"Failed to fetch product {product_id}")
-    
+
     async def crawl_category_products_async(
         self,
         category_id: str,
         max_pages: int = 5,
         items_per_page: int = 48,
-        headers: Optional[Dict[str, str]] = None
+        headers: dict[str, str] | None = None,
     ):
         """Crawl products from a category using Tiki listing API.
-        
+
         Args:
             category_id: Category ID to crawl
             max_pages: Maximum number of pages to fetch
             items_per_page: Number of items per page
             headers: Optional HTTP headers
-            
+
         Yields:
             Product data dictionaries as they are fetched
         """
@@ -335,7 +318,7 @@ class AsyncCrawlerAdapter:
                 "Accept": "application/json, text/plain, */*",
                 "X-Guest-Token": "no-token",
             }
-        
+
         # Build URLs for all pages
         urls = []
         for page in range(1, max_pages + 1):
@@ -349,31 +332,31 @@ class AsyncCrawlerAdapter:
                 f"page={page}"
             )
             urls.append(url)
-        
+
         # Fetch all pages concurrently
         results = await self.client.get_many(urls, headers=headers)
-        
+
         # Process results and yield products
         for page_num, result in enumerate(results, start=1):
             if result is None:
                 logger.warning(f"Failed to fetch page {page_num} for category {category_id}")
                 continue
-            
+
             products_data = result.get("data", [])
             if not products_data:
                 # No more products, stop
                 break
-            
+
             for item in products_data:
                 # Extract and normalize product data
                 product_id = str(item.get("id", ""))
                 if not product_id:
                     continue
-                
+
                 product_url = item.get("url_path", "")
                 if product_url and not product_url.startswith("http"):
                     product_url = f"https://tiki.vn/{product_url}"
-                
+
                 # Extract sales count
                 sales_count = None
                 quantity_sold = item.get("quantity_sold")
@@ -381,7 +364,7 @@ class AsyncCrawlerAdapter:
                     sales_count = int(quantity_sold.get("value", 0))
                 elif quantity_sold is not None:
                     sales_count = quantity_sold
-                
+
                 product = {
                     "product_id": product_id,
                     "name": item.get("name", ""),
@@ -394,31 +377,31 @@ class AsyncCrawlerAdapter:
                     "review_count": item.get("review_count"),
                     "extraction_method": "async_listing_api",
                 }
-                
+
                 yield product
-            
+
             # Check pagination metadata to see if we should continue
             paging = result.get("paging", {})
             current_page = paging.get("current_page", page_num)
             last_page = paging.get("last_page", 1)
-            
+
             if current_page >= last_page:
                 break
-    
+
     async def close(self) -> None:
         """Close the HTTP client if owned by this adapter."""
         if self._owns_client:
             await self.client.close()
 
 
-def chunk_list(items: List[Any], chunk_size: int) -> List[List[Any]]:
+def chunk_list(items: list[Any], chunk_size: int) -> list[list[Any]]:
     """Split a list into chunks of specified size.
-    
+
     Args:
         items: List to chunk
         chunk_size: Size of each chunk
-        
+
     Returns:
         List of chunks
     """
-    return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
+    return [items[i : i + chunk_size] for i in range(0, len(items), chunk_size)]

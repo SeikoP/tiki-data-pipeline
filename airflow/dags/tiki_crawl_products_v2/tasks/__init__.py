@@ -25,7 +25,7 @@ from .loader import (
     load_categories_to_db_wrapper,
     load_products,
 )
-from .maintenance import (
+from .maintenance import (  # validate_data - REMOVED: Not critical, only counted valid/invalid products
     backup_database,
     cleanup_incomplete_products_wrapper,
     cleanup_old_history_wrapper,
@@ -33,7 +33,6 @@ from .maintenance import (
     cleanup_redis_cache,
     cleanup_redundant_categories_wrapper,
     reconcile_categories_wrapper,
-    # validate_data - REMOVED: Not critical, only counted valid/invalid products
 )
 from .monitoring import aggregate_and_notify
 from .product import merge_products, save_products, transform_products

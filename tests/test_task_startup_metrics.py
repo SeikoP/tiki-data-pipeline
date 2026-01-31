@@ -11,9 +11,11 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import pytest
 from datetime import datetime, timedelta
-from common.task_startup_metrics import TaskStartupMetric, AggregatedMetrics
+
+import pytest
+
+from common.task_startup_metrics import AggregatedMetrics, TaskStartupMetric
 
 
 class TestTaskStartupMetric:
@@ -23,16 +25,16 @@ class TestTaskStartupMetric:
         """Test that TaskStartupMetric can be instantiated with valid data"""
         queued_time = datetime(2024, 1, 1, 10, 0, 0)
         start_time = datetime(2024, 1, 1, 10, 0, 5)
-        
+
         metric = TaskStartupMetric(
             dag_id="test_dag",
             task_id="test_task",
             run_id="test_run_123",
             queued_time=queued_time,
             start_time=start_time,
-            startup_latency_seconds=5.0
+            startup_latency_seconds=5.0,
         )
-        
+
         assert metric.dag_id == "test_dag"
         assert metric.task_id == "test_task"
         assert metric.run_id == "test_run_123"
@@ -48,9 +50,9 @@ class TestTaskStartupMetric:
             run_id="test_run_123",
             queued_time=datetime.now(),
             start_time=datetime.now(),
-            startup_latency_seconds=2.5
+            startup_latency_seconds=2.5,
         )
-        
+
         assert metric.startup_latency_ms == 2500.0
 
     def test_startup_latency_ms_with_zero(self):
@@ -61,9 +63,9 @@ class TestTaskStartupMetric:
             run_id="test_run_123",
             queued_time=datetime.now(),
             start_time=datetime.now(),
-            startup_latency_seconds=0.0
+            startup_latency_seconds=0.0,
         )
-        
+
         assert metric.startup_latency_ms == 0.0
 
     def test_startup_latency_ms_with_fractional_seconds(self):
@@ -74,14 +76,15 @@ class TestTaskStartupMetric:
             run_id="test_run_123",
             queued_time=datetime.now(),
             start_time=datetime.now(),
-            startup_latency_seconds=0.123
+            startup_latency_seconds=0.123,
         )
-        
+
         assert metric.startup_latency_ms == 123.0
 
     def test_task_startup_metric_is_dataclass(self):
         """Test that TaskStartupMetric is a dataclass"""
         from dataclasses import is_dataclass
+
         assert is_dataclass(TaskStartupMetric)
 
 
@@ -97,9 +100,9 @@ class TestAggregatedMetrics:
             p95_startup_latency_seconds=5.0,
             p99_startup_latency_seconds=7.0,
             min_startup_latency_seconds=0.5,
-            max_startup_latency_seconds=10.0
+            max_startup_latency_seconds=10.0,
         )
-        
+
         assert metrics.total_tasks == 100
         assert metrics.avg_startup_latency_seconds == 2.5
         assert metrics.median_startup_latency_seconds == 2.0
@@ -116,11 +119,11 @@ class TestAggregatedMetrics:
             run_id="test_run_1",
             queued_time=datetime.now(),
             start_time=datetime.now(),
-            startup_latency_seconds=3.0
+            startup_latency_seconds=3.0,
         )
-        
+
         aggregated = AggregatedMetrics.from_metrics([metric])
-        
+
         assert aggregated.total_tasks == 1
         assert aggregated.avg_startup_latency_seconds == 3.0
         assert aggregated.median_startup_latency_seconds == 3.0
@@ -137,13 +140,13 @@ class TestAggregatedMetrics:
                 run_id=f"run_{i}",
                 queued_time=base_time,
                 start_time=base_time + timedelta(seconds=i),
-                startup_latency_seconds=float(i)
+                startup_latency_seconds=float(i),
             )
             for i in range(1, 6)  # 1.0, 2.0, 3.0, 4.0, 5.0
         ]
-        
+
         aggregated = AggregatedMetrics.from_metrics(metrics)
-        
+
         assert aggregated.total_tasks == 5
         assert aggregated.avg_startup_latency_seconds == 3.0
         assert aggregated.median_startup_latency_seconds == 3.0
@@ -161,13 +164,13 @@ class TestAggregatedMetrics:
                 run_id=f"run_{i}",
                 queued_time=base_time,
                 start_time=base_time + timedelta(seconds=i),
-                startup_latency_seconds=float(i)
+                startup_latency_seconds=float(i),
             )
             for i in range(1, 101)
         ]
-        
+
         aggregated = AggregatedMetrics.from_metrics(metrics)
-        
+
         assert aggregated.total_tasks == 100
         # int(100 * 0.95) = 95, so we get index 95 which is value 96.0
         assert aggregated.p95_startup_latency_seconds == 96.0
@@ -189,13 +192,13 @@ class TestAggregatedMetrics:
                 run_id=f"run_{i}",
                 queued_time=base_time,
                 start_time=base_time + timedelta(seconds=2),
-                startup_latency_seconds=2.0
+                startup_latency_seconds=2.0,
             )
             for i in range(10)
         ]
-        
+
         aggregated = AggregatedMetrics.from_metrics(metrics)
-        
+
         assert aggregated.total_tasks == 10
         assert aggregated.avg_startup_latency_seconds == 2.0
         assert aggregated.median_startup_latency_seconds == 2.0
@@ -214,7 +217,7 @@ class TestAggregatedMetrics:
                 run_id="run_1",
                 queued_time=base_time,
                 start_time=base_time,
-                startup_latency_seconds=5.0
+                startup_latency_seconds=5.0,
             ),
             TaskStartupMetric(
                 dag_id="test_dag",
@@ -222,7 +225,7 @@ class TestAggregatedMetrics:
                 run_id="run_2",
                 queued_time=base_time,
                 start_time=base_time,
-                startup_latency_seconds=1.0
+                startup_latency_seconds=1.0,
             ),
             TaskStartupMetric(
                 dag_id="test_dag",
@@ -230,12 +233,12 @@ class TestAggregatedMetrics:
                 run_id="run_3",
                 queued_time=base_time,
                 start_time=base_time,
-                startup_latency_seconds=3.0
+                startup_latency_seconds=3.0,
             ),
         ]
-        
+
         aggregated = AggregatedMetrics.from_metrics(metrics)
-        
+
         assert aggregated.min_startup_latency_seconds == 1.0
         assert aggregated.max_startup_latency_seconds == 5.0
         assert aggregated.median_startup_latency_seconds == 3.0
@@ -243,6 +246,7 @@ class TestAggregatedMetrics:
     def test_aggregated_metrics_is_dataclass(self):
         """Test that AggregatedMetrics is a dataclass"""
         from dataclasses import is_dataclass
+
         assert is_dataclass(AggregatedMetrics)
 
 
@@ -252,10 +256,10 @@ class TestIntegration:
     def test_realistic_task_metrics_scenario(self):
         """Test a realistic scenario with varying task startup latencies"""
         base_time = datetime(2024, 1, 1, 10, 0, 0)
-        
+
         # Simulate realistic task startup latencies (in seconds)
         latencies = [1.2, 1.5, 2.0, 2.3, 1.8, 3.5, 2.1, 1.9, 2.5, 4.0]
-        
+
         metrics = [
             TaskStartupMetric(
                 dag_id="data_pipeline",
@@ -263,13 +267,13 @@ class TestIntegration:
                 run_id=f"scheduled__2024-01-01T10:00:00+00:00_{i}",
                 queued_time=base_time + timedelta(minutes=i),
                 start_time=base_time + timedelta(minutes=i, seconds=latency),
-                startup_latency_seconds=latency
+                startup_latency_seconds=latency,
             )
             for i, latency in enumerate(latencies)
         ]
-        
+
         aggregated = AggregatedMetrics.from_metrics(metrics)
-        
+
         assert aggregated.total_tasks == 10
         assert aggregated.min_startup_latency_seconds == 1.2
         assert aggregated.max_startup_latency_seconds == 4.0
@@ -279,7 +283,7 @@ class TestIntegration:
     def test_metrics_with_different_dags(self):
         """Test metrics from different DAGs can be aggregated"""
         base_time = datetime.now()
-        
+
         metrics = [
             TaskStartupMetric(
                 dag_id="dag_1",
@@ -287,7 +291,7 @@ class TestIntegration:
                 run_id="run_1",
                 queued_time=base_time,
                 start_time=base_time + timedelta(seconds=2),
-                startup_latency_seconds=2.0
+                startup_latency_seconds=2.0,
             ),
             TaskStartupMetric(
                 dag_id="dag_2",
@@ -295,7 +299,7 @@ class TestIntegration:
                 run_id="run_2",
                 queued_time=base_time,
                 start_time=base_time + timedelta(seconds=3),
-                startup_latency_seconds=3.0
+                startup_latency_seconds=3.0,
             ),
             TaskStartupMetric(
                 dag_id="dag_3",
@@ -303,12 +307,12 @@ class TestIntegration:
                 run_id="run_3",
                 queued_time=base_time,
                 start_time=base_time + timedelta(seconds=4),
-                startup_latency_seconds=4.0
+                startup_latency_seconds=4.0,
             ),
         ]
-        
+
         aggregated = AggregatedMetrics.from_metrics(metrics)
-        
+
         assert aggregated.total_tasks == 3
         assert aggregated.avg_startup_latency_seconds == 3.0
 
@@ -317,61 +321,58 @@ if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
-
 class TestTaskStartupMetrics:
     """Test suite for TaskStartupMetrics class"""
 
     def setup_method(self):
         """Reset singleton instance before each test"""
         from common.task_startup_metrics import TaskStartupMetrics
+
         TaskStartupMetrics._instance = None
 
     def test_singleton_pattern(self):
         """Test that TaskStartupMetrics implements singleton pattern"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics1 = TaskStartupMetrics()
         metrics2 = TaskStartupMetrics()
-        
+
         assert metrics1 is metrics2
 
     def test_record_queue_time(self):
         """Test recording queue time for a task"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         queued_time = datetime(2024, 1, 1, 10, 0, 0)
-        
+
         # Should not raise any exceptions
         metrics.record_queue_time(
-            dag_id="test_dag",
-            task_id="test_task",
-            run_id="test_run_1",
-            queued_dttm=queued_time
+            dag_id="test_dag", task_id="test_task", run_id="test_run_1", queued_dttm=queued_time
         )
-        
+
         # Verify queue time is stored
         key = "test_dag:test_task:test_run_1"
-        assert hasattr(metrics, '_queue_times')
+        assert hasattr(metrics, "_queue_times")
         assert key in metrics._queue_times
         assert metrics._queue_times[key] == queued_time
 
     def test_record_start_time_with_queue_time(self):
         """Test recording start time when queue time is provided"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         queued_time = datetime(2024, 1, 1, 10, 0, 0)
         start_time = datetime(2024, 1, 1, 10, 0, 5)
-        
+
         metrics.record_start_time(
             dag_id="test_dag",
             task_id="test_task",
             run_id="test_run_1",
             start_date=start_time,
-            queued_dttm=queued_time
+            queued_dttm=queued_time,
         )
-        
+
         # Verify metric was added to buffer
         assert len(metrics._metrics_buffer) == 1
         metric = metrics._metrics_buffer[0]
@@ -383,32 +384,26 @@ class TestTaskStartupMetrics:
     def test_record_start_time_with_cached_queue_time(self):
         """Test recording start time using cached queue time"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         queued_time = datetime(2024, 1, 1, 10, 0, 0)
         start_time = datetime(2024, 1, 1, 10, 0, 3)
-        
+
         # First record queue time
         metrics.record_queue_time(
-            dag_id="test_dag",
-            task_id="test_task",
-            run_id="test_run_1",
-            queued_dttm=queued_time
+            dag_id="test_dag", task_id="test_task", run_id="test_run_1", queued_dttm=queued_time
         )
-        
+
         # Then record start time without providing queue time
         metrics.record_start_time(
-            dag_id="test_dag",
-            task_id="test_task",
-            run_id="test_run_1",
-            start_date=start_time
+            dag_id="test_dag", task_id="test_task", run_id="test_run_1", start_date=start_time
         )
-        
+
         # Verify metric was calculated correctly
         assert len(metrics._metrics_buffer) == 1
         metric = metrics._metrics_buffer[0]
         assert metric.startup_latency_seconds == 3.0
-        
+
         # Verify queue time was cleaned up from cache
         key = "test_dag:test_task:test_run_1"
         assert key not in metrics._queue_times
@@ -416,44 +411,41 @@ class TestTaskStartupMetrics:
     def test_record_start_time_without_queue_time(self):
         """Test recording start time when no queue time is available"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         start_time = datetime(2024, 1, 1, 10, 0, 5)
-        
+
         # Should log warning but not raise exception
         metrics.record_start_time(
-            dag_id="test_dag",
-            task_id="test_task",
-            run_id="test_run_1",
-            start_date=start_time
+            dag_id="test_dag", task_id="test_task", run_id="test_run_1", start_date=start_time
         )
-        
+
         # Verify no metric was added
         assert len(metrics._metrics_buffer) == 0
 
     def test_rolling_buffer_maintains_100_tasks(self):
         """Test that rolling buffer maintains only last 100 tasks"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         base_time = datetime(2024, 1, 1, 10, 0, 0)
-        
+
         # Add 150 tasks
         for i in range(150):
             queued_time = base_time + timedelta(minutes=i)
             start_time = queued_time + timedelta(seconds=2)
-            
+
             metrics.record_start_time(
                 dag_id="test_dag",
                 task_id=f"task_{i}",
                 run_id=f"run_{i}",
                 start_date=start_time,
-                queued_dttm=queued_time
+                queued_dttm=queued_time,
             )
-        
+
         # Verify only last 100 are kept
         assert len(metrics._metrics_buffer) == 100
-        
+
         # Verify oldest tasks were removed (first 50)
         task_ids = [m.task_id for m in metrics._metrics_buffer]
         assert "task_0" not in task_ids
@@ -464,23 +456,23 @@ class TestTaskStartupMetrics:
     def test_get_rolling_average_with_metrics(self):
         """Test getting rolling average when metrics exist"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         base_time = datetime(2024, 1, 1, 10, 0, 0)
-        
+
         # Add tasks with latencies: 1.0, 2.0, 3.0, 4.0, 5.0
         for i in range(1, 6):
             queued_time = base_time + timedelta(minutes=i)
             start_time = queued_time + timedelta(seconds=i)
-            
+
             metrics.record_start_time(
                 dag_id="test_dag",
                 task_id=f"task_{i}",
                 run_id=f"run_{i}",
                 start_date=start_time,
-                queued_dttm=queued_time
+                queued_dttm=queued_time,
             )
-        
+
         avg = metrics.get_rolling_average()
         assert avg is not None
         assert avg == 3.0  # (1+2+3+4+5)/5
@@ -488,7 +480,7 @@ class TestTaskStartupMetrics:
     def test_get_rolling_average_without_metrics(self):
         """Test getting rolling average when no metrics exist"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         avg = metrics.get_rolling_average()
         assert avg is None
@@ -496,23 +488,23 @@ class TestTaskStartupMetrics:
     def test_get_aggregated_metrics_with_metrics(self):
         """Test getting aggregated metrics when metrics exist"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         base_time = datetime(2024, 1, 1, 10, 0, 0)
-        
+
         # Add 10 tasks with latencies from 1 to 10
         for i in range(1, 11):
             queued_time = base_time + timedelta(minutes=i)
             start_time = queued_time + timedelta(seconds=i)
-            
+
             metrics.record_start_time(
                 dag_id="test_dag",
                 task_id=f"task_{i}",
                 run_id=f"run_{i}",
                 start_date=start_time,
-                queued_dttm=queued_time
+                queued_dttm=queued_time,
             )
-        
+
         agg = metrics.get_aggregated_metrics()
         assert agg is not None
         assert agg.total_tasks == 10
@@ -523,7 +515,7 @@ class TestTaskStartupMetrics:
     def test_get_aggregated_metrics_without_metrics(self):
         """Test getting aggregated metrics when no metrics exist"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         agg = metrics.get_aggregated_metrics()
         assert agg is None
@@ -531,64 +523,61 @@ class TestTaskStartupMetrics:
     def test_clear_metrics(self):
         """Test clearing all metrics"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         base_time = datetime(2024, 1, 1, 10, 0, 0)
-        
+
         # Add some metrics
         for i in range(5):
             queued_time = base_time + timedelta(minutes=i)
             start_time = queued_time + timedelta(seconds=2)
-            
+
             metrics.record_queue_time(
-                dag_id="test_dag",
-                task_id=f"task_{i}",
-                run_id=f"run_{i}",
-                queued_dttm=queued_time
+                dag_id="test_dag", task_id=f"task_{i}", run_id=f"run_{i}", queued_dttm=queued_time
             )
-            
+
             metrics.record_start_time(
                 dag_id="test_dag",
                 task_id=f"task_{i}",
                 run_id=f"run_{i}",
                 start_date=start_time,
-                queued_dttm=queued_time
+                queued_dttm=queued_time,
             )
-        
+
         assert len(metrics._metrics_buffer) == 5
-        
+
         # Clear metrics
         metrics.clear_metrics()
-        
+
         assert len(metrics._metrics_buffer) == 0
         assert len(metrics._queue_times) == 0
 
     def test_multiple_dags_and_tasks(self):
         """Test tracking metrics for multiple DAGs and tasks"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         base_time = datetime(2024, 1, 1, 10, 0, 0)
-        
+
         dags = ["dag_1", "dag_2", "dag_3"]
         tasks = ["task_a", "task_b"]
-        
+
         for dag in dags:
             for task in tasks:
                 queued_time = base_time
                 start_time = queued_time + timedelta(seconds=2)
-                
+
                 metrics.record_start_time(
                     dag_id=dag,
                     task_id=task,
                     run_id=f"run_{dag}_{task}",
                     start_date=start_time,
-                    queued_dttm=queued_time
+                    queued_dttm=queued_time,
                 )
-        
+
         # Should have 6 metrics (3 dags * 2 tasks)
         assert len(metrics._metrics_buffer) == 6
-        
+
         # All should have same latency
         avg = metrics.get_rolling_average()
         assert avg == 2.0
@@ -596,19 +585,19 @@ class TestTaskStartupMetrics:
     def test_fractional_latency_seconds(self):
         """Test that fractional latency seconds are handled correctly"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         queued_time = datetime(2024, 1, 1, 10, 0, 0)
         start_time = datetime(2024, 1, 1, 10, 0, 0, 500000)  # 0.5 seconds later
-        
+
         metrics.record_start_time(
             dag_id="test_dag",
             task_id="test_task",
             run_id="test_run_1",
             start_date=start_time,
-            queued_dttm=queued_time
+            queued_dttm=queued_time,
         )
-        
+
         assert len(metrics._metrics_buffer) == 1
         metric = metrics._metrics_buffer[0]
         assert metric.startup_latency_seconds == 0.5
@@ -616,18 +605,18 @@ class TestTaskStartupMetrics:
     def test_zero_latency(self):
         """Test handling of zero latency (queue and start at same time)"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         same_time = datetime(2024, 1, 1, 10, 0, 0)
-        
+
         metrics.record_start_time(
             dag_id="test_dag",
             task_id="test_task",
             run_id="test_run_1",
             start_date=same_time,
-            queued_dttm=same_time
+            queued_dttm=same_time,
         )
-        
+
         assert len(metrics._metrics_buffer) == 1
         metric = metrics._metrics_buffer[0]
         assert metric.startup_latency_seconds == 0.0
@@ -635,19 +624,19 @@ class TestTaskStartupMetrics:
     def test_large_latency(self):
         """Test handling of large latency values"""
         from common.task_startup_metrics import TaskStartupMetrics
-        
+
         metrics = TaskStartupMetrics()
         queued_time = datetime(2024, 1, 1, 10, 0, 0)
         start_time = datetime(2024, 1, 1, 11, 0, 0)  # 1 hour later
-        
+
         metrics.record_start_time(
             dag_id="test_dag",
             task_id="test_task",
             run_id="test_run_1",
             start_date=start_time,
-            queued_dttm=queued_time
+            queued_dttm=queued_time,
         )
-        
+
         assert len(metrics._metrics_buffer) == 1
         metric = metrics._metrics_buffer[0]
         assert metric.startup_latency_seconds == 3600.0  # 1 hour in seconds

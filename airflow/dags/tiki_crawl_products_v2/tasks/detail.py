@@ -6,7 +6,6 @@ from tiki_crawl_products_v2.bootstrap import (
     DETAIL_CACHE_DIR,
     OUTPUT_FILE,
     OUTPUT_FILE_WITH_DETAIL,
-    PROGRESS_FILE,
     Any,
     CircuitBreakerOpenError,
     Path,
@@ -27,7 +26,6 @@ from tiki_crawl_products_v2.bootstrap import (
     json,
     os,
     re,
-    redis_cache,
     shutil,
     time,
 )
@@ -219,7 +217,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         logger.info(f"🔄 Bắt đầu kiểm tra {len(products)} products...")
 
         # Duyệt tất cả products để tìm products cần crawl
-        for idx, product in enumerate(products):
+        for _idx, product in enumerate(products):
             product_id = product.get("product_id")
             product_url = product.get("url")
 
@@ -279,7 +277,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             logger.warning("⚠️  NO PRODUCTS TO CRAWL!")
             logger.info(f"   All {len(products)} products are already in DB with recent data")
             logger.info(
-                f"   Hint: Set TIKI_FORCE_CRAWL=true to recrawl all, or reduce TIKI_CACHE_RELAX_DAYS"
+                "   Hint: Set TIKI_FORCE_CRAWL=true to recrawl all, or reduce TIKI_CACHE_RELAX_DAYS"
             )
 
         # Debug: Log một vài products đầu tiên
@@ -897,47 +895,43 @@ def crawl_single_product_detail(product_info: dict[str, Any] = None, **context) 
     if force_refresh:
         logger.info(f"🔄 FORCE REFRESH MODE: Bỏ qua cache cho product {product_id}")
     else:
-        logger.info(f"🔄 FRESH CRAWL MODE: Crawling fresh data to track price changes")
+        logger.info("🔄 FRESH CRAWL MODE: Crawling fresh data to track price changes")
 
     # Fallback: Kiểm tra file cache nếu Redis không available hoặc không có cache
     # File cache chỉ dùng cho debugging, không dùng để skip crawl
     if not force_refresh:
-            cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
-            if cache_file.exists():
-                try:
-                    with open(cache_file, encoding="utf-8") as f:
-                        cached_detail = json.load(f)
-                        has_price = cached_detail.get("price", {}).get("current_price")
-                        has_sales_count = cached_detail.get("sales_count") is not None
-                        brand_value = cached_detail.get("brand")
-                        has_brand = bool(
-                            brand_value
-                            and (not isinstance(brand_value, str) or brand_value.strip())
-                        )
-                        seller_info = cached_detail.get("seller", {})
-                        seller_name = (
-                            seller_info.get("name") if isinstance(seller_info, dict) else None
-                        )
-                        has_seller = bool(
-                            seller_name
-                            and (not isinstance(seller_name, str) or seller_name.strip())
-                        )
+        cache_file = DETAIL_CACHE_DIR / f"{product_id}.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file, encoding="utf-8") as f:
+                    cached_detail = json.load(f)
+                    has_price = cached_detail.get("price", {}).get("current_price")
+                    has_sales_count = cached_detail.get("sales_count") is not None
+                    brand_value = cached_detail.get("brand")
+                    has_brand = bool(
+                        brand_value and (not isinstance(brand_value, str) or brand_value.strip())
+                    )
+                    seller_info = cached_detail.get("seller", {})
+                    seller_name = seller_info.get("name") if isinstance(seller_info, dict) else None
+                    has_seller = bool(
+                        seller_name and (not isinstance(seller_name, str) or seller_name.strip())
+                    )
 
-                        if has_price and has_sales_count and has_brand and has_seller:
-                            logger.info("=" * 70)
-                            logger.info(f"✅ SKIP CRAWL - File Cache Hit cho product {product_id}")
-                            logger.info(f"   - Có price: {has_price}")
-                            logger.info(f"   - Có sales_count: {has_sales_count}")
-                            logger.info(f"   - Có brand: {has_brand}")
-                            logger.info(f"   - Có seller: {has_seller}")
-                            logger.info("   - Sử dụng cache, không cần crawl lại")
-                            logger.info("=" * 70)
-                            result["detail"] = cached_detail
-                            result["status"] = "cached"
-                            return result
-                except Exception:
-                    # File cache lỗi, tiếp tục crawl
-                    pass
+                    if has_price and has_sales_count and has_brand and has_seller:
+                        logger.info("=" * 70)
+                        logger.info(f"✅ SKIP CRAWL - File Cache Hit cho product {product_id}")
+                        logger.info(f"   - Có price: {has_price}")
+                        logger.info(f"   - Có sales_count: {has_sales_count}")
+                        logger.info(f"   - Có brand: {has_brand}")
+                        logger.info(f"   - Có seller: {has_seller}")
+                        logger.info("   - Sử dụng cache, không cần crawl lại")
+                        logger.info("=" * 70)
+                        result["detail"] = cached_detail
+                        result["status"] = "cached"
+                        return result
+            except Exception:
+                # File cache lỗi, tiếp tục crawl
+                pass
 
     # Tiếp tục crawl nếu không có cache hoặc force refresh
     # (File cache check đã được xử lý ở trên trong else block)

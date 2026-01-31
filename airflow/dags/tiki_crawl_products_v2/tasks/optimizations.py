@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
 
 # Add src to path for imports
 src_paths = [
@@ -40,7 +40,7 @@ def get_feature_flag(flag_name: str, default: bool = False) -> bool:
 # Profiling decorator
 def profile_task(component_name: str = None):
     """Decorator to add profiling to DAG tasks
-    
+
     Usage:
         @profile_task("crawler")
         def my_task(**context):
@@ -84,9 +84,7 @@ def profile_task(component_name: str = None):
                     logger.info(f"  - CPU time: {stats.cpu_time_ms:.2f}ms")
                     logger.info(f"  - Memory peak: {stats.memory_peak_mb:.2f}MB")
                     logger.info(f"  - Items processed: {stats.items_processed}")
-                    logger.info(
-                        f"  - Throughput: {stats.throughput_items_per_sec:.2f} items/sec"
-                    )
+                    logger.info(f"  - Throughput: {stats.throughput_items_per_sec:.2f} items/sec")
 
                     # Store profiling data in XCom
                     if "ti" in context:
@@ -138,7 +136,7 @@ class AsyncCrawlerWrapper:
             return None
 
         try:
-            from common.async_io import AsyncHTTPClient, AsyncCrawlerAdapter
+            from common.async_io import AsyncCrawlerAdapter
 
             return AsyncCrawlerAdapter
         except ImportError:
@@ -216,7 +214,7 @@ class ConfigurationOptimizerWrapper:
 # Helper function to apply optimizations
 def apply_optimizations_to_task(func: Callable, component_name: str = None) -> Callable:
     """Apply all enabled optimizations to a task
-    
+
     Usage:
         @apply_optimizations_to_task
         def my_task(**context):

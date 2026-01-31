@@ -269,9 +269,9 @@ def demo_color_coding():
         )
 
         if result:
-            print(f"   ✅ Sent")
+            print("   ✅ Sent")
         else:
-            print(f"   ❌ Failed")
+            print("   ❌ Failed")
 
         time.sleep(1)  # Avoid rate limit
 

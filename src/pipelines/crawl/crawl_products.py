@@ -9,6 +9,9 @@ from urllib.parse import parse_qs, urljoin
 
 import requests
 
+# Import profiling utilities
+from common.profiling import profile, profile_crawler
+
 # Import shared utilities
 from .crawl_utils import (
     DEFAULT_PRODUCT_LIST_CACHE_DIR,
@@ -18,9 +21,6 @@ from .crawl_utils import (
     safe_read_json,
     setup_utf8_encoding,
 )
-
-# Import profiling utilities
-from common.profiling import profile, profile_crawler
 
 # Lazy import BeautifulSoup để tránh timeout khi load DAG
 # from bs4 import BeautifulSoup  # Moved to function level

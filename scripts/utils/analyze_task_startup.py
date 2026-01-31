@@ -142,9 +142,7 @@ def measure_task_overhead():
     start = time.time()
     import subprocess
 
-    subprocess.run(
-        [sys.executable, "-c", "print('hello')"], capture_output=True, text=True
-    )
+    subprocess.run([sys.executable, "-c", "print('hello')"], capture_output=True, text=True)
     python_startup = time.time() - start
     print(f"   Python startup: {python_startup:.3f}s")
 

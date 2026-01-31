@@ -20,10 +20,10 @@ if not notifier.enabled or not notifier.webhook_url:
     print("   Set DISCORD_ENABLED=true and DISCORD_WEBHOOK_URL in .env")
     sys.exit(1)
 
-print(f"\n✅ Discord enabled")
-print(f"✅ Webhook configured")
+print("\n✅ Discord enabled")
+print("✅ Webhook configured")
 if notifier.fallback_webhook_url:
-    print(f"✅ Fallback webhook configured")
+    print("✅ Fallback webhook configured")
 
 # Demo 1: Basic
 print("\n📤 1/4: Sending basic message...")
@@ -62,7 +62,11 @@ time.sleep(1)
 
 # Demo 4: Color coding
 print("📤 4/4: Sending color-coded messages...")
-for success_rate, color, label in [(95, 0x00B894, "Excellent"), (65, 0xF39C12, "Warning"), (35, 0xE74C3C, "Critical")]:
+for success_rate, color, label in [
+    (95, 0x00B894, "Excellent"),
+    (65, 0xF39C12, "Warning"),
+    (35, 0xE74C3C, "Critical"),
+]:
     notifier.send_message(
         content=f"Success rate: {success_rate}%",
         title=f"Test: {label}",

@@ -33,7 +33,7 @@ class DataAggregator:
         self.data: dict[str, Any] = {}
         self.use_db = use_db
         self.db_conn = db_conn
-        
+
         if use_db and not db_conn:
             logger.warning("⚠️  use_db=True but no db_conn provided, falling back to file")
             self.use_db = False

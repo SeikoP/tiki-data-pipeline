@@ -20,9 +20,9 @@ from tiki_crawl_products_v2.bootstrap import (
 )
 from tiki_crawl_products_v2.tasks.common import _fix_sys_path_for_pipelines_import  # noqa: F401
 from tiki_crawl_products_v2.tasks.optimizations import (
-    profile_task,
-    VectorizedTransformerWrapper,
     MetricsCollectorWrapper,
+    VectorizedTransformerWrapper,
+    profile_task,
 )
 
 
@@ -334,7 +334,7 @@ def save_products(**context) -> str:
 def transform_products(**context) -> dict[str, Any]:
     """
     Task: Transform dữ liệu sản phẩm (normalize, validate, compute fields)
-    
+
     Supports vectorized transformation if enabled via USE_VECTORIZED_TRANSFORM flag.
 
     Returns:
