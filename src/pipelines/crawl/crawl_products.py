@@ -166,7 +166,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
                 domain = urlparse(url).netloc or "tiki.vn"
                 adaptive_limiter.wait(domain)
         except Exception:
-            time.sleep(0.7)  # Fixed delay fallback
+            time.sleep(1.0)  # Fixed delay fallback - tăng từ 0.7s để giảm 429 errors
 
     # Lazy import để tránh timeout khi load DAG
     from selenium import webdriver
@@ -315,7 +315,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
                 domain = urlparse(url).netloc or "tiki.vn"
                 adaptive_limiter.wait(domain)
         except Exception:
-            time.sleep(0.7)  # Fixed delay fallback
+            time.sleep(1.0)  # Fixed delay fallback - tăng từ 0.7s để giảm 429 errors
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -837,27 +837,32 @@ def crawl_category_products(
     all_products = []
 
     # Tier 1: Thử Redis cache (Ưu tiên nhất)
-    # Tier 1: Thử Redis cache (Ưu tiên nhất)
     redis_cache = None
     if use_redis_cache:
         try:
-            from pipelines.crawl.storage.redis_cache import get_redis_cache
+            from pipelines.crawl.storage.redis_cache import get_redis_cache, get_working_redis_url
 
-            redis_cache = get_redis_cache("redis://redis:6379/1")
-
-            if redis_cache and not force_refresh:
-                cached_products = redis_cache.get_cached_products(category_url)
-                if cached_products:
-                    logger.info(
-                        f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}... ({len(cached_products)} products)"
-                    )
-                    return cached_products
+            # Auto-detect working Redis URL
+            redis_url = get_working_redis_url(db=1, timeout=2)
+            
+            if redis_url:
+                redis_cache = get_redis_cache(redis_url)
+                if redis_cache and not force_refresh:
+                    cached_products = redis_cache.get_cached_products(category_url)
+                    if cached_products:
+                        logger.info(
+                            f"[Redis Cache] ✅ Hit cache cho {category_url[:60]}... ({len(cached_products)} products)"
+                        )
+                        return cached_products
+                logger.debug(f"[Redis Cache] Connected to {redis_url}")
+            else:
+                logger.info("[Redis Cache] ⚠️ Could not connect to Redis, falling back to file cache")
         except Exception as e:
-            logger.debug(f"[Redis Cache] Error: {e}")
+            logger.warning(f"[Redis Cache] ⚠️ Error: {e}, falling back to file cache")
 
-    # Tier 2: Thử File cache
+    # Tier 2: Thử File cache (chỉ khi Redis không available)
     cache_file = None
-    if cache_dir:
+    if cache_dir and not redis_cache:  # Only use file cache if Redis is not available
         import hashlib
 
         url_hash = hashlib.md5(category_url.encode()).hexdigest()
@@ -878,6 +883,11 @@ def crawl_category_products(
                 logger.info(
                     f"[File Cache] 🔄 Cache quá hạn ({int(file_age / 3600)}h), tiến hành crawl mới..."
                 )
+    elif cache_dir and redis_cache:
+        # Prepare cache_file path for later saving (but don't read from it)
+        import hashlib
+        url_hash = hashlib.md5(category_url.encode()).hexdigest()
+        cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 
     # Tier 3: Thử Listing API (Nhanh nhất nếu cache miss)
     # Tăng mặc định lên cao hơn để lấy nhiều sản phẩm hơn (comprehensive)
@@ -896,12 +906,13 @@ def crawl_category_products(
         # Tối ưu: Cache ngay lập tức sau khi lấy từ API thành công
         if redis_cache:
             try:
-                redis_cache.cache_products(category_url, api_products, ttl=43200)  # 12h
-            except Exception:
-                pass
+                redis_cache.cache_products(category_url, api_products, ttl=86400)  # 24h (increased from 12h)
+                logger.info(f"[Redis Cache] ✅ Cached {len(api_products)} products with TTL=24h")
+            except Exception as e:
+                logger.warning(f"[Redis Cache] ⚠️ Failed to cache: {e}")
 
-        # Bug fix: Save to File Cache as well to update timestamp and prevent re-crawl loop
-        if cache_file:
+        # Save to File Cache as backup (only if Redis failed or not available)
+        if cache_file and not redis_cache:
             try:
                 with open(cache_file, "w", encoding="utf-8") as f:
                     json.dump(
@@ -914,6 +925,7 @@ def crawl_category_products(
                         ensure_ascii=False,
                         indent=2,
                     )
+                logger.info(f"[File Cache] ✅ Saved {len(api_products)} products as backup")
             except Exception as e:
                 logger.error(f"[File Cache] ❌ Error updating cache file {cache_file}: {e}")
 

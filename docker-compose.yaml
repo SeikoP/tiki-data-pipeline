@@ -9,35 +9,65 @@ x-airflow-common:
   environment:
     &airflow-common-env
     TZ: Asia/Ho_Chi_Minh
-    PYTHONPATH: "/opt/airflow:/opt/airflow/src:/opt/airflow/dags:/home/airflow/.local/lib/python3.12/site-packages"
-    AIRFLOW__CORE__TASK_RUNNER: "StandardTaskRunner"
+    # Simplified PYTHONPATH for faster imports
+    PYTHONPATH: "/opt/airflow/src:/opt/airflow/dags"
+    
+    # Task execution optimization
+    AIRFLOW__CORE__TASK_RUNNER: "StandardTaskRunner"  # Faster than BashTaskRunner
     AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES: ""
     AIRFLOW__CORE__INTERNAL_API_URL: "http://airflow-webserver:8080"
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
+    
+    # Security
     AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET}
     AIRFLOW__CORE__SECRET_KEY: ${_AIRFLOW__CORE__SECRET_KEY}
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    
+    # Executor and parallelism
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__DATABASE_ACCESS_ISOLATION: 'false'
     AIRFLOW__CORE__PARALLELISM: 10
     AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 5
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: 1
+    
+    # Database
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: 10
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_RECYCLE: 1800
+    AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: 20
+    
+    # DAG settings
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: 'false'
-    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 300
-    AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: 300
+    
+    # Timeout optimization (reduced from 300s)
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 60
+    AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: 60
+    
+    # Auth
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${_AIRFLOW_WWW_USER_USERNAME:-admin}:Admin
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/data/passwords.json
-    AIRFLOW__CORE__LOGGING_LEVEL: "INFO"
     
-    # Scheduler Tuning for Low Latency
-    AIRFLOW__SCHEDULER__SCHEDULER_HEARTBEAT_SEC: 5
+    # Logging
+    AIRFLOW__CORE__LOGGING_LEVEL: "INFO"
+    AIRFLOW__LOGGING__LOGGING_LEVEL: "INFO"
+    
+    # Scheduler optimization for faster task pickup
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: 'false'
+    AIRFLOW__SCHEDULER__SCHEDULER_HEARTBEAT_SEC: 10  # Increased from 5
     AIRFLOW__SCHEDULER__PARSING_PROCESSES: 2
-    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 10
-    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: 10
-    AIRFLOW__SCHEDULER__JOB_HEARTBEAT_SEC: 5
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 30  # Increased from 10 (less DAG parsing)
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 30  # Reduced DAG scanning
+    AIRFLOW__SCHEDULER__FILE_PARSING_SORT_MODE: "modified_time"
+    
+    # DAG processor optimization
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: 30  # Increased from 10
+    
+    # Task execution optimization
+    AIRFLOW__SCHEDULER__JOB_HEARTBEAT_SEC: 10  # Increased from 5
+    AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY: 512
+    AIRFLOW__SCHEDULER__USE_JOB_SCHEDULE: 'true'
 
   volumes:
     - ./airflow/dags:/opt/airflow/dags:ro
@@ -71,9 +101,16 @@ services:
       - ./airflow/setup/init-crawl-db.sh:/docker-entrypoint-initdb.d/02-init-crawl-db.sh:ro
     command: >
       postgres
-      -c shared_buffers=256MB
-      -c work_mem=32MB
+      -c shared_buffers=512MB
+      -c effective_cache_size=2GB
+      -c maintenance_work_mem=128MB
+      -c work_mem=64MB
       -c max_connections=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c wal_buffers=16MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -82,15 +119,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
+          cpus: '2.0'
+          memory: 2G
     restart: unless-stopped
     networks:
       - backend
 
   redis:
     image: redis:7.2-alpine
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
     ports:
       - "6379:6379"
     healthcheck:
@@ -99,7 +136,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
     restart: unless-stopped
     networks:
       - backend
@@ -118,8 +155,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
+          cpus: '1.5'
+          memory: 1.5G
     restart: unless-stopped
     networks:
       - backend
@@ -140,8 +177,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.5'
-          memory: 1.5G
+          cpus: '3.0'
+          memory: 2G
     restart: unless-stopped
     networks:
       - backend
@@ -157,6 +194,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
     restart: unless-stopped
     networks:
       - backend
@@ -222,32 +264,24 @@ services:
         done
         echo "✅ Redis ready"
 
-        # Fix permissions for data folder (Host volume permission fix)
-        # 1000:0 is often the host user:group, 50000:0 is airflow:root
-        # Ideally we make it writable by group 0 (root) because airflow GID is 0
+        # Fix permissions
         echo "🔧 Fixing data permissions..."
         chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/data || echo "Warning: chown failed"
         chmod -R 777 /opt/airflow/data || echo "Warning: chmod failed"
 
-        # Create standard directories if missing
+        # Create directories
         mkdir -p /opt/airflow/logs /opt/airflow/plugins /opt/airflow/data
         
         echo "Updating Airflow DB..."
-        airflow db migrate
+        su - airflow -c "airflow db migrate"
         
-        echo "Updating Pools and Variables (One-shot)..."
+        echo "Updating Pools and Variables..."
         if [ -f /opt/airflow/airflow/setup/setup_airflow.py ]; then
-          python /opt/airflow/airflow/setup/setup_airflow.py || echo "⚠️ Setup script failed"
-        else
-          echo "⚠️ Setup script not found"
+          su - airflow -c "python /opt/airflow/airflow/setup/setup_airflow.py" || echo "⚠️ Setup script failed"
         fi
         
-        echo "Creating admin user..."
-        
-        echo "Creating admin user (Skipped - Handled by Env/Auth Manager)..."
-        
         echo "Checking Airflow version..."
-        airflow version || { echo "❌ Airflow binary check failed"; exit 1; }
+        su - airflow -c "airflow version" || { echo "❌ Airflow binary check failed"; exit 1; }
 
         echo "✅ Init Done."
     environment:

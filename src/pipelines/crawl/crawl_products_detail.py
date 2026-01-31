@@ -88,7 +88,7 @@ def crawl_product_detail_with_selenium(
                 print(
                     f"[Rate Limiter] ⚠️  Adaptive limiter không available: {e}, dùng delay cố định"
                 )
-            time.sleep(0.7)  # Fixed delay fallback
+            time.sleep(1.0)  # Fixed delay fallback - tăng từ 0.7s để giảm 429 errors
 
     driver = None
     last_error = None
@@ -611,7 +611,7 @@ def crawl_product_detail_with_driver(
                 print(
                     f"[Rate Limiter] ⚠️  Adaptive limiter không available: {e}, dùng delay cố định"
                 )
-            time.sleep(0.7)  # Fixed delay fallback
+            time.sleep(1.0)  # Fixed delay fallback - tăng từ 0.7s để giảm 429 errors
 
     try:
         # Tier 1: Moderate wait time increase
@@ -822,6 +822,7 @@ def extract_product_detail(
         "brand": "",
         "warranty": "",
         "sales_count": None,  # Số lượng sản phẩm đã bán
+        "images": [],  # Initialize images list
         "promotions": [],
         "_metadata": {
             "extracted_at": datetime.now().isoformat(),
@@ -1257,7 +1258,7 @@ def extract_product_detail(
                         )
 
                 # Cập nhật hình ảnh
-                if not product_data["images"]:
+                if not product_data.get("images"):
                     images = (
                         product_from_next.get("images")
                         or product_from_next.get("imageUrls")
@@ -1266,6 +1267,10 @@ def extract_product_detail(
                         or []
                     )
                     if isinstance(images, list):
+                        # Initialize images list if not exists
+                        if "images" not in product_data:
+                            product_data["images"] = []
+                        
                         for img in images:
                             if isinstance(img, dict):
                                 img_url = (
@@ -1290,7 +1295,11 @@ def extract_product_detail(
                                     product_data["images"].append(img_url)
 
                     # Thử tìm images trong configurable_products hoặc variants
-                    if not product_data["images"]:
+                    if not product_data.get("images"):
+                        # Initialize images list if not exists
+                        if "images" not in product_data:
+                            product_data["images"] = []
+                        
                         configurable_products = product_from_next.get("configurable_products", [])
                         for variant in configurable_products:
                             variant_images = (
@@ -1657,8 +1666,7 @@ def extract_product_detail_from_json(data: dict[str, Any], url: str) -> dict[str
         for img in data.get("images", [])
         if isinstance(img, dict) and img.get("base_url")
     ]
-    if images:
-        product_data["images"] = images
+    product_data["images"] = images if images else []
 
     # Extract stock: ONLY if exists
     if isinstance(data.get("stock_item"), dict):
