@@ -19,8 +19,14 @@ from tiki_crawl_products_v2.bootstrap import (
     os,
 )
 from tiki_crawl_products_v2.tasks.common import _fix_sys_path_for_pipelines_import  # noqa: F401
+from tiki_crawl_products_v2.tasks.optimizations import (
+    profile_task,
+    VectorizedTransformerWrapper,
+    MetricsCollectorWrapper,
+)
 
 
+@profile_task("merge_products")
 def merge_products(**context) -> dict[str, Any]:
     """
     Task 3: Merge sản phẩm từ tất cả các danh mục
@@ -234,6 +240,7 @@ def merge_products(**context) -> dict[str, Any]:
         raise
 
 
+@profile_task("save_products")
 def save_products(**context) -> str:
     """
     Task 4: Lưu sản phẩm vào file (atomic write)
@@ -323,9 +330,12 @@ def save_products(**context) -> str:
         raise
 
 
+@profile_task("transform_products")
 def transform_products(**context) -> dict[str, Any]:
     """
     Task: Transform dữ liệu sản phẩm (normalize, validate, compute fields)
+    
+    Supports vectorized transformation if enabled via USE_VECTORIZED_TRANSFORM flag.
 
     Returns:
         Dict: Kết quả transform với transformed products và stats
@@ -524,85 +534,139 @@ def transform_products(**context) -> dict[str, Any]:
         if category_path_count > 0:
             logger.info(f"✅ Tổng products có category_path: {category_path_count}/{len(products)}")
 
-        # Import DataTransformer
-        try:
-            # Tìm đường dẫn transform module
-            transform_paths = [
-                "/opt/airflow/src/pipelines/transform/transformer.py",
-                os.path.abspath(
-                    os.path.join(
-                        dag_file_dir,
-                        "..",
-                        "..",
-                        "..",
-                        "src",
-                        "pipelines",
-                        "transform",
-                        "transformer.py",
-                    )
-                ),
-                os.path.join(os.getcwd(), "src", "pipelines", "transform", "transformer.py"),
-            ]
+        # Check if vectorized transformer is enabled
+        VectorizedTransformer = VectorizedTransformerWrapper.get_transformer()
+        use_vectorized = VectorizedTransformer is not None
 
-            transformer_path = None
-            for path in transform_paths:
-                if os.path.exists(path):
-                    transformer_path = path
-                    break
+        if use_vectorized:
+            logger.info("🚀 Using VECTORIZED transformer for better performance")
+            try:
+                import pandas as pd
 
-            if not transformer_path:
-                raise ImportError("Không tìm thấy transformer.py")
+                # Convert to DataFrame for vectorized operations
+                df = pd.DataFrame(products)
 
-            import importlib.util
+                # Initialize vectorized transformer
+                vectorized_transformer = VectorizedTransformer()
 
-            spec = importlib.util.spec_from_file_location("transformer", transformer_path)
-            transformer_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(transformer_module)
-            DataTransformer = transformer_module.DataTransformer
+                # Transform using vectorized operations
+                transformed_df = vectorized_transformer.transform_batch(df)
 
-            # Transform products
-            transformer = DataTransformer(
-                strict_validation=False, remove_invalid=True, normalize_fields=True
-            )
+                # Convert back to list of dicts
+                transformed_products = transformed_df.to_dict("records")
 
-            transformed_products, transform_stats = transformer.transform_products(
-                products, validate=True
-            )
+                transform_stats = {
+                    "valid_products": len(transformed_products),
+                    "invalid_products": 0,
+                    "duplicates_removed": 0,
+                    "method": "vectorized",
+                }
 
-            logger.info(
-                f"📊 TRANSFORM: Valid={transform_stats['valid_products']} | Invalid={transform_stats['invalid_products']} | Dupes={transform_stats['duplicates_removed']}"
-            )
+                logger.info(
+                    f"📊 VECTORIZED TRANSFORM: Processed {len(transformed_products)} products"
+                )
 
-            # Lưu transformed products vào file
-            processed_dir = DATA_DIR / "processed"
-            processed_dir.mkdir(parents=True, exist_ok=True)
-            transformed_file = processed_dir / "products_transformed.json"
+            except Exception as e:
+                logger.warning(
+                    f"⚠️  Vectorized transform failed: {e}. Falling back to standard transformer."
+                )
+                use_vectorized = False
 
-            output_data = {
-                "transformed_at": datetime.now().isoformat(),
-                "source_file": output_file,
+        if not use_vectorized:
+            logger.info("📝 Using STANDARD transformer")
+            # Import DataTransformer
+            try:
+                # Tìm đường dẫn transform module
+                transform_paths = [
+                    "/opt/airflow/src/pipelines/transform/transformer.py",
+                    os.path.abspath(
+                        os.path.join(
+                            dag_file_dir,
+                            "..",
+                            "..",
+                            "..",
+                            "src",
+                            "pipelines",
+                            "transform",
+                            "transformer.py",
+                        )
+                    ),
+                    os.path.join(os.getcwd(), "src", "pipelines", "transform", "transformer.py"),
+                ]
+
+                transformer_path = None
+                for path in transform_paths:
+                    if os.path.exists(path):
+                        transformer_path = path
+                        break
+
+                if not transformer_path:
+                    raise ImportError("Không tìm thấy transformer.py")
+
+                import importlib.util
+
+                spec = importlib.util.spec_from_file_location("transformer", transformer_path)
+                transformer_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(transformer_module)
+                DataTransformer = transformer_module.DataTransformer
+
+                # Transform products
+                transformer = DataTransformer(
+                    strict_validation=False, remove_invalid=True, normalize_fields=True
+                )
+
+                transformed_products, transform_stats = transformer.transform_products(
+                    products, validate=True
+                )
+                transform_stats["method"] = "standard"
+
+                logger.info(
+                    f"📊 TRANSFORM: Valid={transform_stats['valid_products']} | Invalid={transform_stats['invalid_products']} | Dupes={transform_stats['duplicates_removed']}"
+                )
+
+            except ImportError as e:
+                logger.error(f"❌ Không thể import DataTransformer: {e}", exc_info=True)
+                raise
+            except Exception as e:
+                logger.error(f"❌ Lỗi khi transform products: {e}", exc_info=True)
+                raise
+
+        # Lưu transformed products vào file
+        processed_dir = DATA_DIR / "processed"
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        transformed_file = processed_dir / "products_transformed.json"
+
+        output_data = {
+            "transformed_at": datetime.now().isoformat(),
+            "source_file": output_file,
+            "total_products": len(products),
+            "transform_stats": transform_stats,
+            "products": transformed_products,
+        }
+
+        atomic_write_file(str(transformed_file), output_data, **context)
+        logger.info(
+            f"✅ Đã lưu {len(transformed_products)} transformed products vào: {transformed_file}"
+        )
+
+        # Collect metrics
+        MetricsCollectorWrapper.collect_metrics(
+            "transform_products",
+            {
                 "total_products": len(products),
-                "transform_stats": transform_stats,
-                "products": transformed_products,
-            }
+                "transformed_products": len(transformed_products),
+                "method": transform_stats.get("method", "unknown"),
+                "valid_products": transform_stats.get("valid_products", 0),
+                "invalid_products": transform_stats.get("invalid_products", 0),
+            },
+            **context,
+        )
 
-            atomic_write_file(str(transformed_file), output_data, **context)
-            logger.info(
-                f"✅ Đã lưu {len(transformed_products)} transformed products vào: {transformed_file}"
-            )
-
-            return {
-                "transformed_file": str(transformed_file),
-                "transformed_count": len(transformed_products),
-                "transform_stats": transform_stats,
-            }
-
-        except ImportError as e:
-            logger.error(f"❌ Không thể import DataTransformer: {e}", exc_info=True)
-            raise
-        except Exception as e:
-            logger.error(f"❌ Lỗi khi transform products: {e}", exc_info=True)
-            raise
+        return {
+            "transformed_file": str(transformed_file),
+            "transformed_count": len(transformed_products),
+            "transform_stats": transform_stats,
+        }
 
     except Exception as e:
         logger.error(f"❌ Lỗi trong transform_products task: {e}", exc_info=True)

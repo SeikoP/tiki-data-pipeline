@@ -19,6 +19,9 @@ from .crawl_utils import (
     setup_utf8_encoding,
 )
 
+# Import profiling utilities
+from common.profiling import profile, profile_crawler
+
 # Lazy import BeautifulSoup để tránh timeout khi load DAG
 # from bs4 import BeautifulSoup  # Moved to function level
 
@@ -131,6 +134,7 @@ stats = {
 }
 
 
+@profile
 def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limiting=True):
     """Lấy HTML của trang với Selenium (cho dynamic content)
 
@@ -280,6 +284,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
         driver.quit()
 
 
+@profile
 def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_limiting=True):
     """Lấy HTML của trang với requests (nhanh hơn nhưng không hỗ trợ JS)
 
@@ -383,6 +388,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
     return None
 
 
+@profile
 def parse_products_from_next_data(html_content):
     """
     Parse sản phẩm từ __NEXT_DATA__ (Next.js)
@@ -522,6 +528,7 @@ def parse_products_from_next_data(html_content):
     return products
 
 
+@profile
 def parse_products_from_html(html_content, category_url):
     """
     Parse danh sách sản phẩm từ HTML.
@@ -710,6 +717,7 @@ def get_category_page_url(category_url, page=1):
         return f"{category_url}?page={page}"
 
 
+@profile
 def get_products_via_listing_api(category_url, max_pages=5, use_rate_limiting=True):
     """Lấy danh sách sản phẩm qua Tiki Listing API (Cực nhanh).
 
@@ -811,6 +819,8 @@ def get_products_via_listing_api(category_url, max_pages=5, use_rate_limiting=Tr
     return all_products
 
 
+@profile
+@profile_crawler
 def crawl_category_products(
     category_url,
     max_pages=None,

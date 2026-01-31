@@ -21,6 +21,9 @@ from urllib.parse import (
     urlunsplit,
 )
 
+# Import profiling utilities
+from common.profiling import profile
+
 try:
     import redis
     from redis import ConnectionPool
@@ -142,6 +145,7 @@ class RedisCache:
         """
         return f"{self.prefix}{key}"
 
+    @profile
     def get(self, key: str) -> Any | None:
         """
         Lấy giá trị từ cache.
@@ -155,6 +159,7 @@ class RedisCache:
             # Nếu lỗi, return None để fallback về file cache
             return None
 
+    @profile
     def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
         """
         Lưu giá trị vào cache.
@@ -207,6 +212,7 @@ class RedisCache:
             drop_params = {"page"}
         return self._new_key_for_url(url, cache_type, drop_params=drop_params)
 
+    @profile
     def cache_html(self, url: str, html: str, ttl: int | None = None) -> bool:
         """
         Cache HTML content.
@@ -214,6 +220,7 @@ class RedisCache:
         key = self._new_key_for_url(url, "html")
         return self.set(key, {"url": url, "html": html, "cached_at": time.time()}, ttl)
 
+    @profile
     def get_cached_html(self, url: str) -> str | None:
         """
         Lấy cached HTML.
@@ -228,6 +235,7 @@ class RedisCache:
                 return cached.get("html")
         return None
 
+    @profile
     def cache_products(self, category_url: str, products: list, ttl: int | None = None) -> bool:
         """
         Cache products từ category.
@@ -238,6 +246,7 @@ class RedisCache:
             key, {"category_url": category_url, "products": products, "cached_at": time.time()}, ttl
         )
 
+    @profile
     def get_cached_products(self, category_url: str) -> list | None:
         """
         Lấy cached products.

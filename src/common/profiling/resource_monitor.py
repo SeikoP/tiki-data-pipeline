@@ -194,9 +194,17 @@ class ResourceMonitor:
     
     def stop_monitoring(self) -> None:
         """Stop background resource monitoring."""
+        if not self._monitoring:
+            return
+            
         self._monitoring = False
-        if self._monitor_thread:
-            self._monitor_thread.join(timeout=5.0)
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            # Wait for thread to finish, but don't block forever
+            self._monitor_thread.join(timeout=2.0)
+            if self._monitor_thread.is_alive():
+                # Thread didn't stop in time, but that's okay
+                # It's a daemon thread so it will be killed when program exits
+                pass
             self._monitor_thread = None
     
     def get_snapshots(self) -> List[ResourceSnapshot]:
@@ -205,8 +213,16 @@ class ResourceMonitor:
         Returns:
             List of ResourceSnapshot objects
         """
-        with self._lock:
+        # Use trylock to avoid deadlock if monitoring thread is holding the lock
+        acquired = self._lock.acquire(blocking=True, timeout=1.0)
+        if not acquired:
+            # Could not acquire lock, return empty list
+            return []
+        
+        try:
             return list(self._snapshots)
+        finally:
+            self._lock.release()
     
     def get_summary(self) -> Dict:
         """Get summary statistics of resource usage.
@@ -214,7 +230,13 @@ class ResourceMonitor:
         Returns:
             Dictionary with min, max, mean, and peak values
         """
-        with self._lock:
+        # Use trylock to avoid deadlock if monitoring thread is holding the lock
+        acquired = self._lock.acquire(blocking=True, timeout=1.0)
+        if not acquired:
+            # Could not acquire lock, return empty dict
+            return {}
+        
+        try:
             if not self._snapshots:
                 return {}
             
@@ -244,11 +266,17 @@ class ResourceMonitor:
                 "network_recv_mb": round(self._snapshots[-1].network_recv_mb, 2) if self._snapshots else 0.0,
                 "sample_count": len(self._snapshots),
             }
+        finally:
+            self._lock.release()
     
     def reset(self):
         """Reset all collected snapshots."""
-        with self._lock:
-            self._snapshots.clear()
+        acquired = self._lock.acquire(blocking=True, timeout=1.0)
+        if acquired:
+            try:
+                self._snapshots.clear()
+            finally:
+                self._lock.release()
         self._initial_disk_io = None
         self._initial_net_io = None
     

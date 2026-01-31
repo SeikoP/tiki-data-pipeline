@@ -236,7 +236,14 @@ class FunctionProfiler:
             )
             lines.append("-" * 100)
             
-            for stats in self.get_top_slowest(10):
+            # Get top slowest WITHOUT calling get_top_slowest (avoid nested lock)
+            sorted_stats = sorted(
+                self._stats.values(),
+                key=lambda s: s.total_time_ms,
+                reverse=True
+            )[:10]
+            
+            for stats in sorted_stats:
                 lines.append(
                     f"{stats.function_name:<50} {stats.call_count:>8} "
                     f"{stats.total_time_ms:>12.2f} {stats.mean_time_ms:>12.2f} "

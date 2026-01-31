@@ -52,3 +52,21 @@ DISCORD_CONFIG = {
 SHORT_NAME_CONFIG = {
     "use_ai": os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true",
 }
+
+# Performance Optimization Feature Flags
+OPTIMIZATION_CONFIG = {
+    # Async I/O optimization (Task 14.1)
+    "use_async_crawler": os.getenv("USE_ASYNC_CRAWLER", "false").lower() == "true",
+    "async_connector_limit": int(os.getenv("ASYNC_CONNECTOR_LIMIT", "300")),
+    "async_batch_size": int(os.getenv("ASYNC_BATCH_SIZE", "50")),
+    "async_timeout_total": int(os.getenv("ASYNC_TIMEOUT_TOTAL", "15")),
+    "async_timeout_connect": int(os.getenv("ASYNC_TIMEOUT_CONNECT", "10")),
+    
+    # Vectorized transformation optimization (Task 14.2)
+    "use_vectorized_transform": os.getenv("USE_VECTORIZED_TRANSFORM", "false").lower() == "true",
+    
+    # Optimized batch loading (Task 14.3)
+    "use_optimized_loader": os.getenv("USE_OPTIMIZED_LOADER", "false").lower() == "true",
+    "optimized_batch_size": int(os.getenv("OPTIMIZED_BATCH_SIZE", "1000")),
+    "use_copy_command": os.getenv("USE_COPY_COMMAND", "true").lower() == "true",
+}
