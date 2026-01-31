@@ -8,47 +8,46 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
 
 ## Tasks
 
-- [ ] 1. Set up profiling infrastructure
-  - [ ] 1.1 Implement FunctionProfiler class with timing and call count tracking
+- [x] 1. Set up profiling infrastructure
+  - [x] 1.1 Implement FunctionProfiler class with timing and call count tracking
     - Create decorator-based profiler that wraps functions
     - Collect min, max, mean, p50, p95, p99 execution times
     - Store statistics in thread-safe data structure
     - _Requirements: 1.1, 1.4_
   
-  - [ ] 1.2 Implement ComponentProfiler for pipeline stage tracking
+  - [x] 1.2 Implement ComponentProfiler for pipeline stage tracking
     - Add start/end markers for Crawler, Transformer, Loader
     - Collect execution time, CPU time, I/O wait, memory usage
     - Track items processed and calculate throughput
     - _Requirements: 1.1_
   
-  - [ ] 1.3 Implement ResourceMonitor for system metrics
+  - [x] 1.3 Implement ResourceMonitor for system metrics
     - Sample CPU, memory, disk I/O, network I/O at regular intervals
     - Track connection pool statistics (active, idle connections)
     - Run monitoring in background thread
     - _Requirements: 1.6, 1.7_
   
-  - [ ] 1.4 Implement BottleneckAnalyzer to identify and rank bottlenecks
+  - [x] 1.4 Implement BottleneckAnalyzer to identify and rank bottlenecks
     - Categorize bottlenecks by type (CPU, I/O, Memory, Database, Network)
     - Rank by impact (HIGH >20%, MEDIUM 5-20%, LOW <5%)
     - Generate prioritized list of optimization targets
     - _Requirements: 1.2, 1.3_
   
-  - [ ]* 1.5 Write property test for profiling metrics completeness
+  - [x] 1.5 Write property test for profiling metrics completeness
     - **Property 1: Profiling Metrics Completeness**
     - **Validates: Requirements 1.1, 1.4, 1.6, 1.7**
   
-  - [ ]* 1.6 Write property test for bottleneck categorization
+  - [x] 1.6 Write property test for bottleneck categorization
     - **Property 2: Bottleneck Categorization and Ranking**
     - **Validates: Requirements 1.2, 1.3**
   
-  - [ ]* 1.7 Write property test for profiling report structure
+  - [x] 1.7 Write property test for profiling report structure
     - **Property 3: Profiling Report Structure**
     - **Validates: Requirements 1.5**
 
 - [ ] 2. Integrate profiling into existing pipeline
   - [ ] 2.1 Add profiling decorators to critical functions in crawl_products.py
     - Profile API fetch functions
-    - Profile Selenium operations
     - Profile cache operations
     - _Requirements: 1.4_
   
@@ -97,11 +96,11 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
     - Log failures after max retries
     - _Requirements: 3.7_
   
-  - [ ]* 4.4 Write property test for concurrent request limits
+  - [ ] 4.4 Write property test for concurrent request limits
     - **Property 4: Concurrent Request Limits**
     - **Validates: Requirements 3.2**
   
-  - [ ]* 4.5 Write unit tests for async error handling
+  - [ ] 4.5 Write unit tests for async error handling
     - Test connection failures with retry
     - Test timeout handling
     - Test rate limiting integration
@@ -122,11 +121,11 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
     - Add proper pool cleanup
     - _Requirements: 2.3_
   
-  - [ ]* 5.3 Write property test for optimization result equivalence
+  - [ ] 5.3 Write property test for optimization result equivalence
     - **Property 18: Optimization Result Equivalence**
     - **Validates: Requirements 10.2, 12.2**
   
-  - [ ]* 5.4 Write unit tests for vectorized operations
+  - [ ] 5.4 Write unit tests for vectorized operations
     - Test price normalization correctness
     - Test string cleaning edge cases
     - Test discount calculation accuracy
@@ -152,15 +151,15 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
     - Move accessed items to end (most recently used)
     - _Requirements: 4.3_
   
-  - [ ]* 6.4 Write property test for streaming memory bounds
+  - [ ] 6.4 Write property test for streaming memory bounds
     - **Property 6: Streaming Memory Bounds**
     - **Validates: Requirements 4.1**
   
-  - [ ]* 6.5 Write property test for LRU cache eviction
+  - [ ] 6.5 Write property test for LRU cache eviction
     - **Property 7: LRU Cache Eviction Correctness**
     - **Validates: Requirements 4.3**
   
-  - [ ]* 6.6 Write unit tests for object pool
+  - [ ] 6.6 Write unit tests for object pool
     - Test acquire/release cycle
     - Test pool size limits
     - Test thread safety
@@ -192,15 +191,15 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
     - Add database operation profiling
     - _Requirements: 5.1, 5.5_
   
-  - [ ]* 8.4 Write property test for batch upsert correctness
+  - [ ] 8.4 Write property test for batch upsert correctness
     - **Property 8: Batch Upsert Correctness**
     - **Validates: Requirements 5.1**
   
-  - [ ]* 8.5 Write property test for connection pool bounds
+  - [ ] 8.5 Write property test for connection pool bounds
     - **Property 9: Connection Pool Bounds**
     - **Validates: Requirements 5.5**
   
-  - [ ]* 8.6 Write unit tests for COPY vs upsert selection
+  - [ ] 8.6 Write unit tests for COPY vs upsert selection
     - Test insert-only path uses COPY
     - Test mixed operations use batch upsert
     - Test error handling for both paths
@@ -228,11 +227,11 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
     - Provide warnings for edge cases
     - _Requirements: 9.1, 9.2, 9.3, 9.4_
   
-  - [ ]* 9.4 Write property test for configuration recommendation validity
+  - [ ] 9.4 Write property test for configuration recommendation validity
     - **Property 5: Configuration Recommendation Validity**
     - **Validates: Requirements 3.5, 5.2, 5.3, 7.1, 7.7, 9.1-9.7**
   
-  - [ ]* 9.5 Write unit tests for system capability detection
+  - [ ] 9.5 Write unit tests for system capability detection
     - Test CPU core detection
     - Test memory detection
     - Test handling of detection failures
@@ -260,15 +259,15 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
     - Include data quality metrics alongside performance
     - _Requirements: 8.7, 10.7, 11.5, 11.7_
   
-  - [ ]* 10.4 Write property test for performance metrics collection
+  - [ ] 10.4 Write property test for performance metrics collection
     - **Property 15: Performance Metrics Collection**
     - **Validates: Requirements 8.1, 8.2, 8.5, 8.6**
   
-  - [ ]* 10.5 Write property test for regression detection
+  - [ ] 10.5 Write property test for regression detection
     - **Property 16: Performance Regression Detection**
     - **Validates: Requirements 8.4**
   
-  - [ ]* 10.6 Write property test for comparison report completeness
+  - [ ] 10.6 Write property test for comparison report completeness
     - **Property 17: Comparison Report Completeness**
     - **Validates: Requirements 8.7, 11.5, 11.7**
 
@@ -297,23 +296,23 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
     - Ensure logs are structured and searchable
     - _Requirements: 10.6_
   
-  - [ ]* 11.5 Write property test for data completeness preservation
+  - [ ] 11.5 Write property test for data completeness preservation
     - **Property 12: Data Completeness Preservation**
     - **Validates: Requirements 6.6, 10.1**
   
-  - [ ]* 11.6 Write property test for error rate non-regression
+  - [ ] 11.6 Write property test for error rate non-regression
     - **Property 19: Error Rate Non-Regression**
     - **Validates: Requirements 10.3**
   
-  - [ ]* 11.7 Write property test for data validation preservation
+  - [ ] 11.7 Write property test for data validation preservation
     - **Property 20: Data Validation Preservation**
     - **Validates: Requirements 10.4**
   
-  - [ ]* 11.8 Write property test for cache freshness enforcement
+  - [ ] 11.8 Write property test for cache freshness enforcement
     - **Property 21: Cache Freshness Enforcement**
     - **Validates: Requirements 10.5**
   
-  - [ ]* 11.9 Write property test for audit trail completeness
+  - [ ] 11.9 Write property test for audit trail completeness
     - **Property 22: Audit Trail Completeness**
     - **Validates: Requirements 10.6**
 
@@ -343,23 +342,23 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
     - Flag benchmarks with high variance (>10%)
     - _Requirements: 11.6_
   
-  - [ ]* 12.5 Write property test for baseline metrics capture
+  - [ ] 12.5 Write property test for baseline metrics capture
     - **Property 24: Baseline Metrics Capture**
     - **Validates: Requirements 11.1**
   
-  - [ ]* 12.6 Write property test for benchmark workload consistency
+  - [ ] 12.6 Write property test for benchmark workload consistency
     - **Property 25: Benchmark Workload Consistency**
     - **Validates: Requirements 11.2**
   
-  - [ ]* 12.7 Write property test for benchmark dataset coverage
+  - [ ] 12.7 Write property test for benchmark dataset coverage
     - **Property 26: Benchmark Dataset Coverage**
     - **Validates: Requirements 11.3**
   
-  - [ ]* 12.8 Write property test for environmental recording
+  - [ ] 12.8 Write property test for environmental recording
     - **Property 27: Benchmark Environmental Recording**
     - **Validates: Requirements 11.4**
   
-  - [ ]* 12.9 Write property test for benchmark reproducibility
+  - [ ] 12.9 Write property test for benchmark reproducibility
     - **Property 28: Benchmark Reproducibility**
     - **Validates: Requirements 11.6**
 
@@ -395,7 +394,7 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
     - Provide rollback instructions
     - _Requirements: 9.2, 9.3, 9.4, 9.5, 9.6, 9.7_
   
-  - [ ]* 14.5 Write integration tests for optimized pipeline
+  - [ ] 14.5 Write integration tests for optimized pipeline
     - Test end-to-end execution with all optimizations enabled
     - Verify data quality is maintained
     - Verify performance improvements are realized
@@ -430,7 +429,6 @@ The tasks are organized to deliver value incrementally, with checkpoints to ensu
 
 ## Notes
 
-- Tasks marked with `*` are optional and can be skipped for faster MVP
 - Each task references specific requirements for traceability
 - Checkpoints ensure incremental validation and allow for course corrections
 - Property tests validate universal correctness properties with minimum 100 iterations

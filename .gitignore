@@ -5,7 +5,7 @@ __pycache__/
 
 backups/
 data/test_output/*.html/
-
+.kiro
 airflow/config/airflow.cfg
 airflow/passwords.json
 data/
