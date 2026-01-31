@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import re
+import shutil
+import time
+
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from tiki_crawl_products_v2.bootstrap import (
@@ -25,9 +29,6 @@ from tiki_crawl_products_v2.bootstrap import (
     get_variable,
     json,
     os,
-    re,
-    shutil,
-    time,
 )
 from tiki_crawl_products_v2.tasks.common import (  # noqa: F401
     _fix_sys_path_for_pipelines_import,
