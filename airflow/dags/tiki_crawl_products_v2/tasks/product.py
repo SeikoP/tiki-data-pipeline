@@ -41,20 +41,31 @@ def merge_products(**context) -> dict[str, Any]:
         ensure_output_dirs()
         ti = context["ti"]
 
-        # Lấy danh sách categories từ các task upstream
-        categories = None
+        # Lấy danh sách categories từ file
+        result = None
         for task_id in [
             "pre_crawl.load_categories",
             "load_and_prepare.load_categories",
             "load_categories",
         ]:
-            categories = ti.xcom_pull(task_ids=task_id)
-            if categories:
-                logger.info(f"📂 Đã nạp {len(categories)} danh mục từ task: {task_id}")
+            result = ti.xcom_pull(task_ids=task_id)
+            if result:
+                logger.info(f"📂 Đã lấy categories metadata từ task: {task_id}")
                 break
 
-        if not categories:
+        if not result:
             raise ValueError("Không tìm thấy dữ liệu categories từ các task trước đó.")
+
+        # Đọc categories từ file
+        categories_file = result.get("categories_file")
+        if categories_file:
+            with open(categories_file, encoding="utf-8") as f:
+                categories = json.load(f)
+            logger.info(f"📂 Đọc {len(categories)} categories từ {categories_file}")
+        else:
+            # Fallback: legacy XCom
+            categories = result if isinstance(result, list) else []
+            logger.warning("⚠️ Sử dụng legacy XCom format cho categories")
 
         logger.info(f"Đang merge kết quả từ {len(categories)} danh mục...")
 
@@ -227,106 +238,43 @@ def merge_products(**context) -> dict[str, Any]:
         logger.info(f"• Saved Directly:    {stats['total_saved_directly']}")
         logger.info("=" * 40)
 
-        result = {
+        # Lưu products vào file merged_products.json
+        from pathlib import Path
+        merged_file = Path("/opt/airflow/data/processed") / "merged_products.json"
+        merged_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(merged_file, "w", encoding="utf-8") as f:
+            json.dump({"products": unique_products, "stats": stats}, f, ensure_ascii=False)
+        
+        logger.info(f"💾 Đã lưu {len(unique_products)} products vào {merged_file}")
+
+        # Lưu vào file output chính (products.json) với metadata đầy đủ
+        output_data = {
+            "total_products": len(unique_products),
+            "stats": stats,
+            "crawled_at": datetime.now().isoformat(),
+            "note": "Crawl từ Airflow DAG với Dynamic Task Mapping",
             "products": unique_products,
+        }
+
+        output_file = str(OUTPUT_FILE)
+        atomic_write_file(output_file, output_data, **context)
+        
+        logger.info(f"✅ Đã lưu {len(unique_products)} sản phẩm vào: {output_file}")
+
+        # Return file paths và metadata
+        result = {
+            "products_file": str(merged_file),
+            "output_file": output_file,
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
+            "product_count": len(unique_products),
         }
 
         return result
 
     except Exception as e:
-        logger.error(f"❌ Lỗi khi merge products: {e}", exc_info=True)
-        raise
-
-
-@profile_task("save_products")
-def save_products(**context) -> str:
-    """
-    Task 4: Lưu sản phẩm vào file (atomic write)
-
-    Tối ưu hóa cho dữ liệu lớn:
-    - Batch processing: chia nhỏ và lưu từng batch
-    - Atomic write: tránh corrupt file
-    - Compression: có thể nén file nếu cần
-
-    Returns:
-        str: Đường dẫn file đã lưu
-    """
-    logger = get_logger(context)
-    logger.info("=" * 70)
-    logger.info("💾 TASK: Save Products")
-    logger.info("=" * 70)
-
-    try:
-        # Lấy kết quả từ task merge_products (trong TaskGroup process_and_save)
-        ti = context["ti"]
-        merge_result = None
-
-        # Cách 1: Lấy từ task_id với TaskGroup prefix
-        try:
-            merge_result = ti.xcom_pull(task_ids="process_and_save.merge_products")
-            # Get merge result from upstream task
-        except Exception as e:
-            logger.warning(f"Không lấy được từ 'process_and_save.merge_products': {e}")
-
-        # Cách 2: Thử không có prefix
-        if not merge_result:
-            try:
-                merge_result = ti.xcom_pull(task_ids="merge_products")
-                # Fallback to merge_products without prefix
-            except Exception as e:
-                logger.warning(f"Không lấy được từ 'merge_products': {e}")
-
-        if not merge_result:
-            raise ValueError("Không tìm thấy kết quả merge từ XCom")
-
-        if not merge_result:
-            raise ValueError("Không tìm thấy kết quả merge từ XCom")
-
-        products = merge_result.get("products", [])
-        stats = merge_result.get("stats", {})
-
-        logger.info(f"Đang lưu {len(products)} sản phẩm...")
-
-        # Batch processing cho dữ liệu lớn
-        batch_size = int(get_variable("TIKI_SAVE_BATCH_SIZE", default="10000"))
-
-        if len(products) > batch_size:
-            logger.info(f"Chia nhỏ thành batches (mỗi batch {batch_size} sản phẩm)...")
-            # Lưu từng batch vào file riêng, sau đó merge
-            batch_files = []
-            for i in range(0, len(products), batch_size):
-                batch = products[i : i + batch_size]
-                batch_file = OUTPUT_DIR / f"products_batch_{i // batch_size}.json"
-                batch_data = {
-                    "batch_index": i // batch_size,
-                    "total_batches": (len(products) + batch_size - 1) // batch_size,
-                    "products": batch,
-                }
-                atomic_write_file(str(batch_file), batch_data, **context)
-                batch_files.append(batch_file)
-                logger.info(f"✓ Đã lưu batch {i // batch_size + 1}: {len(batch)} sản phẩm")
-
-        # Chuẩn bị dữ liệu để lưu
-        output_data = {
-            "total_products": len(products),
-            "stats": stats,
-            "crawled_at": datetime.now().isoformat(),
-            "note": "Crawl từ Airflow DAG với Dynamic Task Mapping",
-            "products": products,
-        }
-
-        # Atomic write
-        output_file = str(OUTPUT_FILE)
-        atomic_write_file(output_file, output_data, **context)
-
-        logger.info(f"✅ Đã lưu {len(products)} sản phẩm vào: {output_file}")
-
-        return output_file
-
-    except Exception as e:
-        logger.error(f"❌ Lỗi khi save products: {e}", exc_info=True)
+        logger.error(f"❌ Lỗi khi merge and save products: {e}", exc_info=True)
         raise
 
 

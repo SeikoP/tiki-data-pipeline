@@ -59,7 +59,7 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
             return []
 
     rate_limit_delay = float(get_variable("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.05"))
-    max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="5"))
+    max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="6"))
     semaphore = asyncio.Semaphore(max_concurrent)
 
     async def crawl_single(product_info):

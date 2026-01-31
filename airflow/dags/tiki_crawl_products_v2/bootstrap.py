@@ -692,7 +692,7 @@ def get_dag_config():
         "catchup": False,  # Không chạy lại các task đã bỏ lỡ
         "tags": dag_tags,
         "max_active_runs": 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
-        "max_active_tasks": 4,  # Tối ưu cho Local: 4 tasks * 4 drivers = 16 drivers (vừa đủ 16GB RAM)
+        "max_active_tasks": 3,  # 3 tasks đồng thời
     }
 
 

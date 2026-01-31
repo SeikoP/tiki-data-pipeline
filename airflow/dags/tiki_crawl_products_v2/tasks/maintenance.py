@@ -65,13 +65,13 @@ def cleanup_incomplete_products_wrapper(**context):
         }
 
 
-def cleanup_orphan_categories_wrapper(**context):
-    """Task wrapper to cleanup categories that don't have any matching products. Run this after
-    loading categories to keep the table clean.
-
+def cleanup_categories_wrapper(**context):
+    """
+    Task wrapper to cleanup both orphan and redundant categories.
+    
     Xóa:
-    1. Categories có product_count = 0 (hoặc NULL)
-    2. Leaf categories không có products trong bảng products
+    1. Orphan categories: có product_count = 0 hoặc không có products
+    2. Redundant categories: non-leaf categories
     """
     logger = get_logger(context)
 
@@ -79,12 +79,14 @@ def cleanup_orphan_categories_wrapper(**context):
         from pipelines.crawl.storage.postgres_storage import PostgresStorage
 
         logger.info("=" * 70)
-        logger.info("🧹 CLEANUP ORPHAN CATEGORIES")
+        logger.info("🧹 CLEANUP CATEGORIES (Orphan + Redundant)")
         logger.info("=" * 70)
 
         storage = PostgresStorage()
 
-        # 1. Xóa categories có product_count = 0 hoặc NULL
+        # PART 1: Cleanup Orphan Categories
+        logger.info("📦 Part 1: Cleaning up orphan categories...")
+        
         with storage.get_connection() as conn:
             with conn.cursor() as cur:
                 # Xóa categories có product_count = 0 hoặc NULL
@@ -95,7 +97,7 @@ def cleanup_orphan_categories_wrapper(**context):
                 """)
                 deleted_zero_count = cur.rowcount
 
-                # 2. Xóa leaf categories không có products trong bảng products
+                # Xóa leaf categories không có products trong bảng products
                 cur.execute("""
                     DELETE FROM categories
                     WHERE is_leaf = true
@@ -108,48 +110,36 @@ def cleanup_orphan_categories_wrapper(**context):
 
                 conn.commit()
 
-                total_deleted = deleted_zero_count + deleted_no_products
-
-                logger.info("📊 Cleanup results:")
-                logger.info(f"   - Categories với product_count = 0: {deleted_zero_count}")
-                logger.info(f"   - Categories không có products: {deleted_no_products}")
-                logger.info(f"   - Tổng cộng: {total_deleted} categories đã xóa")
-                logger.info("=" * 70)
-
-        # Gọi cleanup_orphan_categories từ storage để đảm bảo consistency
-        # (nó sẽ xóa các categories không có products)
+        # Gọi cleanup_orphan_categories từ storage
         additional_deleted = storage.cleanup_orphan_categories()
+        total_orphan_deleted = deleted_zero_count + deleted_no_products + additional_deleted
 
-        total_deleted = total_deleted + additional_deleted
+        logger.info("📊 Orphan cleanup results:")
+        logger.info(f"   - Categories với product_count = 0: {deleted_zero_count}")
+        logger.info(f"   - Categories không có products: {deleted_no_products + additional_deleted}")
+        logger.info(f"   - Tổng orphan deleted: {total_orphan_deleted}")
 
-        logger.info(f"✅ Cleanup complete: {total_deleted} orphan categories deleted")
+        # PART 2: Cleanup Redundant Categories
+        logger.info("📦 Part 2: Cleaning up redundant (non-leaf) categories...")
+        removed_redundant = storage.cleanup_redundant_categories()
+        logger.info(f"   - Non-leaf categories removed: {removed_redundant}")
+
+        logger.info("=" * 70)
+        logger.info(f"✅ Total cleanup: {total_orphan_deleted + removed_redundant} categories deleted")
+        logger.info(f"   - Orphan: {total_orphan_deleted}")
+        logger.info(f"   - Redundant: {removed_redundant}")
+        logger.info("=" * 70)
+
         return {
             "status": "success",
-            "deleted_count": total_deleted,
-            "deleted_zero_count": deleted_zero_count,
-            "deleted_no_products": deleted_no_products + additional_deleted,
+            "total_deleted": total_orphan_deleted + removed_redundant,
+            "orphan_deleted": total_orphan_deleted,
+            "redundant_deleted": removed_redundant,
         }
 
     except Exception as e:
         logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
         return {"status": "error", "message": str(e), "deleted_count": 0}
-
-
-def cleanup_redundant_categories_wrapper(**context):
-    """
-    Task wrapper to remove non-leaf categories.
-    """
-    logger = get_logger(context)
-    try:
-        from pipelines.crawl.storage.postgres_storage import PostgresStorage
-
-        storage = PostgresStorage()
-        removed = storage.cleanup_redundant_categories()
-        logger.info(f"✅ Removed {removed} non-leaf categories")
-        return {"status": "success", "removed": removed}
-    except Exception as e:
-        logger.error(f"❌ Error during redundant category cleanup: {e}", exc_info=True)
-        return {"status": "error", "message": str(e)}
 
 
 def reconcile_categories_wrapper(**context):
