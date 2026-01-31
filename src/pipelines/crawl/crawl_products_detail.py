@@ -697,7 +697,7 @@ def crawl_product_detail_with_driver(
 
                 redis_cache = get_redis_cache("redis://redis:6379/1")
                 if redis_cache:
-                    redis_cache.cache_html(url, full_html, ttl=86400)
+                    redis_cache.cache_html(url, full_html, ttl=259200)  # 3 ngày
                     if verbose:
                         print(f"[Redis Cache] ✅ Đã cache HTML cho {url[:60]}...")
             except Exception:

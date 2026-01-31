@@ -65,11 +65,11 @@ class RedisCache:
     Redis cache wrapper với connection pooling cho crawl pipeline.
     """
 
-    def __init__(self, redis_url: str = "redis://redis:6379/1", default_ttl: int = 86400):
+    def __init__(self, redis_url: str = "redis://redis:6379/1", default_ttl: int = 259200):
         """
         Args:
             redis_url: Redis connection URL (database 1 cho cache, database 0 đã dùng cho Celery)
-            default_ttl: Time to live mặc định (giây), mặc định 24 giờ
+            default_ttl: Time to live mặc định (giây), mặc định 3 ngày (259200s)
         """
         if not REDIS_AVAILABLE:
             raise ImportError("Redis chưa được cài đặt. Cài đặt: pip install redis")
