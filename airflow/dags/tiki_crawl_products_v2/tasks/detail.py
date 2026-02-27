@@ -192,10 +192,12 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                                         f"updated_at > NOW() - INTERVAL '{cache_relax_days} days'"
                                     )
                                 else:
-                                    filter_condition = f"""
-                                        (brand IS NOT NULL AND brand != '' AND seller_name IS NOT NULL AND seller_name != '')
-                                        OR (updated_at > NOW() - INTERVAL '{cache_relax_days} days')
-                                    """
+                                    # NORMAL MODE: Skip nếu updated < cache_relax_days
+                                    # Không quan tâm có brand/seller hay không
+                                    # → Tất cả products đều được re-crawl sau cache_relax_days
+                                    filter_condition = (
+                                        f"updated_at > NOW() - INTERVAL '{cache_relax_days} days'"
+                                    )
 
                                 cur.execute(
                                     f"""

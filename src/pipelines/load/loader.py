@@ -21,6 +21,14 @@ from common.profiling import profile_loader
 
 from .db_pool import close_db_pool, get_db_pool, initialize_db_pool
 
+try:
+    from psycopg2.extras import execute_values, Json
+
+    EXECUTE_VALUES_AVAILABLE = True
+except ImportError:
+    EXECUTE_VALUES_AVAILABLE = False
+    Json = None  # type: ignore[assignment,misc]
+
 logger = logging.getLogger(__name__)
 
 
@@ -218,37 +226,155 @@ class OptimizedDataLoader:
 
     def _upsert_batch(self, batch: list[dict], upsert: bool, db_pool):
         """
-        Upsert một batch vào database.
+        Upsert một batch vào database using execute_values for performance.
         """
         with db_pool.get_cursor(commit=True) as cursor:
             if upsert:
-                # INSERT ON CONFLICT UPDATE
-                for product in batch:
-                    self._upsert_product(cursor, product)
+                if EXECUTE_VALUES_AVAILABLE:
+                    self._upsert_batch_values(cursor, batch)
+                else:
+                    # Fallback to row-by-row if execute_values not available
+                    for product in batch:
+                        self._upsert_product(cursor, product)
 
                 # Log crawl history (simple implementation)
                 self._log_crawl_history(cursor, batch)
             else:
-                # Chỉ INSERT
-                for product in batch:
-                    self._insert_product(cursor, product)
+                if EXECUTE_VALUES_AVAILABLE:
+                    self._insert_batch_values(cursor, batch)
+                else:
+                    for product in batch:
+                        self._insert_product(cursor, product)
 
-    def _upsert_product(self, cursor, product: dict):
+    def _upsert_batch_values(self, cursor, batch: list[dict]):
         """
-        Upsert một product với ON CONFLICT UPDATE.
+        Batch upsert using execute_values for 10-50x better performance.
         """
-        # Serialize JSONB fields (if needed in future)
-        # specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
-        # images = json.dumps(product.get("images", {}), ensure_ascii=False)
         query = """
             INSERT INTO products (
                 product_id, category_url, category_id, name, short_name, url, price, original_price,
                 discount_percent, rating_average, review_count, sales_count, brand,
                 seller_name, seller_id, seller_is_official,
+                image_url, stock_available, shipping,
+                crawled_at, updated_at,
+                crawl_quality, needs_enrichment
+            ) VALUES %s
+            ON CONFLICT (product_id) DO UPDATE SET
+                category_url = COALESCE(EXCLUDED.category_url, products.category_url),
+                category_id = COALESCE(EXCLUDED.category_id, products.category_id),
+                name = COALESCE(NULLIF(EXCLUDED.name, ''), products.name),
+                short_name = COALESCE(NULLIF(EXCLUDED.short_name, ''), products.short_name),
+                url = COALESCE(NULLIF(EXCLUDED.url, ''), products.url),
+                price = COALESCE(EXCLUDED.price, products.price),
+                original_price = COALESCE(EXCLUDED.original_price, products.original_price),
+                discount_percent = COALESCE(EXCLUDED.discount_percent, products.discount_percent),
+                rating_average = COALESCE(EXCLUDED.rating_average, products.rating_average),
+                review_count = COALESCE(EXCLUDED.review_count, products.review_count),
+                sales_count = COALESCE(EXCLUDED.sales_count, products.sales_count),
+                brand = COALESCE(NULLIF(EXCLUDED.brand, ''), products.brand),
+                seller_name = COALESCE(NULLIF(EXCLUDED.seller_name, ''), products.seller_name),
+                seller_id = COALESCE(NULLIF(EXCLUDED.seller_id, ''), products.seller_id),
+                seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
+                image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url),
+                stock_available = COALESCE(EXCLUDED.stock_available, products.stock_available),
+                shipping = COALESCE(EXCLUDED.shipping, products.shipping),
+                crawled_at = COALESCE(products.crawled_at, EXCLUDED.crawled_at),
+                updated_at = EXCLUDED.updated_at,
+                crawl_quality = EXCLUDED.crawl_quality,
+                needs_enrichment = EXCLUDED.needs_enrichment
+        """
+
+        now = datetime.now()
+        values = [
+            (
+                product.get("product_id"),
+                product.get("category_url"),
+                product.get("category_id"),
+                product.get("name"),
+                product.get("short_name"),
+                product.get("url"),
+                product.get("price"),
+                product.get("original_price"),
+                product.get("discount_percent"),
+                product.get("rating_average"),
+                product.get("review_count"),
+                product.get("sales_count"),
+                product.get("brand"),
+                product.get("seller_name"),
+                product.get("seller_id"),
+                product.get("seller_is_official"),
+                product.get("image_url"),
+                product.get("stock_available"),
+                Json(product["shipping"]) if product.get("shipping") else None,
+                product.get("crawled_at"),
+                now,
+                product.get("crawl_quality", "basic"),
+                product.get("needs_enrichment", False),
+            )
+            for product in batch
+        ]
+
+        execute_values(cursor, query, values, page_size=100)
+        self.stats["inserted_count"] += len(batch)
+
+    def _insert_batch_values(self, cursor, batch: list[dict]):
+        """
+        Batch insert using execute_values.
+        """
+        query = """
+            INSERT INTO products (
+                product_id, category_url, category_id, name, short_name, url, price, original_price,
+                discount_percent, rating_average, review_count, sales_count, brand,
+                seller_name, seller_id, seller_is_official,
+                image_url, stock_available, shipping,
+                crawled_at, updated_at
+            ) VALUES %s
+        """
+
+        now = datetime.now()
+        values = [
+            (
+                product.get("product_id"),
+                product.get("category_url"),
+                product.get("category_id"),
+                product.get("name"),
+                product.get("short_name"),
+                product.get("url"),
+                product.get("price"),
+                product.get("original_price"),
+                product.get("discount_percent"),
+                product.get("rating_average"),
+                product.get("review_count"),
+                product.get("sales_count"),
+                product.get("brand"),
+                product.get("seller_name"),
+                product.get("seller_id"),
+                product.get("seller_is_official"),
+                product.get("image_url"),
+                product.get("stock_available"),
+                Json(product["shipping"]) if product.get("shipping") else None,
+                product.get("crawled_at"),
+                now,
+            )
+            for product in batch
+        ]
+
+        execute_values(cursor, query, values, page_size=100)
+
+    def _upsert_product(self, cursor, product: dict):
+        """
+        Upsert một product với ON CONFLICT UPDATE.
+        """
+        query = """
+            INSERT INTO products (
+                product_id, category_url, category_id, name, short_name, url, price, original_price,
+                discount_percent, rating_average, review_count, sales_count, brand,
+                seller_name, seller_id, seller_is_official,
+                image_url, stock_available, shipping,
                 crawled_at, updated_at,
                 crawl_quality, needs_enrichment
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (product_id) DO UPDATE SET
                 category_url = COALESCE(EXCLUDED.category_url, products.category_url),
@@ -266,6 +392,9 @@ class OptimizedDataLoader:
                 seller_name = COALESCE(NULLIF(EXCLUDED.seller_name, ''), products.seller_name),
                 seller_id = COALESCE(NULLIF(EXCLUDED.seller_id, ''), products.seller_id),
                 seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
+                image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url),
+                stock_available = COALESCE(EXCLUDED.stock_available, products.stock_available),
+                shipping = COALESCE(EXCLUDED.shipping, products.shipping),
                 crawled_at = COALESCE(products.crawled_at, EXCLUDED.crawled_at),
                 updated_at = EXCLUDED.updated_at,
                 crawl_quality = EXCLUDED.crawl_quality,
@@ -291,6 +420,9 @@ class OptimizedDataLoader:
                 product.get("seller_name"),
                 product.get("seller_id"),
                 product.get("seller_is_official"),
+                product.get("image_url"),
+                product.get("stock_available"),
+                Json(product["shipping"]) if product.get("shipping") else None,
                 product.get("crawled_at"),
                 datetime.now(),
                 product.get("crawl_quality", "basic"),
@@ -308,17 +440,15 @@ class OptimizedDataLoader:
         """
         Insert một product (không UPDATE)
         """
-        # Serialize JSONB fields (if needed in future)
-        # specs = json.dumps(product.get("specifications", {}), ensure_ascii=False)
-        # images = json.dumps(product.get("images", {}), ensure_ascii=False)
         query = """
             INSERT INTO products (
                 product_id, category_url, category_id, name, short_name, url, price, original_price,
                 discount_percent, rating_average, review_count, sales_count, brand,
                 seller_name, seller_id, seller_is_official,
+                image_url, stock_available, shipping,
                 crawled_at, updated_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
         """
 
@@ -341,6 +471,9 @@ class OptimizedDataLoader:
                 product.get("seller_name"),
                 product.get("seller_id"),
                 product.get("seller_is_official"),
+                product.get("image_url"),
+                product.get("stock_available"),
+                Json(product["shipping"]) if product.get("shipping") else None,
                 product.get("crawled_at"),
                 datetime.now(),
             ),
@@ -428,33 +561,110 @@ class OptimizedDataLoader:
 
     def _log_crawl_history(self, cursor, batch: list[dict]):
         """
-        Ghi lại lịch sử crawl (giá, sales_count) cho batch.
+        Ghi lại lịch sử crawl với price change tracking đầy đủ.
+        Tính toán price_change, previous_price, discount_amount, etc.
         """
-        history_query = """
-            INSERT INTO crawl_history (
-                product_id, price, original_price, discount_percent, rating_average, review_count, sales_count,
-                crawled_at, updated_at
-            ) VALUES %s
-        """
+        from psycopg2.extras import execute_values as _execute_values
 
-        history_params = [
-            (
-                p.get("product_id"),
-                p.get("price"),
-                p.get("original_price"),
-                p.get("discount_percent"),
+        valid_products = [p for p in batch if p.get("product_id") and p.get("price") is not None]
+        if not valid_products:
+            return
+
+        # Batch lookup previous prices from crawl_history
+        product_ids = [p.get("product_id") for p in valid_products]
+        cursor.execute(
+            """
+            SELECT DISTINCT ON (product_id)
+                product_id, price, original_price, discount_percent, sales_count
+            FROM crawl_history
+            WHERE product_id = ANY(%s)
+            ORDER BY product_id, crawled_at DESC
+            """,
+            (product_ids,),
+        )
+        previous_data = {
+            row[0]: {
+                "price": row[1],
+                "original_price": row[2],
+                "discount_percent": row[3],
+                "sales_count": row[4],
+            }
+            for row in cursor.fetchall()
+        }
+
+        now = datetime.now()
+        records = []
+        for p in valid_products:
+            product_id = p.get("product_id")
+            current_price = p.get("price")
+            current_original = p.get("original_price")
+            current_discount = p.get("discount_percent")
+            current_sales = p.get("sales_count")
+
+            prev = previous_data.get(product_id)
+            price_change = None
+            price_change_pct = None
+            prev_price = None
+            prev_original = None
+            prev_discount = None
+            sales_change = None
+            crawl_type = "price_change"
+
+            if prev:
+                prev_price = float(prev["price"]) if prev["price"] else None
+                prev_original = float(prev["original_price"]) if prev["original_price"] else None
+                prev_discount = prev["discount_percent"]
+                prev_sales = prev.get("sales_count")
+
+                if prev_price is not None and current_price is not None:
+                    price_change = float(current_price) - prev_price
+                    if prev_price > 0:
+                        price_change_pct = round((price_change / prev_price) * 100, 2)
+
+                if prev_sales is not None and current_sales is not None:
+                    sales_change = current_sales - prev_sales
+
+            # Compute discount_amount
+            discount_amount = None
+            if current_original and current_price:
+                discount_amount = float(current_original) - float(current_price)
+
+            # Flash sale detection
+            is_flash_sale = (current_discount and current_discount >= 30) or (
+                discount_amount and discount_amount >= 100000
+            )
+
+            records.append((
+                product_id,
+                current_price,
+                current_original,
+                current_discount,
+                discount_amount,
+                price_change,
+                price_change_pct,
+                prev_price,
+                prev_original,
+                prev_discount,
+                current_sales,
+                sales_change,
                 p.get("rating_average"),
                 p.get("review_count"),
-                p.get("sales_count"),
-                p.get("crawled_at") or datetime.now(),
-                datetime.now(),
-            )
-            for p in batch
-        ]
+                bool(is_flash_sale),
+                crawl_type,
+                p.get("crawled_at") or now,
+                now,
+            ))
 
-        from psycopg2.extras import execute_values
-
-        execute_values(cursor, history_query, history_params)
+        history_query = """
+            INSERT INTO crawl_history (
+                product_id, price, original_price, discount_percent, discount_amount,
+                price_change, price_change_percent,
+                previous_price, previous_original_price, previous_discount_percent,
+                sales_count, sales_change, rating_average, review_count,
+                is_flash_sale, crawl_type, crawled_at, updated_at
+            ) VALUES %s
+        """
+        _execute_values(cursor, history_query, records)
 
     def close(self):
         """

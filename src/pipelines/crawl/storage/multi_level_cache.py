@@ -11,10 +11,13 @@ Strategy: Check L1 -> L2 -> L3, write to all levels
 import gzip
 import hashlib
 import json
+import logging
 import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 try:
     import redis
@@ -146,6 +149,7 @@ class FileCache:
             return data.get("value")
         except Exception:
             # Nếu lỗi, xóa file corrupt
+            logger.debug("File cache read error for key, removing corrupt file", exc_info=True)
             try:
                 filepath.unlink()
             except Exception:
@@ -236,7 +240,7 @@ class MultiLevelCache:
 
                 self.l2 = RedisCache(redis_url=redis_url, default_ttl=default_ttl)
             except Exception:
-                pass
+                logger.debug("Failed to initialize L2 Redis cache", exc_info=True)
 
         # L3: File cache
         self.l3 = None
@@ -290,7 +294,7 @@ class MultiLevelCache:
                         self.l1.set(key, value)
                     return value
             except Exception:
-                pass
+                logger.debug("L2 Redis cache get failed for key %s", key, exc_info=True)
 
         # L3: File cache
         if self.l3:

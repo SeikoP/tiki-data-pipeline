@@ -51,6 +51,8 @@ x-airflow-common:
     # Logging
     AIRFLOW__CORE__LOGGING_LEVEL: "INFO"
     AIRFLOW__LOGGING__LOGGING_LEVEL: "INFO"
+    AIRFLOW__LOGGING__DELETE_LOCAL_LOGS: "True"
+    AIRFLOW__LOGGING__DELETE_LOCAL_LOGS_AFTER_DAYS: 30
     
     # Scheduler optimization for faster task pickup
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
@@ -87,6 +89,11 @@ x-airflow-common:
 services:
   postgres:
     image: postgres:16-alpine
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     env_file:
       - .env
     environment:
@@ -95,7 +102,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-airflow}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-shared-volume:/var/lib/postgresql/data
       - ./airflow/setup/init-airflow-db.sh:/docker-entrypoint-initdb.d/01-init-airflow-db.sh:ro
@@ -130,9 +137,14 @@ services:
 
   redis:
     image: redis:7.2-alpine
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1 --appendonly yes
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1 --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -301,7 +313,7 @@ services:
         # Fix permissions
         echo "🔧 Fixing data permissions..."
         chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/data || echo "Warning: chown failed"
-        chmod -R 777 /opt/airflow/data || echo "Warning: chmod failed"
+        chmod -R 775 /opt/airflow/data || echo "Warning: chmod failed"
 
         # Create directories
         mkdir -p /opt/airflow/logs /opt/airflow/plugins /opt/airflow/data

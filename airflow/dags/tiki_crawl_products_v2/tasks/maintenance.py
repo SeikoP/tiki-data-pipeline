@@ -382,8 +382,7 @@ def backup_database(**context) -> dict[str, Any]:
             logger.warning(f"⚠️  Không tìm thấy script backup tại: {script_path}")
             logger.info("💡 Sử dụng pg_dump trực tiếp...")
 
-            # Fallback: sử dụng pg_dump trực tiếp
-            container_name = "tiki-data-pipeline-postgres-1"
+            # Use pg_dump directly (available in the Airflow container via postgresql-client)
             # Thử nhiều đường dẫn backup - ưu tiên /opt/airflow/data/backups (có quyền ghi)
             backup_dirs = [
                 Path(
@@ -424,21 +423,25 @@ def backup_database(**context) -> dict[str, Any]:
             logger.info("📦 Đang backup database: crawl_data...")
             logger.info(f"   File: {backup_file}")
 
-            # Chạy pg_dump trong container - dùng plain SQL format
+            # Get postgres host (use service name inside Docker network)
+            postgres_host = os.getenv("POSTGRES_HOST", "postgres")
+            postgres_port = os.getenv("POSTGRES_PORT", "5432")
+            db_name = os.getenv("POSTGRES_DB", "tiki")
+
+            # Run pg_dump directly (postgresql-client is installed in the Airflow image)
             cmd = [
-                "docker",
-                "exec",
-                "-e",
-                f"PGPASSWORD={postgres_password}",
-                container_name,
                 "pg_dump",
-                "-U",
-                postgres_user,
+                "-h", postgres_host,
+                "-p", postgres_port,
+                "-U", postgres_user,
                 "--format=plain",  # Plain SQL format - dễ restore, tương thích
                 "--no-owner",  # Không dump owner info
                 "--no-acl",  # Không dump access privileges
-                os.getenv("POSTGRES_DB", "tiki"),
+                db_name,
             ]
+
+            env = os.environ.copy()
+            env["PGPASSWORD"] = postgres_password
 
             try:
                 with open(backup_file, "wb") as f:
@@ -448,6 +451,7 @@ def backup_database(**context) -> dict[str, Any]:
                         stderr=subprocess.PIPE,
                         check=False,
                         timeout=600,  # 10 phút timeout
+                        env=env,
                     )
 
                 if result.returncode == 0:

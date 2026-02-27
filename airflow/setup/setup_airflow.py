@@ -37,6 +37,8 @@ def setup_airflow():
             "TIKI_CATEGORY_CONCURRENCY": "6",
             "TIKI_DETAIL_BATCH_SIZE": "333",
             "TIKI_DETAIL_MAX_CONCURRENT_TASKS": "6",
+            "TIKI_PRODUCTS_PER_DAY": "3000",  # Crawl 3000 products/run để crawl hết trong 1 ngày
+            "TIKI_CACHE_RELAX_DAYS": "2",  # Update mỗi 2 ngày để track price changes tốt
             "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD": "5",
             "TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT": "60",
             "TIKI_DEGRADATION_FAILURE_THRESHOLD": "3",

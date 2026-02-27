@@ -9,7 +9,6 @@ import os
 import re
 import time
 from datetime import datetime, timedelta
-from functools import lru_cache
 from typing import Any
 
 import requests
@@ -203,7 +202,11 @@ Trả về ĐÚNG format trên:"""
 
         return prompt
 
-    @lru_cache(maxsize=2048)  # noqa: B019
+    # Class-level cache for shorten_product_name to avoid lru_cache memory leak
+    # on instance methods (lru_cache holds reference to self, preventing GC)
+    _short_name_cache: dict[str, str] = {}
+    _SHORT_NAME_CACHE_MAXSIZE = 2048
+
     def shorten_product_name(self, product_name: str) -> str:
         """Rút gọn tên sản phẩm sử dụng AI (có caching và regex fallback).
 
@@ -216,8 +219,13 @@ Trả về ĐÚNG format trên:"""
         if not product_name:
             return ""
 
+        # Check class-level cache first
+        if product_name in self._short_name_cache:
+            return self._short_name_cache[product_name]
+
         # 0. Pre-check: Nếu tên đã ngắn (< 15 chars) hoặc quá dài (> 200 chars - có thể là spam), trả về regex clean luôn
         if len(product_name) < 15:
+            self._cache_short_name(product_name, product_name)
             return product_name
 
         # 1. Regex Cleanup (Heuristic) - Luôn chạy cái này trước để tiết kiệm token
@@ -226,9 +234,11 @@ Trả về ĐÚNG format trên:"""
 
         # Nếu sau khi regex clean, tên đã đủ ngắn (< 40 chars) -> Return luôn, không cần AI
         if len(cleaned_name) < 40:
+            self._cache_short_name(product_name, cleaned_name)
             return cleaned_name
 
         if not self.enabled or not self.api_keys:
+            self._cache_short_name(product_name, cleaned_name)
             return cleaned_name
 
         try:
@@ -270,14 +280,29 @@ Tên rút gọn:
                 cleaned_name_ai = response.strip().strip('"').strip("'")
                 # Fallback check: Nếu AI trả về tên quá ngắn hoặc rỗng, dùng regex clean
                 if len(cleaned_name_ai) < 3:
+                    self._cache_short_name(product_name, cleaned_name)
                     return cleaned_name
+                self._cache_short_name(product_name, cleaned_name_ai)
                 return cleaned_name_ai
 
+            self._cache_short_name(product_name, cleaned_name)
             return cleaned_name
 
         except Exception as e:
             logger.error(f"❌ Lỗi khi rút gọn tên sản phẩm: {e}")
+            self._cache_short_name(product_name, cleaned_name)
             return cleaned_name
+
+    def _cache_short_name(self, key: str, value: str) -> None:
+        """Store result in class-level cache, evicting oldest if full."""
+        if len(self._short_name_cache) >= self._SHORT_NAME_CACHE_MAXSIZE:
+            # Evict first (oldest) entry
+            try:
+                oldest_key = next(iter(self._short_name_cache))
+                del self._short_name_cache[oldest_key]
+            except StopIteration:
+                pass
+        self._short_name_cache[key] = value
 
     def _regex_clean_name(self, name: str) -> str:
         """

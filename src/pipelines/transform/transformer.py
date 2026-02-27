@@ -129,6 +129,7 @@ class DataTransformer:
         transformed = []
         seen_product_ids = set()
         seen_lock = Lock()
+        stats_lock = Lock()
 
         # Determine max_workers based on list size, but cap at reasonable limit (e.g. 20)
         # Higher if IO bound (AI calls), lower if CPU bound.
@@ -146,14 +147,16 @@ class DataTransformer:
                     transformed_product = future.result()
 
                     if not transformed_product:
-                        self.stats["invalid_products"] += 1
+                        with stats_lock:
+                            self.stats["invalid_products"] += 1
                         continue
 
                     # Thread-safe duplicate check
                     product_id = transformed_product.get("product_id")
                     with seen_lock:
                         if product_id in seen_product_ids:
-                            self.stats["duplicates_removed"] += 1
+                            with stats_lock:
+                                self.stats["duplicates_removed"] += 1
                             logger.debug(f"⚠️  Duplicate product_id: {product_id}")
                             continue
                         seen_product_ids.add(product_id)
@@ -163,19 +166,22 @@ class DataTransformer:
                         is_valid, error = self.validate_product(transformed_product)
                         if not is_valid:
                             if self.remove_invalid:
-                                self.stats["invalid_products"] += 1
-                                self.stats["errors"].append(f"Product {product_id}: {error}")
+                                with stats_lock:
+                                    self.stats["invalid_products"] += 1
+                                    self.stats["errors"].append(f"Product {product_id}: {error}")
                                 continue
                             elif self.strict_validation:
                                 raise ValueError(f"Invalid product {product_id}: {error}")
 
                     transformed.append(transformed_product)
-                    self.stats["valid_products"] += 1
+                    with stats_lock:
+                        self.stats["valid_products"] += 1
 
                 except Exception as e:
-                    self.stats["invalid_products"] += 1
-                    error_msg = f"Error transforming product at index {idx}: {str(e)}"
-                    self.stats["errors"].append(error_msg)
+                    with stats_lock:
+                        self.stats["invalid_products"] += 1
+                        error_msg = f"Error transforming product at index {idx}: {str(e)}"
+                        self.stats["errors"].append(error_msg)
                     logger.error(f"❌ {error_msg}")
 
                     if self.strict_validation:
