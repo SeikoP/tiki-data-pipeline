@@ -12,6 +12,8 @@ import requests
 # Import profiling utilities
 from common.profiling import profile, profile_crawler
 
+logger = logging.getLogger(__name__)
+
 # Import shared utilities
 from .crawl_utils import (
     DEFAULT_PRODUCT_LIST_CACHE_DIR,
@@ -117,10 +119,10 @@ def _check_selenium_available():
     return HAS_SELENIUM
 
 
-# Tạo thư mục output
-# Tạo thư mục output
-os.makedirs(DEFAULT_PRODUCTS_DIR, exist_ok=True)
-os.makedirs(DEFAULT_PRODUCT_LIST_CACHE_DIR, exist_ok=True)
+# Tạo thư mục output (deferred to ensure safe for import-time)
+def _ensure_output_dirs():
+    os.makedirs(DEFAULT_PRODUCTS_DIR, exist_ok=True)
+    os.makedirs(DEFAULT_PRODUCT_LIST_CACHE_DIR, exist_ok=True)
 
 # Thread-safe locks và stats
 stats_lock = Lock()
@@ -1117,14 +1119,12 @@ def crawl_category_products(
                         indent=2,
                     )
             except Exception as e:
-                if logger:
-                    logger.error(f"[File Cache] ❌ Lỗi khi ghi cache file {cache_file}: {e}")
-                else:
-                    logger.error(f"[File Cache] ❌ Lỗi khi ghi cache file {cache_file}: {e}")
+                logger.error(f"[File Cache] Lỗi khi ghi cache file {cache_file}: {e}")
 
         return unique_products
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to crawl category {category_url[:80]}: {e}")
         return []
 
 
@@ -1152,7 +1152,8 @@ def crawl_single_category(category, max_pages=None, use_selenium=False):
 
         return category, products
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error crawling category {category_url[:80]}: {e}")
         with stats_lock:
             stats["total_categories"] += 1
             stats["total_failed"] += 1

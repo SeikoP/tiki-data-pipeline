@@ -39,7 +39,7 @@ def get_cache_key(prefix: str, *args, **kwargs) -> str:
     key_str = "|".join(key_parts)
 
     # Hash for consistent length
-    return hashlib.md5(key_str.encode()).hexdigest()
+    return hashlib.sha256(key_str.encode()).hexdigest()[:32]
 
 
 def cache_in_memory(ttl: int = 300):

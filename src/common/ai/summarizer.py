@@ -122,7 +122,7 @@ class AISummarizer:
             "timeout": stats.get("timeout", 0),
         }
         key_str = json.dumps(key_data, sort_keys=True)
-        return hashlib.md5(key_str.encode()).hexdigest()
+        return hashlib.sha256(key_str.encode()).hexdigest()[:32]
 
     def _get_summary_from_cache(self, key: str) -> str | None:
         """Get AI summary from cache if not expired."""

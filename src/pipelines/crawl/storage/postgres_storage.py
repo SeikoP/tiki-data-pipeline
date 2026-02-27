@@ -112,12 +112,22 @@ class PostgresStorage:
             "keepalives_interval": keepalives_interval,
             "keepalives_count": keepalives_count,
         }
-        self.connect_kwargs = {
-            "connect_timeout": connect_timeout,
-            "keepalives_idle": keepalives_idle,
-            "keepalives_interval": keepalives_interval,
-            "keepalives_count": keepalives_count,
-        }
+
+    def close(self):
+        """Close the connection pool and release resources."""
+        if self._pool is not None:
+            try:
+                self._pool.closeall()
+            except Exception:
+                pass
+            finally:
+                self._pool = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
+        self.close()
 
     def _get_pool(self) -> ThreadedConnectionPool:
         """
@@ -1688,51 +1698,49 @@ class PostgresStorage:
                 # Get counts before deletion for detailed reporting
                 # Only calculate stats if both requirements are enabled
                 if require_seller and require_brand:
-                    # Calculate detailed stats: missing seller only, missing brand only, missing both, missing rating
-                    stats_query = f"""
+                    # Calculate detailed stats using parameterized query
+                    cur.execute(
+                        """
                         SELECT
                             COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND NOT (brand IS NULL OR brand = '')) as no_seller,
                             COUNT(*) FILTER (WHERE NOT (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as no_brand,
                             COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as both_missing,
                             COUNT(*) FILTER (WHERE rating_average IS NULL) as no_rating
                         FROM products
-                        WHERE {where_clause}
-                    """
-                    cur.execute(stats_query)
+                        WHERE (seller_name IS NULL OR seller_name = '') OR (brand IS NULL OR brand = '')
+                        """
+                    )
                     stats_row = cur.fetchone()
                     deleted_no_seller = stats_row[0] if stats_row else 0
                     deleted_no_brand = stats_row[1] if stats_row else 0
                     deleted_both = stats_row[2] if stats_row else 0
                     deleted_no_rating = stats_row[3] if stats_row and require_rating else 0
                 elif require_seller:
-                    # Only seller required - count all as no_seller
-                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    cur.execute("SELECT COUNT(*) FROM products WHERE seller_name IS NULL OR seller_name = ''")
                     deleted_no_seller = cur.fetchone()[0] or 0
                 elif require_brand:
-                    # Only brand required - count all as no_brand
-                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    cur.execute("SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = ''")
                     deleted_no_brand = cur.fetchone()[0] or 0
                 elif require_rating:
-                    # Only rating required - count all as no_rating
-                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    cur.execute("SELECT COUNT(*) FROM products WHERE rating_average IS NULL")
                     deleted_no_rating = cur.fetchone()[0] or 0
 
                 # 1. Delete from crawl_history (orphaned records prevention)
-                history_delete_query = f"""
+                history_delete_query = """
                     DELETE FROM crawl_history
                     WHERE product_id IN (
                         SELECT product_id FROM products
-                        WHERE {where_clause}
+                        WHERE {}
                     )
-                """
+                """.format(where_clause)
                 cur.execute(history_delete_query)
                 deleted_history = cur.rowcount
 
                 # 2. Delete products matching criteria
-                delete_query = f"""
+                delete_query = """
                     DELETE FROM products
-                    WHERE {where_clause}
-                """
+                    WHERE {}
+                """.format(where_clause)
                 cur.execute(delete_query)
                 deleted_count = cur.rowcount
 

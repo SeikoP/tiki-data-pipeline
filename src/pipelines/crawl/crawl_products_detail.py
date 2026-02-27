@@ -228,8 +228,8 @@ def crawl_product_detail_with_selenium(
                         canonical_url = redis_cache._canonicalize_url(url)
                         redis_cache.cache_html(canonical_url, full_html, ttl=REDIS_CACHE_TTL_HTML)
                         logger.debug("[Redis Cache] ✅ Đã cache HTML với TTL=%ds (7 days) cho %s...", REDIS_CACHE_TTL_HTML, url[:60])
-                except Exception:
-                    pass  # Ignore cache errors
+                except Exception:  # noqa: BLE001
+                    pass  # Non-critical, intentional swallow  # Ignore cache errors
 
             # Đóng driver trước khi return
             if driver:
@@ -243,8 +243,8 @@ def crawl_product_detail_with_selenium(
 
                     domain = urlparse(url).netloc or "tiki.vn"
                     adaptive_limiter.record_success(domain)
-                except Exception:
-                    pass  # Ignore errors
+                except Exception:  # noqa: BLE001
+                    pass  # Non-critical, intentional swallow  # Ignore errors
 
             return full_html
 
@@ -278,8 +278,8 @@ def crawl_product_detail_with_selenium(
             if driver:
                 try:
                     driver.quit()
-                except Exception:
-                    pass
+                except Exception:  # noqa: BLE001
+                    pass  # Non-critical, intentional swallow
                 driver = None
 
             # Nếu là lỗi không thể retry (như ImportError), raise ngay
@@ -301,8 +301,8 @@ def crawl_product_detail_with_selenium(
     if driver:
         try:
             driver.quit()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001
+            pass  # Non-critical, intentional swallow
 
     raise (
         Exception(f"Không thể crawl. Lỗi: {last_error}")
@@ -568,8 +568,8 @@ def crawl_product_detail_with_driver(
                 if cached_html:
                     logger.debug("[Redis Cache] ✅ Hit cache cho %s...", url[:60])
                     return cached_html
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001
+            pass  # Non-critical, intentional swallow
 
     # Adaptive Rate Limiting
     adaptive_limiter = None
@@ -682,8 +682,8 @@ def crawl_product_detail_with_driver(
 
                 domain = urlparse(url).netloc or "tiki.vn"
                 adaptive_limiter.record_success(domain)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001
+                pass  # Non-critical, intentional swallow
 
         return full_html
 
@@ -700,8 +700,8 @@ def crawl_product_detail_with_driver(
                 elif "timeout" in str(e).lower() or "Timeout" in type(e).__name__:
                     error_type_str = "timeout"
                 adaptive_limiter.record_error(domain, error_type=error_type_str)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001
+                pass  # Non-critical, intentional swallow
 
         if verbose:
             logger.debug("[Selenium] Lỗi khi crawl (reuse driver): %s: %s", type(e).__name__, e)
@@ -723,7 +723,7 @@ def load_category_hierarchy():
         try:
             with open(hierarchy_file, encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except Exception:  # noqa: BLE001
             return {}
     return {}
 
@@ -874,8 +874,8 @@ def extract_product_detail(
             if rating_match:
                 try:
                     product_data["rating"]["average"] = float(rating_match.group(1))
-                except Exception:
-                    pass
+                except Exception:  # noqa: BLE001
+                    pass  # Non-critical, intentional swallow
             break
 
     # Tìm số lượng đánh giá
@@ -892,8 +892,8 @@ def extract_product_detail(
             if count_match:
                 try:
                     product_data["rating"]["total_reviews"] = int(count_match.group(1))
-                except Exception:
-                    pass
+                except Exception:  # noqa: BLE001
+                    pass  # Non-critical, intentional swallow
             break
 
     # 4. Extract seller (mở rộng selectors để lấy đầy đủ seller_name)
@@ -1742,8 +1742,8 @@ async def crawl_product_detail_via_api(
                                 f.write(
                                     f"[{datetime.datetime.now()}] API_FAIL {product_id}: HTTP {response.status} - {text[:200]}\n"
                                 )
-                        except Exception:
-                            pass
+                        except Exception:  # noqa: BLE001
+                            pass  # Non-critical, intentional swallow
                     return None
         except Exception as e:
             logger.error("[API] ❌ Lỗi attempt %d: %s", attempt + 1, e)

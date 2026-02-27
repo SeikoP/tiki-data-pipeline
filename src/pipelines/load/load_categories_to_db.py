@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def load_categories(json_file_path: str):
@@ -11,10 +14,10 @@ def load_categories(json_file_path: str):
     """
     from pipelines.crawl.storage.postgres_storage import PostgresStorage
 
-    print(f"📂 Reading categories from: {json_file_path}")
+    logger.info(f"📂 Reading categories from: {json_file_path}")
 
     if not os.path.exists(json_file_path):
-        print(f"❌ File not found: {json_file_path}")
+        logger.info(f"❌ File not found: {json_file_path}")
         return
 
     try:
@@ -23,10 +26,10 @@ def load_categories(json_file_path: str):
             categories = json.load(f)
 
         if not categories:
-            print("⚠️  File is empty.")
+            logger.info("⚠️  File is empty.")
             return
 
-        print(f"📊 Found {len(categories)} categories.")
+        logger.info(f"📊 Found {len(categories)} categories.")
 
         # 2. CRITICAL: Đảm bảo tất cả parent categories được include
         # Build URL -> category map từ file JSON đầy đủ
@@ -37,9 +40,9 @@ def load_categories(json_file_path: str):
         used_category_ids = set()
         try:
             used_category_ids = storage.get_used_category_ids()
-            print(f"🔍 Found {len(used_category_ids)} active categories in products table")
+            logger.info(f"🔍 Found {len(used_category_ids)} active categories in products table")
         except Exception as e:
-            print(f"⚠️  Could not get used category IDs: {e}")
+            logger.info(f"⚠️  Could not get used category IDs: {e}")
 
         # CRITICAL: Nếu không có products (DB mới), load tất cả leaf categories và parents
         # Nếu có products, chỉ load leaf categories có products và parents của chúng
@@ -93,7 +96,7 @@ def load_categories(json_file_path: str):
                         current = url_to_cat_full[parent_url]
                     else:
                         # Parent không có trong file JSON
-                        print(f"⚠️  Parent {parent_url} không có trong file JSON")
+                        logger.info(f"⚠️  Parent {parent_url} không có trong file JSON")
                         break
                     depth += 1
 
@@ -123,24 +126,24 @@ def load_categories(json_file_path: str):
                     missing_parents.append(parent_url)
 
         if missing_parents:
-            print(f"⚠️  Cảnh báo: {len(missing_parents)} parent URLs không có trong file JSON:")
+            logger.info(f"⚠️  Cảnh báo: {len(missing_parents)} parent URLs không có trong file JSON:")
             for url in missing_parents[:5]:
-                print(f"   - {url}")
+                logger.info(f"   - {url}")
 
-        print(
-            f"📂 Sẽ load {len(categories_to_load)} categories ({len(leaf_categories_to_load)} leaves + {len(parent_urls_needed)} parents)"
+        logger.info(
+            f"Sẽ load {len(categories_to_load)} categories ({len(leaf_categories_to_load)} leaves + {len(parent_urls_needed)} parents)"
         )
 
         # Debug: In ra danh sách categories sẽ load (chỉ hiển thị một số)
         if len(categories_to_load) <= 20:
-            print("\n📋 Danh sách categories sẽ load:")
+            logger.info("\n📋 Danh sách categories sẽ load:")
             for cat in categories_to_load:
-                print(f"   - [{cat.get('level', '?')}] {cat.get('name')} ({cat.get('url')})")
+                logger.info(f"   - [{cat.get('level', '?')}] {cat.get('name')} ({cat.get('url')})")
         else:
-            print(f"\n📋 Sẽ load {len(categories_to_load)} categories (quá nhiều để hiển thị)")
+            logger.info(f"\n📋 Sẽ load {len(categories_to_load)} categories (quá nhiều để hiển thị)")
 
         # 3. Connect & Save
-        print("🚀 Importing to Database...")
+        logger.info("🚀 Importing to Database...")
 
         # Load categories với đầy đủ parent hierarchy
         saved_count = storage.save_categories(
@@ -149,18 +152,18 @@ def load_categories(json_file_path: str):
             sync_with_products=False,  # Already filtered above
         )
 
-        print(
-            f"✅ DONE! Successfully loaded {saved_count} categories (including parent categories)."
+        logger.info(
+            f"DONE! Successfully loaded {saved_count} categories (including parent categories)."
         )
-        print("ℹ️  Table 'categories' relies on 'url' as Primary Key.")
+        logger.info("ℹ️  Table 'categories' relies on 'url' as Primary Key.")
 
         # Update product_count from actual products in database
-        print("📊 Updating product_count from products table...")
+        logger.info("📊 Updating product_count from products table...")
         updated_count = storage.update_category_product_counts()
-        print(f"✅ Updated product_count for {updated_count} categories.")
+        logger.info(f"✅ Updated product_count for {updated_count} categories.")
 
     except Exception as e:
-        print(f"❌ Error during load: {e}")
+        logger.info(f"❌ Error during load: {e}")
         import traceback
 
         traceback.print_exc()
@@ -175,7 +178,7 @@ if __name__ == "__main__":
 
     # Config DB host for local run
     if "POSTGRES_HOST" not in os.environ:
-        print("ℹ️  Setting POSTGRES_HOST=localhost for local execution")
+        logger.info("ℹ️  Setting POSTGRES_HOST=localhost for local execution")
         os.environ["POSTGRES_HOST"] = "localhost"
 
     # Default path based on user's structure

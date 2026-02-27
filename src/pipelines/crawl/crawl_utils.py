@@ -106,11 +106,7 @@ def get_selenium_options(headless: bool = True) -> Any | None:
             # Older Selenium versions may not support the attribute
             pass
 
-        # Additional performance flags
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-plugins")
-        chrome_options.add_argument("--disable-infobars")
-        chrome_options.add_argument("--disable-notifications")
+        # Additional performance flags\n        chrome_options.add_argument(\"--disable-notifications\")
         return chrome_options
     except ImportError:
         return None

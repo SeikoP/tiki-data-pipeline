@@ -4,9 +4,7 @@ Transform pipeline để làm sạch, validate và chuẩn hóa dữ liệu sả
 
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from threading import Lock
 from typing import Any
 
 # Import profiling utilities
@@ -45,61 +43,32 @@ class DataTransformer:
         }
 
         # Initialize AI Summarizer for name shortening
-        # Initialize AI Summarizer for name shortening
-        try:
-            from src.common.ai.summarizer import AISummarizer
+        self.ai_summarizer = self._init_ai_summarizer()
 
-            # Try to import config to check if AI short name is enabled
+    @staticmethod
+    def _init_ai_summarizer():
+        """Try to load AISummarizer with multiple import strategies."""
+        import os
+
+        use_ai = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
+        if not use_ai:
+            logger.info("AI Short Name DISABLED by config")
+            return None
+
+        # Try import strategies in order
+        for import_fn in [
+            lambda: __import__("src.common.ai.summarizer", fromlist=["AISummarizer"]).AISummarizer,
+            lambda: __import__("common.ai.summarizer", fromlist=["AISummarizer"]).AISummarizer,
+        ]:
             try:
-                from src.common.config import SHORT_NAME_CONFIG
-
-                use_ai_short_name = SHORT_NAME_CONFIG.get("use_ai", True)
+                cls = import_fn()
+                logger.info("AI Short Name enabled")
+                return cls()
             except ImportError:
-                import os
+                continue
 
-                # Fallback to env var directly
-                use_ai_short_name = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
-
-            if use_ai_short_name:
-                self.ai_summarizer = AISummarizer()
-                logger.info("✅ AI Short Name enabled")
-            else:
-                self.ai_summarizer = None
-                logger.info("⚠️  AI Short Name DISABLED by config")
-
-        except ImportError:
-            # Fallback for relative import if src is not in path
-            try:
-                import os
-
-                from ..common.ai.summarizer import AISummarizer
-
-                use_ai_short_name = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
-
-                if use_ai_short_name:
-                    self.ai_summarizer = AISummarizer()
-                else:
-                    self.ai_summarizer = None
-            except ImportError:
-                # Try absolute path from project root
-                try:
-                    import os
-                    import sys
-                    from pathlib import Path
-
-                    root_path = Path(__file__).resolve().parent.parent.parent.parent
-                    if str(root_path) not in sys.path:
-                        sys.path.append(str(root_path))
-                    from src.common.ai.summarizer import AISummarizer
-
-                    use_ai_short_name = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
-                    if use_ai_short_name:
-                        self.ai_summarizer = AISummarizer()
-                    else:
-                        self.ai_summarizer = None
-                except Exception as e:
-                    logger.warning(f"Could not import AISummarizer: {e}")
-                    self.ai_summarizer = None
+        logger.warning("Could not import AISummarizer")
+        return None
 
     @profile_transformer
     def transform_products(
@@ -128,64 +97,48 @@ class DataTransformer:
 
         transformed = []
         seen_product_ids = set()
-        seen_lock = Lock()
-        stats_lock = Lock()
+        max_errors = 100  # Cap error list to prevent unbounded memory growth
 
-        # Determine max_workers based on list size, but cap at reasonable limit (e.g. 20)
-        # Higher if IO bound (AI calls), lower if CPU bound.
-        max_workers = min(20, len(products)) if len(products) > 0 else 1
+        for idx, product in enumerate(products):
+            try:
+                transformed_product = self.transform_product(product)
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Map futures to original index to maintain error context (log only)
-            future_to_product = {
-                executor.submit(self.transform_product, p): idx for idx, p in enumerate(products)
-            }
+                if not transformed_product:
+                    self.stats["invalid_products"] += 1
+                    continue
 
-            for future in as_completed(future_to_product):
-                idx = future_to_product[future]
-                try:
-                    transformed_product = future.result()
+                # Duplicate check
+                product_id = transformed_product.get("product_id")
+                if product_id in seen_product_ids:
+                    self.stats["duplicates_removed"] += 1
+                    logger.debug(f"Duplicate product_id: {product_id}")
+                    continue
+                seen_product_ids.add(product_id)
 
-                    if not transformed_product:
-                        with stats_lock:
+                # Validate if needed
+                if validate:
+                    is_valid, error = self.validate_product(transformed_product)
+                    if not is_valid:
+                        if self.remove_invalid:
                             self.stats["invalid_products"] += 1
-                        continue
-
-                    # Thread-safe duplicate check
-                    product_id = transformed_product.get("product_id")
-                    with seen_lock:
-                        if product_id in seen_product_ids:
-                            with stats_lock:
-                                self.stats["duplicates_removed"] += 1
-                            logger.debug(f"⚠️  Duplicate product_id: {product_id}")
+                            if len(self.stats["errors"]) < max_errors:
+                                self.stats["errors"].append(f"Product {product_id}: {error}")
                             continue
-                        seen_product_ids.add(product_id)
+                        elif self.strict_validation:
+                            raise ValueError(f"Invalid product {product_id}: {error}")
 
-                    # Validate if needed
-                    if validate:
-                        is_valid, error = self.validate_product(transformed_product)
-                        if not is_valid:
-                            if self.remove_invalid:
-                                with stats_lock:
-                                    self.stats["invalid_products"] += 1
-                                    self.stats["errors"].append(f"Product {product_id}: {error}")
-                                continue
-                            elif self.strict_validation:
-                                raise ValueError(f"Invalid product {product_id}: {error}")
+                transformed.append(transformed_product)
+                self.stats["valid_products"] += 1
 
-                    transformed.append(transformed_product)
-                    with stats_lock:
-                        self.stats["valid_products"] += 1
+            except Exception as e:
+                self.stats["invalid_products"] += 1
+                error_msg = f"Error transforming product at index {idx}: {e}"
+                if len(self.stats["errors"]) < max_errors:
+                    self.stats["errors"].append(error_msg)
+                logger.error(error_msg)
 
-                except Exception as e:
-                    with stats_lock:
-                        self.stats["invalid_products"] += 1
-                        error_msg = f"Error transforming product at index {idx}: {str(e)}"
-                        self.stats["errors"].append(error_msg)
-                    logger.error(f"❌ {error_msg}")
-
-                    if self.strict_validation:
-                        raise
+                if self.strict_validation:
+                    raise
 
         logger.info(
             f"✅ Transform hoàn tất: {self.stats['valid_products']}/{self.stats['total_processed']} products hợp lệ"
@@ -333,7 +286,7 @@ class DataTransformer:
             db_product["price"] = price.get("current_price")
             db_product["original_price"] = price.get("original_price") or db_product["price"]
             db_product["discount_percent"] = (
-                int(round(price["discount_percent"]))
+                round(float(price["discount_percent"]), 2)
                 if price.get("discount_percent") is not None
                 else None
             )
@@ -406,9 +359,8 @@ class DataTransformer:
         if not product.get("url"):
             return False, "Missing url"
 
-        # CRITICAL: Validate seller_name (Task: Xóa seller_name null trước khi load db)
-        if not product.get("seller_name"):
-            return False, f"Missing or invalid seller_name for product {product.get('product_id')}"
+        # seller_name is optional — listing API products may not have it
+        # Database cleanup handles missing sellers separately
 
         # Validate product_id format (chỉ số)
         product_id = str(product["product_id"]).strip()

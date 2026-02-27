@@ -23,15 +23,28 @@ except ImportError:
         DEFAULT_DATA_DIR = Path("data/raw")
         DEFAULT_CATEGORY_CACHE_DIR = DEFAULT_DATA_DIR / "cache" / "categories"
 
-spec = importlib.util.spec_from_file_location(
-    "extract_category_link_selenium",
-    os.path.join(os.path.dirname(__file__), "extract_category_link_selenium.py"),
-)
-extract_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(extract_module)
+# Lazy-load selenium extraction module to avoid import-time overhead
+_extract_module = None
 
-crawl_with_selenium = extract_module.crawl_with_selenium
-parse_categories = extract_module.parse_categories
+
+def _get_extract_module():
+    global _extract_module
+    if _extract_module is None:
+        spec = importlib.util.spec_from_file_location(
+            "extract_category_link_selenium",
+            os.path.join(os.path.dirname(__file__), "extract_category_link_selenium.py"),
+        )
+        _extract_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_extract_module)
+    return _extract_module
+
+
+def crawl_with_selenium(*args, **kwargs):
+    return _get_extract_module().crawl_with_selenium(*args, **kwargs)
+
+
+def parse_categories(*args, **kwargs):
+    return _get_extract_module().parse_categories(*args, **kwargs)
 
 # Set UTF-8 encoding cho stdout trên Windows
 if sys.platform == "win32":
@@ -101,8 +114,9 @@ except ImportError:
             self.desc = desc
 
 
-# Tạo thư mục output nếu chưa có
-os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
+# Tạo thư mục output (deferred to avoid import-time side effects)
+def _ensure_output_dirs():
+    os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
 
 # Thread-safe locks và counters
 stats_lock = Lock()
