@@ -1,5 +1,5 @@
 # Dockerfile (LITE MODE) - Airflow Mới Nhất (3.x), Không Chrome/Selenium
-FROM apache/airflow:3.1.6
+FROM apache/airflow:3.1.8
 
 USER root
 
