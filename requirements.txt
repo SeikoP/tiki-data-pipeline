@@ -6,6 +6,6 @@ webdriver-manager>=4.0.0
 tqdm>=4.65.0
 redis>=5.0.0
 psycopg2-binary>=2.9.0
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 aiohttp>=3.9.0
 python-docx>=1.1.0
