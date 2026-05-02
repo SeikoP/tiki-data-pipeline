@@ -142,13 +142,15 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1 --appendonly yes --requirepass ${REDIS_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secret}
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1 --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret}
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} --no-auth-warning ping | grep PONG"]
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD --no-auth-warning ping | grep PONG"]
       interval: 10s
     deploy:
       resources:
@@ -167,6 +169,7 @@ services:
     command:
       - -c
       - |
+        airflow db migrate
         exec airflow api-server
     ports:
       - "127.0.0.1:8080:8080"
@@ -197,6 +200,7 @@ services:
     command:
       - -c
       - |
+        airflow db migrate
         exec airflow scheduler
     hostname: airflow-scheduler
     healthcheck:
@@ -278,7 +282,7 @@ services:
         # Wait for Redis
         echo "⏳ Waiting for Redis..."
         attempt=1
-        while ! redis-cli -h redis -a "${REDIS_PASSWORD}" --no-auth-warning ping > /dev/null 2>&1; do
+        while ! redis-cli -h redis -a "${REDIS_PASSWORD:-redis_secret}" --no-auth-warning ping > /dev/null 2>&1; do
           if (( attempt >= max_attempts )); then
             echo "❌ Redis failed to start"
             exit 1

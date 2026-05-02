@@ -802,8 +802,8 @@ def get_tiki_degradation():
     service_health = get_service_health()
     return service_health.register_service(
         name="tiki",
-        failure_threshold=get_int_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default=3),
-        recovery_threshold=get_int_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default=5),
+        failure_threshold=get_int_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default=50),
+        recovery_threshold=get_int_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default=10),
     )
 
 

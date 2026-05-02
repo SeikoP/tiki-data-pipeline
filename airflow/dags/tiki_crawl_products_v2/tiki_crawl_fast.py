@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from airflow.operators.python import ShortCircuitOperator
+from airflow.providers.standard.operators.python import ShortCircuitOperator
 from tiki_crawl_products_v2.bootstrap import (
     DAG,
     DAG_CONFIG,
@@ -386,6 +386,26 @@ with DAG(
     with TaskGroup("transform_and_load") as transform_load_group:
         # task_enrich_category_path removed as it was undefined and redundant
 
+        task_load_categories_db = PythonOperator(
+            task_id="load_categories_to_db",
+            python_callable=load_categories_to_db_wrapper,
+            execution_timeout=timedelta(minutes=5),
+            pool="fast_pool",
+            priority_weight=7,  # Higher priority - must run before load_products
+            doc_md="""
+            ### Load Categories to Database
+            **Nhiệm vụ:** Load/update categories vào PostgreSQL (TRƯỚC khi load products)
+            
+            **Chi tiết:**
+            - Load categories từ file JSON vào bảng `categories`
+            - Update category metadata (name, path, is_leaf)
+            - UPSERT để tránh duplicates
+            - **Phải chạy trước load_products** do FK constraint
+            
+            **Output:** Load stats
+            """,
+        )
+
         task_transform_products = PythonOperator(
             task_id="transform_products",
             python_callable=transform_products,
@@ -426,29 +446,12 @@ with DAG(
             **Output:** Load stats (inserted, updated, failed)
             """,
         )
-        task_transform_products >> task_load_products
+        # Categories MUST be loaded before products (FK constraint)
+        # Transform can run in parallel with load_categories
+        [task_load_categories_db, task_transform_products] >> task_load_products
 
     # TaskGroup: Maintenance and Reports
     with TaskGroup("maintenance_and_reports") as maintenance_group:
-        task_load_categories_db = PythonOperator(
-            task_id="load_categories_to_db",
-            python_callable=load_categories_to_db_wrapper,
-            execution_timeout=timedelta(minutes=5),
-            pool="fast_pool",
-            priority_weight=4,  # Priority thấp hơn
-            doc_md="""
-            ### Load Categories to Database
-            **Nhiệm vụ:** Load/update categories vào PostgreSQL
-            
-            **Chi tiết:**
-            - Load categories từ file JSON vào bảng `categories`
-            - Update category metadata (name, path, is_leaf)
-            - UPSERT để tránh duplicates
-            
-            **Output:** Load stats
-            """,
-        )
-
         task_reconcile = PythonOperator(
             task_id="reconcile_categories",
             python_callable=reconcile_categories_wrapper,
@@ -593,9 +596,9 @@ with DAG(
 
         # Maintenance dependencies
         # Tối ưu: cleanup_cache và backup có thể chạy ngay, không cần chờ reconcile
-        [task_load_categories_db, task_cleanup_cache, task_backup_database, task_cleanup_history]
+        [task_cleanup_cache, task_backup_database, task_cleanup_history]
         
-        task_load_categories_db >> task_reconcile >> task_cleanup_categories
+        task_reconcile >> task_cleanup_categories
 
         # Aggregate and notify - only if Discord enabled
         task_cleanup_categories >> task_check_discord >> task_aggregate_and_notify
