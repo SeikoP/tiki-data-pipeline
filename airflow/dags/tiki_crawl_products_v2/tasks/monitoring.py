@@ -47,13 +47,21 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
 
             ti = context["ti"]
             try:
-                output_file = ti.xcom_pull(
-                    task_ids="crawl_product_details.save_products_with_detail"
+                detail_result = ti.xcom_pull(task_ids="crawl_product_details.merge_product_details")
+                output_file = (
+                    detail_result.get("output_file")
+                    if isinstance(detail_result, dict)
+                    else detail_result
                 )
                 logger.info(f"   Lấy từ XCom: {output_file}")
             except Exception:
                 try:
-                    output_file = ti.xcom_pull(task_ids="save_products_with_detail")
+                    detail_result = ti.xcom_pull(task_ids="merge_product_details")
+                    output_file = (
+                        detail_result.get("output_file")
+                        if isinstance(detail_result, dict)
+                        else detail_result
+                    )
                     logger.info(f"   Lấy từ XCom (không có prefix): {output_file}")
                 except Exception as e:
                     logger.warning(f"   Không lấy được từ XCom: {e}")

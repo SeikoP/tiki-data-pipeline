@@ -57,17 +57,17 @@ def test_property_4_concurrent_request_limits_manual():
             lock = asyncio.Lock()
 
             # Mock response
-            async def mock_get(url, **kwargs):
+            async def mock_get(url, _lock=lock, **kwargs):
                 nonlocal max_concurrent, current_concurrent
 
-                async with lock:
+                async with _lock:
                     current_concurrent += 1
                     max_concurrent = max(max_concurrent, current_concurrent)
 
                 # Simulate network delay
                 await asyncio.sleep(0.01)
 
-                async with lock:
+                async with _lock:
                     current_concurrent -= 1
 
                 # Return mock response
@@ -164,16 +164,16 @@ def test_property_4_with_rate_limiter():
         current_concurrent = 0
         lock = asyncio.Lock()
 
-        async def mock_get(url, **kwargs):
+        async def mock_get(url, _lock=lock, **kwargs):
             nonlocal max_concurrent, current_concurrent
 
-            async with lock:
+            async with _lock:
                 current_concurrent += 1
                 max_concurrent = max(max_concurrent, current_concurrent)
 
             await asyncio.sleep(0.01)
 
-            async with lock:
+            async with _lock:
                 current_concurrent -= 1
 
             mock_response = AsyncMock()
@@ -218,16 +218,16 @@ if HYPOTHESIS_AVAILABLE:
             current_concurrent = 0
             lock = asyncio.Lock()
 
-            async def mock_get(url, **kwargs):
+            async def mock_get(url, _lock=lock, **kwargs):
                 nonlocal max_concurrent, current_concurrent
 
-                async with lock:
+                async with _lock:
                     current_concurrent += 1
                     max_concurrent = max(max_concurrent, current_concurrent)
 
                 await asyncio.sleep(0.001)
 
-                async with lock:
+                async with _lock:
                     current_concurrent -= 1
 
                 mock_response = AsyncMock()

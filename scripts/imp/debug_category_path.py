@@ -40,8 +40,12 @@ def get_db_connection():
 
     db_port = int(os.getenv("POSTGRES_PORT", "5432"))
     db_name = os.getenv("POSTGRES_DB", "tiki")
-    db_user = os.getenv("POSTGRES_USER", "bungmoto")
-    db_password = os.getenv("POSTGRES_PASSWORD", "0946932602a")
+    db_user = os.getenv("POSTGRES_USER")
+    db_password = os.getenv("POSTGRES_PASSWORD")
+
+    if not db_user or not db_password:
+        print("❌ POSTGRES_USER và POSTGRES_PASSWORD phải được set trong environment")
+        return None
 
     print(f"🔗 Đang kết nối: host={db_host}, port={db_port}, db={db_name}, user={db_user}")
 

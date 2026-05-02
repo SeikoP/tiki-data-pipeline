@@ -7,7 +7,6 @@ with random selection to avoid fingerprinting.
 
 import random
 import threading
-from typing import Optional
 
 # Pool of realistic, recent User-Agent strings covering multiple browsers/OS
 _DEFAULT_USER_AGENTS = [
@@ -75,7 +74,7 @@ def add_user_agents(agents: list[str]) -> None:
         _custom_agents.extend(agents)
 
 
-def get_default_headers(extra: Optional[dict] = None) -> dict[str, str]:
+def get_default_headers(extra: dict | None = None) -> dict[str, str]:
     """Get a complete set of request headers with a random User-Agent.
 
     Args:
@@ -102,7 +101,7 @@ def get_default_headers(extra: Optional[dict] = None) -> dict[str, str]:
     return headers
 
 
-def get_api_headers(extra: Optional[dict] = None) -> dict[str, str]:
+def get_api_headers(extra: dict | None = None) -> dict[str, str]:
     """Get headers suitable for Tiki API requests.
 
     Args:

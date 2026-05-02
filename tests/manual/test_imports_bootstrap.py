@@ -4,10 +4,11 @@
 import sys
 from pathlib import Path
 
-# Add src to path
-src_path = Path(__file__).parent.parent.parent.parent / "src"
-if src_path.exists():
-    sys.path.insert(0, str(src_path))
+# Add project import paths
+project_root = Path(__file__).resolve().parents[2]
+for import_path in [project_root / "src", project_root / "airflow" / "dags"]:
+    if import_path.exists():
+        sys.path.insert(0, str(import_path))
 
 print("Testing imports from bootstrap...")
 

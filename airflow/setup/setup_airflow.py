@@ -1,19 +1,19 @@
 import os
-import json
-from airflow import settings
-from airflow.models import Pool, Variable, Connection
+
+from airflow.models import Connection, Pool, Variable
 from airflow.utils.session import create_session
+
 
 def setup_airflow():
     print("🚀 Starting optimized Airflow configuration...")
-    
+
     with create_session() as session:
         # 1. Setup Pools
         pools_data = [
             ("fast_pool", 6, "Pool for Fast API and Data Processing tasks"),
-            ("crawl_pool", 3, "Pool for Tiki crawling tasks (Selenium)")
+            ("crawl_pool", 3, "Pool for Tiki crawling tasks (Selenium)"),
         ]
-        
+
         for name, slots, desc in pools_data:
             pool = session.query(Pool).filter(Pool.pool == name).first()
             if not pool:
@@ -24,7 +24,7 @@ def setup_airflow():
                 pool.slots = slots
                 pool.description = desc
                 pool.include_deferred = False
-        
+
         # 2. Setup Variables
         variables_data = {
             "TIKI_MIN_CATEGORY_LEVEL": "2",
@@ -47,9 +47,9 @@ def setup_airflow():
             "POSTGRES_PORT": os.environ.get("POSTGRES_PORT", "5432"),
             "POSTGRES_DB": os.environ.get("POSTGRES_DB", "tiki"),
             "POSTGRES_USER": os.environ.get("POSTGRES_USER", "airflow_user"),
-            "REDIS_URL": "redis://redis:6379/1"
+            "REDIS_URL": "redis://redis:6379/1",
         }
-        
+
         for key, val in variables_data.items():
             Variable.set(key, val, session=session)
             print(f"   Set variable: {key}")
@@ -57,13 +57,13 @@ def setup_airflow():
         # 3. Setup Connections
         conn_id = "tiki_postgres"
         conn = session.query(Connection).filter(Connection.conn_id == conn_id).first()
-        
+
         postgres_host = os.environ.get("POSTGRES_HOST", "postgres")
         postgres_user = os.environ.get("POSTGRES_USER", "admin")
         postgres_pass = os.environ.get("POSTGRES_PASSWORD", "admin")
         postgres_port = int(os.environ.get("POSTGRES_PORT", "5432"))
         postgres_db = os.environ.get("POSTGRES_DB", "tiki")
-        
+
         if not conn:
             print(f"   Creating connection: {conn_id}")
             new_conn = Connection(
@@ -73,7 +73,7 @@ def setup_airflow():
                 login=postgres_user,
                 password=postgres_pass,
                 port=postgres_port,
-                schema=postgres_db
+                schema=postgres_db,
             )
             session.add(new_conn)
         else:
@@ -83,10 +83,11 @@ def setup_airflow():
             conn.password = postgres_pass
             conn.port = postgres_port
             conn.schema = postgres_db
-        
+
         session.commit()
-    
+
     print("✅ Optimized Airflow configuration completed!")
+
 
 if __name__ == "__main__":
     setup_airflow()

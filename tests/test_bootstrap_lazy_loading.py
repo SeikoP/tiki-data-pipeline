@@ -60,6 +60,8 @@ class TestBootstrapImportTime:
             del sys.modules["bootstrap"]
 
         with caplog.at_level(logging.INFO):
+            import bootstrap  # noqa: F401
+
             # Check that bootstrap import time is logged
             log_messages = [record.message for record in caplog.records]
 

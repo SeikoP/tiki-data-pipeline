@@ -38,13 +38,13 @@ jobs:
 
       - name: Run Bandit security check
         run: |
-          bandit -r src/ airflow/dags/ -f json -o bandit-report.json || true
-          bandit -r src/ airflow/dags/ --exit-zero || true
+          bandit -r src/ airflow/dags/ -f json -o bandit-report.json -lll
+          bandit -r src/ airflow/dags/ -lll
 
       - name: Check dependencies for vulnerabilities
         run: |
-          safety check --json || true
-          safety check || true
+          safety check --json
+          safety check
 
       - name: Check for secrets
         if: github.event_name == 'pull_request'

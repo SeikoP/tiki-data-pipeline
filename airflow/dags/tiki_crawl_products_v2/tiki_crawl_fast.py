@@ -50,12 +50,12 @@ with DAG(
             doc_md="""
             ### Cleanup Incomplete Products
             **Nhiệm vụ:** Xóa products thiếu thông tin quan trọng (seller, brand) để crawl lại
-            
+
             **Chi tiết:**
             - Xóa products không có seller hoặc brand
             - Cho phép re-crawl products không đầy đủ
             - Chạy TRƯỚC khi crawl để đảm bảo data quality
-            
+
             **Output:** Số lượng products đã xóa
             """,
         )
@@ -68,12 +68,12 @@ with DAG(
             doc_md="""
             ### Load Categories
             **Nhiệm vụ:** Load danh sách categories từ file JSON để crawl
-            
+
             **Chi tiết:**
             - Đọc categories từ `data/raw/categories.json`
             - Lọc theo `crawl_only_leaf` flag (chỉ crawl leaf categories)
             - Lưu vào file và trả về metadata qua XCom
-            
+
             **Output:** File path + metadata (count, crawl_only_leaf)
             """,
         )
@@ -89,23 +89,22 @@ with DAG(
             """
             Helper function để prepare op_kwargs cho Dynamic Task Mapping.
             """
-            import logging
             import json
-            from pathlib import Path
+            import logging
 
             logger = logging.getLogger("airflow.task")
             ti = context["ti"]
             result = ti.xcom_pull(task_ids="pre_crawl.load_categories")
-            
+
             # Đọc categories từ file
             categories_file = result.get("categories_file") if result else None
             if not categories_file:
                 logger.error("❌ Không thể lấy categories file path từ XCom!")
                 return []
-            
+
             with open(categories_file, encoding="utf-8") as f:
                 categories = json.load(f)
-            
+
             logger.info(f"📂 Đọc {len(categories)} categories từ {categories_file}")
             return [{"category": cat} for cat in categories]
 
@@ -113,24 +112,23 @@ with DAG(
             """
             Helper function để prepare op_kwargs cho Dynamic Task Mapping với batch processing.
             """
+            import json
             import logging
             import math
-            import json
-            from pathlib import Path
 
             logger = logging.getLogger("airflow.task")
             ti = context["ti"]
             result = ti.xcom_pull(task_ids="pre_crawl.load_categories")
-            
+
             # Đọc categories từ file
             categories_file = result.get("categories_file") if result else None
             if not categories_file:
                 logger.error("❌ Không thể lấy categories file path từ XCom!")
                 return []
-            
+
             with open(categories_file, encoding="utf-8") as f:
                 categories = json.load(f)
-            
+
             logger.info(f"📂 Đọc {len(categories)} categories từ {categories_file}")
 
             # Tối ưu: Chia thành n batch task để tận dụng tối đa pool (mặc định 3)
@@ -163,12 +161,12 @@ with DAG(
                 doc_md="""
                 ### Prepare Category Crawl Batches
                 **Nhiệm vụ:** Chia categories thành batches để crawl song song
-                
+
                 **Chi tiết:**
                 - Chia categories thành 3 batches (tối ưu cho pool size)
                 - Mỗi batch chứa ~N/3 categories
                 - Tạo op_kwargs cho Dynamic Task Mapping
-                
+
                 **Output:** List of batch configs cho crawl_category
                 """,
             )
@@ -176,7 +174,6 @@ with DAG(
                 task_id="crawl_category",
                 python_callable=crawl_category_batch,
                 execution_timeout=timedelta(minutes=45),
-                sla=timedelta(minutes=30),  # Cảnh báo nếu >30 phút
                 pool="fast_pool",
                 retries=2,
                 retry_delay=timedelta(seconds=30),
@@ -184,13 +181,13 @@ with DAG(
                 doc_md="""
                 ### Crawl Category Batch (Mapped)
                 **Nhiệm vụ:** Crawl products từ một batch categories qua Tiki API
-                
+
                 **Chi tiết:**
                 - Crawl parallel nhiều categories trong 1 batch
                 - Sử dụng aiohttp async để tăng tốc
                 - Lưu products vào memory, trả về qua XCom
                 - Retry 2 lần nếu fail
-                
+
                 **Output:** List products từ batch này
                 """,
             ).expand(op_kwargs=task_prepare.output)
@@ -202,7 +199,7 @@ with DAG(
                 doc_md="""
                 ### Prepare Category Crawl (Single)
                 **Nhiệm vụ:** Chuẩn bị kwargs cho crawl từng category riêng lẻ
-                
+
                 **Output:** List of category configs
                 """,
             )
@@ -217,7 +214,7 @@ with DAG(
                 doc_md="""
                 ### Crawl Single Category (Mapped)
                 **Nhiệm vụ:** Crawl products từ 1 category qua Tiki API
-                
+
                 **Output:** Products từ category này
                 """,
             ).expand(op_kwargs=task_prepare.output)
@@ -234,13 +231,13 @@ with DAG(
             doc_md="""
             ### Merge & Save Products
             **Nhiệm vụ:** Merge products từ tất cả category batches và lưu vào file
-            
+
             **Chi tiết:**
             - Lấy products từ tất cả mapped tasks (crawl_category)
             - Loại bỏ duplicates theo product_id
             - Tính toán stats (success/failed categories)
             - Lưu vào file `merged_products.json` và `products.json`
-            
+
             **Output:** File path + stats + product count
             """,
         )
@@ -265,10 +262,10 @@ with DAG(
                 return []
 
             total_products = len(products_to_crawl)
-            
+
             # Số batch tasks chạy đồng thời (từ DAG config)
             max_concurrent_batches = 3
-            
+
             # Tính batch size tối ưu: chia đều cho các batch tasks
             # Với 1000 products, muốn có 3-6 batches thay vì 12
             if total_products <= max_concurrent_batches * 10:
@@ -278,21 +275,25 @@ with DAG(
                 # Nhiều products: dùng batch size lớn (300-350) để có ít batches hơn
                 base_batch_size = get_int_variable("TIKI_DETAIL_BATCH_SIZE", default=333)
                 # Điều chỉnh để số batches là bội số của max_concurrent_batches
-                num_batches = max(max_concurrent_batches, math.ceil(total_products / base_batch_size))
+                num_batches = max(
+                    max_concurrent_batches, math.ceil(total_products / base_batch_size)
+                )
                 # Làm tròn num_batches lên bội số của max_concurrent_batches
-                num_batches = math.ceil(num_batches / max_concurrent_batches) * max_concurrent_batches
+                num_batches = (
+                    math.ceil(num_batches / max_concurrent_batches) * max_concurrent_batches
+                )
                 batch_size = math.ceil(total_products / num_batches)
 
             batches = [
                 products_to_crawl[i : i + batch_size]
                 for i in range(0, len(products_to_crawl), batch_size)
             ]
-            
+
             logger.info(
                 f"📦 Chia {total_products} products thành {len(batches)} batches "
                 f"(size ~{batch_size}) để tối ưu {max_concurrent_batches} tasks song song"
             )
-            
+
             return [
                 {"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
             ]
@@ -304,12 +305,12 @@ with DAG(
             doc_md="""
             ### Prepare Products for Detail Crawl
             **Nhiệm vụ:** Lọc products cần crawl detail (chưa có hoặc cũ)
-            
+
             **Chi tiết:**
             - Check DB: Skip products đã có detail đầy đủ + updated gần đây
             - Giới hạn theo TIKI_PRODUCTS_PER_DAY (default: 1000)
             - Ưu tiên products chưa có brand/seller
-            
+
             **Output:** List products cần crawl detail
             """,
         )
@@ -321,12 +322,12 @@ with DAG(
             doc_md="""
             ### Prepare Detail Crawl Batches
             **Nhiệm vụ:** Chia products thành batches để crawl detail song song
-            
+
             **Chi tiết:**
             - Chia products thành batches (size ~333)
             - Tối ưu để có 3-6 batches chạy song song
             - Giảm số mapped tasks để UI không lag
-            
+
             **Output:** List of batch configs
             """,
         )
@@ -335,7 +336,6 @@ with DAG(
             task_id="crawl_product_detail",
             python_callable=crawl_product_batch_fast,
             execution_timeout=timedelta(minutes=15),
-            sla=timedelta(minutes=10),  # Cảnh báo nếu >10 phút
             pool="fast_pool",
             retries=2,
             retry_delay=timedelta(seconds=30),
@@ -343,13 +343,13 @@ with DAG(
             doc_md="""
             ### Crawl Product Detail Batch (Mapped)
             **Nhiệm vụ:** Crawl chi tiết products (price, sales, brand, seller) qua API
-            
+
             **Chi tiết:**
             - Crawl async với aiohttp (nhanh hơn Selenium)
             - Lấy thông tin: price, sales_count, brand, seller, rating
             - Lưu vào crawl_history để track price changes
             - Retry 2 lần nếu fail
-            
+
             **Output:** List product details từ batch này
             """,
         ).expand(op_kwargs=task_prepare_detail_kwargs.output)
@@ -364,13 +364,13 @@ with DAG(
             doc_md="""
             ### Merge & Save Product Details
             **Nhiệm vụ:** Merge product details từ tất cả batches và lưu vào file
-            
+
             **Chi tiết:**
             - Lấy details từ tất cả mapped tasks (crawl_product_detail)
             - Merge với products gốc theo product_id
             - Lưu vào file `products_with_detail.json`
             - Tính stats (crawled, success, failed)
-            
+
             **Output:** File path + stats + crawled count
             """,
         )
@@ -395,13 +395,13 @@ with DAG(
             doc_md="""
             ### Load Categories to Database
             **Nhiệm vụ:** Load/update categories vào PostgreSQL (TRƯỚC khi load products)
-            
+
             **Chi tiết:**
             - Load categories từ file JSON vào bảng `categories`
             - Update category metadata (name, path, is_leaf)
             - UPSERT để tránh duplicates
             - **Phải chạy trước load_products** do FK constraint
-            
+
             **Output:** Load stats
             """,
         )
@@ -415,14 +415,14 @@ with DAG(
             doc_md="""
             ### Transform Products
             **Nhiệm vụ:** Chuẩn hóa và validate dữ liệu products trước khi load vào DB
-            
+
             **Chi tiết:**
             - Normalize fields (price, name, category_path)
             - Validate data quality (required fields)
             - Enrich category_path từ categories file
             - Loại bỏ invalid products
             - Hỗ trợ vectorized transform (nhanh hơn)
-            
+
             **Output:** File `products_transformed.json` + transform stats
             """,
         )
@@ -436,13 +436,13 @@ with DAG(
             doc_md="""
             ### Load Products to Database
             **Nhiệm vụ:** Load transformed products vào PostgreSQL database
-            
+
             **Chi tiết:**
             - Bulk insert/update products vào bảng `products`
             - Lưu price history vào bảng `crawl_history`
             - Sử dụng UPSERT (ON CONFLICT UPDATE)
             - Track inserted/updated counts
-            
+
             **Output:** Load stats (inserted, updated, failed)
             """,
         )
@@ -461,12 +461,12 @@ with DAG(
             doc_md="""
             ### Reconcile Categories
             **Nhiệm vụ:** Đồng bộ category names và product counts từ JSON
-            
+
             **Chi tiết:**
             - Update category names từ JSON file
             - Update product_count cho mỗi category
             - Đảm bảo data consistency
-            
+
             **Output:** Updated counts
             """,
         )
@@ -480,12 +480,12 @@ with DAG(
             doc_md="""
             ### Cleanup Categories
             **Nhiệm vụ:** Xóa orphan và redundant categories
-            
+
             **Chi tiết:**
             - Xóa categories không có products (orphan)
             - Xóa non-leaf categories (redundant)
             - Giải phóng database space
-            
+
             **Output:** Deleted counts
             """,
         )
@@ -499,12 +499,12 @@ with DAG(
             doc_md="""
             ### Cleanup Old History
             **Nhiệm vụ:** Archive và xóa crawl history cũ
-            
+
             **Chi tiết:**
             - Archive history > 6 tháng
             - Xóa history > 12 tháng
             - Giảm database size
-            
+
             **Output:** Archived/deleted counts
             """,
         )
@@ -523,11 +523,11 @@ with DAG(
             doc_md="""
             ### Check Discord Enabled
             **Nhiệm vụ:** Kiểm tra Discord notification có enabled không
-            
+
             **Chi tiết:**
             - Check env var DISCORD_ENABLED
             - Skip aggregate_and_notify nếu disabled
-            
+
             **Output:** Boolean (continue or skip)
             """,
         )
@@ -542,13 +542,13 @@ with DAG(
             doc_md="""
             ### Aggregate & Notify Discord
             **Nhiệm vụ:** Tổng hợp stats và gửi notification qua Discord
-            
+
             **Chi tiết:**
             - Aggregate stats từ tất cả tasks
             - Tạo summary report (products, categories, errors)
             - Gửi notification qua Discord webhook
             - Chỉ chạy nếu Discord enabled
-            
+
             **Output:** Notification status
             """,
         )
@@ -563,12 +563,12 @@ with DAG(
             doc_md="""
             ### Cleanup Redis Cache
             **Nhiệm vụ:** Cleanup Redis cache (nếu cần)
-            
+
             **Chi tiết:**
             - Check Redis memory usage
             - Redis tự động expire keys theo TTL
             - Task này chỉ log stats, không flush cache
-            
+
             **Output:** Cache stats
             """,
         )
@@ -583,21 +583,17 @@ with DAG(
             doc_md="""
             ### Backup Database
             **Nhiệm vụ:** Backup PostgreSQL database
-            
+
             **Chi tiết:**
             - Backup database `tiki` bằng pg_dump
             - Lưu vào `/opt/airflow/data/backups/postgres/`
             - Format: SQL plain text (dễ restore)
             - Chạy cuối cùng sau tất cả tasks
-            
+
             **Output:** Backup file path + size
             """,
         )
 
-        # Maintenance dependencies
-        # Tối ưu: cleanup_cache và backup có thể chạy ngay, không cần chờ reconcile
-        [task_cleanup_cache, task_backup_database, task_cleanup_history]
-        
         task_reconcile >> task_cleanup_categories
 
         # Aggregate and notify - only if Discord enabled
@@ -605,12 +601,12 @@ with DAG(
 
     # ===== FINAL DAG DEPENDENCIES =====
     # Loại bỏ labels và empty operators để tasks gần nhau hơn
-    
+
     # Main flow: pre_crawl → crawl → process
     pre_crawl_group >> crawl_group >> process_group
-    
+
     # detail_group bắt đầu ngay sau merge_products (parallel với process_group)
     task_merge_products >> detail_group
-    
+
     # transform_load_group chờ cả process và detail hoàn thành
     [process_group, detail_group] >> transform_load_group >> maintenance_group

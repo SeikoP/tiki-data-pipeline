@@ -69,7 +69,6 @@ x-airflow-common:
     # Task execution optimization
     AIRFLOW__SCHEDULER__JOB_HEARTBEAT_SEC: 10  # Increased from 5
     AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY: 512
-    AIRFLOW__SCHEDULER__USE_JOB_SCHEDULE: 'true'
 
   volumes:
     - ./airflow/dags:/opt/airflow/dags:ro

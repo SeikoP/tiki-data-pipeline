@@ -46,6 +46,7 @@ def crawl_with_selenium(*args, **kwargs):
 def parse_categories(*args, **kwargs):
     return _get_extract_module().parse_categories(*args, **kwargs)
 
+
 # Set UTF-8 encoding cho stdout trên Windows
 if sys.platform == "win32":
     try:
@@ -117,6 +118,7 @@ except ImportError:
 # Tạo thư mục output (deferred to avoid import-time side effects)
 def _ensure_output_dirs():
     os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
+
 
 # Thread-safe locks và counters
 stats_lock = Lock()

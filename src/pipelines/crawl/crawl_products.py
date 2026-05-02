@@ -12,8 +12,6 @@ import requests
 # Import profiling utilities
 from common.profiling import profile, profile_crawler
 
-logger = logging.getLogger(__name__)
-
 # Import shared utilities
 from .crawl_utils import (
     DEFAULT_PRODUCT_LIST_CACHE_DIR,
@@ -23,6 +21,8 @@ from .crawl_utils import (
     safe_read_json,
     setup_utf8_encoding,
 )
+
+logger = logging.getLogger(__name__)
 
 # Lazy import BeautifulSoup để tránh timeout khi load DAG
 # from bs4 import BeautifulSoup  # Moved to function level
@@ -124,6 +124,7 @@ def _ensure_output_dirs():
     os.makedirs(DEFAULT_PRODUCTS_DIR, exist_ok=True)
     os.makedirs(DEFAULT_PRODUCT_LIST_CACHE_DIR, exist_ok=True)
 
+
 # Thread-safe locks và stats
 stats_lock = Lock()
 stats = {
@@ -191,6 +192,7 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
     chrome_options.add_argument("--window-size=1920,1080")
     try:
         from .ua_rotation import get_chrome_user_agent
+
         chrome_options.add_argument(f"user-agent={get_chrome_user_agent()}")
     except ImportError:
         chrome_options.add_argument(
@@ -330,6 +332,7 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
 
     try:
         from .ua_rotation import get_default_headers
+
         headers = get_default_headers()
     except ImportError:
         headers = {
@@ -749,6 +752,7 @@ def get_products_via_listing_api(category_url, max_pages=5, use_rate_limiting=Tr
     all_products = []
     try:
         from .ua_rotation import get_api_headers
+
         headers = get_api_headers({"X-Guest-Token": "no-token"})
     except ImportError:
         headers = {
@@ -1311,7 +1315,9 @@ def crawl_products_from_categories(
     logger.info(f"✅ Thành công: {stats['total_success']}")
     logger.error(f"❌ Thất bại: {stats['total_failed']}")
     logger.info(f"📦 Tổng sản phẩm: {len(unique_products)}")
-    logger.info(f"⚡ Tốc độ: {stats['total_products'] / elapsed:.2f} sản phẩm/s" if elapsed > 0 else "")
+    logger.info(
+        f"⚡ Tốc độ: {stats['total_products'] / elapsed:.2f} sản phẩm/s" if elapsed > 0 else ""
+    )
     logger.info("=" * 70)
 
     return unique_products

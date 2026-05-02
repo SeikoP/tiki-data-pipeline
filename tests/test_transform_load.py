@@ -11,10 +11,11 @@ from typing import Any
 
 # Fix encoding cho Windows console
 if sys.platform == "win32":
-    import io
-
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
 
 # Thêm src vào path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -210,10 +211,9 @@ def test_transform_normalization():
         assert transformed.get("sales_count") == 500, "sales_count phải được parse thành int"
         assert transformed.get("price") == 100000.0, "price phải được parse thành float"
         assert transformed.get("original_price") == 150000.0, "original_price phải được parse"
-        assert transformed.get("discount_percent") in [
-            33,
-            34,
-        ], "discount_percent phải được tính lại (có thể làm tròn)"
+        assert abs(transformed.get("discount_percent") - 33.33) < 0.01, (
+            "discount_percent phải được tính lại và làm tròn 2 chữ số"
+        )
 
     print("\n✅ Test normalization thành công!")
     return transformed

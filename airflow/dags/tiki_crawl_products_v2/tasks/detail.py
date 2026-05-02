@@ -76,7 +76,10 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             if merged_file.exists():
                 with open(merged_file, encoding="utf-8") as f:
                     data = json.load(f)
-                    merge_result = {"products_file": str(merged_file), "stats": data.get("stats", {})}
+                    merge_result = {
+                        "products_file": str(merged_file),
+                        "stats": data.get("stats", {}),
+                    }
             elif OUTPUT_FILE.exists():
                 with open(OUTPUT_FILE, encoding="utf-8") as f:
                     data = json.load(f)
@@ -1339,7 +1342,10 @@ def merge_product_details(**context) -> dict[str, Any]:
             if merged_file.exists():
                 with open(merged_file, encoding="utf-8") as f:
                     data = json.load(f)
-                    merge_result = {"products_file": str(merged_file), "stats": data.get("stats", {})}
+                    merge_result = {
+                        "products_file": str(merged_file),
+                        "stats": data.get("stats", {}),
+                    }
             elif OUTPUT_FILE.exists():
                 with open(OUTPUT_FILE, encoding="utf-8") as f:
                     data = json.load(f)
@@ -1375,16 +1381,21 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         # Số lượng products thực tế được crawl
         expected_products_count = len(products_to_crawl) if products_to_crawl else 0
-        # Với batch processing, số map_index = số batches, không phải số products
-        # Lấy batch size từ Airflow Variable (giống logic trong prepare_detail_kwargs)
-        batch_size = get_int_variable("TIKI_DETAIL_BATCH_SIZE", default=333)
-        expected_crawl_count = (
-            (expected_products_count + batch_size - 1) // batch_size
-            if expected_products_count > 0
-            else 0
-        )
+        detail_kwargs = None
+        try:
+            detail_kwargs = ti.xcom_pull(task_ids="crawl_product_details.prepare_detail_kwargs")
+        except Exception:
+            try:
+                detail_kwargs = ti.xcom_pull(task_ids="prepare_detail_kwargs")
+            except Exception:
+                pass
+
+        # Với batch processing, số map_index phải lấy từ chính task prepare_detail_kwargs.
+        # Không tự tính lại bằng TIKI_DETAIL_BATCH_SIZE vì prepare_detail_kwargs có logic
+        # làm tròn số batch để tối ưu concurrency.
+        expected_crawl_count = len(detail_kwargs) if detail_kwargs else 0
         logger.info(
-            f"📊 Số products: {expected_products_count}, Batch size: {batch_size}, Số batches dự kiến: {expected_crawl_count}"
+            f"📊 Số products: {expected_products_count}, Số batches dự kiến: {expected_crawl_count}"
         )
 
         # Tự động phát hiện số lượng map_index thực tế có sẵn bằng cách thử lấy XCom
@@ -1472,18 +1483,33 @@ def merge_product_details(**context) -> dict[str, Any]:
             logger.warning("=" * 70)
             logger.warning("💡 Để force crawl lại, kiểm tra task 'prepare_products_for_detail' log")
             logger.warning("=" * 70)
-            # Trả về products gốc không có detail
-            return {
+            stats = {
+                "total_products": len(products),
+                "with_detail": 0,
+                "cached": 0,
+                "failed": 0,
+                "timeout": 0,
+                "crawled_count": 0,
+                "products_saved": len(products),
+                "products_skipped": 0,
+                "products_cached_skipped": 0,
+                "products_failed_skipped": 0,
+                "products_no_brand_skipped": 0,
+            }
+            output_data = {
+                "total_products": len(products),
+                "stats": stats,
+                "crawled_at": datetime.now().isoformat(),
+                "note": "Không có product nào cần crawl detail trong run này; ghi output mới để tránh đọc file cũ.",
                 "products": products,
-                "stats": {
-                    "total_products": len(products),
-                    "with_detail": 0,
-                    "cached": 0,
-                    "failed": 0,
-                    "timeout": 0,
-                    "crawled_count": 0,
-                },
+            }
+            output_file = str(OUTPUT_FILE_WITH_DETAIL)
+            atomic_write_file(output_file, output_data, **context)
+            return {
+                "output_file": output_file,
+                "stats": stats,
                 "merged_at": datetime.now().isoformat(),
+                "product_count": len(products),
             }
 
         # Lấy detail results từ Dynamic Task Mapping
@@ -2020,7 +2046,7 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         # Lưu products với detail vào file ngay
         logger.info(f"💾 Đang lưu {len(products_with_detail)} products với detail...")
-        
+
         output_data = {
             "total_products": len(products_with_detail),
             "stats": stats,
@@ -2032,7 +2058,7 @@ def merge_product_details(**context) -> dict[str, Any]:
         # Atomic write
         output_file = str(OUTPUT_FILE_WITH_DETAIL)
         atomic_write_file(output_file, output_data, **context)
-        
+
         logger.info(f"✅ Đã lưu {len(products_with_detail)} products với detail vào: {output_file}")
 
         result = {

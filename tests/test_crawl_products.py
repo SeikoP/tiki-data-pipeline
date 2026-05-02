@@ -1,12 +1,11 @@
-import json
-import os
 import re
 import sys
+from pathlib import Path
 
 # Thêm đường dẫn src vào sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "pipelines", "crawl"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from crawl_products import (
+from pipelines.crawl.crawl_products import (
     crawl_category_products,
     crawl_products_from_categories,
     get_page_with_requests,

@@ -14,7 +14,6 @@ from tiki_crawl_products_v2.bootstrap import (
     datetime,
     ensure_output_dirs,
     get_logger,
-    get_variable,
     json,
     os,
 )
@@ -240,12 +239,13 @@ def merge_products(**context) -> dict[str, Any]:
 
         # Lưu products vào file merged_products.json
         from pathlib import Path
+
         merged_file = Path("/opt/airflow/data/processed") / "merged_products.json"
         merged_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(merged_file, "w", encoding="utf-8") as f:
             json.dump({"products": unique_products, "stats": stats}, f, ensure_ascii=False)
-        
+
         logger.info(f"💾 Đã lưu {len(unique_products)} products vào {merged_file}")
 
         # Lưu vào file output chính (products.json) với metadata đầy đủ
@@ -259,7 +259,7 @@ def merge_products(**context) -> dict[str, Any]:
 
         output_file = str(OUTPUT_FILE)
         atomic_write_file(output_file, output_data, **context)
-        
+
         logger.info(f"✅ Đã lưu {len(unique_products)} sản phẩm vào: {output_file}")
 
         # Return file paths và metadata
@@ -295,13 +295,21 @@ def transform_products(**context) -> dict[str, Any]:
         ensure_output_dirs()
         ti = context["ti"]
 
-        # Lấy file từ save_products_with_detail
+        # Lấy file từ merge_product_details
         output_file = None
         try:
-            output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
+            detail_result = ti.xcom_pull(task_ids="crawl_product_details.merge_product_details")
+            if isinstance(detail_result, dict):
+                output_file = detail_result.get("output_file")
+            elif isinstance(detail_result, str):
+                output_file = detail_result
         except Exception:
             try:
-                output_file = ti.xcom_pull(task_ids="save_products_with_detail")
+                detail_result = ti.xcom_pull(task_ids="merge_product_details")
+                if isinstance(detail_result, dict):
+                    output_file = detail_result.get("output_file")
+                elif isinstance(detail_result, str):
+                    output_file = detail_result
             except Exception:
                 pass
 

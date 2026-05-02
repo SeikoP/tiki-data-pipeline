@@ -126,7 +126,9 @@ def load_categories(json_file_path: str):
                     missing_parents.append(parent_url)
 
         if missing_parents:
-            logger.info(f"⚠️  Cảnh báo: {len(missing_parents)} parent URLs không có trong file JSON:")
+            logger.info(
+                f"⚠️  Cảnh báo: {len(missing_parents)} parent URLs không có trong file JSON:"
+            )
             for url in missing_parents[:5]:
                 logger.info(f"   - {url}")
 
@@ -140,7 +142,9 @@ def load_categories(json_file_path: str):
             for cat in categories_to_load:
                 logger.info(f"   - [{cat.get('level', '?')}] {cat.get('name')} ({cat.get('url')})")
         else:
-            logger.info(f"\n📋 Sẽ load {len(categories_to_load)} categories (quá nhiều để hiển thị)")
+            logger.info(
+                f"\n📋 Sẽ load {len(categories_to_load)} categories (quá nhiều để hiển thị)"
+            )
 
         # 3. Connect & Save
         logger.info("🚀 Importing to Database...")

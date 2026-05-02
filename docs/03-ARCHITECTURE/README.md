@@ -1,199 +1,54 @@
-# 🏗️ 03-ARCHITECTURE - KIẾN TRÚC & THIẾT KẾ
+# Architecture
 
-**Thư mục này chứa**: Kiến trúc hệ thống, data flow, ETL pipeline design
+The active Airflow DAG is `tiki_crawl_fast` in `airflow/dags/tiki_crawl_products_v2/tiki_crawl_fast.py`.
 
----
+## Data Flow
 
-## 📁 FILE STRUCTURE
+```text
+pre_crawl
+  cleanup_incomplete_products
+  load_categories
 
-| File | Mô Tả | Sử Dụng Khi |
-|------|--------|-----------|
-| `DAG_DATA_FLOW_ANALYSIS.md` | 📊 Luồng dữ liệu chi tiết | Hiểu pipeline |
-| Other files | Architecture docs | Expand soon |
-| `README.md` | 📌 File này | Overview |
+crawl_categories
+  prepare_crawl_kwargs
+  crawl_category
 
----
+process
+  merge_products
 
-## 🎯 QUICK START
+detail
+  prepare_products_for_detail
+  crawl_product_batch_fast
+  merge_product_details
 
-### Bạn muốn...
+transform_load
+  load_categories_to_db
+  transform_products
+  load_products
 
-| Mục Đích | Đọc File |
-|---------|----------|
-| Hiểu luồng dữ liệu | `DAG_DATA_FLOW_ANALYSIS.md` |
-
----
-
-## 🏗️ ARCHITECTURE OVERVIEW
-
-### Three-Stage ETL Pipeline
-
-```
-┌─────────┐     ┌─────────┐     ┌─────────┐     ┌──────────┐
-│ Extract │────▶│Transform│────▶│  Load   │────▶│ Database │
-└─────────┘     └─────────┘     └─────────┘     └──────────┘
-    Crawl           Process         Insert        PostgreSQL
-  (Selenium)      (Normalize)       (Batch)       crawl_data
-   2-3 hours      10-15 min        5-10 min
+maintenance_and_reports
+  reconcile_categories
+  cleanup_categories
+  cleanup_old_history
+  aggregate_and_notify
+  cleanup_redis_cache
+  backup_database
 ```
 
-### System Components
+## Main Components
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                    AIRFLOW ORCHESTRATION                  │
-│                   (Scheduler + Worker)                    │
-└──────────────────────────────────────────────────────────┘
-         │                       │                    │
-         ▼                       ▼                    ▼
-    ┌─────────┐            ┌──────────┐        ┌────────────┐
-    │ Selenium│            │ aiohttp  │        │ PostgreSQL │
-    │ Drivers │            │ Requests │        │  Connector │
-    │ (15)    │            │ (100)    │        │ (20)       │
-    └─────────┘            └──────────┘        └────────────┘
-         │                       │                    │
-         ▼                       ▼                    ▼
-    ┌─────────────────────────────────────────────────────────┐
-    │                   Redis Cache (1.2GB)                    │
-    │            (Category & Product HTML Cache)              │
-    └─────────────────────────────────────────────────────────┘
-```
+| Component | Location | Responsibility |
+| --- | --- | --- |
+| Airflow DAG | `airflow/dags/tiki_crawl_products_v2/` | Task orchestration and runtime dependencies |
+| Crawl pipeline | `src/pipelines/crawl/` | Tiki API/Selenium crawling, retry, cache, storage helpers |
+| Transform pipeline | `src/pipelines/transform/` | Normalize and validate product records |
+| Load pipeline | `src/pipelines/load/` | PostgreSQL insert/update and connection pool code |
+| Shared modules | `src/common/` | Cache, monitoring, profiling, data quality, notifications |
+| Tools/scripts | `scripts/`, `src/tools/` | Admin checks, category repair, profiling and maintenance helpers |
 
----
+## Storage
 
-## 📈 ETL STAGES
-
-### Stage 1: Extract (Crawl)
-**Duration**: 13 min (optimized from 87 min)
-```
-Input: Tiki.vn website
-Process:
-  1. Get category list (recursive)
-  2. Get product list per category (15 drivers parallel)
-  3. Get product details (12-product batches → 23 tasks)
-  
-Output: 
-  - data/raw/products_*.json (1000+ products)
-  - Statistics in XCom
-```
-
-### Stage 2: Transform
-**Duration**: 2 min (optimized from 12 min)
-```
-Input: data/raw/products_*.json
-Process:
-  1. Parse JSON → Python objects
-  2. Normalize fields (fix encoding, price format)
-  3. Validate schema
-  4. Compute derived fields (discount %, status)
-  5. Deduplicate products
-  
-Output:
-  - Cleaned product list
-  - Validation report
-  - 99.2% success rate
-```
-
-### Stage 3: Load
-**Duration**: 1.5 min (optimized from 8 min)
-```
-Input: Transformed products
-Process:
-  1. Batch by 50 products
-  2. Parallel insert/update
-  3. Conflict resolution (ON CONFLICT)
-  4. Update statistics
-  
-Output:
-  - PostgreSQL crawl_data.products
-  - 1000+ products stored
-  - Metadata tables updated
-```
-
----
-
-## 💾 DATABASE SCHEMA
-
-### crawl_data Database
-
-```sql
--- Categories table
-CREATE TABLE categories (
-  id SERIAL PRIMARY KEY,
-  tiki_id VARCHAR UNIQUE,
-  name VARCHAR,
-  url VARCHAR,
-  created_at TIMESTAMP,
-  updated_at TIMESTAMP
-);
-
--- Products table
-CREATE TABLE products (
-  id SERIAL PRIMARY KEY,
-  product_id VARCHAR UNIQUE, -- ID từ Tiki
-  name VARCHAR,
-  short_name VARCHAR,
-  url VARCHAR,
-  image_url VARCHAR,
-  category_url VARCHAR,
-  category_id VARCHAR, -- c1234
-  price NUMERIC,
-  original_price NUMERIC,
-  discount_percent NUMERIC,
-  rating_average NUMERIC,
-  review_count INTEGER,
-  sales_count INTEGER,
-  stock_available BOOLEAN,
-  shipping JSONB,
-  brand VARCHAR,
-  seller_name VARCHAR,
-  seller_id VARCHAR,
-  seller_is_official BOOLEAN,
-  crawled_at TIMESTAMP,
-  updated_at TIMESTAMP,
-  crawl_quality VARCHAR, -- 'basic' or 'enriched'
-  needs_enrichment BOOLEAN
-);
-
--- Indexes for performance
-CREATE INDEX idx_products_category_id ON products(category_id);
-CREATE INDEX idx_products_product_id ON products(product_id);
-CREATE INDEX idx_products_price ON products(price);
-CREATE INDEX idx_products_quality ON products(crawl_quality);
-```
-
----
-
-## 🔌 INTEGRATION POINTS
-
-### Airflow ↔ PostgreSQL
-- Connection: `postgresql://user:pass@localhost:5432/crawl_data`
-- Pool: ThreadedConnectionPool (min=2, max=20)
-- Reuse: 78% connection reuse rate
-
-### Airflow ↔ Redis
-- Connection: `redis://localhost:6379/0` (Celery)
-- Cache: DB 1 for pipeline (capacity 1.2GB)
-- Hit Ratio: 34-42% on subsequent runs
-
-### Airflow ↔ Selenium
-- Docker: Chrome/Chromium in headless mode
-- Pool: 15 concurrent drivers (vs 5 baseline)
-- Timeout: 60s per product detail
-
----
-
-## ✅ NEXT TOPICS (Coming Soon)
-
-- [ ] Detailed DAG structure
-- [ ] Task dependencies
-- [ ] XCom data flow
-- [ ] Error handling & retries
-- [ ] Monitoring & alerting
-- [ ] Scaling strategies
-- [ ] Disaster recovery
-
----
-
-**Last Updated**: 18/11/2025  
-**Status**: ✅ Overview Complete
+- PostgreSQL stores Airflow metadata and crawl data schemas initialized from `airflow/setup/`.
+- Redis supports Airflow/runtime caching and crawl cache acceleration.
+- `data/` contains local generated inputs and outputs and is not intended for git.
+- `backups/` contains generated database backups and is not intended for git except placeholder files.

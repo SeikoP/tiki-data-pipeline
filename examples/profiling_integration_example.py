@@ -48,13 +48,13 @@ def run_pipeline():
     """Run the complete pipeline."""
     # Crawl
     products = simulate_crawler()
-    
+
     # Transform
     transformed = simulate_transformer(products)
-    
+
     # Load
     result = simulate_loader(transformed)
-    
+
     return result
 
 
@@ -64,38 +64,38 @@ def main():
     print("PROFILING INTEGRATION EXAMPLE")
     print("=" * 80)
     print()
-    
+
     # Create profiled pipeline runner
     runner = ProfiledPipelineRunner(monitoring_interval=0.5)
-    
+
     # Start monitoring
     print("▶️  Starting resource monitoring...")
     runner.start_monitoring()
     print()
-    
+
     # Run pipeline
     print("▶️  Running pipeline...")
     result = run_pipeline()
     print(f"✅ Pipeline completed: {result}")
     print()
-    
+
     # Stop monitoring
     print("⏹️  Stopping resource monitoring...")
     runner.stop_monitoring()
     print()
-    
+
     # Generate comprehensive report
     print("📊 Generating profiling report...")
     report = runner.generate_report()
     print()
     print(report)
-    
+
     # Save report to file
     output_file = Path(__file__).parent / "profiling_report.txt"
     runner.generate_report(output_file=str(output_file))
     print(f"✅ Report saved to: {output_file}")
     print()
-    
+
     # Export JSON data
     print("📊 Exporting profiling data as JSON...")
     generator = ProfilingReportGenerator(
@@ -103,12 +103,12 @@ def main():
         component_profiler=get_global_component_profiler(),
         resource_monitor=get_global_resource_monitor(),
     )
-    
+
     json_file = Path(__file__).parent / "profiling_data.json"
     generator.export_json(str(json_file))
     print(f"✅ JSON data exported to: {json_file}")
     print()
-    
+
     print("=" * 80)
     print("EXAMPLE COMPLETED")
     print("=" * 80)
@@ -116,4 +116,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

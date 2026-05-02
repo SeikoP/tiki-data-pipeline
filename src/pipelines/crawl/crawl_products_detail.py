@@ -11,8 +11,6 @@ import time
 from datetime import datetime
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 # Import shared utilities
 from .crawl_utils import (
     create_selenium_driver,
@@ -22,6 +20,8 @@ from .crawl_utils import (
     parse_sales_count,
     setup_utf8_encoding,
 )
+
+logger = logging.getLogger(__name__)
 
 # Setup UTF-8 encoding
 setup_utf8_encoding()
@@ -66,7 +66,9 @@ def crawl_product_detail_with_selenium(
                     logger.debug("[Redis Cache] ✅ Hit cache cho %s...", url[:60])
                     return cached_html
         except Exception:
-            logger.debug("Redis cache lookup failed for %s", url[:60], exc_info=True)  # Fallback về crawl
+            logger.debug(
+                "Redis cache lookup failed for %s", url[:60], exc_info=True
+            )  # Fallback về crawl
 
     # Adaptive Rate Limiting - tự động điều chỉnh delay
     adaptive_limiter = None
@@ -81,11 +83,15 @@ def crawl_product_detail_with_selenium(
                 domain = urlparse(url).netloc or "tiki.vn"
                 # Đợi với adaptive delay (tự động điều chỉnh)
                 current_delay = adaptive_limiter.get_current_delay()
-                logger.debug("[Adaptive Rate Limiter] ⏳ Delay: %.2fs cho %s", current_delay, domain)
+                logger.debug(
+                    "[Adaptive Rate Limiter] ⏳ Delay: %.2fs cho %s", current_delay, domain
+                )
                 adaptive_limiter.wait(domain)
         except Exception as e:
             # Fallback về fixed delay nếu adaptive limiter không available
-            logger.debug("[Rate Limiter] ⚠️  Adaptive limiter không available: %s, dùng delay cố định", e)
+            logger.debug(
+                "[Rate Limiter] ⚠️  Adaptive limiter không available: %s, dùng delay cố định", e
+            )
             time.sleep(1.0)  # Fixed delay fallback - tăng từ 0.7s để giảm 429 errors
 
     driver = None
@@ -132,7 +138,9 @@ def crawl_product_detail_with_selenium(
                     logger.debug("[Selenium] ⚠️  Page có thể chưa load đầy đủ, nhưng tiếp tục...")
             except ImportError:
                 # Fallback về time.sleep nếu module chưa có
-                logger.debug("[Selenium] ⚠️  Sử dụng time.sleep fallback (explicit waits không available)")
+                logger.debug(
+                    "[Selenium] ⚠️  Sử dụng time.sleep fallback (explicit waits không available)"
+                )
                 time.sleep(1)
 
             # Scroll để load các phần động - tối ưu với explicit waits
@@ -227,7 +235,11 @@ def crawl_product_detail_with_selenium(
                         # CRITICAL: Chuẩn hóa URL trước khi cache để maximize hit rate
                         canonical_url = redis_cache._canonicalize_url(url)
                         redis_cache.cache_html(canonical_url, full_html, ttl=REDIS_CACHE_TTL_HTML)
-                        logger.debug("[Redis Cache] ✅ Đã cache HTML với TTL=%ds (7 days) cho %s...", REDIS_CACHE_TTL_HTML, url[:60])
+                        logger.debug(
+                            "[Redis Cache] ✅ Đã cache HTML với TTL=%ds (7 days) cho %s...",
+                            REDIS_CACHE_TTL_HTML,
+                            url[:60],
+                        )
                 except Exception:  # noqa: BLE001
                     pass  # Non-critical, intentional swallow  # Ignore cache errors
 
@@ -267,11 +279,17 @@ def crawl_product_detail_with_selenium(
                         error_type_str = "timeout"
                     adaptive_limiter.record_error(domain, error_type=error_type_str)
                 except Exception:
-                    logger.debug("Adaptive rate limiter record_error failed", exc_info=True)  # Ignore errors
+                    logger.debug(
+                        "Adaptive rate limiter record_error failed", exc_info=True
+                    )  # Ignore errors
 
             if verbose:
                 logger.debug(
-                    "[Selenium] Lỗi attempt %d/%d (%s): %s", attempt + 1, max_retries, error_type, error_msg
+                    "[Selenium] Lỗi attempt %d/%d (%s): %s",
+                    attempt + 1,
+                    max_retries,
+                    error_type,
+                    error_msg,
                 )
 
             # Đóng driver nếu có lỗi
@@ -371,7 +389,7 @@ def crawl_product_with_retry(
         try:
             attempt_start_time = time.time()
 
-            tier = "Tier 1 (Normal)" if attempt == 0 else "Tier 2 (Retry %d)" % attempt
+            tier = "Tier 1 (Normal)" if attempt == 0 else f"Tier 2 (Retry {attempt})"
             logger.debug("[Retry Wrapper] %s - Crawling %s...", tier, url[:60])
 
             # Crawl HTML
@@ -482,7 +500,9 @@ def crawl_product_with_retry(
                     # Wait before retry (exponential backoff)
                     retry_delay = PRODUCT_RETRY_DELAY_BASE * (attempt + 1)
                     logger.debug(
-                        "[Retry Wrapper] ⏳ Waiting %ds before retry %d...", retry_delay, retry_count
+                        "[Retry Wrapper] ⏳ Waiting %ds before retry %d...",
+                        retry_delay,
+                        retry_count,
                     )
                     time.sleep(retry_delay)
                     continue
@@ -498,14 +518,18 @@ def crawl_product_with_retry(
                     if verbose:
                         score = product["_metadata"].get("data_completeness_score", 0)
                         logger.debug(
-                            "[Retry Wrapper] ⚠️  Accepted with partial data after %d retries (score: %s)", max_retries, score
+                            "[Retry Wrapper] ⚠️  Accepted with partial data after %d retries (score: %s)",
+                            max_retries,
+                            score,
                         )
 
                     last_product = product
                     return product
 
         except Exception as e:
-            logger.debug("[Retry Wrapper] Error on attempt %d: %s: %s", attempt + 1, type(e).__name__, e)
+            logger.debug(
+                "[Retry Wrapper] Error on attempt %d: %s: %s", attempt + 1, type(e).__name__, e
+            )
 
             if attempt < max_retries:
                 retry_count += 1
@@ -583,10 +607,14 @@ def crawl_product_detail_with_driver(
             if adaptive_limiter:
                 domain = urlparse(url).netloc or "tiki.vn"
                 current_delay = adaptive_limiter.get_current_delay()
-                logger.debug("[Adaptive Rate Limiter] ⏳ Delay: %.2fs cho %s", current_delay, domain)
+                logger.debug(
+                    "[Adaptive Rate Limiter] ⏳ Delay: %.2fs cho %s", current_delay, domain
+                )
                 adaptive_limiter.wait(domain)
         except Exception as e:
-            logger.debug("[Rate Limiter] ⚠️  Adaptive limiter không available: %s, dùng delay cố định", e)
+            logger.debug(
+                "[Rate Limiter] ⚠️  Adaptive limiter không available: %s, dùng delay cố định", e
+            )
             time.sleep(1.0)  # Fixed delay fallback - tăng từ 0.7s để giảm 429 errors
 
     try:
@@ -1470,7 +1498,9 @@ def extract_product_detail(
                 product_data["category_path"] = product_data["category_path"][:5]
         except Exception as e:
             # Log but don't fail - just keep original path
-            logger.warning("[Warning] Error prepending parent category '%s': %s", parent_category, e)
+            logger.warning(
+                "[Warning] Error prepending parent category '%s': %s", parent_category, e
+            )
     elif (
         not parent_category
         and len(product_data["category_path"]) >= 3
@@ -1511,7 +1541,9 @@ def extract_product_detail(
                                         ][:5]
                     except Exception as e:
                         # Log but don't fail - just keep original path
-                        logger.warning("[Warning] Error auto-detecting parent for '%s': %s", first_item, e)
+                        logger.warning(
+                            "[Warning] Error auto-detecting parent for '%s': %s", first_item, e
+                        )
         except Exception as e:
             # Log but don't fail - just keep original path
             logger.warning("[Warning] Error loading hierarchy map for auto-detect: %s", e)
@@ -1675,12 +1707,15 @@ async def crawl_product_detail_via_api(
     api_url = f"https://tiki.vn/api/v2/products/{product_id}"
     try:
         from .ua_rotation import get_api_headers
-        headers = get_api_headers({
-            "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
-            "Referer": url,
-            "Origin": "https://tiki.vn",
-            "X-Guest-Token": "no-token",
-        })
+
+        headers = get_api_headers(
+            {
+                "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
+                "Referer": url,
+                "Origin": "https://tiki.vn",
+                "X-Guest-Token": "no-token",
+            }
+        )
     except ImportError:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
@@ -1706,7 +1741,9 @@ async def crawl_product_detail_via_api(
                         data = await response.json()
                         return extract_product_detail_from_json(data, url)
                     except Exception as json_err:
-                        logger.warning("[API] ⚠️ Failed to decode JSON for %s: %s", product_id, json_err)
+                        logger.warning(
+                            "[API] ⚠️ Failed to decode JSON for %s: %s", product_id, json_err
+                        )
                         # Fallback to retry/status handling
 
                 # Handling status 0 (connection issues) or 429/5xx
@@ -1723,7 +1760,10 @@ async def crawl_product_detail_via_api(
 
                     if verbose:
                         logger.warning(
-                            "[API] ⚠️ Attempt %d failed with status %s for ID %s. Retrying...", attempt + 1, status_desc, product_id
+                            "[API] ⚠️ Attempt %d failed with status %s for ID %s. Retrying...",
+                            attempt + 1,
+                            status_desc,
+                            product_id,
                         )
                     await asyncio.sleep(retry_delay * (2**attempt))
                     continue
@@ -1732,7 +1772,10 @@ async def crawl_product_detail_via_api(
                     if verbose:
                         text = await response.text()
                         logger.error(
-                            "[API] ❌ Failed ID %s: HTTP %s - Body: %s", product_id, response.status, text[:200]
+                            "[API] ❌ Failed ID %s: HTTP %s - Body: %s",
+                            product_id,
+                            response.status,
+                            text[:200],
                         )
                         # LOG TO FILE
                         try:
@@ -1797,6 +1840,7 @@ async def crawl_product_detail_async(
         timeout = aiohttp.ClientTimeout(total=20, connect=10)  # Tối ưu: giảm timeout
         try:
             from .ua_rotation import get_random_user_agent
+
             _session_ua = get_random_user_agent()
         except ImportError:
             _session_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -1824,7 +1868,9 @@ async def crawl_product_detail_async(
                 return product_data
             else:
                 if verbose:
-                    logger.warning(f"[Async] ⚠️ API thiếu thông tin cơ bản (Name/Price) cho {url[:60]}")
+                    logger.warning(
+                        f"[Async] ⚠️ API thiếu thông tin cơ bản (Name/Price) cho {url[:60]}"
+                    )
 
         # Tier 2: Thử crawl bằng aiohttp (HTML scraping)
         if verbose:

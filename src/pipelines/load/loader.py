@@ -22,7 +22,7 @@ from common.profiling import profile_loader
 from .db_pool import close_db_pool, get_db_pool, initialize_db_pool
 
 try:
-    from psycopg2.extras import execute_values, Json
+    from psycopg2.extras import Json, execute_values
 
     EXECUTE_VALUES_AVAILABLE = True
 except ImportError:
@@ -634,26 +634,28 @@ class OptimizedDataLoader:
                 discount_amount and discount_amount >= 100000
             )
 
-            records.append((
-                product_id,
-                current_price,
-                current_original,
-                current_discount,
-                discount_amount,
-                price_change,
-                price_change_pct,
-                prev_price,
-                prev_original,
-                prev_discount,
-                current_sales,
-                sales_change,
-                p.get("rating_average"),
-                p.get("review_count"),
-                bool(is_flash_sale),
-                crawl_type,
-                p.get("crawled_at") or now,
-                now,
-            ))
+            records.append(
+                (
+                    product_id,
+                    current_price,
+                    current_original,
+                    current_discount,
+                    discount_amount,
+                    price_change,
+                    price_change_pct,
+                    prev_price,
+                    prev_original,
+                    prev_discount,
+                    current_sales,
+                    sales_change,
+                    p.get("rating_average"),
+                    p.get("review_count"),
+                    bool(is_flash_sale),
+                    crawl_type,
+                    p.get("crawled_at") or now,
+                    now,
+                )
+            )
 
         history_query = """
             INSERT INTO crawl_history (

@@ -122,6 +122,7 @@ class PostgresStorage:
                 pass
             finally:
                 self._pool = None
+                self._pool_stats["active_connections"] = 0
 
     def __enter__(self):
         return self
@@ -1639,15 +1640,6 @@ class PostgresStorage:
                 pass
         return stats
 
-    def close(self):
-        """
-        Đóng connection pool.
-        """
-        if self._pool:
-            self._pool.closeall()
-            self._pool = None
-            self._pool_stats["active_connections"] = 0
-
     def cleanup_incomplete_products(
         self,
         require_seller: bool = True,
@@ -1716,7 +1708,9 @@ class PostgresStorage:
                     deleted_both = stats_row[2] if stats_row else 0
                     deleted_no_rating = stats_row[3] if stats_row and require_rating else 0
                 elif require_seller:
-                    cur.execute("SELECT COUNT(*) FROM products WHERE seller_name IS NULL OR seller_name = ''")
+                    cur.execute(
+                        "SELECT COUNT(*) FROM products WHERE seller_name IS NULL OR seller_name = ''"
+                    )
                     deleted_no_seller = cur.fetchone()[0] or 0
                 elif require_brand:
                     cur.execute("SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = ''")
@@ -1726,21 +1720,21 @@ class PostgresStorage:
                     deleted_no_rating = cur.fetchone()[0] or 0
 
                 # 1. Delete from crawl_history (orphaned records prevention)
-                history_delete_query = """
+                history_delete_query = f"""
                     DELETE FROM crawl_history
                     WHERE product_id IN (
                         SELECT product_id FROM products
-                        WHERE {}
+                        WHERE {where_clause}
                     )
-                """.format(where_clause)
+                """
                 cur.execute(history_delete_query)
                 deleted_history = cur.rowcount
 
                 # 2. Delete products matching criteria
-                delete_query = """
+                delete_query = f"""
                     DELETE FROM products
-                    WHERE {}
-                """.format(where_clause)
+                    WHERE {where_clause}
+                """
                 cur.execute(delete_query)
                 deleted_count = cur.rowcount
 

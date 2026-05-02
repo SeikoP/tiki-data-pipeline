@@ -9,10 +9,11 @@ from pathlib import Path
 
 # Fix encoding cho Windows console
 if sys.platform == "win32":
-    import io
-
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
 
 # Thêm src vào path - cần thêm cả common, pipelines và crawl
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -39,55 +40,9 @@ for path in [project_root, src_path, common_path, pipelines_path, crawl_path]:
     if path not in sys.path:
         sys.path.insert(0, path)
 
-import importlib.util  # noqa: E402
-
-# Setup package structure để relative imports hoạt động
-import types  # noqa: E402
-
-# Tạo package structure trong sys.modules
-if "pipelines" not in sys.modules:
-    sys.modules["pipelines"] = types.ModuleType("pipelines")
-if "pipelines.crawl" not in sys.modules:
-    sys.modules["pipelines.crawl"] = types.ModuleType("pipelines.crawl")
-if "common" not in sys.modules:
-    sys.modules["common"] = types.ModuleType("common")
-if "common.analytics" not in sys.modules:
-    sys.modules["common.analytics"] = types.ModuleType("common.analytics")
-if "common.ai" not in sys.modules:
-    sys.modules["common.ai"] = types.ModuleType("common.ai")
-if "common.notifications" not in sys.modules:
-    sys.modules["common.notifications"] = types.ModuleType("common.notifications")
-
-# Import config trước (cần thiết cho các module khác)
-config_path = os.path.join(crawl_path, "config.py")
-spec = importlib.util.spec_from_file_location("pipelines.crawl.config", config_path)
-config_module = importlib.util.module_from_spec(spec)
-sys.modules["pipelines.crawl.config"] = config_module
-spec.loader.exec_module(config_module)
-
-# Import DataAggregator từ common/analytics/
-aggregator_path = os.path.join(common_path, "analytics", "aggregator.py")
-spec = importlib.util.spec_from_file_location("common.analytics.aggregator", aggregator_path)
-aggregator_module = importlib.util.module_from_spec(spec)
-sys.modules["common.analytics.aggregator"] = aggregator_module
-spec.loader.exec_module(aggregator_module)
-DataAggregator = aggregator_module.DataAggregator
-
-# Import AISummarizer từ common/ai/
-summarizer_path = os.path.join(common_path, "ai", "summarizer.py")
-spec = importlib.util.spec_from_file_location("common.ai.summarizer", summarizer_path)
-summarizer_module = importlib.util.module_from_spec(spec)
-sys.modules["common.ai.summarizer"] = summarizer_module
-spec.loader.exec_module(summarizer_module)
-AISummarizer = summarizer_module.AISummarizer
-
-# Import DiscordNotifier từ common/notifications/
-discord_path = os.path.join(common_path, "notifications", "discord.py")
-spec = importlib.util.spec_from_file_location("common.notifications.discord", discord_path)
-discord_module = importlib.util.module_from_spec(spec)
-sys.modules["common.notifications.discord"] = discord_module
-spec.loader.exec_module(discord_module)
-DiscordNotifier = discord_module.DiscordNotifier
+from common.ai.summarizer import AISummarizer  # noqa: E402
+from common.analytics.aggregator import DataAggregator  # noqa: E402
+from common.notifications.discord import DiscordNotifier  # noqa: E402
 
 
 def create_sample_data_file(output_path: str) -> str:

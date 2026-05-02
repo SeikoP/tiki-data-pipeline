@@ -596,7 +596,9 @@ def get_working_redis_url(db: int = 1, timeout: int = 2) -> str | None:
             client_kwargs = {
                 "host": parsed.hostname or "localhost",
                 "port": parsed.port or 6379,
-                "db": int(parsed.path.lstrip("/")) if parsed.path and parsed.path.lstrip("/") else 0,
+                "db": int(parsed.path.lstrip("/"))
+                if parsed.path and parsed.path.lstrip("/")
+                else 0,
                 "decode_responses": True,
                 "socket_connect_timeout": timeout,
                 "socket_timeout": timeout,

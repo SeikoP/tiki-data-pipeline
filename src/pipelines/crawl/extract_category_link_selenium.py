@@ -9,25 +9,29 @@ logger = logging.getLogger(__name__)
 # Lazy imports - Selenium/BS4 loaded on first use to avoid DAG import overhead
 _BeautifulSoup = None
 _HAS_WEBDRIVER_MANAGER = None
+ChromeDriverManager = None
 
 
 def _get_bs4():
     global _BeautifulSoup
     if _BeautifulSoup is None:
         from bs4 import BeautifulSoup
+
         _BeautifulSoup = BeautifulSoup
     return _BeautifulSoup
 
 
 def _check_webdriver_manager():
-    global _HAS_WEBDRIVER_MANAGER
+    global ChromeDriverManager, _HAS_WEBDRIVER_MANAGER
     if _HAS_WEBDRIVER_MANAGER is None:
         try:
-            from webdriver_manager.chrome import ChromeDriverManager  # noqa: F401
+            from webdriver_manager.chrome import ChromeDriverManager
+
             _HAS_WEBDRIVER_MANAGER = True
         except ImportError:
             _HAS_WEBDRIVER_MANAGER = False
     return _HAS_WEBDRIVER_MANAGER
+
 
 # Set UTF-8 encoding cho stdout trên Windows
 if sys.platform == "win32":
@@ -57,6 +61,7 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
     chrome_options.add_argument("--disable-gpu")
     try:
         from .ua_rotation import get_chrome_user_agent
+
         chrome_options.add_argument(f"user-agent={get_chrome_user_agent()}")
     except ImportError:
         chrome_options.add_argument(
@@ -83,6 +88,7 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
             import stat
 
             # Install ChromeDriver
+            assert ChromeDriverManager is not None
             driver_path = ChromeDriverManager().install()
 
             # QUAN TRỌNG: Set quyền thực thi cho ChromeDriver (fix lỗi status code 127)
@@ -128,7 +134,9 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
                 raise enhanced_error from e
 
             if verbose:
-                logger.info(f"[Selenium] Không thể dùng webdriver-manager: {e}, thử Chrome mặc định")
+                logger.info(
+                    f"[Selenium] Không thể dùng webdriver-manager: {e}, thử Chrome mặc định"
+                )
             try:
                 driver = webdriver.Chrome(options=chrome_options)
             except Exception as e2:
@@ -204,6 +212,8 @@ def crawl_with_driver(driver, url, save_html=False, verbose=True):
     Returns:
         str: HTML content hoặc None nếu lỗi
     """
+    from selenium.webdriver.common.by import By
+
     try:
         if verbose:
             logger.info(f"[Selenium] Đang mở {url}... (reuse driver)")

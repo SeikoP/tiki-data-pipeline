@@ -68,7 +68,7 @@ def cleanup_incomplete_products_wrapper(**context):
 def cleanup_categories_wrapper(**context):
     """
     Task wrapper to cleanup both orphan and redundant categories.
-    
+
     Xóa:
     1. Orphan categories: có product_count = 0 hoặc không có products
     2. Redundant categories: non-leaf categories
@@ -86,7 +86,7 @@ def cleanup_categories_wrapper(**context):
 
         # PART 1: Cleanup Orphan Categories
         logger.info("📦 Part 1: Cleaning up orphan categories...")
-        
+
         with storage.get_connection() as conn:
             with conn.cursor() as cur:
                 # Xóa categories có product_count = 0 hoặc NULL
@@ -116,7 +116,9 @@ def cleanup_categories_wrapper(**context):
 
         logger.info("📊 Orphan cleanup results:")
         logger.info(f"   - Categories với product_count = 0: {deleted_zero_count}")
-        logger.info(f"   - Categories không có products: {deleted_no_products + additional_deleted}")
+        logger.info(
+            f"   - Categories không có products: {deleted_no_products + additional_deleted}"
+        )
         logger.info(f"   - Tổng orphan deleted: {total_orphan_deleted}")
 
         # PART 2: Cleanup Redundant Categories
@@ -125,7 +127,9 @@ def cleanup_categories_wrapper(**context):
         logger.info(f"   - Non-leaf categories removed: {removed_redundant}")
 
         logger.info("=" * 70)
-        logger.info(f"✅ Total cleanup: {total_orphan_deleted + removed_redundant} categories deleted")
+        logger.info(
+            f"✅ Total cleanup: {total_orphan_deleted + removed_redundant} categories deleted"
+        )
         logger.info(f"   - Orphan: {total_orphan_deleted}")
         logger.info(f"   - Redundant: {removed_redundant}")
         logger.info("=" * 70)
@@ -431,9 +435,12 @@ def backup_database(**context) -> dict[str, Any]:
             # Run pg_dump directly (postgresql-client is installed in the Airflow image)
             cmd = [
                 "pg_dump",
-                "-h", postgres_host,
-                "-p", postgres_port,
-                "-U", postgres_user,
+                "-h",
+                postgres_host,
+                "-p",
+                postgres_port,
+                "-U",
+                postgres_user,
                 "--format=plain",  # Plain SQL format - dễ restore, tương thích
                 "--no-owner",  # Không dump owner info
                 "--no-acl",  # Không dump access privileges

@@ -678,18 +678,22 @@ class CIRunner:
             # Bandit
             self._print_info("Running Bandit...")
             self._run_command(
-                [self.python_cmd, "-m", "bandit", "-r", "src/", "--exit-zero"],
+                [
+                    self.python_cmd,
+                    "-m",
+                    "bandit",
+                    "-r",
+                    "src/",
+                    "airflow/dags/",
+                    "scripts/",
+                    "-lll",
+                ],
                 "Bandit security check",
             )
 
             # Safety
             self._print_info("Running Safety...")
-            try:
-                self._run_command(
-                    [self.python_cmd, "-m", "safety", "check"], "Safety check", check=False
-                )
-            except Exception:
-                self._print_warning("Safety check encountered issues (non-critical)")
+            self._run_command([self.python_cmd, "-m", "safety", "check"], "Safety check")
 
             duration = time.time() - start
             return TaskResult(

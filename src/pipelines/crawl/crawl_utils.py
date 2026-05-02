@@ -83,6 +83,7 @@ def get_selenium_options(headless: bool = True) -> Any | None:
         chrome_options.add_argument("--use-mock-keychain")
         try:
             from .ua_rotation import get_chrome_user_agent
+
             chrome_options.add_argument(f"user-agent={get_chrome_user_agent()}")
         except ImportError:
             chrome_options.add_argument(
@@ -686,6 +687,7 @@ DEFAULT_PRODUCTS_DIR = DEFAULT_DATA_DIR / "products"
 # Default user agent - prefer ua_rotation module for runtime use
 try:
     from .ua_rotation import get_random_user_agent as _get_ua
+
     DEFAULT_USER_AGENT = _get_ua()
 except ImportError:
     DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

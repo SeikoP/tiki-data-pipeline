@@ -177,9 +177,20 @@ class VectorizedTransformer:
 
         # Step 2: Semantic cutoff — truncate at common Vietnamese stop phrases
         _stop_phrases = [
-            "chính hãng", "cao cấp", "nhập khẩu", "giá rẻ", "bảo hành",
-            "dành cho", "tặng kèm", "miễn phí", "freeship", "fullbox",
-            "nguyên seal", "hàng mới", "xả kho", "thanh lý",
+            "chính hãng",
+            "cao cấp",
+            "nhập khẩu",
+            "giá rẻ",
+            "bảo hành",
+            "dành cho",
+            "tặng kèm",
+            "miễn phí",
+            "freeship",
+            "fullbox",
+            "nguyên seal",
+            "hàng mới",
+            "xả kho",
+            "thanh lý",
         ]
         _stop_pattern = re.compile(
             r"\b(" + "|".join(re.escape(p) for p in _stop_phrases) + r")\b",

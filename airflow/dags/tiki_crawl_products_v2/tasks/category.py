@@ -94,12 +94,13 @@ def load_categories(**context) -> list[dict[str, Any]]:
 
         # Lưu categories vào file thay vì XCom
         from pathlib import Path
+
         output_file = Path("/opt/airflow/data/processed") / "loaded_categories.json"
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(categories, f, ensure_ascii=False)
-        
+
         logger.info(f"💾 Đã lưu {len(categories)} categories vào {output_file}")
 
         # Return chỉ file path và metadata
