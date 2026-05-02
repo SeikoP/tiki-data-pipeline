@@ -158,7 +158,7 @@ def crawl_product_batch_with_async(
         try:
             results = loop.run_until_complete(
                 crawl_product_details_async(
-                    product_ids=product_ids, batch_size=50, max_concurrent=10, logger=logger
+                    product_ids=product_ids, batch_size=50, max_concurrent=6, logger=logger
                 )
             )
         finally:

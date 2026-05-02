@@ -54,7 +54,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     
-    CREATE INDEX IF NOT EXISTS idx_categories_url ON categories(url);
+    -- Note: idx_categories_url removed (redundant with UNIQUE constraint on url)
     CREATE INDEX IF NOT EXISTS idx_categories_parent_url ON categories(parent_url);
     CREATE INDEX IF NOT EXISTS idx_categories_level ON categories(level);
     CREATE INDEX IF NOT EXISTS idx_categories_path ON categories USING GIN (category_path);
@@ -64,7 +64,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
     
     -- =====================================================
     -- BẢNG PRODUCTS
-    -- Đã loại bỏ các trường: category_path, review_count, description, images,
+    -- Đã loại bỏ các trường: category_path, description, images,
     -- estimated_revenue, price_savings, price_category, value_score, sales_velocity,
     -- specifications, popularity_score, discount_amount
     -- =====================================================
@@ -74,18 +74,21 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         name VARCHAR(1000) NOT NULL,
         short_name VARCHAR(255),
         url TEXT NOT NULL,
+        image_url TEXT,
         category_url TEXT,
-        category_id VARCHAR(255),
+        category_id VARCHAR(255) REFERENCES categories(category_id) ON DELETE SET NULL,
         sales_count INTEGER,
         price DECIMAL(12, 2),
         original_price DECIMAL(12, 2),
-        discount_percent INTEGER,
-        rating_average DECIMAL(3, 2),
+        discount_percent DECIMAL(5, 2),
+        rating_average DECIMAL(4, 2),
         review_count INTEGER,
         seller_name VARCHAR(500),
         seller_id VARCHAR(255),
         seller_is_official BOOLEAN DEFAULT FALSE,
         brand VARCHAR(255),
+        stock_available BOOLEAN DEFAULT TRUE,
+        shipping JSONB,
 
         crawl_quality VARCHAR(50) DEFAULT 'basic',
         needs_enrichment BOOLEAN DEFAULT TRUE,
@@ -93,11 +96,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     
-    CREATE INDEX IF NOT EXISTS idx_products_product_id ON products(product_id);
+    -- Note: idx_products_product_id removed (redundant with UNIQUE constraint)
     CREATE INDEX IF NOT EXISTS idx_products_category_url ON products(category_url);
     CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
     CREATE INDEX IF NOT EXISTS idx_products_sales_count ON products(sales_count);
     CREATE INDEX IF NOT EXISTS idx_products_crawled_at ON products(crawled_at);
+    CREATE INDEX IF NOT EXISTS idx_products_category_sales ON products(category_id, sales_count DESC);
+    CREATE INDEX IF NOT EXISTS idx_products_needs_enrichment ON products(needs_enrichment) WHERE needs_enrichment = true;
     
     -- =====================================================
     -- BẢNG CRAWL_HISTORY (Lịch Sử Giá và Giảm Giá)
@@ -107,18 +112,18 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
     -- =====================================================
     CREATE TABLE IF NOT EXISTS crawl_history (
         id SERIAL PRIMARY KEY,
-        product_id VARCHAR(255) NOT NULL,
+        product_id VARCHAR(255) NOT NULL REFERENCES products(product_id) ON DELETE CASCADE,
         
         -- Price tracking
         price DECIMAL(12, 2) NOT NULL,
         original_price DECIMAL(12, 2),
-        discount_percent INTEGER,
+        discount_percent DECIMAL(5, 2),
         discount_amount DECIMAL(12, 2),
         price_change DECIMAL(12, 2),
         price_change_percent DECIMAL(5, 2),
         previous_price DECIMAL(12, 2),
         previous_original_price DECIMAL(12, 2),
-        previous_discount_percent INTEGER,
+        previous_discount_percent DECIMAL(5, 2),
         
         -- Sales tracking
         sales_count INTEGER,
@@ -128,7 +133,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         is_flash_sale BOOLEAN DEFAULT FALSE,
         
         -- Quality tracking
-        rating_average DECIMAL(3, 2),
+        rating_average DECIMAL(4, 2),
         review_count INTEGER,
 
         -- Metadata
@@ -169,6 +174,35 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         BEFORE UPDATE ON categories
         FOR EACH ROW
         EXECUTE FUNCTION update_updated_at_column();
+    
+    DROP TRIGGER IF EXISTS update_crawl_history_updated_at ON crawl_history;
+    CREATE TRIGGER update_crawl_history_updated_at
+        BEFORE UPDATE ON crawl_history
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column();
+    
+    -- =====================================================
+    -- CRAWL HISTORY CLEANUP
+    -- Removes old records to prevent unbounded growth.
+    -- Call periodically: SELECT cleanup_crawl_history(90);
+    -- =====================================================
+    CREATE OR REPLACE FUNCTION cleanup_crawl_history(retention_days INTEGER DEFAULT 90)
+    RETURNS INTEGER AS \$\$
+    DECLARE
+        deleted_count INTEGER;
+    BEGIN
+        DELETE FROM crawl_history
+        WHERE crawled_at < CURRENT_TIMESTAMP - (retention_days || ' days')::INTERVAL
+          AND id NOT IN (
+              -- Keep the most recent record per product
+              SELECT DISTINCT ON (product_id) id
+              FROM crawl_history
+              ORDER BY product_id, crawled_at DESC
+          );
+        GET DIAGNOSTICS deleted_count = ROW_COUNT;
+        RETURN deleted_count;
+    END;
+    \$\$ LANGUAGE plpgsql;
     
     GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $POSTGRES_USER;
     GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $POSTGRES_USER;

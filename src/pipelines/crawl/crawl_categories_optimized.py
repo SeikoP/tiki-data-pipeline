@@ -1,6 +1,7 @@
 # Import từ file cùng thư mục
 import importlib.util
 import json
+import logging
 import os
 import sys
 import time
@@ -8,6 +9,8 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
+
+logger = logging.getLogger(__name__)
 
 # Try importing constants from crawl_utils
 try:
@@ -20,15 +23,28 @@ except ImportError:
         DEFAULT_DATA_DIR = Path("data/raw")
         DEFAULT_CATEGORY_CACHE_DIR = DEFAULT_DATA_DIR / "cache" / "categories"
 
-spec = importlib.util.spec_from_file_location(
-    "extract_category_link_selenium",
-    os.path.join(os.path.dirname(__file__), "extract_category_link_selenium.py"),
-)
-extract_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(extract_module)
+# Lazy-load selenium extraction module to avoid import-time overhead
+_extract_module = None
 
-crawl_with_selenium = extract_module.crawl_with_selenium
-parse_categories = extract_module.parse_categories
+
+def _get_extract_module():
+    global _extract_module
+    if _extract_module is None:
+        spec = importlib.util.spec_from_file_location(
+            "extract_category_link_selenium",
+            os.path.join(os.path.dirname(__file__), "extract_category_link_selenium.py"),
+        )
+        _extract_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_extract_module)
+    return _extract_module
+
+
+def crawl_with_selenium(*args, **kwargs):
+    return _get_extract_module().crawl_with_selenium(*args, **kwargs)
+
+
+def parse_categories(*args, **kwargs):
+    return _get_extract_module().parse_categories(*args, **kwargs)
 
 # Set UTF-8 encoding cho stdout trên Windows
 if sys.platform == "win32":
@@ -53,7 +69,7 @@ try:
     HAS_TQDM = True
 except ImportError:
     HAS_TQDM = False
-    print("⚠️  Khuyến nghị cài đặt tqdm để hiển thị progress bar: pip install tqdm")
+    logger.warning("⚠️  Khuyến nghị cài đặt tqdm để hiển thị progress bar: pip install tqdm")
 
     # Fallback progress bar đơn giản
     class tqdm:
@@ -87,7 +103,7 @@ except ImportError:
                 if self.n > 0:
                     rate = self.n / elapsed if elapsed > 0 else 0
                     eta = (self.total - self.n) / rate if rate > 0 else 0
-                    print(
+                    logger.info(
                         f"\r{self.desc} {self.n}/{self.total} ({pct:.1f}%) | "
                         f"Tốc độ: {rate:.2f}/s | ETA: {eta:.0f}s",
                         end="",
@@ -98,8 +114,9 @@ except ImportError:
             self.desc = desc
 
 
-# Tạo thư mục output nếu chưa có
-os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
+# Tạo thư mục output (deferred to avoid import-time side effects)
+def _ensure_output_dirs():
+    os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
 
 # Thread-safe locks và counters
 stats_lock = Lock()
@@ -153,7 +170,7 @@ def crawl_single_category(
                 return True, cached_categories, None
             except Exception as e:
                 # Nếu cache file bị lỗi, tiếp tục crawl lại
-                print(f"  ⚠️  Cache file lỗi, sẽ crawl lại: {cache_file} - {str(e)}")
+                logger.warning(f"  ⚠️  Cache file lỗi, sẽ crawl lại: {cache_file} - {str(e)}")
 
     try:
         # Crawl với Selenium (ưu tiên driver pool nếu có)
@@ -216,7 +233,7 @@ def crawl_single_category(
             stats["total_crawled"] += 1
             stats["total_failed"] += 1
         # Log chi tiết hơn cho debugging
-        print(f"  ⚠️  Lỗi crawl {url}: [{error_type}] {error_msg}")
+        logger.error(f"  ⚠️  Lỗi crawl {url}: [{error_type}] {error_msg}")
         return False, [], error_msg
 
 
@@ -285,7 +302,7 @@ def crawl_level_parallel(
                             pbar.set_postfix(
                                 {"✅": stats["total_success"], "❌": stats["total_failed"]}
                             )
-                        print(f"\n  ❌ Lỗi crawl {url}: {error}")
+                        logger.error(f"\n  ❌ Lỗi crawl {url}: {error}")
                 except Exception as e:
                     error_msg = str(e)
                     error_type = type(e).__name__
@@ -293,7 +310,7 @@ def crawl_level_parallel(
                     visited_urls.add(url)  # Đánh dấu đã thử crawl
                     with stats_lock:
                         stats["total_failed"] += 1
-                    print(f"\n  ❌ Exception khi crawl {url}: [{error_type}] {error_msg}")
+                    logger.error(f"\n  ❌ Exception khi crawl {url}: [{error_type}] {error_msg}")
 
                 pbar.update(1)
 
@@ -338,7 +355,7 @@ def crawl_category_recursive_optimized(
                     driver_pool = SeleniumDriverPool(
                         pool_size=max_workers, headless=True, timeout=90
                     )
-                    print(f"✅ Đã khởi tạo driver pool với {max_workers} drivers")
+                    logger.info(f"✅ Đã khởi tạo driver pool với {max_workers} drivers")
         except Exception:
             pass  # Fallback: không dùng pool
 
@@ -374,7 +391,7 @@ def crawl_category_recursive_optimized(
                 }
                 all_categories.append(root_category)
                 existing_root_urls.add(root_url)
-                print(f"✅ Đã thêm root category: {root_name} ({root_cat_id})")
+                logger.info(f"✅ Đã thêm root category: {root_name} ({root_cat_id})")
 
         # Crawl từng level một
         for current_level in range(max_level + 1):
@@ -395,9 +412,9 @@ def crawl_category_recursive_optimized(
             if not new_urls:
                 continue
 
-            print(f"\n{'=' * 70}")
-            print(f"Level {current_level}: Dang crawl {len(new_urls)} danh muc...")
-            print(f"{'=' * 70}")
+            logger.info(f"\n{'=' * 70}")
+            logger.info(f"Level {current_level}: Dang crawl {len(new_urls)} danh muc...")
+            logger.info(f"{'=' * 70}")
 
             # Crawl song song
             results = crawl_level_parallel(
@@ -423,7 +440,7 @@ def crawl_category_recursive_optimized(
                             if child_url not in visited_urls:
                                 queue[current_level + 1].append((child_url, url))
                 else:
-                    print(f"  ❌ Lỗi crawl {url}: {error}")
+                    logger.error(f"  ❌ Lỗi crawl {url}: {error}")
 
         return all_categories
     finally:
@@ -431,7 +448,7 @@ def crawl_category_recursive_optimized(
         if driver_pool is not None:
             try:
                 driver_pool.cleanup()
-                print("✅ Đã cleanup driver pool")
+                logger.info("✅ Đã cleanup driver pool")
             except Exception:
                 pass
 
@@ -445,20 +462,20 @@ def print_stats():
         elapsed = time.time() - stats["start_time"]
         rate = stats["total_crawled"] / elapsed if elapsed > 0 else 0
 
-        print(f"\n{'=' * 70}")
-        print("📈 THỐNG KÊ")
-        print(f"{'=' * 70}")
-        print(f"⏱  Thời gian: {elapsed:.1f}s")
-        print(f"📥 Đã crawl: {stats['total_crawled']} danh mục")
-        print(f"✅ Thành công: {stats['total_success']}")
-        print(f"❌ Thất bại: {stats['total_failed']}")
-        print(f"📊 Tổng danh mục tìm được: {stats['total_categories']}")
-        print(f"⚡ Tốc độ: {rate:.2f} danh mục/s")
+        logger.info(f"\n{'=' * 70}")
+        logger.info("📈 THỐNG KÊ")
+        logger.info(f"{'=' * 70}")
+        logger.info(f"⏱  Thời gian: {elapsed:.1f}s")
+        logger.info(f"📥 Đã crawl: {stats['total_crawled']} danh mục")
+        logger.info(f"✅ Thành công: {stats['total_success']}")
+        logger.error(f"❌ Thất bại: {stats['total_failed']}")
+        logger.info(f"📊 Tổng danh mục tìm được: {stats['total_categories']}")
+        logger.info(f"⚡ Tốc độ: {rate:.2f} danh mục/s")
 
         if stats["by_level"]:
-            print("\n📋 Theo level:")
+            logger.info("\n📋 Theo level:")
             for level in sorted(stats["by_level"].keys()):
-                print(f"  Level {level}: {stats['by_level'][level]} danh mục")
+                logger.info(f"  Level {level}: {stats['by_level'][level]} danh mục")
 
 
 def main():
@@ -504,7 +521,7 @@ def main():
     # Default: danh sách mặc định nếu không có config
     if not root_urls:
         root_urls = [
-            "https://tiki.vn/thoi-trang-nam/c915",
+            "https://tiki.vn/thoi-trang-nu/c931",
             # Có thể thêm các root categories khác ở đây
             # "https://tiki.vn/nha-cua-doi-song/c1883",
             # "https://tiki.vn/dien-tu-dien-lanh/c4221",

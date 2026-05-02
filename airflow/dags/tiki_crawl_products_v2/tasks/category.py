@@ -92,8 +92,22 @@ def load_categories(**context) -> list[dict[str, Any]]:
                 f"📊 Lọc theo Level: {len(categories)} danh mục (Level {min_level}-{max_level})"
             )
 
-        # Push categories lên XCom để các task khác dùng
-        return categories
+        # Lưu categories vào file thay vì XCom
+        from pathlib import Path
+        output_file = Path("/opt/airflow/data/processed") / "loaded_categories.json"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(categories, f, ensure_ascii=False)
+        
+        logger.info(f"💾 Đã lưu {len(categories)} categories vào {output_file}")
+
+        # Return chỉ file path và metadata
+        return {
+            "categories_file": str(output_file),
+            "count": len(categories),
+            "crawl_only_leaf": crawl_only_leaf,
+        }
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi load categories: {e}", exc_info=True)
@@ -361,7 +375,7 @@ def crawl_category_batch(
     # Lấy cấu hình cho cả batch
     max_pages = int(get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20"))
     use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
-    concurrency = int(get_variable("TIKI_CATEGORY_CONCURRENCY", default="10"))
+    concurrency = int(get_variable("TIKI_CATEGORY_CONCURRENCY", default="6"))
 
     def process_category(cat):
         try:

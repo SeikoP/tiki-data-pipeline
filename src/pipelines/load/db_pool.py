@@ -7,9 +7,11 @@ Optimizations:
 - Automatic reconnection
 """
 
+import logging
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
+from threading import Lock
 from typing import Any
 
 try:
@@ -21,18 +23,24 @@ except ImportError:
     PSYCOPG2_AVAILABLE = False
     pool = None
 
+logger = logging.getLogger(__name__)
+
 
 class PostgresConnectionPool:
     """
-    Thread-safe PostgreSQL connection pool.
+    Thread-safe PostgreSQL connection pool with proper singleton pattern.
     """
 
     _instance = None
     _pool = None
+    _init_lock = Lock()
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._init_lock:
+                # Double-checked locking
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
 
     def initialize(
@@ -79,9 +87,9 @@ class PostgresConnectionPool:
                 connect_timeout=10,
                 options="-c statement_timeout=30000",  # 30s statement timeout
             )
-            print(f"✅ PostgreSQL connection pool initialized: {minconn}-{maxconn} connections")
+            logger.info(f"PostgreSQL connection pool initialized: {minconn}-{maxconn} connections")
         except Exception as e:
-            print(f"❌ Failed to initialize connection pool: {e}")
+            logger.error(f"Failed to initialize connection pool: {e}")
             raise
 
     def get_connection(self):
@@ -106,7 +114,7 @@ class PostgresConnectionPool:
         if self._pool is not None:
             self._pool.closeall()
             self._pool = None
-            print("✅ All connections closed")
+            logger.info("All database connections closed")
 
     @contextmanager
     def get_cursor(self, commit: bool = True) -> Generator[Any, None, None]:

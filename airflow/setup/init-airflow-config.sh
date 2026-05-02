@@ -9,6 +9,14 @@ echo "=========================================="
 echo "🚀 Initializing Airflow Configuration..."
 echo "=========================================="
 
+# Initialize/Migrate Airflow DB
+echo "🔧 Running Airflow DB migration..."
+airflow db migrate || {
+    echo "❌ Failed to migrate Airflow DB"
+    exit 1
+}
+echo "✅ Airflow DB migration completed"
+
 # Wait for Airflow DB to be ready
 MAX_RETRIES=30
 RETRY_COUNT=0

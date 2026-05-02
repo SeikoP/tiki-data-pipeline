@@ -242,6 +242,7 @@ class OptimizedBatchLoader:
                     seller_name = COALESCE(NULLIF(EXCLUDED.seller_name, ''), products.seller_name),
                     seller_id = COALESCE(NULLIF(EXCLUDED.seller_id, ''), products.seller_id),
                     seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
+                    crawled_at = COALESCE(products.crawled_at, EXCLUDED.crawled_at),
                     updated_at = EXCLUDED.updated_at,
                     crawl_quality = EXCLUDED.crawl_quality,
                     needs_enrichment = EXCLUDED.needs_enrichment

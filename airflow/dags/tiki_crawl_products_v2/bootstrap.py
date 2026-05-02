@@ -692,7 +692,7 @@ def get_dag_config():
         "catchup": False,  # Không chạy lại các task đã bỏ lỡ
         "tags": dag_tags,
         "max_active_runs": 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
-        "max_active_tasks": 4,  # Tối ưu cho Local: 4 tasks * 4 drivers = 16 drivers (vừa đủ 16GB RAM)
+        "max_active_tasks": 3,  # 3 tasks đồng thời
     }
 
 
@@ -802,8 +802,8 @@ def get_tiki_degradation():
     service_health = get_service_health()
     return service_health.register_service(
         name="tiki",
-        failure_threshold=get_int_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default=3),
-        recovery_threshold=get_int_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default=5),
+        failure_threshold=get_int_variable("TIKI_DEGRADATION_FAILURE_THRESHOLD", default=50),
+        recovery_threshold=get_int_variable("TIKI_DEGRADATION_RECOVERY_THRESHOLD", default=10),
     )
 
 

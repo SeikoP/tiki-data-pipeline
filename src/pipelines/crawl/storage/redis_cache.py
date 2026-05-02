@@ -10,6 +10,8 @@ Các tính năng:
 
 import hashlib
 import json
+import logging
+import os
 import time
 from collections.abc import Iterable
 from typing import Any
@@ -23,6 +25,8 @@ from urllib.parse import (
 
 # Import profiling utilities
 from common.profiling import profile
+
+logger = logging.getLogger(__name__)
 
 try:
     import redis
@@ -42,7 +46,7 @@ def get_redis_pool(redis_url: str, max_connections: int = 20) -> ConnectionPool:
     """Get or create a connection pool for the given Redis URL.
 
     Args:
-        redis_url: Redis connection URL
+        redis_url: Redis connection URL (supports redis://:password@host:port/db)
         max_connections: Maximum number of connections in the pool
 
     Returns:
@@ -50,16 +54,21 @@ def get_redis_pool(redis_url: str, max_connections: int = 20) -> ConnectionPool:
     """
     if redis_url not in _connection_pools:
         parsed = urlparse(redis_url)
-        _connection_pools[redis_url] = ConnectionPool(
-            host=parsed.hostname or "localhost",
-            port=parsed.port or 6379,
-            db=int(parsed.path.lstrip("/")) if parsed.path else 0,
-            max_connections=max_connections,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5,
-            retry_on_timeout=True,
-        )
+        pool_kwargs = {
+            "host": parsed.hostname or "localhost",
+            "port": parsed.port or 6379,
+            "db": int(parsed.path.lstrip("/")) if parsed.path and parsed.path.lstrip("/") else 0,
+            "max_connections": max_connections,
+            "decode_responses": True,
+            "socket_connect_timeout": 5,
+            "socket_timeout": 5,
+            "retry_on_timeout": True,
+        }
+        # Add password from URL or environment
+        password = parsed.password or os.environ.get("REDIS_PASSWORD")
+        if password:
+            pool_kwargs["password"] = password
+        _connection_pools[redis_url] = ConnectionPool(**pool_kwargs)
     return _connection_pools[redis_url]
 
 
@@ -155,8 +164,8 @@ class RedisCache:
             if value:
                 return json.loads(value)
             return None
-        except Exception:
-            # Nếu lỗi, return None để fallback về file cache
+        except Exception as e:
+            logger.debug("Redis get failed for key %s: %s", key[:50], e)
             return None
 
     @profile
@@ -168,7 +177,8 @@ class RedisCache:
             ttl = ttl or self.default_ttl
             serialized = json.dumps(value, ensure_ascii=False)
             return self.client.setex(self._make_key(key), ttl, serialized)
-        except Exception:
+        except Exception as e:
+            logger.debug("Redis set failed for key %s: %s", key[:50], e)
             return False
 
     def delete(self, key: str) -> bool:
@@ -177,7 +187,8 @@ class RedisCache:
         """
         try:
             return bool(self.client.delete(self._make_key(key)))
-        except Exception:
+        except Exception as e:
+            logger.debug("Redis delete failed for key %s: %s", key[:50], e)
             return False
 
     def exists(self, key: str) -> bool:
@@ -186,19 +197,20 @@ class RedisCache:
         """
         try:
             return bool(self.client.exists(self._make_key(key)))
-        except Exception:
+        except Exception as e:
+            logger.debug("Redis exists check failed for key %s: %s", key[:50], e)
             return False
 
     def _new_key_for_url(
         self, url: str, cache_type: str = "html", drop_params: Iterable[str] | None = None
     ) -> str:
         canonical = self._canonicalize_url(url, drop_params=drop_params)
-        url_hash = hashlib.md5(canonical.encode()).hexdigest()
+        url_hash = hashlib.sha256(canonical.encode()).hexdigest()[:32]
         return f"{cache_type}:{url_hash}"
 
     def _legacy_key_for_url(self, url: str, cache_type: str = "html") -> str:
         # Legacy behavior: hash nguyên URL không chuẩn hóa
-        url_hash = hashlib.md5(url.encode()).hexdigest()
+        url_hash = hashlib.md5(url.encode()).hexdigest()  # noqa: S324 - legacy compat
         return f"{cache_type}:{url_hash}"
 
     def get_cache_key(
@@ -563,24 +575,35 @@ def get_working_redis_url(db: int = 1, timeout: int = 2) -> str | None:
     if not REDIS_AVAILABLE:
         return None
 
-    # Common Redis URLs to try
-    urls = [
-        f"redis://redis:6379/{db}",  # Docker internal network
-        f"redis://localhost:6379/{db}",  # External/development
-        f"redis://127.0.0.1:6379/{db}",  # Explicit localhost
-    ]
+    # Common Redis URLs to try (with password from env)
+    password = os.environ.get("REDIS_PASSWORD", "")
+    if password:
+        urls = [
+            f"redis://:{password}@redis:6379/{db}",
+            f"redis://:{password}@localhost:6379/{db}",
+            f"redis://:{password}@127.0.0.1:6379/{db}",
+        ]
+    else:
+        urls = [
+            f"redis://redis:6379/{db}",
+            f"redis://localhost:6379/{db}",
+            f"redis://127.0.0.1:6379/{db}",
+        ]
 
     for url in urls:
         try:
             parsed = urlparse(url)
-            client = redis.Redis(
-                host=parsed.hostname or "localhost",
-                port=parsed.port or 6379,
-                db=int(parsed.path.lstrip("/")) if parsed.path else 0,
-                decode_responses=True,
-                socket_connect_timeout=timeout,
-                socket_timeout=timeout,
-            )
+            client_kwargs = {
+                "host": parsed.hostname or "localhost",
+                "port": parsed.port or 6379,
+                "db": int(parsed.path.lstrip("/")) if parsed.path and parsed.path.lstrip("/") else 0,
+                "decode_responses": True,
+                "socket_connect_timeout": timeout,
+                "socket_timeout": timeout,
+            }
+            if parsed.password:
+                client_kwargs["password"] = parsed.password
+            client = redis.Redis(**client_kwargs)
             # Test connection
             client.ping()
             client.close()

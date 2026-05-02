@@ -72,7 +72,12 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         if not merge_result:
             # Thử lấy từ file output
-            if OUTPUT_FILE.exists():
+            merged_file = Path("/opt/airflow/data/processed/merged_products.json")
+            if merged_file.exists():
+                with open(merged_file, encoding="utf-8") as f:
+                    data = json.load(f)
+                    merge_result = {"products_file": str(merged_file), "stats": data.get("stats", {})}
+            elif OUTPUT_FILE.exists():
                 with open(OUTPUT_FILE, encoding="utf-8") as f:
                     data = json.load(f)
                     merge_result = {"products": data.get("products", [])}
@@ -80,7 +85,15 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         if not merge_result:
             raise ValueError("Không tìm thấy products từ XCom hoặc file")
 
-        products = merge_result.get("products", [])
+        # Đọc products từ file
+        products_file = merge_result.get("products_file")
+        if products_file:
+            with open(products_file, encoding="utf-8") as f:
+                data = json.load(f)
+                products = data.get("products", [])
+        else:
+            # Fallback: legacy XCom
+            products = merge_result.get("products", [])
 
         logger.info(f"📊 Tổng số products: {len(products)}")
 
@@ -179,10 +192,12 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                                         f"updated_at > NOW() - INTERVAL '{cache_relax_days} days'"
                                     )
                                 else:
-                                    filter_condition = f"""
-                                        (brand IS NOT NULL AND brand != '' AND seller_name IS NOT NULL AND seller_name != '')
-                                        OR (updated_at > NOW() - INTERVAL '{cache_relax_days} days')
-                                    """
+                                    # NORMAL MODE: Skip nếu updated < cache_relax_days
+                                    # Không quan tâm có brand/seller hay không
+                                    # → Tất cả products đều được re-crawl sau cache_relax_days
+                                    filter_condition = (
+                                        f"updated_at > NOW() - INTERVAL '{cache_relax_days} days'"
+                                    )
 
                                 cur.execute(
                                     f"""
@@ -660,7 +675,7 @@ def crawl_product_batch(
         rate_limit_delay = float(get_variable("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.05"))
 
         # Tạo semaphore để limit concurrent tasks (tối ưu throughput)
-        max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="30"))
+        max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="6"))
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def bounded_task(task_coro):
@@ -1320,7 +1335,12 @@ def merge_product_details(**context) -> dict[str, Any]:
 
         if not merge_result:
             # Thử lấy từ file
-            if OUTPUT_FILE.exists():
+            merged_file = Path("/opt/airflow/data/processed/merged_products.json")
+            if merged_file.exists():
+                with open(merged_file, encoding="utf-8") as f:
+                    data = json.load(f)
+                    merge_result = {"products_file": str(merged_file), "stats": data.get("stats", {})}
+            elif OUTPUT_FILE.exists():
                 with open(OUTPUT_FILE, encoding="utf-8") as f:
                     data = json.load(f)
                     merge_result = {"products": data.get("products", [])}
@@ -1328,7 +1348,15 @@ def merge_product_details(**context) -> dict[str, Any]:
         if not merge_result:
             raise ValueError("Không tìm thấy products từ XCom hoặc file")
 
-        products = merge_result.get("products", [])
+        # Đọc products từ file
+        products_file = merge_result.get("products_file")
+        if products_file:
+            with open(products_file, encoding="utf-8") as f:
+                data = json.load(f)
+                products = data.get("products", [])
+        else:
+            # Fallback: legacy XCom
+            products = merge_result.get("products", [])
 
         logger.info(f"Tổng số products: {len(products)}")
 
@@ -1348,20 +1376,15 @@ def merge_product_details(**context) -> dict[str, Any]:
         # Số lượng products thực tế được crawl
         expected_products_count = len(products_to_crawl) if products_to_crawl else 0
         # Với batch processing, số map_index = số batches, không phải số products
-        # Lấy batch size từ config
-        try:
-            from pipelines.crawl.config import PRODUCT_BATCH_SIZE
-
-            batch_size = PRODUCT_BATCH_SIZE
-        except Exception:
-            batch_size = 12  # Default fallback
+        # Lấy batch size từ Airflow Variable (giống logic trong prepare_detail_kwargs)
+        batch_size = get_int_variable("TIKI_DETAIL_BATCH_SIZE", default=333)
         expected_crawl_count = (
             (expected_products_count + batch_size - 1) // batch_size
             if expected_products_count > 0
             else 0
         )
         logger.info(
-            f"📊 Số products: {expected_products_count}, Số batches dự kiến: {expected_crawl_count}"
+            f"📊 Số products: {expected_products_count}, Batch size: {batch_size}, Số batches dự kiến: {expected_crawl_count}"
         )
 
         # Tự động phát hiện số lượng map_index thực tế có sẵn bằng cách thử lấy XCom
@@ -1995,11 +2018,28 @@ def merge_product_details(**context) -> dict[str, Any]:
         stats["products_failed_skipped"] = products_failed
         stats["products_no_brand_skipped"] = products_no_brand
 
-        result = {
+        # Lưu products với detail vào file ngay
+        logger.info(f"💾 Đang lưu {len(products_with_detail)} products với detail...")
+        
+        output_data = {
+            "total_products": len(products_with_detail),
+            "stats": stats,
+            "crawled_at": datetime.now().isoformat(),
+            "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' và brand/seller không null (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_no_brand} không có brand, {products_without_detail} không có detail)",
             "products": products_with_detail,
+        }
+
+        # Atomic write
+        output_file = str(OUTPUT_FILE_WITH_DETAIL)
+        atomic_write_file(output_file, output_data, **context)
+        
+        logger.info(f"✅ Đã lưu {len(products_with_detail)} products với detail vào: {output_file}")
+
+        result = {
+            "output_file": output_file,
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
-            "note": f"Chỉ lưu {len(products_with_detail)} products có status='success' và brand/seller không null (đã bỏ qua {products_cached} cached, {products_failed} failed, {products_no_brand} không có brand, {products_without_detail} không có detail)",
+            "product_count": len(products_with_detail),
         }
 
         return result
@@ -2008,10 +2048,10 @@ def merge_product_details(**context) -> dict[str, Any]:
         logger.error(f"❌ Validation error khi merge details: {e}", exc_info=True)
         # Nếu là validation error (thiếu products), return empty result thay vì raise
         return {
-            "products": [],
+            "output_file": None,
             "stats": {
                 "total_products": 0,
-                "crawled_count": 0,  # Số lượng products được crawl detail
+                "crawled_count": 0,
                 "with_detail": 0,
                 "cached": 0,
                 "failed": 0,
@@ -2021,7 +2061,7 @@ def merge_product_details(**context) -> dict[str, Any]:
             "error": str(e),
         }
     except Exception as e:
-        logger.error(f"❌ Lỗi khi merge details: {e}", exc_info=True)
+        logger.error(f"❌ Lỗi khi merge and save details: {e}", exc_info=True)
         # Log chi tiết context để debug
         logger.error(f"   Context keys: {list(context.keys()) if context else 'None'}")
         try:
@@ -2030,81 +2070,4 @@ def merge_product_details(**context) -> dict[str, Any]:
                 logger.error(f"   Task ID: {ti.task_id}, DAG ID: {ti.dag_id}, Run ID: {ti.run_id}")
         except Exception:
             pass
-        raise
-
-
-def save_products_with_detail(**context) -> str:
-    """
-    Task: Lưu products với detail vào file
-
-    Returns:
-        str: Đường dẫn file đã lưu
-    """
-    logger = get_logger(context)
-    logger.info("=" * 70)
-    logger.info("💾 TASK: Save Products with Detail")
-    logger.info("=" * 70)
-
-    try:
-        ensure_output_dirs()
-        ti = context["ti"]
-
-        # Lấy kết quả merge
-        merge_result = None
-        try:
-            merge_result = ti.xcom_pull(task_ids="crawl_product_details.merge_product_details")
-        except Exception:
-            try:
-                merge_result = ti.xcom_pull(task_ids="merge_product_details")
-            except Exception:
-                pass
-
-        if not merge_result:
-            raise ValueError("Không tìm thấy merge result từ XCom")
-
-        if not merge_result:
-            raise ValueError("Không tìm thấy merge result từ XCom")
-
-        products = []
-        stats = {}
-        note = "Crawl từ Airflow DAG với product details"
-
-        products = merge_result.get("products", [])
-        stats = merge_result.get("stats", {})
-        note = merge_result.get("note", note)
-
-        logger.info(f"💾 Đang lưu {len(products)} products với detail...")
-
-        # Log thông tin về crawl detail
-        crawled_count = stats.get("crawled_count", 0)
-        if crawled_count > 0:
-            logger.info(f"🔄 Products được crawl detail: {crawled_count}")
-            logger.info(f"✅ Products có detail (success): {stats.get('with_detail', 0)}")
-            if stats.get("timeout", 0) > 0:
-                logger.info(f"⏱️  Products timeout: {stats.get('timeout', 0)}")
-            if stats.get("failed", 0) > 0:
-                logger.info(f"❌ Products failed: {stats.get('failed', 0)}")
-
-        if stats.get("products_skipped"):
-            logger.info(f"🚫 Đã bỏ qua {stats.get('products_skipped')} products không có detail")
-
-        # Chuẩn bị dữ liệu
-        output_data = {
-            "total_products": len(products),
-            "stats": stats,
-            "crawled_at": datetime.now().isoformat(),
-            "note": note,
-            "products": products,
-        }
-
-        # Atomic write
-        output_file = str(OUTPUT_FILE_WITH_DETAIL)
-        atomic_write_file(output_file, output_data, **context)
-
-        logger.info(f"✅ Đã lưu {len(products)} products với detail vào: {output_file}")
-
-        return output_file
-
-    except Exception as e:
-        logger.error(f"❌ Lỗi khi save products with detail: {e}", exc_info=True)
         raise

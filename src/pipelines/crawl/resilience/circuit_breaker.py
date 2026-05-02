@@ -70,10 +70,9 @@ class CircuitBreaker:
             CircuitBreakerOpenError: Nếu circuit đang mở
             Exception: Exception từ function (nếu không phải expected_exception)
         """
+        # Check state under lock (fast)
         with self._lock:
-            # Kiểm tra state
             if self.state == CircuitState.OPEN:
-                # Kiểm tra xem đã đến lúc thử lại chưa
                 if self._should_attempt_reset():
                     self.state = CircuitState.HALF_OPEN
                     self.success_count = 0
@@ -84,18 +83,19 @@ class CircuitBreaker:
                         f"Will retry after {self.recovery_timeout}s"
                     )
 
-            # Gọi function
-            try:
-                result = func(*args, **kwargs)
+        # Execute function WITHOUT holding the lock (allows parallel calls)
+        try:
+            result = func(*args, **kwargs)
+            with self._lock:
                 self._on_success()
-                return result
-            except self.expected_exception:
+            return result
+        except self.expected_exception:
+            with self._lock:
                 self._on_failure()
-                raise
-            except Exception:
-                # Exception không phải expected_exception -> không tính là failure
-                # Nhưng vẫn raise
-                raise
+            raise
+        except Exception:
+            # Exception không phải expected_exception -> không tính là failure
+            raise
 
     def _should_attempt_reset(self) -> bool:
         """

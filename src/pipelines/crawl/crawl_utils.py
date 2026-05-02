@@ -81,9 +81,13 @@ def get_selenium_options(headless: bool = True) -> Any | None:
         chrome_options.add_argument("--enable-automation")
         chrome_options.add_argument("--password-store=basic")
         chrome_options.add_argument("--use-mock-keychain")
-        chrome_options.add_argument(
-            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
+        try:
+            from .ua_rotation import get_chrome_user_agent
+            chrome_options.add_argument(f"user-agent={get_chrome_user_agent()}")
+        except ImportError:
+            chrome_options.add_argument(
+                "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            )
         # Performance optimizations - Block unnecessary resources
         prefs = {
             "profile.managed_default_content_settings.images": 2,  # Block images for faster loading
@@ -102,11 +106,7 @@ def get_selenium_options(headless: bool = True) -> Any | None:
             # Older Selenium versions may not support the attribute
             pass
 
-        # Additional performance flags
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-plugins")
-        chrome_options.add_argument("--disable-infobars")
-        chrome_options.add_argument("--disable-notifications")
+        # Additional performance flags\n        chrome_options.add_argument(\"--disable-notifications\")
         return chrome_options
     except ImportError:
         return None
@@ -683,8 +683,12 @@ DEFAULT_PRODUCT_LIST_CACHE_DIR = DEFAULT_CACHE_DIR / "products"
 DEFAULT_DETAIL_CACHE_DIR = DEFAULT_CACHE_DIR / "details"
 DEFAULT_PRODUCTS_DIR = DEFAULT_DATA_DIR / "products"
 
-# Default user agent
-DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# Default user agent - prefer ua_rotation module for runtime use
+try:
+    from .ua_rotation import get_random_user_agent as _get_ua
+    DEFAULT_USER_AGENT = _get_ua()
+except ImportError:
+    DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 # Default timeout
 DEFAULT_TIMEOUT = 30

@@ -98,8 +98,8 @@ class DataCompletenessTracker:
             value = record.get(field_name)
             # Consider None, empty string, or missing key as incomplete
             if value is None or value == "":
-                missing.append(field)
-                self.metrics.missing_fields[field] = self.metrics.missing_fields.get(field, 0) + 1
+                missing.append(field_name)
+                self.metrics.missing_fields[field_name] = self.metrics.missing_fields.get(field_name, 0) + 1
 
         if missing:
             self.metrics.incomplete_records += 1
@@ -365,7 +365,7 @@ class ValidationPreservationChecker:
                     return ValidationResult(
                         is_valid=False,
                         error_message=error_msg,
-                        field_name=field,
+                        field_name=_field_name,
                         validation_rule=name,
                     )
                 else:
