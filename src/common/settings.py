@@ -46,13 +46,13 @@ def _get_airflow_variable(key: str) -> str | None:
 
 
 def _get_value(spec: SettingSpec, *, use_airflow: bool = True) -> Any:
+    env_value = os.getenv(spec.env_name)
+    if env_value is not None:
+        return spec.parse(env_value)
     if use_airflow and spec.airflow_variable:
         airflow_value = _get_airflow_variable(spec.env_name)
         if airflow_value is not None:
             return spec.parse(airflow_value)
-    env_value = os.getenv(spec.env_name)
-    if env_value is not None:
-        return spec.parse(env_value)
     return spec.default
 
 
@@ -95,17 +95,29 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     ),
     "TIKI_CATEGORY_NUM_BATCHES": SettingSpec(
         "TIKI_CATEGORY_NUM_BATCHES",
-        3,
+        12,
         "int",
         description="Mapped category batch count",
         airflow_variable=True,
     ),
     "TIKI_CATEGORY_CONCURRENCY": SettingSpec(
         "TIKI_CATEGORY_CONCURRENCY",
-        6,
+        1,
         "int",
         description="Concurrent category requests inside a category batch",
         airflow_variable=True,
+    ),
+    "TIKI_CATEGORY_MAX_ACTIVE_TASKS": SettingSpec(
+        "TIKI_CATEGORY_MAX_ACTIVE_TASKS",
+        2,
+        "int",
+        description="Maximum mapped category batch tasks allowed to run at once",
+        airflow_variable=True,
+    ),
+    "TIKI_CATEGORY_BATCH_OUTPUT_DIR": SettingSpec(
+        "TIKI_CATEGORY_BATCH_OUTPUT_DIR",
+        "/opt/airflow/data/raw/category_batches",
+        description="Directory for file-backed category mapped results",
     ),
     "TIKI_MIN_CATEGORY_LEVEL": SettingSpec(
         "TIKI_MIN_CATEGORY_LEVEL", 2, "int", description="Minimum category level to crawl"
@@ -271,7 +283,7 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "DISCORD_FALLBACK_WEBHOOK_URL", "", description="Discord fallback webhook", secret=True
     ),
     "SHORT_NAME_USE_AI": SettingSpec(
-        "SHORT_NAME_USE_AI", True, "bool", description="Use AI for short product names"
+        "SHORT_NAME_USE_AI", False, "bool", description="Use AI for short product names"
     ),
     # Feature flags
     "ENABLE_PROFILING": SettingSpec(
@@ -676,6 +688,7 @@ def airflow_variable_defaults() -> dict[str, str]:
         "TIKI_SAVE_BATCH_SIZE",
         "TIKI_CATEGORY_NUM_BATCHES",
         "TIKI_CATEGORY_CONCURRENCY",
+        "TIKI_CATEGORY_MAX_ACTIVE_TASKS",
         "TIKI_DETAIL_ACTIVE_BATCHES",
         "TIKI_DETAIL_BATCH_SIZE",
         "TIKI_DETAIL_MAX_CONCURRENT_TASKS",

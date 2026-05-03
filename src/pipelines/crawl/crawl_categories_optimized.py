@@ -84,13 +84,15 @@ class SafeProgress:
         self.desc = desc
         self.n = 0
         self.start_time = time.time()
+        self.last_print_time = 0.0
+        self.print_interval = 5.0
 
     def __enter__(self):
-        logger.info("%s: starting %s items", self.desc, self.total)
+        print(f"{self.desc}: starting {self.total} items", flush=True)
         return self
 
     def __exit__(self, *args):
-        logger.info("%s: completed %s/%s items", self.desc, self.n, self.total)
+        print(f"{self.desc}: completed {self.n}/{self.total} items", flush=True)
 
     def __iter__(self):
         if self.iterable:
@@ -102,6 +104,16 @@ class SafeProgress:
 
     def update(self, n=1):
         self.n += n
+        now = time.time()
+        if self.n == self.total or now - self.last_print_time >= self.print_interval:
+            pct = (self.n / self.total * 100) if self.total else 100.0
+            elapsed = now - self.start_time
+            rate = self.n / elapsed if elapsed > 0 else 0.0
+            print(
+                f"{self.desc}: {self.n}/{self.total} ({pct:.1f}%) | {rate:.2f} items/s",
+                flush=True,
+            )
+            self.last_print_time = now
 
     def set_description(self, desc):
         self.desc = desc
@@ -265,9 +277,11 @@ def crawl_level_parallel(
 
     # Lọc các URL chưa crawl
     tasks = []
+    queued_urls = set()
     for url, parent_url in zip(urls_to_crawl, parent_urls, strict=False):
-        if url not in visited_urls:
+        if url not in visited_urls and url not in queued_urls:
             tasks.append((url, parent_url))
+            queued_urls.add(url)
 
     if not tasks:
         return results
@@ -435,6 +449,7 @@ def crawl_category_recursive_optimized(
             )
 
             # Xử lý kết quả và chuẩn bị level tiếp theo
+            queued_next_urls = {next_url for next_url, _ in queue[current_level + 1]}
             for url, (success, categories, error) in results.items():
                 if success:
                     # Thêm vào danh sách tổng
@@ -444,8 +459,9 @@ def crawl_category_recursive_optimized(
                     if current_level < max_level:
                         for cat in categories:
                             child_url = cat["url"]
-                            if child_url not in visited_urls:
+                            if child_url not in visited_urls and child_url not in queued_next_urls:
                                 queue[current_level + 1].append((child_url, url))
+                                queued_next_urls.add(child_url)
                 else:
                     logger.error(f"  ❌ Lỗi crawl {url}: {error}")
 
@@ -489,6 +505,10 @@ def main():
     """
     Hàm main để crawl đệ quy với tối ưu.
     """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
 
     # Hỗ trợ nhiều root categories từ config file hoặc tham số
     # Có thể cấu hình qua:
@@ -536,7 +556,7 @@ def main():
         print("ℹ️  Sử dụng root categories mặc định")
 
     # Độ sâu tối đa
-    max_level = int(os.getenv("TIKI_MAX_CATEGORY_LEVEL", "4"))
+    max_level = int(os.getenv("TIKI_MAX_CATEGORY_LEVEL", "5"))
 
     # Số thread song song (giới hạn để tránh quá tải server)
     max_workers = int(os.getenv("TIKI_CRAWL_MAX_WORKERS", "3"))

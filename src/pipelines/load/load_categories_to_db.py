@@ -64,14 +64,10 @@ def load_categories(json_file_path: str):
             # Check if leaf category (không có children trong danh sách)
             is_leaf = cat.get("url") not in parent_urls_in_list
 
-            # Nếu không có products, load tất cả leaf categories
-            # Nếu có products, chỉ load leaf categories có products
             should_load = False
             if not used_category_ids:
-                # DB mới, load tất cả leaf categories
                 should_load = is_leaf
             else:
-                # Có products, chỉ load leaf categories có products
                 should_load = is_leaf and cat_id and cat_id in used_category_ids
 
             if should_load:
@@ -152,8 +148,8 @@ def load_categories(json_file_path: str):
         # Load categories với đầy đủ parent hierarchy
         saved_count = storage.save_categories(
             categories_to_load,
-            only_leaf=True,  # Changed: strictly load only leaf categories
-            sync_with_products=False,  # Already filtered above
+            only_leaf=True,
+            sync_with_products=False,
         )
 
         logger.info(

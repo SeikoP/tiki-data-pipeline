@@ -45,12 +45,24 @@ Focus on fields used by load and reporting:
 - `category_id`
 - `seller_name`
 - `brand`
-- `sales_count`
 - `review_count`
+
+`sales_count` and `rating_average` are nullable when Tiki does not return sales data or when
+`review_count = 0`. Keep those values NULL instead of coercing them to zero.
+
+`products.specifications` is intentionally removed from the normalized product table. Raw specs
+from any source remain available in `raw_products.raw_json` for debugging or future enrichment.
 
 Useful tests:
 
 ```powershell
 pytest tests/test_transform_load.py tests/test_sales_count.py -q
 pytest tests/test_leaf_filtering.py tests/test_hierarchy_map.py -q
+```
+
+Latest crawl database audit:
+
+```powershell
+python scripts/quality/check_latest_crawl_quality.py --crawl-run-id latest
+python scripts/quality/check_latest_crawl_quality.py --crawl-run-id latest --format json
 ```

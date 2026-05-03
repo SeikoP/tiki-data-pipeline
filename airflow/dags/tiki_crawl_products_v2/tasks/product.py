@@ -102,6 +102,52 @@ def merge_products(**context) -> dict[str, Any]:
         # Với Dynamic Task Mapping trong Airflow 2.x, cần lấy từ task_id với map_index
         task_id = "crawl_categories.crawl_category"
 
+        def merge_single_result(single_result: dict[str, Any]) -> None:
+            if single_result.get("status") == "success":
+                stats["success_categories"] += 1
+                products = single_result.get("products", [])
+                all_products.extend(products)
+                stats["total_products"] += len(products)
+                stats["total_saved_directly"] += single_result.get("saved_count", 0)
+            elif single_result.get("status") == "timeout":
+                stats["timeout_categories"] += 1
+                logger.warning(f"⏱️  Category {single_result.get('category_name')} timeout")
+            else:
+                stats["failed_categories"] += 1
+                logger.warning(
+                    f"❌ Category {single_result.get('category_name')} failed: {single_result.get('error')}"
+                )
+
+        def merge_result_payload(payload: Any) -> bool:
+            if isinstance(payload, dict) and payload.get("output_file"):
+                output_file = payload["output_file"]
+                with open(output_file, encoding="utf-8") as f:
+                    batch_data = json.load(f)
+                batch_results = batch_data.get("results", [])
+                logger.info(
+                    "📦 Đọc batch %s: categories=%s products=%s file=%s",
+                    batch_data.get("batch_index", payload.get("batch_index")),
+                    len(batch_results),
+                    batch_data.get("product_count", payload.get("product_count", 0)),
+                    output_file,
+                )
+                for single_result in batch_results:
+                    if isinstance(single_result, dict):
+                        merge_single_result(single_result)
+                return True
+
+            if isinstance(payload, list):
+                for single_result in payload:
+                    if isinstance(single_result, dict):
+                        merge_single_result(single_result)
+                return True
+
+            if isinstance(payload, dict):
+                merge_single_result(payload)
+                return True
+
+            return False
+
         # Lấy từ XCom - thử nhiều cách
         try:
             # Cách 1: Lấy tất cả kết quả từ XCom (Airflow 2.x có thể trả về list)
@@ -109,80 +155,15 @@ def merge_products(**context) -> dict[str, Any]:
 
             # Xử lý kết quả
             if isinstance(all_results, list):
-                # Nếu là list, xử lý từng phần tử
-                # Với batch processing, mỗi phần tử có thể là list of results (từ 1 batch)
                 for result in all_results:
-                    # Check if result is a list (batch result) hoặc dict (single category result)
-                    if isinstance(result, list):
-                        # Batch result - flatten it
-                        for single_result in result:
-                            if single_result and isinstance(single_result, dict):
-                                if single_result.get("status") == "success":
-                                    stats["success_categories"] += 1
-                                    products = single_result.get("products", [])
-                                    all_products.extend(products)
-                                    stats["total_products"] += len(products)
-                                    stats["total_saved_directly"] += single_result.get(
-                                        "saved_count", 0
-                                    )
-                                elif single_result.get("status") == "timeout":
-                                    stats["timeout_categories"] += 1
-                                    logger.warning(
-                                        f"⏱️  Category {single_result.get('category_name')} timeout"
-                                    )
-                                else:
-                                    stats["failed_categories"] += 1
-                                    logger.warning(
-                                        f"❌ Category {single_result.get('category_name')} failed: {single_result.get('error')}"
-                                    )
-                    elif result and isinstance(result, dict):
-                        # Single category result
-                        if result.get("status") == "success":
-                            stats["success_categories"] += 1
-                            products = result.get("products", [])
-                            all_products.extend(products)
-                            stats["total_products"] += len(products)
-                        elif result.get("status") == "timeout":
-                            stats["timeout_categories"] += 1
-                            logger.warning(f"⏱️  Category {result.get('category_name')} timeout")
-                        else:
-                            stats["failed_categories"] += 1
-                            logger.warning(
-                                f"❌ Category {result.get('category_name')} failed: {result.get('error')}"
-                            )
+                    merge_result_payload(result)
             elif isinstance(all_results, dict):
                 # Nếu là dict, có thể key là map_index hoặc category_id
-                for result in all_results.values():
-                    if result and isinstance(result, dict):
-                        if result.get("status") == "success":
-                            stats["success_categories"] += 1
-                            products = result.get("products", [])
-                            all_products.extend(products)
-                            stats["total_products"] += len(products)
-                        elif result.get("status") == "timeout":
-                            stats["timeout_categories"] += 1
-                            logger.warning(f"⏱️  Category {result.get('category_name')} timeout")
-                        else:
-                            stats["failed_categories"] += 1
-                            logger.warning(
-                                f"❌ Category {result.get('category_name')} failed: {result.get('error')}"
-                            )
-            elif all_results and isinstance(all_results, dict):
-                # Nếu chỉ có 1 kết quả (dict)
-                if all_results.get("status") == "success":
-                    stats["success_categories"] += 1
-                    products = all_results.get("products", [])
-                    all_products.extend(products)
-                    stats["total_products"] += len(products)
-                    stats["total_saved_directly"] += all_results.get("saved_count", 0)
-                elif all_results.get("status") == "timeout":
-                    stats["timeout_categories"] += 1
-                    logger.warning(f"⏱️  Category {all_results.get('category_name')} timeout")
+                if all_results.get("output_file") or all_results.get("status"):
+                    merge_result_payload(all_results)
                 else:
-                    stats["failed_categories"] += 1
-                    logger.warning(
-                        f"❌ Category {all_results.get('category_name')} failed: {all_results.get('error')}"
-                    )
+                    for result in all_results.values():
+                        merge_result_payload(result)
 
             # Nếu không lấy được, thử lấy từng map_index
             if not all_results or (isinstance(all_results, (list, dict)) and len(all_results) == 0):
@@ -193,21 +174,8 @@ def merge_products(**context) -> dict[str, Any]:
                             task_ids=task_id, key="return_value", map_indexes=[map_index]
                         )
 
-                        if result and isinstance(result, dict):
-                            if result.get("status") == "success":
-                                stats["success_categories"] += 1
-                                products = result.get("products", [])
-                                all_products.extend(products)
-                                stats["total_products"] += len(products)
-                                stats["total_saved_directly"] += result.get("saved_count", 0)
-                            elif result.get("status") == "timeout":
-                                stats["timeout_categories"] += 1
-                                logger.warning(f"⏱️  Category {result.get('category_name')} timeout")
-                            else:
-                                stats["failed_categories"] += 1
-                                logger.warning(
-                                    f"❌ Category {result.get('category_name')} failed: {result.get('error')}"
-                                )
+                        if result:
+                            merge_result_payload(result)
                     except Exception as e:
                         stats["failed_categories"] += 1
                         logger.warning(f"Không thể lấy kết quả từ map_index {map_index}: {e}")

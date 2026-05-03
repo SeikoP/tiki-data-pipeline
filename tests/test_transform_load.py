@@ -240,7 +240,6 @@ def test_transform_db_format():
             print(f"   - rating_average: {transformed.get('rating_average')}")
             print(f"   - review_count: {transformed.get('review_count')}")
             print(f"   - sales_count: {transformed.get('sales_count')}")
-            print(f"   - specifications: {type(transformed.get('specifications'))}")
             print(f"   - images: {type(transformed.get('images'))}")
 
             # Kiểm tra format
@@ -250,6 +249,146 @@ def test_transform_db_format():
             assert "rating_average" in transformed, "Phải có rating_average (flatten từ dict)"
 
     print("\n✅ Test database format thành công!")
+
+
+def test_transform_preserves_missing_metrics(monkeypatch):
+    """Missing metrics must stay NULL-like instead of becoming fake zeroes."""
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "111",
+            "name": "Sản phẩm thiếu metric",
+            "url": "https://tiki.vn/p/111",
+            "price": {"current_price": 100000, "original_price": 100000},
+            "seller": {"name": "Test Seller"},
+            "brand": "Test Brand",
+            "category_id": "123",
+            "description": "<p>Mô tả <strong>sản phẩm</strong></p>",
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["sales_count"] is None
+    assert transformed["rating_average"] is None
+    assert transformed["review_count"] is None
+    assert transformed["description_text"] == "Mô tả sản phẩm"
+    assert set(transformed["missing_fields"]) == {"review_count"}
+    assert transformed["crawl_quality"] == "partial"
+    assert transformed["detail_status"] == "partial_needs_enrichment"
+    assert transformed["needs_enrichment"] is True
+
+
+def test_transform_nullable_metrics_are_allowed_for_full_quality(monkeypatch):
+    """Sales and rating can stay NULL when the source has no evidence for those metrics."""
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "221",
+            "name": "Sản phẩm không có specs",
+            "url": "https://tiki.vn/p/221",
+            "category_id": "123",
+            "brand": "Test Brand",
+            "price": {"current_price": 100000, "original_price": 120000},
+            "rating": {"average": None, "total_reviews": 0},
+            "sales_count": None,
+            "seller": {"name": "Test Seller"},
+            "images": [{"url": "https://example.com/image.jpg"}],
+            "stock": {"available": False, "quantity": 0},
+        }
+    )
+
+    assert transformed is not None
+    assert "specifications" not in transformed
+    assert transformed["rating_average"] is None
+    assert transformed["review_count"] == 0
+    assert transformed["sales_count"] is None
+    assert transformed["stock_available"] is False
+    assert transformed["missing_fields"] == []
+    assert transformed["crawl_quality"] == "full"
+    assert transformed["detail_status"] == "full"
+    assert transformed["needs_enrichment"] is False
+
+
+def test_transform_missing_rating_is_flagged_when_reviews_exist(monkeypatch):
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "223",
+            "name": "Sản phẩm có review thiếu rating",
+            "url": "https://tiki.vn/p/223",
+            "category_id": "123",
+            "brand": "Test Brand",
+            "price": {"current_price": 100000, "original_price": 100000},
+            "rating": {"average": None, "total_reviews": 12},
+            "seller": {"name": "Test Seller"},
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["discount_percent"] == 0.0
+    assert transformed["missing_fields"] == ["rating_average"]
+    assert transformed["crawl_quality"] == "partial"
+
+
+def test_transform_full_quality_contract(monkeypatch):
+    """A product with required and enrichment fields is marked full."""
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "222",
+            "name": "Sản phẩm đủ dữ liệu",
+            "url": "https://tiki.vn/p/222",
+            "category_id": "123",
+            "brand": "Test Brand",
+            "price": {"current_price": 100000, "original_price": 120000},
+            "rating": {"average": 4.7, "total_reviews": 0},
+            "sales_count": 0,
+            "seller": {"name": "Test Seller"},
+            "images": [{"url": "https://example.com/image.jpg"}],
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["review_count"] == 0
+    assert transformed["sales_count"] == 0
+    assert transformed["image_url"] == "https://example.com/image.jpg"
+    assert transformed["missing_fields"] == []
+    assert transformed["crawl_quality"] == "full"
+    assert transformed["detail_status"] == "full"
+    assert transformed["needs_enrichment"] is False
+
+
+def test_short_name_uses_local_heuristics_by_default(monkeypatch):
+    """Short names should not depend on AI calls in the transform critical path."""
+    monkeypatch.delenv("SHORT_NAME_USE_AI", raising=False)
+    transformer = DataTransformer()
+
+    assert transformer.ai_summarizer is None
+
+    examples = [
+        "Máy hút bụi mini cầm tay không dây cao cấp bảo hành 12 tháng",
+        "Chổi Chà Sàn Nhà Tắm Kết Hợp Gạt Nước Đầu Chữ V Deli - Chính Hãng",
+        "Bàn Chải Nylon Vệ Sinh Khe Hở Cửa Sổ / Khe Hở Nhà Tắm",
+    ]
+
+    for raw_name in examples:
+        short_name = transformer._get_short_name(raw_name)
+        assert short_name
+        assert len(short_name.split()) <= 8
+        assert "chính hãng" not in short_name.lower()
+        assert "bảo hành" not in short_name.lower()
+
+    assert "mini" in transformer._get_short_name(examples[0]).lower()
+    assert "cầm tay" in transformer._get_short_name(examples[0]).lower()
+    assert "không dây" in transformer._get_short_name(examples[0]).lower()
 
 
 def test_transform_duplicates():

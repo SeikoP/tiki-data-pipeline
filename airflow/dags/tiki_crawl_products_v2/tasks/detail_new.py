@@ -14,6 +14,52 @@ from tiki_crawl_products_v2.tasks.common import (
 )
 
 
+def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
+    ti = context.get("ti")
+    if not ti:
+        return None
+    for task_id in ("start_crawl_run", "pipeline_tracking.start_crawl_run"):
+        try:
+            value = ti.xcom_pull(task_ids=task_id)
+        except Exception:
+            continue
+        if isinstance(value, dict) and value.get("crawl_run_id"):
+            return int(value["crawl_run_id"])
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _track_detail_results(
+    results: list[dict[str, Any]], context: dict[str, Any], logger
+) -> None:
+    crawl_run_id = _get_crawl_run_id(context)
+    if not crawl_run_id or not results:
+        return
+    try:
+        from common.pipeline_tracking import upsert_crawl_tasks
+
+        tasks = []
+        for result in results:
+            product_id = result.get("product_id")
+            if not product_id:
+                continue
+            tasks.append(
+                {
+                    "crawl_run_id": crawl_run_id,
+                    "task_key": f"detail:{product_id}",
+                    "task_type": "detail",
+                    "status": result.get("status") or "unknown",
+                    "url": result.get("url"),
+                    "retry_count": 0,
+                    "error_message": result.get("error"),
+                }
+            )
+        upsert_crawl_tasks(tasks)
+    except Exception as tracking_error:
+        logger.warning("⚠️ Không thể ghi audit detail tasks: %s", tracking_error)
+
+
 def _get_detail_concurrency(logger) -> int:
     """Return clamped per-task async concurrency for fast detail crawl."""
     configured = get_int_setting("TIKI_DETAIL_MAX_CONCURRENT_TASKS")
@@ -149,12 +195,11 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
                     # Logic: Needs Enrichment?
                     # Check for critical fields
                     has_brand = detail.get("brand") and detail.get("brand") != "Unknown"
-                    has_specs = bool(detail.get("specifications"))
                     has_seller = bool(detail.get("seller", {}).get("name"))
                     metadata = detail.get("_metadata") or {}
                     extraction_method = metadata.get("extraction_method", "unknown")
 
-                    if not has_brand or not has_specs or not has_seller:
+                    if not has_brand or not has_seller:
                         result["detail"]["needs_enrichment"] = True
                         result["detail"]["crawl_quality"] = "partial"
                         result["status"] = "partial_needs_enrichment"
@@ -305,6 +350,7 @@ def crawl_product_batch_fast(
         needs_enrich,
         saved_count,
     )
+    _track_detail_results(final_results, context, logger)
     results_file = _write_detail_batch_results(final_results, batch_index, context)
     return {
         "xcom_payload_version": 2,

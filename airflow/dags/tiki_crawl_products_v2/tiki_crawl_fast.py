@@ -181,6 +181,9 @@ with DAG(
             ]
 
         if crawl_category_batch is not None:
+            from common.settings import get_int_setting
+
+            category_max_active_tasks = get_int_setting("TIKI_CATEGORY_MAX_ACTIVE_TASKS")
             task_prepare = PythonOperator(
                 task_id="prepare_crawl_kwargs",
                 python_callable=prepare_category_batch_kwargs,
@@ -206,6 +209,7 @@ with DAG(
                 retries=2,
                 retry_delay=timedelta(seconds=30),
                 priority_weight=10,
+                max_active_tis_per_dag=category_max_active_tasks,
                 show_return_value_in_logs=False,
                 doc_md="""
                 ### Crawl Category Batch (Mapped)
@@ -214,10 +218,10 @@ with DAG(
                 **Chi tiết:**
                 - Crawl parallel nhiều categories trong 1 batch
                 - Sử dụng aiohttp async để tăng tốc
-                - Lưu products vào memory, trả về qua XCom
+                - Lưu products theo file batch, XCom chỉ trả metadata
                 - Retry 2 lần nếu fail
 
-                **Output:** List products từ batch này
+                **Output:** File path + stats của batch này
                 """,
             ).expand(op_kwargs=task_prepare.output)
         else:

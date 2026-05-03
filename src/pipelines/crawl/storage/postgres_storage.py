@@ -385,7 +385,7 @@ class PostgresStorage:
     def save_categories(
         self,
         categories: list[dict[str, Any]],
-        only_leaf: bool = True,  # Changed: Start defaulting to True to prevent redundant data
+        only_leaf: bool = True,
         sync_with_products: bool = False,
     ) -> int:
         """Lưu danh sách categories vào DB sử dụng bulk processing tối ưu.
@@ -755,7 +755,7 @@ class PostgresStorage:
                         if cat.get("url") not in urls_to_keep:
                             continue
 
-                    # Extract level_1 đến level_5 từ category_path để thể hiện rõ theo từng độ sâu
+                    # Extract level columns for common category reporting.
                     level_1 = category_path[0] if len(category_path) > 0 else None
                     level_2 = category_path[1] if len(category_path) > 1 else None
                     level_3 = category_path[2] if len(category_path) > 2 else None
@@ -888,7 +888,6 @@ class PostgresStorage:
                             f"Auto-added {len(missing_parents)} missing parent categories"
                         )
 
-                # CRITICAL: If only_leaf=True, ensure NO non-leaf categories remain
                 if only_leaf:
                     self.cleanup_redundant_categories(cur)
 
@@ -1536,10 +1535,7 @@ class PostgresStorage:
                 return cur.rowcount
 
     def cleanup_redundant_categories(self, cur=None, dry_run: bool = False) -> int:
-        """Xóa các categories không phải là leaf (có categories con) hoặc các categories không có
-        sản phẩm nếu cần thiết.
-
-        Method này đảm bảo bảng categories chỉ chứa dữ liệu 'leaf' thực sự.
+        """Remove non-leaf categories when categories table is synced to loaded products.
 
         Args:
             cur: Database cursor
@@ -1579,22 +1575,20 @@ class PostgresStorage:
             if count > 0:
                 self.logger.info(f"Cleanup: Removed {count} non-leaf categories from DB")
             return count
-        else:
-            with self.get_connection() as conn:
-                with conn.cursor() as standalone_cur:
-                    if dry_run:
-                        standalone_cur.execute(select_query)
-                        count = standalone_cur.fetchone()[0]
-                        print(
-                            f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB"
-                        )
-                        return 0
 
-                    standalone_cur.execute(delete_query)
-                    count = standalone_cur.rowcount
-                    if count > 0:
-                        self.logger.info(f"Cleanup: Removed {count} non-leaf categories from DB")
-                    return count
+        with self.get_connection() as conn:
+            with conn.cursor() as standalone_cur:
+                if dry_run:
+                    standalone_cur.execute(select_query)
+                    count = standalone_cur.fetchone()[0]
+                    print(f"[DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
+                    return 0
+
+                standalone_cur.execute(delete_query)
+                count = standalone_cur.rowcount
+                if count > 0:
+                    self.logger.info(f"Cleanup: Removed {count} non-leaf categories from DB")
+                return count
 
     def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
         """
@@ -1872,11 +1866,7 @@ class PostgresStorage:
         return result["deleted_count"]
 
     def cleanup_orphan_categories(self) -> int:
-        """Remove categories that don't have any matching products. This ensures categories table
-        stays clean after product crawls.
-
-        Only removes leaf categories (is_leaf = true) that have no products.
-        Parent categories are kept to maintain hierarchy.
+        """Remove leaf categories that do not match loaded products.
 
         Returns:
             Number of categories deleted

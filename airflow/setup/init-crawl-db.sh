@@ -43,7 +43,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         task_type VARCHAR(80) NOT NULL,
         url TEXT,
         category_id VARCHAR(255),
-        page INTEGER,
         status VARCHAR(30) NOT NULL DEFAULT 'pending',
         retry_count INTEGER NOT NULL DEFAULT 0,
         error_message TEXT,
@@ -68,8 +67,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         id BIGSERIAL PRIMARY KEY,
         tiki_seller_id VARCHAR(255) UNIQUE,
         name VARCHAR(500),
-        url TEXT,
-        rating DECIMAL(4, 2),
         is_official BOOLEAN DEFAULT FALSE,
         raw_json JSONB,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -80,7 +77,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
         id BIGSERIAL PRIMARY KEY,
         tiki_category_id VARCHAR(255) UNIQUE,
         category_id VARCHAR(255) UNIQUE,
-        parent_id BIGINT REFERENCES categories(id) ON DELETE SET NULL,
         name VARCHAR(500) NOT NULL,
         url TEXT UNIQUE,
         image_url TEXT,
@@ -158,6 +154,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
     CREATE TABLE IF NOT EXISTS crawl_history (
         id BIGSERIAL PRIMARY KEY,
         product_id VARCHAR(255) NOT NULL REFERENCES products(product_id) ON DELETE CASCADE,
+        crawl_run_id BIGINT REFERENCES crawl_runs(id) ON DELETE SET NULL,
         price DECIMAL(12, 2),
         original_price DECIMAL(12, 2),
         discount_percent DECIMAL(5, 2),
@@ -178,7 +175,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS ux_categories_tiki_category_id ON categories(tiki_category_id) WHERE tiki_category_id IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id);
     CREATE INDEX IF NOT EXISTS idx_categories_parent_url ON categories(parent_url);
     CREATE INDEX IF NOT EXISTS idx_categories_level ON categories(level);
     CREATE INDEX IF NOT EXISTS idx_categories_path ON categories USING GIN (category_path);
@@ -197,6 +193,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$CRAWL_DB" <<-EOSQ
     CREATE INDEX IF NOT EXISTS idx_metrics_crawl_run_id ON product_metrics(crawl_run_id);
     CREATE INDEX IF NOT EXISTS idx_crawl_tasks_run_status ON crawl_tasks(crawl_run_id, status);
     CREATE INDEX IF NOT EXISTS idx_history_product_latest ON crawl_history(product_id, crawled_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_history_crawl_run_id ON crawl_history(crawl_run_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_history_product_run ON crawl_history(product_id, crawl_run_id) WHERE crawl_run_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_history_price_change ON crawl_history(price_change) WHERE price_change IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_history_flash_sale ON crawl_history(is_flash_sale) WHERE is_flash_sale = true;
 

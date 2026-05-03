@@ -71,7 +71,12 @@ class AISummarizer:
         Returns:
             String chứa bản tổng hợp từ AI
         """
-        if not self.enabled or not self.api_keys:
+        if (
+            not self.enabled
+            or not self.api_keys
+            or self.__class__._auth_disabled
+            or self.__class__._rate_limit_disabled
+        ):
             logger.info("Groq AI disabled or missing API key, skipping summary")
             return ""
 
@@ -197,6 +202,10 @@ Trả về ĐÚNG format trên:"""
     # on instance methods (lru_cache holds reference to self, preventing GC)
     _short_name_cache: dict[str, str] = {}
     _SHORT_NAME_CACHE_MAXSIZE = 2048
+    _auth_disabled = False
+    _auth_failure_logged = False
+    _rate_limit_disabled = False
+    _rate_limit_logged = False
 
     def shorten_product_name(self, product_name: str) -> str:
         """Rút gọn tên sản phẩm sử dụng AI (có caching và regex fallback).
@@ -229,6 +238,9 @@ Trả về ĐÚNG format trên:"""
             return cleaned_name
 
         if not self.enabled or not self.api_keys:
+            self._cache_short_name(product_name, cleaned_name)
+            return cleaned_name
+        if self.__class__._auth_disabled or self.__class__._rate_limit_disabled:
             self._cache_short_name(product_name, cleaned_name)
             return cleaned_name
 
@@ -341,9 +353,14 @@ Tên rút gọn:
         """
         Gọi Groq API để tổng hợp (với Retry và Key Rotation)
         """
-        # Thử với tối đa số lượng key * 2 lần (để retry mỗi key ít nhất 1 lần nếu cần)
-        max_attempts = len(self.api_keys) * 2 if self.api_keys else 1
+        if self.__class__._auth_disabled or self.__class__._rate_limit_disabled:
+            return ""
+
+        # Auth errors should try each configured key once, then fail open for this process.
+        max_attempts = len(self.api_keys) if self.api_keys else 1
         attempts = 0
+        auth_failed_keys: set[int] = set()
+        rate_limited_keys: set[int] = set()
 
         while attempts < max_attempts:
             attempts += 1
@@ -397,6 +414,10 @@ Tên rút gọn:
                     logger.warning(
                         f"⚠️  Rate Limit (429) hit on Key #{self.current_key_index}. Waiting {wait_time}s then rotating..."
                     )
+                    rate_limited_keys.add(self.current_key_index)
+                    if len(rate_limited_keys) >= len(self.api_keys):
+                        self._disable_ai_for_rate_limit()
+                        return ""
                     time.sleep(wait_time)
                     self._rotate_key()
                     continue
@@ -405,6 +426,10 @@ Tên rút gọn:
                     logger.warning(
                         f"⚠️  Auth Error (401) on Key #{self.current_key_index}. Rotating..."
                     )
+                    auth_failed_keys.add(self.current_key_index)
+                    if len(auth_failed_keys) >= len(self.api_keys):
+                        self._disable_ai_for_auth_failure()
+                        return ""
                     self._rotate_key()
                     continue
 
@@ -438,8 +463,31 @@ Tên rút gọn:
                 logger.error(f"❌ Lỗi không xác định khi gọi Groq API: {e}")
                 return ""
 
-        logger.error("❌ Đã thử tất cả API keys nhưng đều thất bại.")
+        if auth_failed_keys and len(auth_failed_keys) >= len(self.api_keys):
+            self._disable_ai_for_auth_failure()
+        elif rate_limited_keys and len(rate_limited_keys) >= len(self.api_keys):
+            self._disable_ai_for_rate_limit()
+        else:
+            logger.error("❌ Đã thử tất cả API keys nhưng đều thất bại.")
         return ""
+
+    @classmethod
+    def _disable_ai_for_auth_failure(cls) -> None:
+        cls._auth_disabled = True
+        if not cls._auth_failure_logged:
+            logger.error(
+                "❌ Tất cả AI_API_KEY đều bị 401. Tắt AI cho process hiện tại và dùng fallback local."
+            )
+            cls._auth_failure_logged = True
+
+    @classmethod
+    def _disable_ai_for_rate_limit(cls) -> None:
+        cls._rate_limit_disabled = True
+        if not cls._rate_limit_logged:
+            logger.error(
+                "❌ Tất cả AI_API_KEY đều bị rate limit 429. Tắt AI cho process hiện tại và dùng fallback local."
+            )
+            cls._rate_limit_logged = True
 
     def generate_data_quality_report(self, conn) -> str:
         """Tạo báo cáo chất lượng dữ liệu với phân tích chiến lược giảm giá.

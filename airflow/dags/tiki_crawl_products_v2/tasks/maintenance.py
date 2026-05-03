@@ -158,12 +158,10 @@ def cleanup_categories_wrapper(**context):
                 "redundant_deleted": 0,
             }
 
-        # PART 1: Cleanup Orphan Categories
         logger.info("📦 Part 1: Cleaning up orphan categories...")
 
         with storage.get_connection() as conn:
             with conn.cursor() as cur:
-                # Xóa categories có product_count = 0 hoặc NULL
                 cur.execute("""
                     DELETE FROM categories
                     WHERE (product_count = 0 OR product_count IS NULL)
@@ -171,7 +169,6 @@ def cleanup_categories_wrapper(**context):
                 """)
                 deleted_zero_count = cur.rowcount
 
-                # Xóa leaf categories không có products trong bảng products
                 cur.execute("""
                     DELETE FROM categories
                     WHERE is_leaf = true
@@ -184,7 +181,6 @@ def cleanup_categories_wrapper(**context):
 
                 conn.commit()
 
-        # Gọi cleanup_orphan_categories từ storage
         additional_deleted = storage.cleanup_orphan_categories()
         total_orphan_deleted = deleted_zero_count + deleted_no_products + additional_deleted
 
@@ -195,7 +191,6 @@ def cleanup_categories_wrapper(**context):
         )
         logger.info(f"   - Tổng orphan deleted: {total_orphan_deleted}")
 
-        # PART 2: Cleanup Redundant Categories
         logger.info("📦 Part 2: Cleaning up redundant (non-leaf) categories...")
         removed_redundant = storage.cleanup_redundant_categories()
         logger.info(f"   - Non-leaf categories removed: {removed_redundant}")

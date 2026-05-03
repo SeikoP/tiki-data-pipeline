@@ -4,7 +4,7 @@ from __future__ import annotations
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from concurrent.futures import ThreadPoolExecutor
 
-from common.settings import get_bool_setting, get_int_setting
+from common.settings import get_bool_setting, get_int_setting, get_setting
 from tiki_crawl_products_v2.bootstrap import (
     CACHE_DIR,
     CATEGORIES_FILE,
@@ -27,6 +27,45 @@ from tiki_crawl_products_v2.tasks.common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
     get_logger,  # noqa: F401
 )
+
+
+def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
+    ti = context.get("ti")
+    if not ti:
+        return None
+    for task_id in ("start_crawl_run", "pipeline_tracking.start_crawl_run"):
+        try:
+            value = ti.xcom_pull(task_ids=task_id)
+        except Exception:
+            continue
+        if isinstance(value, dict) and value.get("crawl_run_id"):
+            return int(value["crawl_run_id"])
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _track_category_result(result: dict[str, Any], context: dict[str, Any], logger) -> None:
+    crawl_run_id = _get_crawl_run_id(context)
+    if not crawl_run_id:
+        return
+    category_id = result.get("category_id")
+    task_key = f"category:{category_id or result.get('category_url') or 'unknown'}"
+    try:
+        from common.pipeline_tracking import upsert_crawl_task
+
+        upsert_crawl_task(
+            crawl_run_id=crawl_run_id,
+            task_key=task_key,
+            task_type="category",
+            status=result.get("status") or "unknown",
+            url=result.get("category_url"),
+            category_id=str(category_id) if category_id else None,
+            retry_count=0,
+            error_message=result.get("error"),
+        )
+    except Exception as tracking_error:
+        logger.warning("⚠️ Không thể ghi audit category task %s: %s", task_key, tracking_error)
 
 
 def load_categories(**context) -> list[dict[str, Any]]:
@@ -194,6 +233,7 @@ def crawl_single_category(
             result["error"] = "Service đang ở trạng thái FAILED, skip crawl"
             result["status"] = "degraded"
             logger.warning(f"⚠️  Service degraded, skip category {category_name}")
+            _track_category_result(result, context, logger)
             return result
 
         # Lấy cấu hình từ Airflow Variables hoặc tham số truyền vào (để giảm DB hit trong batch)
@@ -264,6 +304,7 @@ def crawl_single_category(
                 logger.info(f"📬 Đã thêm vào DLQ: crawl_category_{category_id}")
             except Exception as dlq_error:
                 logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
+            _track_category_result(result, context, logger)
             return result
         except Exception:
             # Ghi nhận failure
@@ -336,12 +377,13 @@ def crawl_single_category(
             logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
         # Không raise để tiếp tục với danh mục khác
 
+    _track_category_result(result, context, logger)
     return result
 
 
 def crawl_category_batch(
     category_batch: list[dict[str, Any]] = None, batch_index: int = -1, **context
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """
     Task 3: Crawl sản phẩm từ một batch danh mục (Giảm overhead của Airflow)
 
@@ -351,7 +393,7 @@ def crawl_category_batch(
         context: Airflow context
 
     Returns:
-        List[Dict]: Kết quả crawl cho toàn bộ batch
+        Dict: File path và metadata cho kết quả crawl của batch
     """
     logger = get_logger(context)
 
@@ -366,7 +408,14 @@ def crawl_category_batch(
 
     if not category_batch:
         logger.error(f"❌ MISSING CATEGORY_BATCH! Batch index: {batch_index}")
-        return []
+        return {
+            "batch_index": batch_index,
+            "output_file": None,
+            "category_count": 0,
+            "success_count": 0,
+            "failed_count": 0,
+            "product_count": 0,
+        }
 
     # Lấy cấu hình cho cả batch
     max_pages = get_int_setting("TIKI_MAX_PAGES_PER_CATEGORY")
@@ -384,11 +433,15 @@ def crawl_category_batch(
             )
         except Exception as e:
             logger.error(f"❌ Batch error for category {cat.get('name')}: {e}")
-            return {
+            failed_result = {
                 "category_id": cat.get("id", "unknown"),
+                "category_name": cat.get("name"),
+                "category_url": cat.get("url"),
                 "status": "failed",
                 "error": str(e),
             }
+            _track_category_result(failed_result, context, logger)
+            return failed_result
 
     # Chạy song song dùng ThreadPoolExecutor
     logger.info(
@@ -400,6 +453,23 @@ def crawl_category_batch(
     success_count = sum(1 for item in results if item.get("status") == "success")
     failed_count = sum(1 for item in results if item.get("status") == "failed")
     product_count = sum(len(item.get("products", [])) for item in results)
+    output_dir = str(get_setting("TIKI_CATEGORY_BATCH_OUTPUT_DIR"))
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"category_batch_{batch_index}.json")
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "batch_index": batch_index,
+                "category_count": len(results),
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "product_count": product_count,
+                "created_at": datetime.now().isoformat(),
+                "results": results,
+            },
+            f,
+            ensure_ascii=False,
+        )
     logger.info(
         "✅ Hoàn thành BATCH CATEGORY %s: categories=%s success=%s failed=%s products=%s",
         batch_index,
@@ -408,4 +478,12 @@ def crawl_category_batch(
         failed_count,
         product_count,
     )
-    return results
+    logger.info("💾 Đã lưu category batch %s vào %s", batch_index, output_file)
+    return {
+        "batch_index": batch_index,
+        "output_file": output_file,
+        "category_count": len(results),
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "product_count": product_count,
+    }
