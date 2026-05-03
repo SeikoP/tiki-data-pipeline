@@ -8,7 +8,6 @@ Optimizations:
 """
 
 import logging
-import os
 from collections.abc import Generator
 from contextlib import contextmanager
 from threading import Lock
@@ -24,6 +23,11 @@ except ImportError:
     pool = None
 
 logger = logging.getLogger(__name__)
+
+try:
+    from common.settings import get_pipeline_settings
+except ImportError:
+    get_pipeline_settings = None
 
 
 class PostgresConnectionPool:
@@ -46,8 +50,8 @@ class PostgresConnectionPool:
     def initialize(
         self,
         host: str | None = None,
-        port: int = 5432,
-        database: str = "crawl_data",
+        port: int | None = None,
+        database: str | None = None,
         user: str | None = None,
         password: str | None = None,
         minconn: int = 2,
@@ -70,10 +74,16 @@ class PostgresConnectionPool:
         if self._pool is not None:
             return  # Already initialized
 
-        # Get credentials from environment if not provided
-        host = host or os.getenv("POSTGRES_HOST", "localhost")
-        user = user or os.getenv("POSTGRES_USER", "postgres")
-        password = password or os.getenv("POSTGRES_PASSWORD", "")
+        settings = (
+            get_pipeline_settings(use_airflow=False).database if get_pipeline_settings else None
+        )
+        host = host or (settings.host if settings else None)
+        port = port or (settings.port if settings else 5432)
+        database = database or (settings.database if settings else None)
+        user = user or (settings.user if settings else None)
+        password = password if password is not None else (settings.password if settings else "")
+        if not host or not database or not user:
+            raise ValueError("PostgreSQL host, database, and user must be configured")
 
         try:
             self._pool = pool.ThreadedConnectionPool(

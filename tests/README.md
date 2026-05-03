@@ -26,13 +26,29 @@ The test suite mixes unit tests, integration-style tests, profiling tests and ma
 ## Common Commands
 
 ```powershell
-pytest tests -q
-pytest tests/test_transform_load.py tests/test_sales_count.py -q
-pytest tests/test_crawl_products.py tests/test_crawl_retry_logic.py -q
+pytest tests -m "not integration and not slow" -q
+pytest tests/test_transform_load.py tests/test_utils.py -q
+pytest tests/test_crawl_products.py tests/test_crawl_retry_logic.py -m "not integration and not slow" -q
 pytest tests/profiling -q
 ```
 
-Run `.\scripts\ci.ps1` when the Docker/Airflow stack is running and you want the same broad checks used locally.
+Run integration tests only when the required local services or live network access are available:
+
+```powershell
+docker compose up -d postgres redis
+pytest tests -m integration -q
+pytest tests -m slow -q
+```
+
+Run `.\scripts\ci.ps1` when the Docker/Airflow stack is running and you want the broad local checks. GitHub Actions runs unit tests with `not integration and not slow` by default; Redis/Postgres/live crawl checks are intentionally opt-in.
+
+## Quality Gates
+
+```powershell
+ruff format --check src airflow/dags scripts tests
+ruff check src airflow/dags scripts tests
+pytest tests/test_crawl_products.py tests/test_utils.py tests/test_transform_load.py -q -W error::pytest.PytestReturnNotNoneWarning
+```
 
 ## Cleanup Rule
 

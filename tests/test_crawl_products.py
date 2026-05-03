@@ -1,6 +1,9 @@
+import json
 import re
 import sys
 from pathlib import Path
+
+import pytest
 
 # Thêm đường dẫn src vào sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -69,107 +72,88 @@ def test_crawl_single_category():
     # Chọn một danh mục bất kỳ từ file (thử với danh mục khác)
     categories_file = "data/raw/categories_recursive_optimized.json"
 
-    try:
-        with open(categories_file, encoding="utf-8") as f:
-            categories = json.load(f)
+    if not Path(categories_file).exists():
+        pytest.skip(f"Missing categories fixture: {categories_file}")
 
-        # Chọn danh mục có nhiều sản phẩm - thử với danh mục level 2-3 và có nhiều sản phẩm
-        # Ưu tiên các danh mục phổ biến như điện tử, thời trang, etc.
-        test_categories = []
-        for cat in categories:
-            level = cat.get("level", 0)
-            name = cat.get("name", "").lower()
-            # Chọn các danh mục phổ biến
-            if 2 <= level <= 3:
-                if any(
-                    keyword in name
-                    for keyword in [
-                        "điện thoại",
-                        "laptop",
-                        "tai nghe",
-                        "áo",
-                        "quần",
-                        "giày",
-                        "túi",
-                        "đồng hồ",
-                    ]
-                ):
-                    test_categories.append(cat)
+    with open(categories_file, encoding="utf-8") as f:
+        categories = json.load(f)
 
-        # Nếu không tìm thấy danh mục phổ biến, lấy bất kỳ danh mục level 2-3
-        if not test_categories:
-            test_categories = [cat for cat in categories if 2 <= cat.get("level", 0) <= 3]
+    # Chọn danh mục có nhiều sản phẩm - thử với danh mục level 2-3 và có nhiều sản phẩm
+    # Ưu tiên các danh mục phổ biến như điện tử, thời trang, etc.
+    test_categories = []
+    for cat in categories:
+        level = cat.get("level", 0)
+        name = cat.get("name", "").lower()
+        # Chọn các danh mục phổ biến
+        if 2 <= level <= 3:
+            if any(
+                keyword in name
+                for keyword in [
+                    "điện thoại",
+                    "laptop",
+                    "tai nghe",
+                    "áo",
+                    "quần",
+                    "giày",
+                    "túi",
+                    "đồng hồ",
+                ]
+            ):
+                test_categories.append(cat)
 
-        # Nếu vẫn không có, lấy bất kỳ
-        if not test_categories:
-            test_categories = categories[:10] if len(categories) > 10 else categories
+    # Nếu không tìm thấy danh mục phổ biến, lấy bất kỳ danh mục level 2-3
+    if not test_categories:
+        test_categories = [cat for cat in categories if 2 <= cat.get("level", 0) <= 3]
 
-        # Chọn ngẫu nhiên hoặc lấy danh mục thứ 3 để test với danh mục khác
+    # Nếu vẫn không có, lấy bất kỳ
+    if not test_categories:
+        test_categories = categories[:10] if len(categories) > 10 else categories
 
-        test_category = (
-            test_categories[2]
-            if len(test_categories) > 2
-            else test_categories[0]
-            if test_categories
-            else None
-        )
+    # Chọn ngẫu nhiên hoặc lấy danh mục thứ 3 để test với danh mục khác
 
-        if not test_category:
-            print("❌ Không tìm thấy danh mục để test")
-            return
+    test_category = (
+        test_categories[2]
+        if len(test_categories) > 2
+        else test_categories[0]
+        if test_categories
+        else None
+    )
 
-        category_url = test_category.get("url", "")
-        category_name = test_category.get("name", "Unknown")
+    if not test_category:
+        pytest.skip("No category available in fixture")
 
-        print(f"📁 Danh mục: {category_name}")
-        print(f"🔗 URL: {category_url}")
-        print(f"📊 Level: {test_category.get('level', 0)}")
-        print("📝 Lưu ý: Chỉ crawl thông tin cơ bản (ID, tên, URL, hình) - sẽ crawl detail sau")
-        print("\n⏳ Đang crawl...")
+    category_url = test_category.get("url", "")
+    category_name = test_category.get("name", "Unknown")
 
-        # Crawl với giới hạn 2 trang để test nhanh
-        # Thử với Selenium nếu requests không tìm thấy sản phẩm
-        products = crawl_category_products(
-            category_url,
-            max_pages=2,
-            use_selenium=True,  # Dùng Selenium để render JavaScript
-        )
+    print(f"📁 Danh mục: {category_name}")
+    print(f"🔗 URL: {category_url}")
+    print(f"📊 Level: {test_category.get('level', 0)}")
+    print("📝 Lưu ý: Chỉ crawl thông tin cơ bản (ID, tên, URL, hình) - sẽ crawl detail sau")
+    print("\n⏳ Đang crawl...")
 
-        print(f"\n✅ Tìm thấy {len(products)} sản phẩm")
+    # Crawl với giới hạn 2 trang để test nhanh
+    # Thử với Selenium nếu requests không tìm thấy sản phẩm
+    products = crawl_category_products(
+        category_url,
+        max_pages=2,
+        use_selenium=True,  # Dùng Selenium để render JavaScript
+    )
 
-        if products:
-            print("\n📦 Mẫu sản phẩm (5 sản phẩm đầu):")
-            for i, product in enumerate(products[:5], 1):
-                print(f"  {i}. {product.get('name', 'N/A')}")
-                print(f"     ID: {product.get('product_id')}")
-                print(f"     URL: {product.get('url')}")
-                if product.get("image_url"):
-                    print(f"     Hình: {product.get('image_url')[:50]}...")
-                print("     (Giá, đánh giá, số lượng bán sẽ crawl detail sau)")
-                print()
+    print(f"\n✅ Tìm thấy {len(products)} sản phẩm")
 
-        if len(products) == 0:
-            print("⚠️  Không tìm thấy sản phẩm. Có thể do:")
-            print("   - Danh mục không có sản phẩm")
-            print("   - Cần Selenium để render JavaScript")
-            print("   - Cấu trúc HTML đã thay đổi")
-            print("   - Website chặn crawler")
-            print("\n💡 Thử:")
-            print("   - Kiểm tra URL trực tiếp trên browser")
-            print("   - Dùng Selenium nếu chưa dùng")
-            print("   - Kiểm tra __NEXT_DATA__ trong HTML")
-        else:
-            assert len(products) > 0, "Phải tìm thấy ít nhất 1 sản phẩm"
-            print("✅ Test crawl danh mục thành công!\n")
+    if products:
+        print("\n📦 Mẫu sản phẩm (5 sản phẩm đầu):")
+        for i, product in enumerate(products[:5], 1):
+            print(f"  {i}. {product.get('name', 'N/A')}")
+            print(f"     ID: {product.get('product_id')}")
+            print(f"     URL: {product.get('url')}")
+            if product.get("image_url"):
+                print(f"     Hình: {product.get('image_url')[:50]}...")
+            print("     (Giá, đánh giá, số lượng bán sẽ crawl detail sau)")
+            print()
 
-    except FileNotFoundError:
-        print(f"❌ Không tìm thấy file: {categories_file}")
-        print("   Chạy crawl categories trước!")
-    except Exception as e:
-        print(f"❌ Lỗi: {e}")
-        import traceback
-
-        traceback.print_exc()
+    assert products, "Phải tìm thấy ít nhất 1 sản phẩm"
+    print("✅ Test crawl danh mục thành công!\n")
 
 
 def test_crawl_multiple_categories():
@@ -181,112 +165,104 @@ def test_crawl_multiple_categories():
     categories_file = "data/raw/categories_recursive_optimized.json"
     output_file = "data/demo/products/products.json"
 
-    try:
-        with open(categories_file, encoding="utf-8") as f:
-            all_categories = json.load(f)
+    if not Path(categories_file).exists():
+        pytest.skip(f"Missing categories fixture: {categories_file}")
 
-        # Filter lấy các danh mục ở DEEP LEVEL (level 3-4) - có nhiều sản phẩm cụ thể
-        deep_level_categories = []
+    with open(categories_file, encoding="utf-8") as f:
+        all_categories = json.load(f)
+
+    # Filter lấy các danh mục ở DEEP LEVEL (level 3-4) - có nhiều sản phẩm cụ thể
+    deep_level_categories = []
+    for cat in all_categories:
+        level = cat.get("level", 0)
+        # Lấy level 3-4 (deep level - danh mục con sâu)
+        if 3 <= level <= 4:
+            deep_level_categories.append(cat)
+
+    # Chọn một vài danh mục từ deep level
+    # Có thể điều chỉnh số lượng danh mục ở đây
+    NUM_CATEGORIES_TO_CRAWL = 4  # Số danh mục để crawl (có thể thay đổi)
+
+    selected_categories = (
+        deep_level_categories[:NUM_CATEGORIES_TO_CRAWL]
+        if len(deep_level_categories) > NUM_CATEGORIES_TO_CRAWL
+        else deep_level_categories
+    )
+
+    if not selected_categories:
+        print("❌ Không tìm thấy danh mục ở deep level (level 3-4)")
+        print("   Thử với level 2-3...")
+        # Fallback: lấy level 2-3 nếu không có level 3-4
         for cat in all_categories:
-            level = cat.get("level", 0)
-            # Lấy level 3-4 (deep level - danh mục con sâu)
-            if 3 <= level <= 4:
-                deep_level_categories.append(cat)
+            if 2 <= cat.get("level", 0) <= 3:
+                selected_categories.append(cat)
+                if len(selected_categories) >= 10:
+                    break
 
-        # Chọn một vài danh mục từ deep level
-        # Có thể điều chỉnh số lượng danh mục ở đây
-        NUM_CATEGORIES_TO_CRAWL = 4  # Số danh mục để crawl (có thể thay đổi)
+    if not selected_categories:
+        pytest.skip("No suitable categories available in fixture")
 
-        selected_categories = (
-            deep_level_categories[:NUM_CATEGORIES_TO_CRAWL]
-            if len(deep_level_categories) > NUM_CATEGORIES_TO_CRAWL
-            else deep_level_categories
-        )
+    print(f"📖 Đã chọn {len(selected_categories)} danh mục ở deep level (level 3-4)")
+    print(f"📁 File output: {output_file}")
+    print("📝 Lưu ý: Crawl HẾT sản phẩm (TẤT CẢ trang) trong các danh mục này")
+    print("          Chỉ lấy thông tin cơ bản (ID, tên, URL, hình)")
+    print("          Giá, đánh giá, số lượng bán sẽ crawl detail sau")
+    print(f"\n📋 Danh sách {len(selected_categories)} danh mục sẽ crawl:")
+    for i, cat in enumerate(selected_categories, 1):
+        print(f"   {i}. {cat.get('name')} (Level {cat.get('level')})")
+        print(f"      {cat.get('url')}")
+    print("=" * 70)
 
-        if not selected_categories:
-            print("❌ Không tìm thấy danh mục ở deep level (level 3-4)")
-            print("   Thử với level 2-3...")
-            # Fallback: lấy level 2-3 nếu không có level 3-4
-            for cat in all_categories:
-                if 2 <= cat.get("level", 0) <= 3:
-                    selected_categories.append(cat)
-                    if len(selected_categories) >= 10:
-                        break
+    # Filter function để chỉ crawl các danh mục đã chọn
+    selected_urls = {cat.get("url") for cat in selected_categories}
 
-        if not selected_categories:
-            print("❌ Không tìm thấy danh mục phù hợp")
-            return
+    def filter_selected_categories(cat):
+        return cat.get("url") in selected_urls
 
-        print(f"📖 Đã chọn {len(selected_categories)} danh mục ở deep level (level 3-4)")
-        print(f"📁 File output: {output_file}")
-        print("📝 Lưu ý: Crawl HẾT sản phẩm (TẤT CẢ trang) trong các danh mục này")
-        print("          Chỉ lấy thông tin cơ bản (ID, tên, URL, hình)")
-        print("          Giá, đánh giá, số lượng bán sẽ crawl detail sau")
-        print(f"\n📋 Danh sách {len(selected_categories)} danh mục sẽ crawl:")
-        for i, cat in enumerate(selected_categories, 1):
-            print(f"   {i}. {cat.get('name')} (Level {cat.get('level')})")
-            print(f"      {cat.get('url')}")
-        print("=" * 70)
+    products = crawl_products_from_categories(
+        categories_file=categories_file,
+        output_file=output_file,
+        max_categories=None,  # Crawl tất cả các danh mục đã chọn
+        max_pages_per_category=None,  # Crawl TẤT CẢ trang (không giới hạn)
+        max_workers=5,  # 5 thread song song
+        use_selenium=False,  # Dùng requests (nhanh hơn), tự động fallback Selenium nếu cần
+        categories_filter=filter_selected_categories,  # Chỉ crawl các danh mục đã chọn
+    )
 
-        # Filter function để chỉ crawl các danh mục đã chọn
-        selected_urls = {cat.get("url") for cat in selected_categories}
+    print("\n✅ Crawl hoàn thành!")
+    print(f"📦 Tổng sản phẩm: {len(products)}")
+    print(f"📁 File output: {output_file}")
 
-        def filter_selected_categories(cat):
-            return cat.get("url") in selected_urls
+    # Thống kê theo danh mục
+    if products:
+        category_stats = {}
+        category_names = {}
 
-        products = crawl_products_from_categories(
-            categories_file=categories_file,
-            output_file=output_file,
-            max_categories=None,  # Crawl tất cả các danh mục đã chọn
-            max_pages_per_category=None,  # Crawl TẤT CẢ trang (không giới hạn)
-            max_workers=5,  # 5 thread song song
-            use_selenium=False,  # Dùng requests (nhanh hơn), tự động fallback Selenium nếu cần
-            categories_filter=filter_selected_categories,  # Chỉ crawl các danh mục đã chọn
-        )
+        # Lấy tên danh mục từ selected_categories
+        for cat in selected_categories:
+            category_names[cat.get("url")] = cat.get("name", "Unknown")
 
-        print("\n✅ Crawl hoàn thành!")
-        print(f"📦 Tổng sản phẩm: {len(products)}")
-        print(f"📁 File output: {output_file}")
+        for product in products:
+            cat_url = product.get("category_url", "Unknown")
+            category_stats[cat_url] = category_stats.get(cat_url, 0) + 1
+            # Lưu tên danh mục nếu chưa có
+            if cat_url not in category_names:
+                category_names[cat_url] = cat_url.split("/")[-2] if "/" in cat_url else "Unknown"
 
-        # Thống kê theo danh mục
-        if products:
-            category_stats = {}
-            category_names = {}
+        print("\n📊 Thống kê theo danh mục:")
+        print(f"   Số danh mục: {len(category_stats)}")
+        print(f"   Tổng sản phẩm: {len(products)}")
 
-            # Lấy tên danh mục từ selected_categories
-            for cat in selected_categories:
-                category_names[cat.get("url")] = cat.get("name", "Unknown")
+        # Sắp xếp và hiển thị
+        sorted_stats = sorted(category_stats.items(), key=lambda x: x[1], reverse=True)
+        for cat_url, count in sorted_stats:
+            cat_name = category_names.get(cat_url, cat_url)
+            print(
+                f"   - {count:4d} sản phẩm | {cat_name} (Level {next((c.get('level') for c in selected_categories if c.get('url') == cat_url), '?')})"
+            )
+            print(f"     {cat_url}")
 
-            for product in products:
-                cat_url = product.get("category_url", "Unknown")
-                category_stats[cat_url] = category_stats.get(cat_url, 0) + 1
-                # Lưu tên danh mục nếu chưa có
-                if cat_url not in category_names:
-                    category_names[cat_url] = (
-                        cat_url.split("/")[-2] if "/" in cat_url else "Unknown"
-                    )
-
-            print("\n📊 Thống kê theo danh mục:")
-            print(f"   Số danh mục: {len(category_stats)}")
-            print(f"   Tổng sản phẩm: {len(products)}")
-
-            # Sắp xếp và hiển thị
-            sorted_stats = sorted(category_stats.items(), key=lambda x: x[1], reverse=True)
-            for cat_url, count in sorted_stats:
-                cat_name = category_names.get(cat_url, cat_url)
-                print(
-                    f"   - {count:4d} sản phẩm | {cat_name} (Level {next((c.get('level') for c in selected_categories if c.get('url') == cat_url), '?')})"
-                )
-                print(f"     {cat_url}")
-
-    except FileNotFoundError:
-        print(f"❌ Không tìm thấy file: {categories_file}")
-        print("   Chạy crawl categories trước!")
-    except Exception as e:
-        print(f"❌ Lỗi: {e}")
-        import traceback
-
-        traceback.print_exc()
+    assert products, "Expected at least one product from selected categories"
 
 
 def test_get_page():
@@ -299,44 +275,35 @@ def test_get_page():
 
     test_url = "https://tiki.vn/dien-thoai-smartphone/c1795"
 
-    try:
-        print(f"⏳ Đang lấy HTML từ: {test_url}")
-        html = get_page_with_requests(test_url)
+    print(f"⏳ Đang lấy HTML từ: {test_url}")
+    html = get_page_with_requests(test_url)
 
-        if html:
-            print(f"✅ Đã lấy thành công ({len(html)} ký tự)")
+    assert html, "Không lấy được HTML"
 
-            # Kiểm tra __NEXT_DATA__
-            from bs4 import BeautifulSoup
+    print(f"✅ Đã lấy thành công ({len(html)} ký tự)")
 
-            soup = BeautifulSoup(html, "html.parser")
-            next_data = soup.find("script", id="__NEXT_DATA__")
-            if next_data:
-                print(f"✓ Tìm thấy __NEXT_DATA__ ({len(next_data.string)} ký tự)")
-            else:
-                print("⚠️  Không tìm thấy __NEXT_DATA__ - có thể cần Selenium")
+    # Kiểm tra __NEXT_DATA__
+    from bs4 import BeautifulSoup
 
-            # Test parse
-            products = parse_products_from_html(html, test_url)
-            print(f"📦 Tìm thấy {len(products)} sản phẩm")
+    soup = BeautifulSoup(html, "html.parser")
+    next_data = soup.find("script", id="__NEXT_DATA__")
+    if next_data:
+        print(f"✓ Tìm thấy __NEXT_DATA__ ({len(next_data.string)} ký tự)")
+    else:
+        print("⚠️  Không tìm thấy __NEXT_DATA__ - có thể cần Selenium")
 
-            if len(products) == 0:
-                # Debug: tìm các link /p/
-                all_links = soup.find_all("a", href=re.compile(r"/p/\d+"))
-                print(f"   Debug: Tìm thấy {len(all_links)} link /p/ trong HTML")
+    # Test parse
+    products = parse_products_from_html(html, test_url)
+    print(f"📦 Tìm thấy {len(products)} sản phẩm")
 
-            # Test get total pages
-            total_pages = get_total_pages(html)
-            print(f"📄 Tổng số trang: {total_pages}")
+    if len(products) == 0:
+        # Debug: tìm các link /p/
+        all_links = soup.find_all("a", href=re.compile(r"/p/\d+"))
+        print(f"   Debug: Tìm thấy {len(all_links)} link /p/ trong HTML")
 
-        else:
-            print("❌ Không lấy được HTML")
-
-    except Exception as e:
-        print(f"❌ Lỗi: {e}")
-        import traceback
-
-        traceback.print_exc()
+    # Test get total pages
+    total_pages = get_total_pages(html)
+    print(f"📄 Tổng số trang: {total_pages}")
 
 
 def main():

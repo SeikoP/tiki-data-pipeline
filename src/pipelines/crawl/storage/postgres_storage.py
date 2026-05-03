@@ -91,11 +91,24 @@ class PostgresStorage:
             keepalives_count: Number of keepalive probes before considering connection dead
         """
         self.logger = logger or logging.getLogger(__name__)
-        self.host = host or os.getenv("POSTGRES_HOST", "postgres")
-        self.port = port
-        self.database = database or os.getenv("POSTGRES_DB", "tiki")
-        self.user = user or os.getenv("POSTGRES_USER", "airflow_user")
-        self.password = password or os.getenv("POSTGRES_PASSWORD", "")
+        try:
+            from common.settings import get_pipeline_settings
+
+            db_settings = get_pipeline_settings(use_airflow=False).database
+        except Exception:
+            db_settings = None
+
+        self.host = host or (db_settings.host if db_settings else os.getenv("POSTGRES_HOST"))
+        self.port = port or (db_settings.port if db_settings else 5432)
+        self.database = database or (
+            db_settings.database if db_settings else os.getenv("POSTGRES_DB")
+        )
+        self.user = user or (db_settings.user if db_settings else os.getenv("POSTGRES_USER"))
+        self.password = (
+            password if password is not None else (db_settings.password if db_settings else "")
+        )
+        if not self.host or not self.database or not self.user:
+            raise ValueError("PostgreSQL host, database, and user must be configured")
         self.minconn = minconn
         self.maxconn = maxconn
         self._pool: ThreadedConnectionPool | None = None

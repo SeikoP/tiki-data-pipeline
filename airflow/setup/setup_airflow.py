@@ -1,7 +1,6 @@
-import os
-
 from airflow.models import Connection, Pool, Variable
 from airflow.utils.session import create_session
+from common.settings import POOL_DEFAULTS, airflow_variable_defaults, get_pipeline_settings
 
 
 def setup_airflow():
@@ -10,8 +9,7 @@ def setup_airflow():
     with create_session() as session:
         # 1. Setup Pools
         pools_data = [
-            ("fast_pool", 6, "Pool for Fast API and Data Processing tasks"),
-            ("crawl_pool", 3, "Pool for Tiki crawling tasks (Selenium)"),
+            (name, data["slots"], data["description"]) for name, data in POOL_DEFAULTS.items()
         ]
 
         for name, slots, desc in pools_data:
@@ -26,29 +24,7 @@ def setup_airflow():
                 pool.include_deferred = False
 
         # 2. Setup Variables
-        variables_data = {
-            "TIKI_MIN_CATEGORY_LEVEL": "2",
-            "TIKI_MAX_CATEGORY_LEVEL": "4",
-            "TIKI_MAX_CATEGORIES": "0",
-            "TIKI_DAG_SCHEDULE_MODE": "manual",
-            "TIKI_SAVE_BATCH_SIZE": "100",
-            "TIKI_CRAWL_BATCH_SIZE": "5",
-            "TIKI_CATEGORY_NUM_BATCHES": "3",
-            "TIKI_CATEGORY_CONCURRENCY": "6",
-            "TIKI_DETAIL_BATCH_SIZE": "333",
-            "TIKI_DETAIL_MAX_CONCURRENT_TASKS": "6",
-            "TIKI_PRODUCTS_PER_DAY": "3000",  # Crawl 3000 products/run để crawl hết trong 1 ngày
-            "TIKI_CACHE_RELAX_DAYS": "2",  # Update mỗi 2 ngày để track price changes tốt
-            "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD": "5",
-            "TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT": "60",
-            "TIKI_DEGRADATION_FAILURE_THRESHOLD": "3",
-            "TIKI_DEGRADATION_RECOVERY_THRESHOLD": "5",
-            "POSTGRES_HOST": os.environ.get("POSTGRES_HOST", "postgres"),
-            "POSTGRES_PORT": os.environ.get("POSTGRES_PORT", "5432"),
-            "POSTGRES_DB": os.environ.get("POSTGRES_DB", "tiki"),
-            "POSTGRES_USER": os.environ.get("POSTGRES_USER", "airflow_user"),
-            "REDIS_URL": "redis://redis:6379/1",
-        }
+        variables_data = airflow_variable_defaults()
 
         for key, val in variables_data.items():
             Variable.set(key, val, session=session)
@@ -58,11 +34,14 @@ def setup_airflow():
         conn_id = "tiki_postgres"
         conn = session.query(Connection).filter(Connection.conn_id == conn_id).first()
 
-        postgres_host = os.environ.get("POSTGRES_HOST", "postgres")
-        postgres_user = os.environ.get("POSTGRES_USER", "admin")
-        postgres_pass = os.environ.get("POSTGRES_PASSWORD", "admin")
-        postgres_port = int(os.environ.get("POSTGRES_PORT", "5432"))
-        postgres_db = os.environ.get("POSTGRES_DB", "tiki")
+        db_settings = get_pipeline_settings(use_airflow=False).database
+        postgres_host = db_settings.host
+        postgres_user = db_settings.user
+        postgres_pass = db_settings.password
+        postgres_port = db_settings.port
+        postgres_db = db_settings.database
+        if not postgres_pass:
+            print("   Warning: POSTGRES_PASSWORD is empty; connection will use empty password")
 
         if not conn:
             print(f"   Creating connection: {conn_id}")

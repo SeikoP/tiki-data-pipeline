@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from common.batch_processor import BatchProcessor
+from common.db_schema import ensure_crawl_schema
 from common.monitoring import PerformanceTimer
 
 # Import profiling utilities
@@ -74,6 +75,7 @@ class OptimizedDataLoader:
         db_config: dict[str, Any] | None = None,
         show_progress: bool = True,
         continue_on_error: bool = True,
+        require_db: bool = False,
     ):
         """
         Args:
@@ -82,6 +84,7 @@ class OptimizedDataLoader:
             db_config: Database configuration (host, port, user, password, database)
             show_progress: Show progress logs
             continue_on_error: Continue if a batch fails
+            require_db: Raise during initialization if database setup fails
         """
         self.batch_size = batch_size
         self.enable_db = enable_db
@@ -106,9 +109,13 @@ class OptimizedDataLoader:
             try:
                 db_config = db_config or {}
                 initialize_db_pool(**db_config)
+                with get_db_pool().get_cursor(commit=True) as cursor:
+                    ensure_crawl_schema(cursor)
                 logger.info("✅ Database connection pool initialized")
             except Exception as e:
                 logger.error(f"❌ Failed to initialize DB pool: {e}")
+                if require_db:
+                    raise
                 self.enable_db = False
 
         # Initialize batch processor
@@ -125,6 +132,7 @@ class OptimizedDataLoader:
         upsert: bool = True,
         validate_before_load: bool = True,
         save_to_file: str | None = None,
+        raise_on_db_error: bool = False,
     ) -> dict[str, Any]:
         """Load products vào database với connection pooling.
 
@@ -151,6 +159,14 @@ class OptimizedDataLoader:
             # Load vào database
             if self.enable_db:
                 self._load_to_database(products, upsert)
+                db_failed = self.stats["failed_count"] > 0 or bool(self.stats["errors"])
+                nothing_loaded = products and self.stats["db_loaded"] == 0
+                if raise_on_db_error and (db_failed or nothing_loaded):
+                    error_text = "; ".join(map(str, self.stats["errors"][:3]))
+                    raise RuntimeError(
+                        "Database load failed"
+                        + (f": {error_text}" if error_text else " with no rows loaded")
+                    )
 
             # Load vào file nếu cần
             if save_to_file:
@@ -158,7 +174,11 @@ class OptimizedDataLoader:
 
             # Update success count
             self.stats["total_loaded"] = max(self.stats["db_loaded"], self.stats["file_loaded"])
-            if self.stats["success_count"] == 0 and self.stats["file_loaded"] > 0:
+            if (
+                not self.enable_db
+                and self.stats["success_count"] == 0
+                and self.stats["file_loaded"] > 0
+            ):
                 self.stats["success_count"] = self.stats["file_loaded"]
 
             self.stats["processing_time"] = timer.duration if timer.duration else 0.0
@@ -210,6 +230,7 @@ class OptimizedDataLoader:
             self.stats["db_loaded"] = batch_stats["total_processed"]
             self.stats["success_count"] = batch_stats["total_processed"]
             self.stats["failed_count"] += batch_stats["total_failed"]
+            self.stats["errors"].extend(batch_stats.get("errors", []))
 
             if self.show_progress:
                 logger.info("✅ Database loading completed:")
@@ -220,9 +241,12 @@ class OptimizedDataLoader:
 
         except Exception as e:
             error_msg = f"Database loading failed: {str(e)}"
-            self.stats["errors"].append(error_msg)
+            if error_msg not in self.stats["errors"]:
+                self.stats["errors"].append(error_msg)
             self.stats["failed_count"] += len(products)
             logger.error(f"❌ {error_msg}")
+            if not self.continue_on_error:
+                raise
 
     def _upsert_batch(self, batch: list[dict], upsert: bool, db_pool):
         """

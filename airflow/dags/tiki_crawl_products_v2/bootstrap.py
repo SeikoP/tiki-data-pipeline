@@ -455,7 +455,12 @@ def get_schedule_mode():
     """Get schedule mode with lazy evaluation."""
     global _schedule_mode
     if _schedule_mode is None:
-        _schedule_mode = get_variable("TIKI_DAG_SCHEDULE_MODE", default="manual")
+        try:
+            from common.settings import get_setting
+
+            _schedule_mode = get_setting("TIKI_DAG_SCHEDULE_MODE")
+        except Exception:
+            _schedule_mode = get_variable("TIKI_DAG_SCHEDULE_MODE", default="manual")
     return _schedule_mode
 
 
@@ -463,7 +468,12 @@ def get_schedule_hours():
     """Get schedule hours with lazy evaluation."""
     global _schedule_hours
     if _schedule_hours is None:
-        _schedule_hours = get_int_variable("TIKI_DAG_SCHEDULE_HOURS", default=1)
+        try:
+            from common.settings import get_int_setting
+
+            _schedule_hours = get_int_setting("TIKI_DAG_SCHEDULE_HOURS")
+        except Exception:
+            _schedule_hours = get_int_variable("TIKI_DAG_SCHEDULE_HOURS", default=1)
     return _schedule_hours
 
 
@@ -692,7 +702,7 @@ def get_dag_config():
         "catchup": False,  # Không chạy lại các task đã bỏ lỡ
         "tags": dag_tags,
         "max_active_runs": 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
-        "max_active_tasks": 3,  # 3 tasks đồng thời
+        "max_active_tasks": get_int_variable("TIKI_DETAIL_ACTIVE_BATCHES", default=6),
     }
 
 

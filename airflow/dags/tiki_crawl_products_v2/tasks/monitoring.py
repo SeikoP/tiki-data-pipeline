@@ -309,7 +309,7 @@ def aggregate_and_notify(**context) -> dict[str, Any]:
             dag_run = context.get("dag_run")
             if dag_run and dag_run.start_date:
                 start_time = dag_run.start_date
-                end_time = datetime.now()
+                end_time = datetime.now(start_time.tzinfo) if start_time.tzinfo else datetime.now()
                 duration = (end_time - start_time).total_seconds()
 
                 # FIX: Use crawled_count (actual products crawled) not with_detail

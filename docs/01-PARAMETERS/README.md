@@ -1,6 +1,8 @@
 # Parameters
 
 This file is the canonical parameter reference for the current compact docs set.
+Runtime defaults are defined in `src/common/settings.py`; Airflow setup, docs and
+`.env.example` should stay in sync with that registry.
 
 ## Airflow and Run Size
 
@@ -8,6 +10,12 @@ This file is the canonical parameter reference for the current compact docs set.
 | --- | --- | --- |
 | `TIKI_CATEGORY_NUM_BATCHES` | Airflow Variable, fallback `3` | Splits categories for dynamic task mapping |
 | `TIKI_PRODUCTS_PER_DAY` | Airflow/env dependent | Limits daily product volume when enabled by tasks |
+| `TIKI_DETAIL_ACTIVE_BATCHES` | Airflow Variable, fallback `6` | Detail mapped batches to fill one Airflow wave |
+| `TIKI_DETAIL_BATCH_SIZE` | Airflow Variable, fallback `500` | Soft target before planner allows more than one wave |
+| `TIKI_DETAIL_MAX_CONCURRENT_TASKS` | Airflow Variable, fallback `8` | Async requests inside each detail task |
+| `TIKI_DETAIL_CONCURRENCY_MIN` | Airflow Variable, fallback `4` | Minimum clamp for per-task async concurrency |
+| `TIKI_DETAIL_CONCURRENCY_MAX` | Airflow Variable, fallback `10` | Maximum clamp for per-task async concurrency |
+| `TIKI_LOAD_MODE` | Airflow Variable, fallback `auto` | Selects safe or optimized DB batch sizing |
 | `TIKI_FORCE_REFRESH` | env/Airflow usage | Bypass cache when stale or incomplete data must be refreshed |
 | `DISCORD_ENABLED` | env, default `false` | Enables final aggregate Discord notification |
 

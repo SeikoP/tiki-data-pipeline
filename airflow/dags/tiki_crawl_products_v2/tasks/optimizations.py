@@ -29,9 +29,16 @@ for src_path in src_paths:
 def get_feature_flag(flag_name: str, default: bool = False) -> bool:
     """Get feature flag value from environment or Airflow Variable"""
     try:
-        from airflow.models import Variable
+        try:
+            from airflow.sdk import Variable
+        except ImportError:
+            from airflow.models import Variable
 
-        return Variable.get(flag_name, default_var=str(default)).lower() in ("true", "1", "yes")
+        try:
+            value = Variable.get(flag_name, str(default))
+        except TypeError:
+            value = Variable.get(flag_name, default_var=str(default))
+        return str(value).lower() in ("true", "1", "yes")
     except Exception:
         # Fallback to environment variable
         return os.getenv(flag_name, str(default)).lower() in ("true", "1", "yes")

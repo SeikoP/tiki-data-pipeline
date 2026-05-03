@@ -77,6 +77,7 @@ def merge_products(**context) -> dict[str, Any]:
             "failed_categories": 0,
             "timeout_categories": 0,
             "total_products": 0,
+            "raw_products": 0,
             "unique_products": 0,
             "total_saved_directly": 0,
         }
@@ -222,6 +223,7 @@ def merge_products(**context) -> dict[str, Any]:
             else "📊 Products có sales_count: 0/0"
         )
 
+        stats["raw_products"] = stats["total_products"]
         stats["unique_products"] = len(unique_products)
 
         logger.info("=" * 40)
@@ -368,54 +370,17 @@ def transform_products(**context) -> dict[str, Any]:
             except Exception as e:
                 logger.warning(f"⚠️  Lỗi khi đọc products.json: {e}")
 
-        # Bước 2: Import utility để extract category_id
+        # Bước 2: Import utility để extract/normalize category metadata
         try:
-            # Tìm đường dẫn utils module
-            utils_paths = [
-                "/opt/airflow/src/pipelines/crawl/crawl_utils.py",
-                os.path.abspath(
-                    os.path.join(
-                        dag_file_dir,
-                        "..",
-                        "..",
-                        "..",
-                        "src",
-                        "pipelines",
-                        "crawl",
-                        "crawl_utils.py",
-                    )
-                ),
-                os.path.join(os.getcwd(), "src", "pipelines", "crawl", "crawl_utils.py"),
-            ]
-
-            utils_path = None
-            for path in utils_paths:
-                if os.path.exists(path):
-                    utils_path = path
-                    break
-
-            if utils_path:
-                import importlib.util
-
-                spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
-                utils_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(utils_module)
-                extract_category_id_from_url = utils_module.extract_category_id_from_url
-            else:
-                # Fallback: định nghĩa hàm đơn giản
-                import re
-
-                def extract_category_id_from_url(url: str) -> str | None:
-                    if not url:
-                        return None
-                    match = re.search(r"/c(\d+)", url)
-                    if match:
-                        return f"c{match.group(1)}"
-                    return None
-
+            from common.category_utils import build_category_lookup, extract_category_id_from_url
         except Exception as e:
-            logger.warning(f"⚠️  Không thể import extract_category_id_from_url: {e}")
+            logger.warning(f"⚠️  Không thể import category_utils: {e}")
             import re
+
+            def build_category_lookup(
+                categories: list[dict[str, Any]],
+            ) -> dict[str, dict[str, Any]]:
+                return {}
 
             def extract_category_id_from_url(url: str) -> str | None:
                 if not url:
@@ -440,12 +405,10 @@ def transform_products(**context) -> dict[str, Any]:
                 with open(CATEGORIES_FILE, encoding="utf-8") as cf:
                     raw_categories = json.load(cf)
 
-                for cat in raw_categories:
-                    cat_id = cat.get("category_id")
+                category_lookup = build_category_lookup(raw_categories)
+                for cat_id, cat in category_lookup.items():
                     cat_path = cat.get("category_path")
-
-                    # Chỉ thêm vào lookup nếu có category_id và category_path
-                    if cat_id and cat_path:
+                    if cat_path:
                         category_path_lookup[cat_id] = cat_path
 
                 logger.info(f"✅ Loaded {len(category_path_lookup)} category_path từ file")

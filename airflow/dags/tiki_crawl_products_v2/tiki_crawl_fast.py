@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-import os
+import logging
 
-from airflow.providers.standard.operators.python import ShortCircuitOperator
+try:
+    from airflow.providers.standard.operators.python import ShortCircuitOperator
+except ImportError:
+    try:
+        from airflow.operators.python import ShortCircuitOperator
+    except ImportError:
+        ShortCircuitOperator = None
 from tiki_crawl_products_v2.bootstrap import (
     DAG,
     DAG_CONFIG,
     PythonOperator,
     TaskGroup,
-    get_int_variable,
     timedelta,
 )
 from tiki_crawl_products_v2.tasks import (
@@ -30,6 +35,13 @@ from tiki_crawl_products_v2.tasks import (
     reconcile_categories_wrapper,
     transform_products,
 )
+
+if ShortCircuitOperator is None:
+
+    class ShortCircuitOperator(PythonOperator):
+        """Local-development fallback when Airflow is not installed."""
+
+        pass
 
 # Safe Mode: airflow DAG
 # This file is an Airflow DAG for Tiki product crawling (Speed Layer).
@@ -132,7 +144,9 @@ with DAG(
             logger.info(f"📂 Đọc {len(categories)} categories từ {categories_file}")
 
             # Tối ưu: Chia thành n batch task để tận dụng tối đa pool (mặc định 3)
-            num_batches = get_int_variable("TIKI_CATEGORY_NUM_BATCHES", default=3)
+            from common.settings import get_int_setting
+
+            num_batches = get_int_setting("TIKI_CATEGORY_NUM_BATCHES")
             total_categories = len(categories)
 
             if total_categories <= num_batches:
@@ -158,6 +172,7 @@ with DAG(
                 task_id="prepare_crawl_kwargs",
                 python_callable=prepare_category_batch_kwargs,
                 execution_timeout=timedelta(minutes=1),
+                show_return_value_in_logs=False,
                 doc_md="""
                 ### Prepare Category Crawl Batches
                 **Nhiệm vụ:** Chia categories thành batches để crawl song song
@@ -178,6 +193,7 @@ with DAG(
                 retries=2,
                 retry_delay=timedelta(seconds=30),
                 priority_weight=10,
+                show_return_value_in_logs=False,
                 doc_md="""
                 ### Crawl Category Batch (Mapped)
                 **Nhiệm vụ:** Crawl products từ một batch categories qua Tiki API
@@ -196,6 +212,7 @@ with DAG(
                 task_id="prepare_crawl_kwargs",
                 python_callable=prepare_crawl_kwargs,
                 execution_timeout=timedelta(minutes=1),
+                show_return_value_in_logs=False,
                 doc_md="""
                 ### Prepare Category Crawl (Single)
                 **Nhiệm vụ:** Chuẩn bị kwargs cho crawl từng category riêng lẻ
@@ -211,6 +228,7 @@ with DAG(
                 retries=2,  # Thêm retries
                 retry_delay=timedelta(seconds=30),
                 priority_weight=10,
+                show_return_value_in_logs=False,
                 doc_md="""
                 ### Crawl Single Category (Mapped)
                 **Nhiệm vụ:** Crawl products từ 1 category qua Tiki API
@@ -228,6 +246,7 @@ with DAG(
             pool="fast_pool",
             trigger_rule="all_done",
             priority_weight=8,
+            show_return_value_in_logs=False,
             doc_md="""
             ### Merge & Save Products
             **Nhiệm vụ:** Merge products từ tất cả category batches và lưu vào file
@@ -248,10 +267,9 @@ with DAG(
         def prepare_detail_kwargs(**context):
             """
             Helper function để prepare op_kwargs cho Dynamic Task Mapping detail.
-            Chia batch thông minh dựa trên số lượng products và max_active_tis_per_dagrun.
+            Chia batch theo số slot đang có để giảm số wave Airflow.
             """
             import logging
-            import math
 
             logger = logging.getLogger("airflow.task")
             ti = context["ti"]
@@ -263,45 +281,33 @@ with DAG(
 
             total_products = len(products_to_crawl)
 
-            # Số batch tasks chạy đồng thời (từ DAG config)
-            max_concurrent_batches = 3
+            from common.detail_batch_planner import plan_detail_batches
+            from common.settings import get_int_setting
 
-            # Tính batch size tối ưu: chia đều cho các batch tasks
-            # Với 1000 products, muốn có 3-6 batches thay vì 12
-            if total_products <= max_concurrent_batches * 10:
-                # Ít products: chia nhỏ để tận dụng 3 tasks song song
-                batch_size = max(1, math.ceil(total_products / max_concurrent_batches))
-            else:
-                # Nhiều products: dùng batch size lớn (300-350) để có ít batches hơn
-                base_batch_size = get_int_variable("TIKI_DETAIL_BATCH_SIZE", default=333)
-                # Điều chỉnh để số batches là bội số của max_concurrent_batches
-                num_batches = max(
-                    max_concurrent_batches, math.ceil(total_products / base_batch_size)
-                )
-                # Làm tròn num_batches lên bội số của max_concurrent_batches
-                num_batches = (
-                    math.ceil(num_batches / max_concurrent_batches) * max_concurrent_batches
-                )
-                batch_size = math.ceil(total_products / num_batches)
+            active_batches = get_int_setting("TIKI_DETAIL_ACTIVE_BATCHES")
+            base_batch_size = get_int_setting("TIKI_DETAIL_BATCH_SIZE")
 
-            batches = [
-                products_to_crawl[i : i + batch_size]
-                for i in range(0, len(products_to_crawl), batch_size)
-            ]
-
-            logger.info(
-                f"📦 Chia {total_products} products thành {len(batches)} batches "
-                f"(size ~{batch_size}) để tối ưu {max_concurrent_batches} tasks song song"
+            batch_kwargs = plan_detail_batches(
+                products_to_crawl,
+                active_batches=active_batches,
+                base_batch_size=base_batch_size,
+            )
+            actual_batch_size = (
+                max(len(item["product_batch"]) for item in batch_kwargs) if batch_kwargs else 0
             )
 
-            return [
-                {"product_batch": batch, "batch_index": idx} for idx, batch in enumerate(batches)
-            ]
+            logger.info(
+                f"📦 Chia {total_products} products thành {len(batch_kwargs)} batches "
+                f"(size tối đa ~{actual_batch_size}) để lấp {active_batches} slots song song"
+            )
+
+            return batch_kwargs
 
         task_prepare_detail = PythonOperator(
             task_id="prepare_products_for_detail",
             python_callable=prepare_products_for_detail,
             execution_timeout=timedelta(minutes=5),
+            show_return_value_in_logs=False,
             doc_md="""
             ### Prepare Products for Detail Crawl
             **Nhiệm vụ:** Lọc products cần crawl detail (chưa có hoặc cũ)
@@ -319,6 +325,7 @@ with DAG(
             task_id="prepare_detail_kwargs",
             python_callable=prepare_detail_kwargs,
             execution_timeout=timedelta(minutes=1),
+            show_return_value_in_logs=False,
             doc_md="""
             ### Prepare Detail Crawl Batches
             **Nhiệm vụ:** Chia products thành batches để crawl detail song song
@@ -340,6 +347,7 @@ with DAG(
             retries=2,
             retry_delay=timedelta(seconds=30),
             priority_weight=9,
+            show_return_value_in_logs=False,
             doc_md="""
             ### Crawl Product Detail Batch (Mapped)
             **Nhiệm vụ:** Crawl chi tiết products (price, sales, brand, seller) qua API
@@ -512,9 +520,13 @@ with DAG(
         # Check if Discord is enabled before running aggregate_and_notify
         def check_discord_enabled(**context):
             """Skip aggregate_and_notify if Discord is disabled."""
-            discord_enabled = os.getenv("DISCORD_ENABLED", "false").lower() == "true"
+            from common.settings import get_bool_setting
+
+            discord_enabled = get_bool_setting("DISCORD_ENABLED", use_airflow=False)
             if not discord_enabled:
-                context["ti"].log.info("⏭️  Discord disabled, skipping aggregate_and_notify")
+                logging.getLogger("airflow.task").info(
+                    "⏭️  Discord disabled, skipping aggregate_and_notify"
+                )
             return discord_enabled
 
         task_check_discord = ShortCircuitOperator(
@@ -537,7 +549,6 @@ with DAG(
             python_callable=aggregate_and_notify,
             execution_timeout=timedelta(minutes=15),
             pool="fast_pool",
-            trigger_rule="all_done",
             priority_weight=2,
             doc_md="""
             ### Aggregate & Notify Discord
@@ -560,6 +571,8 @@ with DAG(
             pool="fast_pool",
             trigger_rule="all_done",
             priority_weight=1,
+            do_xcom_push=False,
+            show_return_value_in_logs=False,
             doc_md="""
             ### Cleanup Redis Cache
             **Nhiệm vụ:** Cleanup Redis cache (nếu cần)
@@ -580,13 +593,15 @@ with DAG(
             pool="fast_pool",
             trigger_rule="all_done",
             priority_weight=1,
+            do_xcom_push=False,
+            show_return_value_in_logs=False,
             doc_md="""
             ### Backup Database
             **Nhiệm vụ:** Backup PostgreSQL database
 
             **Chi tiết:**
-            - Backup database `tiki` bằng pg_dump
-            - Lưu vào `/opt/airflow/data/backups/postgres/`
+            - Backup database cấu hình bởi `POSTGRES_DB` bằng pg_dump
+            - Lưu vào `/opt/airflow/backups/postgres/`
             - Format: SQL plain text (dễ restore)
             - Chạy cuối cùng sau tất cả tasks
 

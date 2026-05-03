@@ -141,9 +141,7 @@ class VectorizedTransformer:
             # Only convert non-None values to string
             mask = df["seller_name"].notna()
             df.loc[mask, "seller_name"] = df.loc[mask, "seller_name"].astype(str).str.strip()
-            # Clean up 'None' strings and empty strings
-            df.loc[df["seller_name"] == "None", "seller_name"] = None
-            df.loc[df["seller_name"] == "", "seller_name"] = None
+            # Match the loop-based transformer: preserve stripped empty strings and "None".
 
         # Clean product_id
         if "product_id" in df.columns:

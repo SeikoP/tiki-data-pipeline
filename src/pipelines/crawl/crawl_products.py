@@ -889,7 +889,7 @@ def crawl_category_products(
                     # Debug: Check if key exists
                     key_exists = redis_cache.exists(cache_key)
                     logger.info(
-                        f"[Redis Cache] ❌ Cache miss cho {category_url[:60]}... (key exists: {key_exists})"
+                        f"[Redis Cache] Cache miss cho {category_url[:60]}... (key exists: {key_exists})"
                     )
             elif force_refresh:
                 logger.info("[Redis Cache] 🔄 Force refresh enabled, skipping cache")

@@ -82,6 +82,7 @@ logs/
 airflow/logs/
 airflow/airflow.cfg
 airflow/config/simple_auth_manager_passwords.json
+passwords.json
 docker-compose.override.yml
 docker-compose.*.yml
 # Keep separate-db version for reference

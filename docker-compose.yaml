@@ -5,70 +5,15 @@ x-airflow-common:
     context: .
     dockerfile: airflow/Dockerfile
   env_file:
-    - .env
+    - ${ENV_FILE_PATH:-.env}
   environment:
     &airflow-common-env
     TZ: Asia/Ho_Chi_Minh
     # Simplified PYTHONPATH for faster imports
     PYTHONPATH: "/opt/airflow/src:/opt/airflow/dags"
     
-    # Task execution optimization
-    AIRFLOW__CORE__TASK_RUNNER: "StandardTaskRunner"  # Faster than BashTaskRunner
-    AIRFLOW__CORE__ALLOWED_DESERIALIZATION_CLASSES: ""
     AIRFLOW__CORE__INTERNAL_API_URL: "http://airflow-webserver:8080"
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
-    
-    # Security
-    AIRFLOW__API_AUTH__JWT_SECRET: ${_AIRFLOW__API_AUTH__JWT_SECRET}
-    AIRFLOW__CORE__SECRET_KEY: ${_AIRFLOW__CORE__SECRET_KEY}
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
-    
-    # Executor and parallelism
-    AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__CORE__DATABASE_ACCESS_ISOLATION: 'false'
-    AIRFLOW__CORE__PARALLELISM: 6
-    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 3
-    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: 1
-    
-    # Database
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
-    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: 10
-    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_RECYCLE: 1800
-    AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: 20
-    
-    # DAG settings
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    
-    # Timeout optimization (reduced from 300s)
-    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 60
-    AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: 60
-    
-    # Auth
-    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${_AIRFLOW_WWW_USER_USERNAME:-admin}:Admin
-    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/data/passwords.json
-    
-    # Logging
-    AIRFLOW__CORE__LOGGING_LEVEL: "INFO"
-    AIRFLOW__LOGGING__LOGGING_LEVEL: "INFO"
-    AIRFLOW__LOGGING__DELETE_LOCAL_LOGS: "True"
-    AIRFLOW__LOGGING__DELETE_LOCAL_LOGS_AFTER_DAYS: 30
-    
-    # Scheduler optimization for faster task pickup
-    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: 'false'
-    AIRFLOW__SCHEDULER__SCHEDULER_HEARTBEAT_SEC: 10  # Increased from 5
-    AIRFLOW__SCHEDULER__PARSING_PROCESSES: 2
-    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 30  # Increased from 10 (less DAG parsing)
-    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 30  # Reduced DAG scanning
-    AIRFLOW__SCHEDULER__FILE_PARSING_SORT_MODE: "modified_time"
-    
-    # DAG processor optimization
-    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: 30  # Increased from 10
-    
-    # Task execution optimization
-    AIRFLOW__SCHEDULER__JOB_HEARTBEAT_SEC: 10  # Increased from 5
-    AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY: 512
 
   volumes:
     - ./airflow/dags:/opt/airflow/dags:ro
@@ -79,6 +24,7 @@ x-airflow-common:
     - ./scripts:/opt/airflow/scripts:ro
     - ./airflow/setup:/opt/airflow/airflow/setup:ro
     - ./backups:/opt/airflow/backups
+    - ./passwords.json:/opt/airflow/external/passwords.json:ro
   depends_on:
     postgres:
       condition: service_healthy
@@ -94,12 +40,9 @@ services:
         max-size: "50m"
         max-file: "3"
     env_file:
-      - .env
+      - ${ENV_FILE_PATH:-.env}
     environment:
       TZ: Asia/Ho_Chi_Minh
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-airflow}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -119,7 +62,7 @@ services:
       -c min_wal_size=512MB
       -c max_wal_size=2GB
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-airflow_user} -d $${POSTGRES_DB:-tiki}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -141,9 +84,9 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secret}
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1 --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret}
+    env_file:
+      - ${ENV_FILE_PATH:-.env}
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1 --appendonly yes --requirepass "$${REDIS_PASSWORD:-redis_secret}"
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -236,10 +179,10 @@ services:
       - -c
       - |
         airflow triggerer &
-        TRIGGERER_PID=$!
+        TRIGGERER_PID=$$!
         sleep 10
         touch /tmp/airflow-triggerer-ready
-        wait $TRIGGERER_PID
+        wait $$TRIGGERER_PID
     deploy:
       resources:
         limits:
@@ -268,7 +211,7 @@ services:
         echo "⏳ Waiting for PostgreSQL..."
         max_attempts=30
         attempt=1
-        while ! pg_isready -h postgres -U ${POSTGRES_USER} 2>/dev/null; do
+        while ! pg_isready -h postgres -U "$${POSTGRES_USER:-airflow_user}" 2>/dev/null; do
           if (( attempt >= max_attempts )); then
             echo "❌ PostgreSQL failed to start"
             exit 1
@@ -281,7 +224,7 @@ services:
         # Wait for Redis
         echo "⏳ Waiting for Redis..."
         attempt=1
-        while ! redis-cli -h redis -a "${REDIS_PASSWORD:-redis_secret}" --no-auth-warning ping > /dev/null 2>&1; do
+        while ! redis-cli -h redis -a "$${REDIS_PASSWORD:-redis_secret}" --no-auth-warning ping > /dev/null 2>&1; do
           if (( attempt >= max_attempts )); then
             echo "❌ Redis failed to start"
             exit 1
@@ -293,7 +236,7 @@ services:
 
         # Fix permissions
         echo "🔧 Fixing data permissions..."
-        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/data || echo "Warning: chown failed"
+        chown -R "$${AIRFLOW_UID:-50000}:0" /opt/airflow/data || echo "Warning: chown failed"
         chmod -R 775 /opt/airflow/data || echo "Warning: chmod failed"
 
         # Create directories
@@ -305,7 +248,7 @@ services:
         echo "Updating Pools and Variables..."
         if [ -f /opt/airflow/airflow/setup/setup_airflow.py ]; then
           su - airflow -c "python /opt/airflow/airflow/setup/setup_airflow.py"
-          if [ $? -ne 0 ]; then
+          if [ $$? -ne 0 ]; then
             echo "❌ Setup script failed - pools and variables not created"
             exit 1
           fi
@@ -321,8 +264,6 @@ services:
         echo "✅ Init Done."
     environment:
       <<: *airflow-common-env
-      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
     networks:
       - backend
 

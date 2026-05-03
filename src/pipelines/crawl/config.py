@@ -5,39 +5,45 @@ Configuration cho crawl pipeline.
 import os
 from typing import Any
 
+from common.settings import get_pipeline_settings, get_setting
+
+_SETTINGS = get_pipeline_settings(use_airflow=False)
+
 
 def get_config() -> dict[str, Any]:
     """
     Get configuration từ environment variables.
     """
-    return {"firecrawl_api_url": os.getenv("FIRECRAWL_API_URL", "http://localhost:3002")}
+    return {"firecrawl_api_url": get_setting("FIRECRAWL_API_URL", use_airflow=False)}
 
 
 # Category level configuration
-MAX_CATEGORY_LEVELS = 5  # Tiki categories can have up to 5 levels with parent category included
+MAX_CATEGORY_LEVELS = _SETTINGS.crawl.max_category_levels
 
 # Category crawling configuration - OPTIMIZED
-CATEGORY_BATCH_SIZE = 20  # Categories per batch (tăng từ 12)
-CATEGORY_TIMEOUT = 120  # Seconds
-CATEGORY_CONCURRENT_REQUESTS = 10  # Tối ưu: 10 concurrent requests
-CATEGORY_POOL_SIZE = 8  # Selenium drivers cho category crawl (vẫn giữ thấp vì API lo phần lớn)
+CATEGORY_BATCH_SIZE = int(get_setting("CATEGORY_BATCH_SIZE", use_airflow=False))
+CATEGORY_TIMEOUT = int(get_setting("CATEGORY_TIMEOUT", use_airflow=False))
+CATEGORY_CONCURRENT_REQUESTS = int(get_setting("CATEGORY_CONCURRENT_REQUESTS", use_airflow=False))
+CATEGORY_POOL_SIZE = int(get_setting("CATEGORY_POOL_SIZE", use_airflow=False))
 
 # Product crawling configuration - OPTIMIZED
-PRODUCT_BATCH_SIZE = 50  # Products per batch (tăng mạnh từ 15 -> 50)
-PRODUCT_TIMEOUT = 60  # Seconds (API rất nhanh, 60s là đủ cho cả batch lớn)
-PRODUCT_POOL_SIZE = 12  # Selenium drivers - match với crawl_pool
+PRODUCT_BATCH_SIZE = int(get_setting("PRODUCT_BATCH_SIZE", use_airflow=False))
+PRODUCT_TIMEOUT = int(get_setting("PRODUCT_TIMEOUT", use_airflow=False))
+PRODUCT_POOL_SIZE = int(get_setting("PRODUCT_POOL_SIZE", use_airflow=False))
 
 # HTTP client configuration - OPTIMIZED
-HTTP_CONNECTOR_LIMIT = 300  # Tổng concurrent HTTP connections (tăng gấp đôi để hỗ trợ batch lớn)
-HTTP_CONNECTOR_LIMIT_PER_HOST = 50  # Per-host limit (tăng cho listing API)
-HTTP_TIMEOUT_TOTAL = 15  # Seconds (giảm timeout vì API response nhanh)
-HTTP_TIMEOUT_CONNECT = 10  # Seconds
-HTTP_DNS_CACHE_TTL = 1800  # Seconds (30 phút - tăng từ 5 phút để giảm DNS lookups)
+HTTP_CONNECTOR_LIMIT = _SETTINGS.crawl.http_connector_limit
+HTTP_CONNECTOR_LIMIT_PER_HOST = _SETTINGS.crawl.http_connector_limit_per_host
+HTTP_TIMEOUT_TOTAL = _SETTINGS.crawl.http_timeout_total
+HTTP_TIMEOUT_CONNECT = _SETTINGS.crawl.http_timeout_connect
+HTTP_DNS_CACHE_TTL = _SETTINGS.crawl.http_dns_cache_ttl
 
 # Redis Cache TTL configuration - CRITICAL FOR CACHE HIT RATE
-REDIS_CACHE_TTL_PRODUCT_DETAIL = 604800  # 7 days (604800 seconds) - long TTL để maximize hits
-REDIS_CACHE_TTL_PRODUCT_LIST = 43200  # 12 hours (43200 seconds) - product lists change more often
-REDIS_CACHE_TTL_HTML = 604800  # 7 days (604800 seconds) - HTML pages stable for 7 days
+REDIS_CACHE_TTL_PRODUCT_DETAIL = int(
+    get_setting("REDIS_CACHE_TTL_PRODUCT_DETAIL", use_airflow=False)
+)
+REDIS_CACHE_TTL_PRODUCT_LIST = int(get_setting("REDIS_CACHE_TTL_PRODUCT_LIST", use_airflow=False))
+REDIS_CACHE_TTL_HTML = int(get_setting("REDIS_CACHE_TTL_HTML", use_airflow=False))
 
 # Cache validation configuration
 CACHE_MIN_FIELDS_FOR_VALIDITY = [
@@ -45,13 +51,13 @@ CACHE_MIN_FIELDS_FOR_VALIDITY = [
     "sales_count",
     "name",
 ]  # Product needs at least one of these
-CACHE_ACCEPT_PARTIAL_DATA = True  # Chấp nhận partial cache (không cần tất cả fields)
+CACHE_ACCEPT_PARTIAL_DATA = bool(get_setting("CACHE_ACCEPT_PARTIAL_DATA", use_airflow=False))
 
 # ========== RETRY CONFIGURATION - HYBRID APPROACH ==========
 # Conditional retry for missing critical fields (seller_name, brand)
-PRODUCT_RETRY_MAX_ATTEMPTS = 2  # Retry up to 2 times for missing critical fields
-PRODUCT_RETRY_DELAY_BASE = 3  # Base delay in seconds between retries
-PRODUCT_RETRY_WAIT_MULTIPLIER = 2  # Multiply wait times on retry (e.g., 4s -> 8s implicit_wait)
+PRODUCT_RETRY_MAX_ATTEMPTS = int(get_setting("PRODUCT_RETRY_MAX_ATTEMPTS", use_airflow=False))
+PRODUCT_RETRY_DELAY_BASE = int(get_setting("PRODUCT_RETRY_DELAY_BASE", use_airflow=False))
+PRODUCT_RETRY_WAIT_MULTIPLIER = int(get_setting("PRODUCT_RETRY_WAIT_MULTIPLIER", use_airflow=False))
 
 # ========== DATA QUALITY THRESHOLDS ==========
 # Fields classification for validation
@@ -68,18 +74,26 @@ DATA_QUALITY_OPTIONAL_FIELDS = [
 ]  # Nice to have
 
 # Minimum completeness score to accept product (0.0 - 1.0)
-DATA_QUALITY_MIN_SCORE = 0.7  # 70% completeness threshold
+DATA_QUALITY_MIN_SCORE = float(get_setting("DATA_QUALITY_MIN_SCORE", use_airflow=False))
 
 # Wait time adjustments for retry (Tier 1 + Tier 2 approach)
 # Tier 1: Normal crawl (moderate increase from current)
-CRAWL_IMPLICIT_WAIT_NORMAL = 4  # seconds (increased from 3s)
-CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL = 4  # seconds (increased from 3s)
-CRAWL_POST_SCROLL_SLEEP_NORMAL = 1.2  # seconds (increased from 0.8s)
+CRAWL_IMPLICIT_WAIT_NORMAL = int(get_setting("CRAWL_IMPLICIT_WAIT_NORMAL", use_airflow=False))
+CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL = int(
+    get_setting("CRAWL_DYNAMIC_CONTENT_WAIT_NORMAL", use_airflow=False)
+)
+CRAWL_POST_SCROLL_SLEEP_NORMAL = float(
+    get_setting("CRAWL_POST_SCROLL_SLEEP_NORMAL", use_airflow=False)
+)
 
 # Tier 2: Retry crawl (2x wait times)
-CRAWL_IMPLICIT_WAIT_RETRY = 8  # seconds (2x normal)
-CRAWL_DYNAMIC_CONTENT_WAIT_RETRY = 8  # seconds (2x normal)
-CRAWL_POST_SCROLL_SLEEP_RETRY = 2.4  # seconds (2x normal)
+CRAWL_IMPLICIT_WAIT_RETRY = int(get_setting("CRAWL_IMPLICIT_WAIT_RETRY", use_airflow=False))
+CRAWL_DYNAMIC_CONTENT_WAIT_RETRY = int(
+    get_setting("CRAWL_DYNAMIC_CONTENT_WAIT_RETRY", use_airflow=False)
+)
+CRAWL_POST_SCROLL_SLEEP_RETRY = float(
+    get_setting("CRAWL_POST_SCROLL_SLEEP_RETRY", use_airflow=False)
+)
 
 # ========== SELLER NAME VALIDATION ==========
 # Default invalid patterns for seller_name (lowercase)

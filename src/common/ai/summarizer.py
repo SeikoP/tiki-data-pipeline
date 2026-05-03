@@ -5,7 +5,6 @@ Module để tổng hợp dữ liệu sử dụng Groq AI.
 import hashlib
 import json
 import logging
-import os
 import re
 import time
 from datetime import datetime, timedelta
@@ -17,17 +16,9 @@ import requests
 try:
     from ..config import AI_CONFIG
 except ImportError:
-    # Fallback: đọc trực tiếp từ environment
-    AI_CONFIG = {
-        "enabled": os.getenv("AI_ENABLED", os.getenv("GROQ_ENABLED", "false")).lower() == "true",
-        "api_key": os.getenv("AI_API_KEY", os.getenv("GROQ_API_KEY", "")),
-        "base_url": os.getenv(
-            "AI_API_BASE", os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
-        ),
-        "model": os.getenv(
-            "AI_MODEL", os.getenv("GROQ_MODEL", "arcee-ai/trinity-large-preview:free")
-        ),
-    }
+    from common.settings import get_pipeline_settings
+
+    AI_CONFIG = get_pipeline_settings(use_airflow=False).ai.as_config()
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +38,14 @@ class AISummarizer:
         self.api_keys = [k.strip() for k in self.raw_api_key.split(",") if k.strip()]
         self.current_key_index = 0
 
-        self.base_url = AI_CONFIG.get("base_url", "https://openrouter.ai/api/v1")
-        self.model = AI_CONFIG.get("model", "arcee-ai/trinity-large-preview:free")
+        self.base_url = AI_CONFIG.get("base_url", "https://api.groq.com/openai/v1")
+        self.model = AI_CONFIG.get("model", "llama-3.3-70b-versatile")
         self.enabled = AI_CONFIG.get("enabled", False)
 
-        if not self.api_keys:
+        if self.enabled and not self.api_keys:
             logger.warning("⚠️  AI_API_KEY không được cấu hình trong environment variables")
         if not self.enabled:
-            logger.warning("⚠️  AI_ENABLED chưa được bật")
+            logger.info("AI summary disabled")
 
         if len(self.api_keys) > 1:
             logger.info(f"🔑 Đã load {len(self.api_keys)} API keys cho Groq AI")
@@ -81,7 +72,7 @@ class AISummarizer:
             String chứa bản tổng hợp từ AI
         """
         if not self.enabled or not self.api_keys:
-            logger.warning("⚠️  Groq AI không được bật hoặc thiếu API key, bỏ qua tổng hợp")
+            logger.info("Groq AI disabled or missing API key, skipping summary")
             return ""
 
         try:

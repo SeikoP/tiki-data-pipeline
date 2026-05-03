@@ -15,9 +15,11 @@ except ImportError:
     print("[INFO] Cai dat: pip install psycopg2-binary")
     sys.exit(1)
 
-# Tìm file .env trong project root
-project_root = Path(__file__).parent.parent
-env_file = project_root / ".env"
+# Tìm file env hợp nhất
+project_root = Path(__file__).parent.parent.parent
+env_file = (
+    Path(os.getenv("ENV_FILE_PATH", "")) if os.getenv("ENV_FILE_PATH") else project_root / ".env"
+)
 
 # SECURITY WARNING: Default values chỉ dùng cho local development/testing
 # Production PHẢI set environment variables trong .env file
@@ -26,7 +28,7 @@ postgres_user = "postgres"
 postgres_password = "postgres"  # DEVELOPMENT ONLY - Override in .env
 postgres_host = "localhost"
 postgres_port = 5432
-postgres_db = "crawl_data"
+postgres_db = "tiki"
 
 if env_file.exists():
     try:

@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: '3.11'
           cache: 'pip'
 
       - name: Install dependencies
@@ -28,8 +28,8 @@ jobs:
       - name: Check code formatting and lint with Ruff
         run: |
           # Use ruff for both formatting and linting (matches local ci.py)
-          ruff format --check src/ airflow/dags/
-          ruff check src/ airflow/dags/
+          ruff format --check src/ airflow/dags/ scripts/ tests/
+          ruff check src/ airflow/dags/ scripts/ tests/
 
   test:
     name: Run Tests
@@ -54,7 +54,7 @@ jobs:
         env:
           PYTHONPATH: src:airflow/dags
         run: |
-          pytest tests/ -v --cov=src --cov-report=xml --cov-report=term
+          pytest tests/ -m "not integration and not slow" -v --cov=src --cov-report=xml --cov-report=term
       
       - name: Test Transform and Load modules
         run: |

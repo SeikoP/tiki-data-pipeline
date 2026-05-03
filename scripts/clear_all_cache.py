@@ -11,7 +11,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import redis
 from dotenv import load_dotenv
 
-env_file = Path(__file__).parent.parent / ".env"
+project_root = Path(__file__).parent.parent
+env_file = (
+    Path(os.getenv("ENV_FILE_PATH", "")) if os.getenv("ENV_FILE_PATH") else project_root / ".env"
+)
 load_dotenv(env_file)
 
 

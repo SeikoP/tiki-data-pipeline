@@ -7,7 +7,7 @@ Kiểm tra:
 """
 
 import json
-import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -17,16 +17,14 @@ from psycopg2.extras import RealDictCursor
 # Đường dẫn files
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from common.settings import get_pipeline_settings  # noqa: E402
+
 PRODUCTS_WITH_DETAIL_FILE = PROJECT_ROOT / "data" / "raw" / "products" / "products_with_detail.json"
 
 # Database connection
-DB_CONFIG = {
-    "host": os.getenv("POSTGRES_HOST", "localhost"),
-    "port": int(os.getenv("POSTGRES_PORT", "5432")),
-    "database": os.getenv("POSTGRES_DB", "crawl_data"),
-    "user": os.getenv("POSTGRES_USER", "postgres"),
-    "password": os.getenv("POSTGRES_PASSWORD", "postgres"),  # trufflehog:ignore
-}
+DB_CONFIG = get_pipeline_settings(use_airflow=False).database.as_dict()
 
 
 def get_products_from_db(product_ids: list[str]) -> dict[str, dict]:

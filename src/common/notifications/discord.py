@@ -3,7 +3,6 @@ Module để gửi thông báo qua Discord webhook.
 """
 
 import logging
-import os
 import time
 from typing import Any
 
@@ -16,12 +15,9 @@ except ImportError:
     try:
         from ...pipelines.crawl.config import DISCORD_CONFIG
     except ImportError:
-        # Fallback: đọc trực tiếp từ environment
-        DISCORD_CONFIG = {
-            "webhook_url": os.getenv("DISCORD_WEBHOOK_URL", ""),
-            "enabled": os.getenv("DISCORD_ENABLED", "false").lower() == "true",
-            "fallback_webhook_url": os.getenv("DISCORD_FALLBACK_WEBHOOK_URL", ""),
-        }
+        from common.settings import get_pipeline_settings
+
+        DISCORD_CONFIG = get_pipeline_settings(use_airflow=False).notifications.as_discord_config()
 
 logger = logging.getLogger(__name__)
 

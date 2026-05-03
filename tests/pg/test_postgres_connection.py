@@ -19,7 +19,7 @@ host = os.getenv("POSTGRES_HOST", "postgres")
 port = int(os.getenv("POSTGRES_PORT", "5432"))
 user = os.getenv("POSTGRES_USER", "airflow_user")
 password = os.getenv("POSTGRES_PASSWORD", "")  # Must be set in .env
-database = os.getenv("POSTGRES_DB", "airflow")
+database = os.getenv("POSTGRES_DB", "tiki")
 
 print("Testing PostgreSQL connection...")
 print(f"Host: {host}, Port: {port}, User: {user}, Database: {database}")

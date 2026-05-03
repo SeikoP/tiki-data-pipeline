@@ -169,7 +169,6 @@ def test_transform_validation():
     assert len(transformed) == stats["valid_products"], "Số products transformed phải khớp"
 
     print("\n✅ Test validation thành công!")
-    return transformed, stats
 
 
 def test_transform_normalization():
@@ -216,7 +215,6 @@ def test_transform_normalization():
         )
 
     print("\n✅ Test normalization thành công!")
-    return transformed
 
 
 def test_transform_db_format():
@@ -319,7 +317,6 @@ def test_load_to_file():
             assert "loaded_at" in data, "File phải có 'loaded_at'"
 
         print("\n✅ Test load to file thành công!")
-        return temp_file
 
     finally:
         # Cleanup
@@ -360,7 +357,6 @@ def test_load_from_file():
             assert stats["file_loaded"] > 0, "Phải có products được load từ file"
 
             print("\n✅ Test load from file thành công!")
-            return output_file
 
         finally:
             if Path(output_file).exists():
@@ -403,7 +399,6 @@ def test_load_integration():
         )
 
         print("\n✅ Test integration thành công!")
-        return transform_stats, load_stats
 
     finally:
         if Path(output_file).exists():

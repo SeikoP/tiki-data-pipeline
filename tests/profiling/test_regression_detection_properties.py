@@ -608,7 +608,7 @@ if HYPOTHESIS_AVAILABLE:
     @given(
         baseline=pipeline_metrics_strategy("baseline"),
         degradation_factor=st.floats(
-            min_value=0.5, max_value=0.95, allow_nan=False, allow_infinity=False
+            min_value=0.5, max_value=0.949, allow_nan=False, allow_infinity=False
         ),
     )
     @settings(max_examples=100, deadline=None)

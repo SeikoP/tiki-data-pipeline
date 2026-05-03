@@ -430,6 +430,11 @@ def parse_categories(html_content, parent_url=None, level=0):
 
 # ========== MAIN ==========
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+
     url = "https://tiki.vn/nha-cua-doi-song/c1883"
 
     # Bước 1: Crawl với Selenium

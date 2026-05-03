@@ -27,3 +27,7 @@ Prefer concise Conventional Commit subjects such as `fix: handle missing seller 
 ## Security & Configuration Tips
 
 Never commit `.env`, credentials, generated data, backups, or logs. Keep secrets in local env files and document only variable names. Before deleting scripts, tests, or docs, verify references with `rg` and avoid reverting unrelated dirty work.
+
+## Configuration & Hardcode Rules
+
+Runtime configuration must go through `src/common/settings.py`. Do not hardcode timeouts, batch sizes, concurrency, pool slots, service hosts, database names, model names, webhook URLs, or credential fallbacks directly in DAGs, tasks, pipeline code, or scripts. If a new runtime value is needed, add it to the settings registry, update `.env.example` and docs, and include validator/test coverage. Inline literals are acceptable only for true domain constants, enum/status values, local test fixtures, or small loop/control values that are not deployment configuration. Secrets must never have non-empty defaults in code.

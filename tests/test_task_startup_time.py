@@ -7,8 +7,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
-def test_import_times():
-    """Test import time của các modules chính"""
+def _measure_import_times():
+    """Measure import time của các modules chính"""
     print("\n" + "=" * 70)
     print("TEST: Import Times")
     print("=" * 70)
@@ -61,8 +61,14 @@ def test_import_times():
     return results
 
 
-def test_bootstrap_import():
-    """Test import time của bootstrap module (DAG file)"""
+def test_import_times():
+    """Test import time của các modules chính"""
+    results = _measure_import_times()
+    assert results
+
+
+def _measure_bootstrap_import():
+    """Measure import time của bootstrap module (DAG file)"""
     print("\n" + "=" * 70)
     print("TEST: Bootstrap Import Time")
     print("=" * 70)
@@ -91,8 +97,14 @@ def test_bootstrap_import():
         return duration
 
 
-def test_task_function_call():
-    """Test thời gian gọi task function"""
+def test_bootstrap_import():
+    """Test import time của bootstrap module (DAG file)"""
+    duration = _measure_bootstrap_import()
+    assert duration >= 0
+
+
+def _measure_task_function_call():
+    """Measure thời gian gọi task function"""
     print("\n" + "=" * 70)
     print("TEST: Task Function Call Time")
     print("=" * 70)
@@ -127,17 +139,23 @@ def test_task_function_call():
         return duration
 
 
+def test_task_function_call():
+    """Test thời gian gọi task function"""
+    duration = _measure_task_function_call()
+    assert duration >= 0
+
+
 if __name__ == "__main__":
     print("\nStarting Task Startup Time Tests...\n")
 
     # Test 1: Import times
-    import_results = test_import_times()
+    import_results = _measure_import_times()
 
     # Test 2: Bootstrap import
-    bootstrap_time = test_bootstrap_import()
+    bootstrap_time = _measure_bootstrap_import()
 
     # Test 3: Task function call
-    task_time = test_task_function_call()
+    task_time = _measure_task_function_call()
 
     # Summary
     print("\n" + "=" * 70)

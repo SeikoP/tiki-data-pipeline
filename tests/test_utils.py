@@ -6,7 +6,7 @@ import os
 import sys
 
 # Thêm src vào path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "pipelines", "crawl"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
 def test_utils_imports():
@@ -19,10 +19,8 @@ def test_utils_imports():
 
     try:
         print("OK: Import utilities thanh cong")
-        return True
     except Exception as e:
-        print(f"FAIL: Import utilities loi: {e}")
-        return False
+        raise AssertionError(f"FAIL: Import utilities loi: {e}") from e
 
 
 def test_parse_sales_count():
@@ -34,7 +32,7 @@ def test_parse_sales_count():
     print("=" * 70)
 
     try:
-        from utils import parse_sales_count
+        from pipelines.crawl.crawl_utils import parse_sales_count
 
         test_cases = [
             (1000, 1000),
@@ -61,13 +59,13 @@ def test_parse_sales_count():
             )
             print(f"  {status}: Input={input_str} -> Output={result} (Expected: {expected})")
 
-        return all_passed
+        assert all_passed
     except Exception as e:
         print(f"FAIL: Test parse_sales_count loi: {e}")
         import traceback
 
         traceback.print_exc()
-        return False
+        raise
 
 
 def test_parse_price():
@@ -79,7 +77,7 @@ def test_parse_price():
     print("=" * 70)
 
     try:
-        from utils import parse_price
+        from pipelines.crawl.crawl_utils import parse_price
 
         test_cases = [
             ("389.000", 389000),
@@ -97,13 +95,13 @@ def test_parse_price():
                 all_passed = False
             print(f"  {status}: Input={input_val} -> Output={result} (Expected: {expected})")
 
-        return all_passed
+        assert all_passed
     except Exception as e:
         print(f"FAIL: Test parse_price loi: {e}")
         import traceback
 
         traceback.print_exc()
-        return False
+        raise
 
 
 def test_extract_product_id():
@@ -115,7 +113,7 @@ def test_extract_product_id():
     print("=" * 70)
 
     try:
-        from utils import extract_product_id_from_url
+        from pipelines.crawl.crawl_utils import extract_product_id_from_url
 
         test_cases = [
             ("https://tiki.vn/p/123456", "123456"),
@@ -132,13 +130,13 @@ def test_extract_product_id():
                 all_passed = False
             print(f"  {status}: URL={url[:50]}... -> Product ID={result} (Expected: {expected})")
 
-        return all_passed
+        assert all_passed
     except Exception as e:
         print(f"FAIL: Test extract_product_id loi: {e}")
         import traceback
 
         traceback.print_exc()
-        return False
+        raise
 
 
 def test_crawl_products_import():
@@ -150,32 +148,19 @@ def test_crawl_products_import():
     print("=" * 70)
 
     try:
-        # Test import với fallback
-        import importlib.util
+        from pipelines.crawl import crawl_products as module
 
-        crawl_products_path = os.path.join(
-            os.path.dirname(__file__), "..", "src", "pipelines", "crawl", "crawl_products.py"
-        )
-
-        if os.path.exists(crawl_products_path):
-            spec = importlib.util.spec_from_file_location("crawl_products", crawl_products_path)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                print("OK: Import crawl_products thanh cong")
-                print(f"   - Has parse_sales_count: {hasattr(module, 'parse_sales_count')}")
-                print(
-                    f"   - Has crawl_category_products: {hasattr(module, 'crawl_category_products')}"
-                )
-                return True
-        print("FAIL: Khong tim thay crawl_products.py")
-        return False
+        print("OK: Import crawl_products thanh cong")
+        print(f"   - Has parse_sales_count: {hasattr(module, 'parse_sales_count')}")
+        print(f"   - Has crawl_category_products: {hasattr(module, 'crawl_category_products')}")
+        assert hasattr(module, "parse_sales_count")
+        assert hasattr(module, "crawl_category_products")
     except Exception as e:
         print(f"FAIL: Import crawl_products loi: {e}")
         import traceback
 
         traceback.print_exc()
-        return False
+        raise
 
 
 def test_crawl_products_detail_import():
@@ -187,33 +172,21 @@ def test_crawl_products_detail_import():
     print("=" * 70)
 
     try:
-        import importlib.util
+        from pipelines.crawl import crawl_products_detail as module
 
-        detail_path = os.path.join(
-            os.path.dirname(__file__), "..", "src", "pipelines", "crawl", "crawl_products_detail.py"
+        print("OK: Import crawl_products_detail thanh cong")
+        print(
+            f"   - Has crawl_product_detail_with_selenium: {hasattr(module, 'crawl_product_detail_with_selenium')}"
         )
-
-        if os.path.exists(detail_path):
-            spec = importlib.util.spec_from_file_location("crawl_products_detail", detail_path)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                print("OK: Import crawl_products_detail thanh cong")
-                print(
-                    f"   - Has crawl_product_detail_with_selenium: {hasattr(module, 'crawl_product_detail_with_selenium')}"
-                )
-                print(
-                    f"   - Has extract_product_detail: {hasattr(module, 'extract_product_detail')}"
-                )
-                return True
-        print("FAIL: Khong tim thay crawl_products_detail.py")
-        return False
+        print(f"   - Has extract_product_detail: {hasattr(module, 'extract_product_detail')}")
+        assert hasattr(module, "crawl_product_detail_with_selenium")
+        assert hasattr(module, "extract_product_detail")
     except Exception as e:
         print(f"FAIL: Import crawl_products_detail loi: {e}")
         import traceback
 
         traceback.print_exc()
-        return False
+        raise
 
 
 def main():

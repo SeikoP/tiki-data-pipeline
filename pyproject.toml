@@ -142,7 +142,7 @@ formatter = "ruff"
 line_length = 100
 
 # Python target version
-target_version = "py39"
+target_version = "py311"
 
 # Skip normalizing string quotes
 skip_string_normalization = false
@@ -215,7 +215,7 @@ tasks = [
 
 [docker]
 # Docker compose file
-compose_file = "docker-compose.yml"
+compose_file = "docker-compose.yaml"
 
 # Services to start for testing
 test_services = ["postgres", "redis"]

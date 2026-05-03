@@ -4,6 +4,7 @@ from __future__ import annotations
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from concurrent.futures import ThreadPoolExecutor
 
+from common.settings import get_bool_setting, get_int_setting
 from tiki_crawl_products_v2.bootstrap import (
     CACHE_DIR,
     CATEGORIES_FILE,
@@ -14,11 +15,9 @@ from tiki_crawl_products_v2.bootstrap import (
     crawl_category_products,
     datetime,
     ensure_output_dirs,
-    get_int_variable,
     get_tiki_circuit_breaker,
     get_tiki_degradation,
     get_tiki_dlq,
-    get_variable,
     json,
     os,
     sys,
@@ -59,18 +58,14 @@ def load_categories(**context) -> list[dict[str, Any]]:
         with open(categories_file, encoding="utf-8") as f:
             categories = json.load(f)
 
+        from common.category_utils import normalize_category_tree
+
+        categories = normalize_category_tree(categories)
         logger.info(f"✅ Đã load {len(categories)} danh mục")
-
-        # 1. Xác định is_leaf cho từng danh mục
-        # Một danh mục là leaf nếu URL của nó không được dùng làm parent_url của bất kỳ danh mục nào khác
-        parent_urls = {cat.get("parent_url") for cat in categories if cat.get("parent_url")}
-
-        for cat in categories:
-            cat["is_leaf"] = cat.get("url") not in parent_urls
 
         # 2. Lọc danh mục: Chỉ lấy leaf categories theo đúng định hướng
         # Cho phép override bằng variable nếu cần (mặc định crawl_only_leaf=True)
-        crawl_only_leaf = get_variable("TIKI_CRAWL_ONLY_LEAF", default="true").lower() == "true"
+        crawl_only_leaf = get_bool_setting("TIKI_CRAWL_ONLY_LEAF")
 
         if crawl_only_leaf:
             original_count = len(categories)
@@ -81,8 +76,8 @@ def load_categories(**context) -> list[dict[str, Any]]:
         else:
             # Fallback về lọc theo level nếu không chỉ lọc leaf
             try:
-                min_level = get_int_variable("TIKI_MIN_CATEGORY_LEVEL", default=2)
-                max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
+                min_level = get_int_setting("TIKI_MIN_CATEGORY_LEVEL")
+                max_level = get_int_setting("TIKI_MAX_CATEGORY_LEVEL")
             except Exception:
                 min_level, max_level = 2, 4
             categories = [
@@ -205,18 +200,18 @@ def crawl_single_category(
         max_pages = (
             max_pages_param
             if max_pages_param is not None
-            else int(get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20"))
+            else get_int_setting("TIKI_MAX_PAGES_PER_CATEGORY")
         )
         use_selenium = (
             use_selenium_param
             if use_selenium_param is not None
-            else get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
+            else get_bool_setting("TIKI_USE_SELENIUM")
         )
-        timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300"))
+        timeout = get_int_setting("TIKI_CRAWL_TIMEOUT")
 
         # Thêm cấu hình cache
-        force_refresh = get_variable("TIKI_FORCE_REFRESH", default="false").lower() == "true"
-        cache_ttl = int(get_variable("TIKI_CACHE_TTL", default="86400"))
+        force_refresh = get_bool_setting("TIKI_FORCE_REFRESH")
+        cache_ttl = get_int_setting("TIKI_CACHE_TTL")
 
         # Rate limiting: được xử lý bên trong crawl_category_products (smart rate limit / cache check)
         # Không sleep ở đây để tránh chậm khi hit cache
@@ -374,9 +369,9 @@ def crawl_category_batch(
         return []
 
     # Lấy cấu hình cho cả batch
-    max_pages = int(get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20"))
-    use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
-    concurrency = int(get_variable("TIKI_CATEGORY_CONCURRENCY", default="6"))
+    max_pages = get_int_setting("TIKI_MAX_PAGES_PER_CATEGORY")
+    use_selenium = get_bool_setting("TIKI_USE_SELENIUM")
+    concurrency = get_int_setting("TIKI_CATEGORY_CONCURRENCY")
 
     def process_category(cat):
         try:
@@ -402,5 +397,15 @@ def crawl_category_batch(
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         results = list(executor.map(process_category, category_batch))
 
-    logger.info(f"✅ Hoàn thành BATCH CATEGORY {batch_index}: {len(results)} kết quả")
+    success_count = sum(1 for item in results if item.get("status") == "success")
+    failed_count = sum(1 for item in results if item.get("status") == "failed")
+    product_count = sum(len(item.get("products", [])) for item in results)
+    logger.info(
+        "✅ Hoàn thành BATCH CATEGORY %s: categories=%s success=%s failed=%s products=%s",
+        batch_index,
+        len(results),
+        success_count,
+        failed_count,
+        product_count,
+    )
     return results

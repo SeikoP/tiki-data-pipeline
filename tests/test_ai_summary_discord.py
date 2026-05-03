@@ -7,6 +7,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 # Fix encoding cho Windows console
 if sys.platform == "win32":
     try:
@@ -22,9 +24,14 @@ common_path = os.path.join(src_path, "common")
 pipelines_path = os.path.join(src_path, "pipelines")
 crawl_path = os.path.join(pipelines_path, "crawl")
 
-# Load .env từ src/common/ nếu có
-env_file = os.path.join(common_path, ".env")
-if os.path.exists(env_file):
+# Load env hợp nhất nếu có
+env_candidates = [
+    os.getenv("ENV_FILE_PATH", ""),
+    os.path.join(project_root, ".env"),
+    os.path.join(common_path, ".env"),
+]
+env_file = next((path for path in env_candidates if path and os.path.exists(path)), "")
+if env_file:
     try:
         from dotenv import load_dotenv
 
@@ -140,7 +147,7 @@ def create_sample_data_file(output_path: str) -> str:
     return output_path
 
 
-def test_data_aggregator():
+def _run_data_aggregator():
     """Test 1: Kiểm tra DataAggregator"""
     print("=" * 70)
     print("🧪 TEST 1: DataAggregator - Tổng hợp dữ liệu")
@@ -204,6 +211,11 @@ def test_data_aggregator():
         return None
 
 
+def test_data_aggregator():
+    """Test 1: Kiểm tra DataAggregator"""
+    assert _run_data_aggregator()
+
+
 def test_ai_summarizer(summary=None):
     """Test 2: Kiểm tra AISummarizer"""
     print("\n" + "=" * 70)
@@ -221,9 +233,9 @@ def test_ai_summarizer(summary=None):
         print("\n⚙️  Cấu hình:")
         print(f"   - Enabled: {summarizer.enabled}")
         print(f"   - Model: {summarizer.model}")
-        print(f"   - API Key: {'✅ Có' if summarizer.api_key else '❌ Không có'}")
+        print(f"   - API Key: {'✅ Có' if summarizer.api_keys else '❌ Không có'}")
 
-        if not summarizer.enabled or not summarizer.api_key:
+        if not summarizer.enabled or not summarizer.api_keys:
             print("\n⚠️  Groq AI chưa được bật hoặc thiếu API key")
             print("   💡 Để test đầy đủ, cần set environment variables:")
             print("      - GROQ_ENABLED=true")
@@ -254,7 +266,7 @@ def test_ai_summarizer(summary=None):
         return None
 
 
-def test_discord_notifier(ai_summary=None, stats=None):
+def _run_discord_notifier(ai_summary=None, stats=None):
     """Test 3: Kiểm tra DiscordNotifier"""
     print("\n" + "=" * 70)
     print("🧪 TEST 3: DiscordNotifier - Gửi thông báo qua Discord")
@@ -274,7 +286,7 @@ def test_discord_notifier(ai_summary=None, stats=None):
             print("      - DISCORD_ENABLED=true")
             print("      - DISCORD_WEBHOOK_URL=your_webhook_url")
             print("\n   ⏭️  Bỏ qua test gửi Discord (chỉ test cấu hình)")
-            return False
+            return None
 
         # Test send message
         print("\n📤 Test gửi thông báo...")
@@ -317,7 +329,13 @@ def test_discord_notifier(ai_summary=None, stats=None):
         return False
 
 
-def test_integration():
+def test_discord_notifier():
+    """Test 3: Kiểm tra DiscordNotifier"""
+    result = _run_discord_notifier()
+    assert result is not False
+
+
+def _run_integration():
     """Test 4: Test tích hợp toàn bộ flow"""
     print("\n" + "=" * 70)
     print("🧪 TEST 4: Integration Test - Toàn bộ flow")
@@ -339,7 +357,7 @@ def test_integration():
         # 2. Tổng hợp với AI
         summarizer = AISummarizer()
         ai_summary = None
-        if summarizer.enabled and summarizer.api_key:
+        if summarizer.enabled and summarizer.api_keys:
             ai_summary = summarizer.summarize_data(summary, max_tokens=1000)
             if ai_summary:
                 print("✅ Bước 2: Tổng hợp với AI thành công")
@@ -379,7 +397,12 @@ def test_integration():
         return False
 
 
-def test_with_real_data():
+def test_integration():
+    """Test 4: Test tích hợp toàn bộ flow"""
+    assert _run_integration()
+
+
+def _run_with_real_data():
     """Test 5: Test với dữ liệu thực từ products_with_detail.json"""
     print("\n" + "=" * 70)
     print("🧪 TEST 5: Test với dữ liệu thực")
@@ -404,6 +427,8 @@ def test_with_real_data():
     if not data_file:
         print("⚠️  Không tìm thấy file products_with_detail.json")
         print("   💡 Cần crawl dữ liệu trước hoặc tạo file test")
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            pytest.skip("Missing products_with_detail.json")
         return None
 
     print(f"📂 Sử dụng file: {data_file}")
@@ -425,7 +450,7 @@ def test_with_real_data():
 
         # Test AI summary nếu có config
         summarizer = AISummarizer()
-        if summarizer.enabled and summarizer.api_key:
+        if summarizer.enabled and summarizer.api_keys:
             print("\n🤖 Đang tổng hợp với AI...")
             ai_summary = summarizer.summarize_data(summary, max_tokens=2000)
             if ai_summary:
@@ -446,6 +471,11 @@ def test_with_real_data():
         return None, None
 
 
+def test_with_real_data():
+    """Test 5: Test với dữ liệu thực từ products_with_detail.json"""
+    _run_with_real_data()
+
+
 def main():
     """
     Chạy tất cả tests.
@@ -464,7 +494,7 @@ def main():
 
     # Test 1: DataAggregator
     try:
-        summary = test_data_aggregator()
+        summary = _run_data_aggregator()
         if summary:
             results["data_aggregator"] = True
     except Exception as e:
@@ -481,7 +511,7 @@ def main():
     # Test 3: DiscordNotifier
     try:
         stats = summary.get("statistics", {}) if summary else {}
-        discord_success = test_discord_notifier(ai_summary, stats)
+        discord_success = _run_discord_notifier(ai_summary, stats)
         if discord_success:
             results["discord_notifier"] = True
     except Exception as e:
@@ -489,7 +519,7 @@ def main():
 
     # Test 4: Integration
     try:
-        integration_success = test_integration()
+        integration_success = _run_integration()
         if integration_success:
             results["integration"] = True
     except Exception as e:
@@ -497,7 +527,7 @@ def main():
 
     # Test 5: Real data
     try:
-        real_ai_summary, real_stats = test_with_real_data()
+        real_ai_summary, real_stats = _run_with_real_data()
         if real_ai_summary or real_stats:
             results["real_data"] = True
     except Exception as e:

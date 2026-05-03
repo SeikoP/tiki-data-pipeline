@@ -8,11 +8,16 @@ script này sẽ:
 3. Verify kết quả
 """
 
-import os
 import sys
+from pathlib import Path
 
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from common.settings import get_pipeline_settings  # noqa: E402
 
 
 def fix_category_path_null():
@@ -20,12 +25,12 @@ def fix_category_path_null():
     Fix NULL category_path values.
     """
 
-    # Get DB connection info
-    db_host = os.getenv("POSTGRES_HOST", "localhost")
-    db_port = os.getenv("POSTGRES_PORT", "5432")
-    db_name = os.getenv("POSTGRES_DB", "crawl_data")
-    db_user = os.getenv("POSTGRES_USER", "airflow")
-    db_password = os.getenv("POSTGRES_PASSWORD", "airflow")
+    db_settings = get_pipeline_settings(use_airflow=False).database
+    db_host = db_settings.host
+    db_port = db_settings.port
+    db_name = db_settings.database
+    db_user = db_settings.user
+    db_password = db_settings.password
 
     try:
         # Connect to database

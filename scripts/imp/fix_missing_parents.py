@@ -32,7 +32,7 @@ script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent.parent
 src_path = project_root / "src"
 
-# Load .env file từ project root
+# Load env file hợp nhất
 load_dotenv(project_root / ".env")
 
 # Thêm vào path với nhiều fallback

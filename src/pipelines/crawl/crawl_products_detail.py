@@ -1758,13 +1758,20 @@ async def crawl_product_detail_via_api(
                     elif is_html_response:
                         status_desc = "200 (HTML instead of JSON)"
 
+                    is_last_attempt = attempt == max_retries - 1
                     if verbose:
-                        logger.warning(
-                            "[API] ⚠️ Attempt %d failed with status %s for ID %s. Retrying...",
+                        log_func = logger.info if is_last_attempt else logger.debug
+                        next_action = "Trying HTML fallback." if is_last_attempt else "Retrying..."
+                        log_func(
+                            "[API] Attempt %d/%d got status %s for ID %s. %s",
                             attempt + 1,
+                            max_retries,
                             status_desc,
                             product_id,
+                            next_action,
                         )
+                    if is_last_attempt:
+                        return None
                     await asyncio.sleep(retry_delay * (2**attempt))
                     continue
                 else:

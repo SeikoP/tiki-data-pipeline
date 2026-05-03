@@ -62,7 +62,7 @@ echo "📋 Configuration Summary"
 echo "=========================================="
 echo ""
 echo "Pools:"
-airflow pools list 2>/dev/null | grep -E "(crawl_pool|Pool)" | head -5
+airflow pools list 2>/dev/null | grep -E "(fast_pool|crawl_pool|Pool)" | head -5
 echo ""
 echo "Variables (sample):"
 airflow variables list 2>/dev/null | head -10
