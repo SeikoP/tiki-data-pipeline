@@ -72,47 +72,52 @@ except ImportError:
     HAS_TQDM = False
     logger.warning("⚠️  Khuyến nghị cài đặt tqdm để hiển thị progress bar: pip install tqdm")
 
-    # Fallback progress bar đơn giản
-    class tqdm:
-        def __init__(self, iterable=None, total=None, desc="", **kwargs):
-            self.iterable = iterable
-            self.total = total or (len(iterable) if iterable else 0)
-            self.desc = desc
-            self.n = 0
-            self.start_time = time.time()
+    tqdm = None
 
-        def __enter__(self):
+
+class SafeProgress:
+    """Minimal tqdm-compatible progress helper for non-interactive or closed stdout runs."""
+
+    def __init__(self, iterable=None, total=None, desc="", **kwargs):
+        self.iterable = iterable
+        self.total = total or (len(iterable) if iterable else 0)
+        self.desc = desc
+        self.n = 0
+        self.start_time = time.time()
+
+    def __enter__(self):
+        logger.info("%s: starting %s items", self.desc, self.total)
+        return self
+
+    def __exit__(self, *args):
+        logger.info("%s: completed %s/%s items", self.desc, self.n, self.total)
+
+    def __iter__(self):
+        if self.iterable:
+            for item in self.iterable:
+                self.update(1)
+                yield item
+        else:
             return self
 
-        def __exit__(self, *args):
-            pass
+    def update(self, n=1):
+        self.n += n
 
-        def __iter__(self):
-            if self.iterable:
-                for item in self.iterable:
-                    self.n += 1
-                    self.update(1)
-                    yield item
-            else:
-                return self
+    def set_description(self, desc):
+        self.desc = desc
 
-        def update(self, n=1):
-            self.n += n
-            if self.total > 0:
-                pct = (self.n / self.total) * 100
-                elapsed = time.time() - self.start_time
-                if self.n > 0:
-                    rate = self.n / elapsed if elapsed > 0 else 0
-                    eta = (self.total - self.n) / rate if rate > 0 else 0
-                    logger.info(
-                        f"\r{self.desc} {self.n}/{self.total} ({pct:.1f}%) | "
-                        f"Tốc độ: {rate:.2f}/s | ETA: {eta:.0f}s",
-                        end="",
-                        flush=True,
-                    )
+    def set_postfix(self, _postfix=None, **kwargs):
+        pass
 
-        def set_description(self, desc):
-            self.desc = desc
+
+def progress_bar(*args, **kwargs):
+    if not HAS_TQDM or tqdm is None or sys.stdout.closed:
+        return SafeProgress(*args, **kwargs)
+    try:
+        return tqdm(*args, file=sys.stdout, **kwargs)
+    except Exception as exc:
+        logger.warning("Progress bar unavailable, continuing without tqdm: %s", exc)
+        return SafeProgress(*args, **kwargs)
 
 
 # Tạo thư mục output (deferred to avoid import-time side effects)
@@ -269,7 +274,7 @@ def crawl_level_parallel(
 
     # Tạo progress bar
     desc = f"Level {level}"
-    with tqdm(total=len(tasks), desc=desc, unit="danh mục") as pbar:
+    with progress_bar(total=len(tasks), desc=desc, unit="danh mục") as pbar:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit tất cả tasks
             future_to_url = {}
@@ -523,10 +528,10 @@ def main():
     # Default: danh sách mặc định nếu không có config
     if not root_urls:
         root_urls = [
-            "https://tiki.vn/thoi-trang-nu/c931",
+            #"https://tiki.vn/thoi-trang-nu/c931",
             # Có thể thêm các root categories khác ở đây
-            # "https://tiki.vn/nha-cua-doi-song/c1883",
-            # "https://tiki.vn/dien-tu-dien-lanh/c4221",
+             "https://tiki.vn/nha-cua-doi-song/c1883",
+             "https://tiki.vn/dien-tu-dien-lanh/c4221",
         ]
         print("ℹ️  Sử dụng root categories mặc định")
 

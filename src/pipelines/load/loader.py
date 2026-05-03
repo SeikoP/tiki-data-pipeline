@@ -7,6 +7,7 @@ Improvements over loader.py:
 - Better error handling per batch
 """
 
+import inspect
 import json
 import logging
 from datetime import datetime
@@ -16,6 +17,7 @@ from typing import Any
 from common.batch_processor import BatchProcessor
 from common.db_schema import ensure_crawl_schema
 from common.monitoring import PerformanceTimer
+from common.pipeline_tracking import load_layered_products
 
 # Import profiling utilities
 from common.profiling import profile_loader
@@ -133,6 +135,7 @@ class OptimizedDataLoader:
         validate_before_load: bool = True,
         save_to_file: str | None = None,
         raise_on_db_error: bool = False,
+        crawl_run_id: int | None = None,
     ) -> dict[str, Any]:
         """Load products vào database với connection pooling.
 
@@ -158,7 +161,10 @@ class OptimizedDataLoader:
 
             # Load vào database
             if self.enable_db:
-                self._load_to_database(products, upsert)
+                if "crawl_run_id" in inspect.signature(self._load_to_database).parameters:
+                    self._load_to_database(products, upsert, crawl_run_id=crawl_run_id)
+                else:
+                    self._load_to_database(products, upsert)
                 db_failed = self.stats["failed_count"] > 0 or bool(self.stats["errors"])
                 nothing_loaded = products and self.stats["db_loaded"] == 0
                 if raise_on_db_error and (db_failed or nothing_loaded):
@@ -208,7 +214,9 @@ class OptimizedDataLoader:
 
         return valid_products
 
-    def _load_to_database(self, products: list[dict], upsert: bool):
+    def _load_to_database(
+        self, products: list[dict], upsert: bool, crawl_run_id: int | None = None
+    ):
         """
         Load products vào database với batch processing.
         """
@@ -219,7 +227,7 @@ class OptimizedDataLoader:
                 """
                 Process một batch products.
                 """
-                self._upsert_batch(batch, upsert, db_pool)
+                self._upsert_batch(batch, upsert, db_pool, crawl_run_id=crawl_run_id)
 
             # Process với BatchProcessor
             batch_stats = self.batch_processor.process(
@@ -248,21 +256,16 @@ class OptimizedDataLoader:
             if not self.continue_on_error:
                 raise
 
-    def _upsert_batch(self, batch: list[dict], upsert: bool, db_pool):
+    def _upsert_batch(
+        self, batch: list[dict], upsert: bool, db_pool, crawl_run_id: int | None = None
+    ):
         """
         Upsert một batch vào database using execute_values for performance.
         """
         with db_pool.get_cursor(commit=True) as cursor:
             if upsert:
-                if EXECUTE_VALUES_AVAILABLE:
-                    self._upsert_batch_values(cursor, batch)
-                else:
-                    # Fallback to row-by-row if execute_values not available
-                    for product in batch:
-                        self._upsert_product(cursor, product)
-
-                # Log crawl history (simple implementation)
-                self._log_crawl_history(cursor, batch)
+                loaded_count = load_layered_products(cursor, batch, crawl_run_id)
+                self.stats["inserted_count"] += loaded_count
             else:
                 if EXECUTE_VALUES_AVAILABLE:
                     self._insert_batch_values(cursor, batch)

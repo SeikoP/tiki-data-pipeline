@@ -1789,10 +1789,9 @@ class PostgresStorage:
         self, archive_months: int = 6, delete_months: int = 12
     ) -> dict[str, Any]:
         """
-        Cleanup old crawl history records:
-        - Archive records older than `archive_months`
-        - Delete records older than `delete_months`
-        - Vacuum table to reclaim space
+        Cleanup old snapshot records:
+        - Archive product_prices and product_metrics older than `archive_months`
+        - Delete snapshot records older than `delete_months`
 
         Returns:
             Dict with statistics on archived and deleted records
@@ -1810,38 +1809,52 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                # 1. Create archive table if not exists
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS crawl_history_archive (
-                        LIKE crawl_history INCLUDING ALL
-                    );
-                    """)
+                    CREATE TABLE IF NOT EXISTS product_prices_archive (
+                        LIKE product_prices INCLUDING ALL
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS product_metrics_archive (
+                        LIKE product_metrics INCLUDING ALL
+                    )
+                """)
 
-                # 2. Archive records
                 cur.execute(
                     """
-                    INSERT INTO crawl_history_archive
-                    SELECT * FROM crawl_history
-                    WHERE crawled_at >= %s AND crawled_at < %s
+                    INSERT INTO product_prices_archive
+                    SELECT * FROM product_prices
+                    WHERE recorded_at >= %s AND recorded_at < %s
                     ON CONFLICT DO NOTHING
                     """,
                     (delete_date, archive_date),
                 )
-                result["archived_count"] = cur.rowcount
-
-                # 3. Delete old records
+                archived_prices = cur.rowcount
                 cur.execute(
-                    "DELETE FROM crawl_history WHERE crawled_at < %s",
+                    """
+                    INSERT INTO product_metrics_archive
+                    SELECT * FROM product_metrics
+                    WHERE recorded_at >= %s AND recorded_at < %s
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (delete_date, archive_date),
+                )
+                archived_metrics = cur.rowcount
+
+                cur.execute(
+                    "DELETE FROM product_prices WHERE recorded_at < %s",
                     (delete_date,),
                 )
-                result["deleted_count"] = cur.rowcount
+                deleted_prices = cur.rowcount
+                cur.execute(
+                    "DELETE FROM product_metrics WHERE recorded_at < %s",
+                    (delete_date,),
+                )
+                deleted_metrics = cur.rowcount
 
+                result["archived_count"] = archived_prices + archived_metrics
+                result["deleted_count"] = deleted_prices + deleted_metrics
                 conn.commit()
-
-                # 4. Vacuum (cannot be inside a transaction block in some versions,
-                # but with autocommit=True it works. SimpleConnectionPool usually uses autocommit=False)
-                # We'll skip VACUUM here to avoid transaction issues in Airflow tasks,
-                # as VACUUM is often managed by Autovacuum anyway.
 
         return result
 

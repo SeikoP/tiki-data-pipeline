@@ -33,6 +33,22 @@ def _resolve_product_load_mode(raw_mode: str | None, product_count: int, thresho
     raise ValueError("TIKI_LOAD_MODE must be one of: auto, safe, traditional, optimized, bulk")
 
 
+def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
+    ti = context.get("ti")
+    if not ti:
+        return None
+    for task_id in ("start_crawl_run", "pipeline_tracking.start_crawl_run"):
+        try:
+            result = ti.xcom_pull(task_ids=task_id)
+        except Exception:
+            continue
+        if isinstance(result, dict) and result.get("crawl_run_id"):
+            return int(result["crawl_run_id"])
+        if isinstance(result, int):
+            return result
+    return None
+
+
 def fix_missing_parent_categories(**context) -> dict[str, Any]:
     """Fix missing parent categories và rebuild category_path đầy đủ.
 
@@ -424,6 +440,9 @@ def load_products(**context) -> dict[str, Any]:
 
         products = data.get("products", [])
         logger.info(f"📊 Tổng số products để load: {len(products)}")
+        crawl_run_id = _get_crawl_run_id(context)
+        if crawl_run_id:
+            logger.info("🧾 Loading snapshots for crawl_run_id=%s", crawl_run_id)
 
         # Import OptimizedDataLoader
         try:
@@ -514,6 +533,7 @@ def load_products(**context) -> dict[str, Any]:
                     validate_before_load=True,
                     save_to_file=str(final_file),
                     raise_on_db_error=not allow_file_only,
+                    crawl_run_id=crawl_run_id,
                 )
                 if not allow_file_only and load_stats.get("db_loaded", 0) < len(products):
                     raise RuntimeError(

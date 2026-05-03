@@ -24,7 +24,7 @@ x-airflow-common:
     - ./scripts:/opt/airflow/scripts:ro
     - ./airflow/setup:/opt/airflow/airflow/setup:ro
     - ./backups:/opt/airflow/backups
-    - ./passwords.json:/opt/airflow/external/passwords.json:ro
+    - ./passwords.json:/opt/airflow/external/passwords.json
   depends_on:
     postgres:
       condition: service_healthy
@@ -86,13 +86,19 @@ services:
         max-file: "3"
     env_file:
       - ${ENV_FILE_PATH:-.env}
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1 --appendonly yes --requirepass "$${REDIS_PASSWORD:-redis_secret}"
+    command:
+      - sh
+      - -c
+      - >
+        exec redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+        --save 60 1 --appendonly yes
+        --requirepass "$${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD --no-auth-warning ping | grep PONG"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD:?REDIS_PASSWORD is required}\" --no-auth-warning ping | grep PONG"]
       interval: 10s
     deploy:
       resources:
@@ -166,6 +172,36 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  airflow-dag-processor:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        exec airflow dag-processor
+    hostname: airflow-dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --local || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          memory: 512M
+    stop_grace_period: 30s
+    restart: unless-stopped
+    networks:
+      - backend
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
   airflow-triggerer:
     <<: *airflow-common
     healthcheck:
@@ -224,7 +260,7 @@ services:
         # Wait for Redis
         echo "⏳ Waiting for Redis..."
         attempt=1
-        while ! redis-cli -h redis -a "$${REDIS_PASSWORD:-redis_secret}" --no-auth-warning ping > /dev/null 2>&1; do
+        while ! redis-cli -h redis -a "$${REDIS_PASSWORD:?REDIS_PASSWORD is required}" --no-auth-warning ping > /dev/null 2>&1; do
           if (( attempt >= max_attempts )); then
             echo "❌ Redis failed to start"
             exit 1
@@ -243,11 +279,11 @@ services:
         mkdir -p /opt/airflow/logs /opt/airflow/plugins /opt/airflow/data
         
         echo "Updating Airflow DB..."
-        su - airflow -c "airflow db migrate"
+        su airflow -c "airflow db migrate"
         
         echo "Updating Pools and Variables..."
         if [ -f /opt/airflow/airflow/setup/setup_airflow.py ]; then
-          su - airflow -c "python /opt/airflow/airflow/setup/setup_airflow.py"
+          su airflow -c "python /opt/airflow/airflow/setup/setup_airflow.py"
           if [ $$? -ne 0 ]; then
             echo "❌ Setup script failed - pools and variables not created"
             exit 1
@@ -259,7 +295,7 @@ services:
         fi
         
         echo "Checking Airflow version..."
-        su - airflow -c "airflow version" || { echo "❌ Airflow binary check failed"; exit 1; }
+        su airflow -c "airflow version" || { echo "❌ Airflow binary check failed"; exit 1; }
 
         echo "✅ Init Done."
     environment:

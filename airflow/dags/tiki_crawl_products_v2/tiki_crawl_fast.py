@@ -26,6 +26,7 @@ from tiki_crawl_products_v2.tasks import (
     crawl_category_batch,
     crawl_product_batch_fast,
     crawl_single_category,
+    finish_crawl_run,
     load_categories,
     load_categories_to_db_wrapper,
     load_products,
@@ -33,6 +34,7 @@ from tiki_crawl_products_v2.tasks import (
     merge_products,
     prepare_products_for_detail,
     reconcile_categories_wrapper,
+    start_crawl_run,
     transform_products,
 )
 
@@ -52,6 +54,17 @@ with DAG(
     description="Speed Layer: API-based Fast Crawling",
     **{k: v for k, v in DAG_CONFIG.items() if k not in ["dag_id", "description"]},
 ) as dag:
+    task_start_crawl_run = PythonOperator(
+        task_id="start_crawl_run",
+        python_callable=start_crawl_run,
+        execution_timeout=timedelta(minutes=2),
+        pool="fast_pool",
+        doc_md="""
+        ### Start Crawl Run
+        **Nhiệm vụ:** Tạo row tracking trong `crawl_runs` cho DAG run hiện tại.
+        """,
+    )
+
     # ===== STEP 1: PRE-CRAWL CLEANUP & LOAD =====
     with TaskGroup("pre_crawl") as pre_crawl_group:
         task_cleanup_products = PythonOperator(
@@ -355,7 +368,7 @@ with DAG(
             **Chi tiết:**
             - Crawl async với aiohttp (nhanh hơn Selenium)
             - Lấy thông tin: price, sales_count, brand, seller, rating
-            - Lưu vào crawl_history để track price changes
+            - Lưu snapshot giá/metrics vào `product_prices` và `product_metrics`
             - Retry 2 lần nếu fail
 
             **Output:** List product details từ batch này
@@ -447,7 +460,7 @@ with DAG(
 
             **Chi tiết:**
             - Bulk insert/update products vào bảng `products`
-            - Lưu price history vào bảng `crawl_history`
+            - Lưu price/metric snapshots theo crawl run
             - Sử dụng UPSERT (ON CONFLICT UPDATE)
             - Track inserted/updated counts
 
@@ -609,16 +622,34 @@ with DAG(
             """,
         )
 
+        task_finish_crawl_run = PythonOperator(
+            task_id="finish_crawl_run",
+            python_callable=finish_crawl_run,
+            execution_timeout=timedelta(minutes=2),
+            pool="fast_pool",
+            trigger_rule="all_done",
+            priority_weight=1,
+            doc_md="""
+            ### Finish Crawl Run
+            **Nhiệm vụ:** Cập nhật trạng thái cuối cùng cho `crawl_runs`.
+            """,
+        )
+
         task_reconcile >> task_cleanup_categories
 
         # Aggregate and notify - only if Discord enabled
         task_cleanup_categories >> task_check_discord >> task_aggregate_and_notify
+        [
+            task_cleanup_categories,
+            task_cleanup_cache,
+            task_backup_database,
+        ] >> task_finish_crawl_run
 
     # ===== FINAL DAG DEPENDENCIES =====
     # Loại bỏ labels và empty operators để tasks gần nhau hơn
 
     # Main flow: pre_crawl → crawl → process
-    pre_crawl_group >> crawl_group >> process_group
+    task_start_crawl_run >> pre_crawl_group >> crawl_group >> process_group
 
     # detail_group bắt đầu ngay sau merge_products (parallel với process_group)
     task_merge_products >> detail_group

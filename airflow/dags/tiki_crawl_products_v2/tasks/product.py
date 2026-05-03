@@ -25,6 +25,22 @@ from tiki_crawl_products_v2.tasks.optimizations import (
 )
 
 
+def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
+    ti = context.get("ti")
+    if not ti:
+        return None
+    for task_id in ("start_crawl_run", "pipeline_tracking.start_crawl_run"):
+        try:
+            value = ti.xcom_pull(task_ids=task_id)
+        except Exception:
+            continue
+        if isinstance(value, dict) and value.get("crawl_run_id"):
+            return int(value["crawl_run_id"])
+        if isinstance(value, int):
+            return value
+    return None
+
+
 @profile_task("merge_products")
 def merge_products(**context) -> dict[str, Any]:
     """
@@ -225,6 +241,20 @@ def merge_products(**context) -> dict[str, Any]:
 
         stats["raw_products"] = stats["total_products"]
         stats["unique_products"] = len(unique_products)
+        crawl_run_id = _get_crawl_run_id(context)
+        if crawl_run_id:
+            try:
+                from common.pipeline_tracking import save_raw_products
+
+                raw_saved = save_raw_products(
+                    unique_products, crawl_run_id=crawl_run_id, source_stage="list"
+                )
+                stats["raw_products_saved"] = raw_saved
+                logger.info(
+                    "🧾 Đã lưu %s raw list products cho crawl_run_id=%s", raw_saved, crawl_run_id
+                )
+            except Exception as raw_error:
+                logger.warning("⚠️ Không thể lưu raw list products: %s", raw_error)
 
         logger.info("=" * 40)
         logger.info("📊 TỔNG KẾT GIAI ĐOẠN CRAWL")
@@ -330,6 +360,22 @@ def transform_products(**context) -> dict[str, Any]:
         products = data.get("products", [])
         stats = data.get("stats", {})
         logger.info(f"📊 Tổng số products trong file: {len(products)}")
+        crawl_run_id = _get_crawl_run_id(context)
+        if crawl_run_id:
+            try:
+                from common.pipeline_tracking import save_raw_products
+
+                raw_saved = save_raw_products(
+                    products, crawl_run_id=crawl_run_id, source_stage="detail"
+                )
+                stats["raw_detail_products_saved"] = raw_saved
+                logger.info(
+                    "🧾 Đã lưu %s raw detail products cho crawl_run_id=%s",
+                    raw_saved,
+                    crawl_run_id,
+                )
+            except Exception as raw_error:
+                logger.warning("⚠️ Không thể lưu raw detail products: %s", raw_error)
 
         # Log thông tin về crawl detail nếu có
         crawled_count = stats.get("crawled_count", 0)
