@@ -307,10 +307,63 @@ def test_transform_nullable_metrics_are_allowed_for_full_quality(monkeypatch):
     assert transformed["review_count"] == 0
     assert transformed["sales_count"] is None
     assert transformed["stock_available"] is False
+    assert transformed["stock_status"] == "out_of_stock"
     assert transformed["missing_fields"] == []
     assert transformed["crawl_quality"] == "full"
     assert transformed["detail_status"] == "full"
     assert transformed["needs_enrichment"] is False
+
+
+def test_transform_stock_false_without_evidence_stays_unknown(monkeypatch):
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "222",
+            "name": "Sản phẩm fallback không rõ tồn kho",
+            "url": "https://tiki.vn/p/222",
+            "category_id": "123",
+            "brand": "Test Brand",
+            "price": {"current_price": 100000, "original_price": 100000},
+            "rating": {"average": None, "total_reviews": 0},
+            "seller": {"name": "Test Seller"},
+            "images": [{"url": "https://example.com/image.jpg"}],
+            "stock": {"available": False},
+            "_metadata": {"crawl_status": "success_html", "extraction_method": "aiohttp"},
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["stock_available"] is None
+    assert transformed["stock_status"] == "unknown"
+    assert transformed["stock_source"] == "detail_html"
+
+
+def test_transform_inventory_out_of_stock_is_trusted(monkeypatch):
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "9982840",
+            "name": "Gel tắm trắng face & body D.S White (250ml)",
+            "url": "https://tiki.vn/gel-tam-trang-face-body-d-s-white-250ml-p9982840.html",
+            "category_id": "123",
+            "brand": "D.S White",
+            "price": {"current_price": 320000, "original_price": 320000},
+            "rating": {"average": 5, "total_reviews": 1},
+            "seller": {"name": "Tiki"},
+            "images": [{"url": "https://example.com/image.jpg"}],
+            "inventory_status": "out_of_stock",
+            "_metadata": {"crawl_status": "success_api", "extraction_method": "api"},
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["stock_available"] is False
+    assert transformed["stock_status"] == "out_of_stock"
+    assert transformed["stock_source"] == "detail_api"
 
 
 def test_transform_missing_rating_is_flagged_when_reviews_exist(monkeypatch):

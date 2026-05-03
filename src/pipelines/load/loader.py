@@ -283,7 +283,8 @@ class OptimizedDataLoader:
                 discount_percent, rating_average, review_count, sales_count, brand,
                 seller_name, seller_id, seller_is_official,
                 image_url, images, description, description_text,
-                stock_available, shipping, detail_status, missing_fields, data_quality_score,
+                stock_available, stock_status, stock_source, shipping, detail_status,
+                missing_fields, data_quality_score,
                 crawled_at, updated_at,
                 crawl_quality, needs_enrichment
             ) VALUES %s
@@ -308,6 +309,8 @@ class OptimizedDataLoader:
                 description = COALESCE(NULLIF(EXCLUDED.description, ''), products.description),
                 description_text = COALESCE(NULLIF(EXCLUDED.description_text, ''), products.description_text),
                 stock_available = COALESCE(EXCLUDED.stock_available, products.stock_available),
+                stock_status = COALESCE(NULLIF(EXCLUDED.stock_status, ''), products.stock_status),
+                stock_source = COALESCE(NULLIF(EXCLUDED.stock_source, ''), products.stock_source),
                 shipping = COALESCE(EXCLUDED.shipping, products.shipping),
                 detail_status = COALESCE(EXCLUDED.detail_status, products.detail_status),
                 missing_fields = COALESCE(EXCLUDED.missing_fields, products.missing_fields),
@@ -342,6 +345,8 @@ class OptimizedDataLoader:
                 product.get("description"),
                 product.get("description_text"),
                 product.get("stock_available"),
+                product.get("stock_status"),
+                product.get("stock_source"),
                 Json(product["shipping"]) if product.get("shipping") else None,
                 product.get("detail_status"),
                 Json(product["missing_fields"]) if product.get("missing_fields") is not None else None,
@@ -366,7 +371,7 @@ class OptimizedDataLoader:
                 product_id, category_url, category_id, name, short_name, url, price, original_price,
                 discount_percent, rating_average, review_count, sales_count, brand,
                 seller_name, seller_id, seller_is_official,
-                image_url, stock_available, shipping,
+                image_url, stock_available, stock_status, stock_source, shipping,
                 crawled_at, updated_at
             ) VALUES %s
         """
@@ -392,6 +397,8 @@ class OptimizedDataLoader:
                 product.get("seller_is_official"),
                 product.get("image_url"),
                 product.get("stock_available"),
+                product.get("stock_status"),
+                product.get("stock_source"),
                 Json(product["shipping"]) if product.get("shipping") else None,
                 product.get("crawled_at"),
                 now,
@@ -410,11 +417,11 @@ class OptimizedDataLoader:
                 product_id, category_url, category_id, name, short_name, url, price, original_price,
                 discount_percent, rating_average, review_count, sales_count, brand,
                 seller_name, seller_id, seller_is_official,
-                image_url, stock_available, shipping,
+                image_url, stock_available, stock_status, stock_source, shipping,
                 crawled_at, updated_at,
                 crawl_quality, needs_enrichment
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (product_id) DO UPDATE SET
                 category_url = COALESCE(EXCLUDED.category_url, products.category_url),
@@ -434,6 +441,8 @@ class OptimizedDataLoader:
                 seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
                 image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url),
                 stock_available = COALESCE(EXCLUDED.stock_available, products.stock_available),
+                stock_status = COALESCE(NULLIF(EXCLUDED.stock_status, ''), products.stock_status),
+                stock_source = COALESCE(NULLIF(EXCLUDED.stock_source, ''), products.stock_source),
                 shipping = COALESCE(EXCLUDED.shipping, products.shipping),
                 crawled_at = COALESCE(products.crawled_at, EXCLUDED.crawled_at),
                 updated_at = EXCLUDED.updated_at,
@@ -462,6 +471,8 @@ class OptimizedDataLoader:
                 product.get("seller_is_official"),
                 product.get("image_url"),
                 product.get("stock_available"),
+                product.get("stock_status"),
+                product.get("stock_source"),
                 Json(product["shipping"]) if product.get("shipping") else None,
                 product.get("crawled_at"),
                 datetime.now(),
@@ -485,10 +496,10 @@ class OptimizedDataLoader:
                 product_id, category_url, category_id, name, short_name, url, price, original_price,
                 discount_percent, rating_average, review_count, sales_count, brand,
                 seller_name, seller_id, seller_is_official,
-                image_url, stock_available, shipping,
+                image_url, stock_available, stock_status, stock_source, shipping,
                 crawled_at, updated_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
         """
 
@@ -513,6 +524,8 @@ class OptimizedDataLoader:
                 product.get("seller_is_official"),
                 product.get("image_url"),
                 product.get("stock_available"),
+                product.get("stock_status"),
+                product.get("stock_source"),
                 Json(product["shipping"]) if product.get("shipping") else None,
                 product.get("crawled_at"),
                 datetime.now(),

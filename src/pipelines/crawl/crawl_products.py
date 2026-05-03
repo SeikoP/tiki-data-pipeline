@@ -807,9 +807,15 @@ def get_products_via_listing_api(category_url, max_pages=5, use_rate_limiting=Tr
                         if isinstance(item.get("quantity_sold"), dict)
                         else item.get("quantity_sold"),
                         "image_url": item.get("thumbnail_url"),
-                        "stock": {"available": True}
+                        "inventory_status": item.get("inventory_status"),
+                        "stock": {"available": True, "stock_status": "available"}
                         if item.get("inventory_status") == "available"
-                        else {"available": False},
+                        else (
+                            {"available": False, "stock_status": "out_of_stock"}
+                            if item.get("inventory_status") == "out_of_stock"
+                            else {}
+                        ),
+                        "stock_source": "listing_api",
                         "shipping": item.get("badges_new") or item.get("badges"),
                         "thumbnail_url": item.get("thumbnail_url"),
                         "rating_average": item.get("rating_average"),

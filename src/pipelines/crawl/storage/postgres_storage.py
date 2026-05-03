@@ -997,9 +997,11 @@ class PostgresStorage:
                                 product.get("seller_name"),
                                 product.get("seller_id"),
                                 product.get("seller_is_official"),
-                                # Brand and stock (only stock_available)
+                                # Brand and stock
                                 product.get("brand"),
                                 product.get("stock_available"),
+                                product.get("stock_status"),
+                                product.get("stock_source"),
                                 Json(product.get("shipping")) if product.get("shipping") else None,
                             )
                             for product in batch
@@ -1023,7 +1025,7 @@ class PostgresStorage:
                                     (product_id, name, short_name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average, review_count,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, shipping)
+                                     stock_available, stock_status, stock_source, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id)
                                 DO UPDATE SET
@@ -1044,6 +1046,8 @@ class PostgresStorage:
                                     seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
                                     brand = COALESCE(NULLIF(EXCLUDED.brand, ''), products.brand),
                                     stock_available = COALESCE(EXCLUDED.stock_available, products.stock_available),
+                                    stock_status = COALESCE(NULLIF(EXCLUDED.stock_status, ''), products.stock_status),
+                                    stock_source = COALESCE(NULLIF(EXCLUDED.stock_source, ''), products.stock_source),
                                     shipping = COALESCE(EXCLUDED.shipping, products.shipping),
                                     updated_at = CURRENT_TIMESTAMP
                                 """,
@@ -1067,10 +1071,10 @@ class PostgresStorage:
                                 cur,
                                 """
                                 INSERT INTO products
-                                    (product_id, name, url, image_url, category_url, category_id, sales_count,
+                                    (product_id, name, short_name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average, review_count,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, shipping)
+                                     stock_available, stock_status, stock_source, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id) DO NOTHING
                                 """,

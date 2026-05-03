@@ -1426,12 +1426,25 @@ def extract_product_detail(
                     product_from_next.get("stock") or product_from_next.get("inventory") or {}
                 )
                 if isinstance(stock_info, dict):
-                    product_data["stock"]["available"] = stock_info.get("available", True)
-                    product_data["stock"]["quantity"] = stock_info.get("quantity", 0)
-                    product_data["stock"]["stock_status"] = stock_info.get("status", "")
+                    stock_status = (
+                        stock_info.get("stock_status")
+                        or stock_info.get("status")
+                        or product_from_next.get("inventory_status")
+                    )
+                    if stock_status:
+                        product_data["stock"]["stock_status"] = stock_status
+                    if "available" in stock_info:
+                        product_data["stock"]["available"] = stock_info.get("available")
+                    if "quantity" in stock_info or "qty" in stock_info:
+                        product_data["stock"]["quantity"] = stock_info.get(
+                            "quantity", stock_info.get("qty", 0)
+                        )
                 elif isinstance(stock_info, (int, float)):
                     product_data["stock"]["quantity"] = int(stock_info)
                     product_data["stock"]["available"] = stock_info > 0
+                    product_data["stock"]["stock_status"] = (
+                        "available" if stock_info > 0 else "out_of_stock"
+                    )
 
                 # Cập nhật sales_count (số lượng đã bán) - dùng shared utility
                 if not product_data["sales_count"]:
@@ -1594,6 +1607,21 @@ def extract_product_detail(
     if is_default_shipping:
         product_data.pop("shipping", None)
 
+    page_text = soup.get_text(" ", strip=True).lower()
+    out_of_stock_texts = (
+        "sản phẩm đã hết hàng",
+        "sản phẩm tạm hết hàng",
+        "tạm hết hàng",
+        "đã hết hàng",
+        "ngừng kinh doanh",
+    )
+    if any(text in page_text for text in out_of_stock_texts):
+        product_data["stock"] = {
+            "available": False,
+            "quantity": 0,
+            "stock_status": "out_of_stock",
+        }
+
     # 4. Handle stock: Remove if no data (all defaults)
     # Default is {"available": True, "quantity": 0, "stock_status": ""}
     # Only remove if it matches default exactly (implying no extraction occurred)
@@ -1669,11 +1697,20 @@ def extract_product_detail_from_json(data: dict[str, Any], url: str) -> dict[str
 
     # Extract stock: ONLY if exists
     if isinstance(data.get("stock_item"), dict):
+        qty = data.get("stock_item", {}).get("qty", 0)
         product_data["stock"] = {
-            "available": data.get("stock_item", {}).get("qty", 0) > 0,
-            "quantity": data.get("stock_item", {}).get("qty", 0),
-            "stock_status": "",
+            "available": qty > 0,
+            "quantity": qty,
+            "stock_status": "available" if qty > 0 else "out_of_stock",
         }
+    elif data.get("inventory_status"):
+        inventory_status = data.get("inventory_status")
+        product_data["inventory_status"] = inventory_status
+        if inventory_status in {"available", "out_of_stock", "unavailable"}:
+            product_data["stock"] = {
+                "available": inventory_status == "available",
+                "stock_status": inventory_status,
+            }
 
     # Extract shipping: ONLY if found (currently API doesn't provide it clearly, so we skip or prune)
     # If we had extraction logic for it, we would add it here.
@@ -1761,7 +1798,7 @@ async def crawl_product_detail_via_api(
                     is_last_attempt = attempt == max_retries - 1
                     if verbose:
                         log_func = logger.info if is_last_attempt else logger.debug
-                        next_action = "Trying HTML fallback." if is_last_attempt else "Retrying..."
+                        next_action = "Giving up." if is_last_attempt else "Retrying..."
                         log_func(
                             "[API] Attempt %d/%d got status %s for ID %s. %s",
                             attempt + 1,
@@ -1879,90 +1916,13 @@ async def crawl_product_detail_async(
                         f"[Async] ⚠️ API thiếu thông tin cơ bản (Name/Price) cho {url[:60]}"
                     )
 
-        # Tier 2: Thử crawl bằng aiohttp (HTML scraping)
         if verbose:
-            logger.debug(f"[Async] ℹ️ Thử HTML scraping cho {url[:60]}...")
-        async with session.get(url) as response:
-            if response.status != 200:
-                if verbose:
-                    logger.warning(f"[Async] ⚠️  HTTP {response.status} cho {url[:60]}...")
-                if use_selenium_fallback:
-                    if create_session:
-                        await session.close()
-                    return crawl_product_detail_with_selenium(url, verbose=verbose)
-                return None
-
-            html_content = await response.text()
-
-            # Extract product detail từ HTML
-            product_data = extract_product_detail(html_content, url, verbose=verbose)
-
-            # Kiểm tra xem có đầy đủ thông tin cơ bản không
-            has_name = bool(product_data.get("name"))
-            has_price = product_data.get("price", {}).get("current_price") is not None
-            # Check for brand as well
-            has_brand = bool(product_data.get("brand")) and product_data.get("brand") != "Unknown"
-
-            # Nếu thiếu thông tin cực kỳ quan trọng, dùng Selenium (Tier 3)
-            # Tier 3: triggered if name, price OR BRAND is missing
-            if (not has_name or not has_price or not has_brand) and use_selenium_fallback:
-                if verbose:
-                    missing = []
-                    if not has_name:
-                        missing.append("name")
-                    if not has_price:
-                        missing.append("price")
-                    if not has_brand:
-                        missing.append("brand")
-                    logger.info(
-                        f"[Async] ⚠️  Thiếu {', '.join(missing)}, fallback về Selenium cho {url[:60]}..."
-                    )
-                if create_session:
-                    await session.close()
-                return crawl_product_detail_with_selenium(url, verbose=verbose)
-
-            # Cập nhật metadata
-            product_data["_metadata"]["extraction_method"] = "aiohttp"
-            product_data["_metadata"]["extraction_status"] = "success"
-
-            if verbose:
-                logger.info(f"[Async] ✅ HTML scraping thành công cho {url[:60]}...")
-
-            # Fix: Ensure category_path is never None, use empty list if not populated
-            if product_data.get("category_path") is None:
-                product_data["category_path"] = []
-
-            # Ensure category_path is always a list
-            if not isinstance(product_data.get("category_path"), list):
-                product_data["category_path"] = [str(product_data["category_path"])]
-
-            # Enforce max category levels (safety check against product names)
-            # Real Tiki categories should have 3-5 levels (including parent), anything more is likely product name
-            MAX_CATEGORY_LEVELS = 5
-            if len(product_data["category_path"]) > MAX_CATEGORY_LEVELS:
-                product_data["category_path"] = product_data["category_path"][:MAX_CATEGORY_LEVELS]
-
-            # Remove product name from category_path if it was mistakenly added
-            product_name = product_data.get("name", "").strip()
-            if product_name and product_data["category_path"]:
-                # Check both exact match and prefix match (product name may be truncated in category_path)
-                filtered_path = []
-                for cat in product_data["category_path"]:
-                    # Skip if category text is suspiciously long (>80 chars = likely product name)
-                    # OR if it starts with the product name
-                    if len(cat) > 80 or (
-                        product_name and cat.upper().startswith(product_name[:30].upper())
-                    ):
-                        continue
-                    filtered_path.append(cat)
-
-                # If we filtered out the last item and product_name was in path exactly, use filtered version
-                if product_name in product_data["category_path"]:
-                    filtered_path = [c for c in product_data["category_path"] if c != product_name]
-
-                product_data["category_path"] = filtered_path
-
-            return product_data
+            logger.warning(
+                "[Async] API detail failed or incomplete; HTML detail scraping is disabled "
+                "because rating/stock fields are not reliable for %s",
+                url[:60],
+            )
+        return None
 
     except Exception as e:
         if verbose:

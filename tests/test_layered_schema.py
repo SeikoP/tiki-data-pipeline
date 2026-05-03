@@ -38,9 +38,13 @@ def test_layered_schema_has_product_detail_quality_columns() -> None:
         "detail_status VARCHAR(50)",
         "missing_fields JSONB",
         "data_quality_score DECIMAL(4, 2)",
+        "stock_available BOOLEAN",
+        "stock_status VARCHAR(50)",
+        "stock_source VARCHAR(50)",
     ):
         assert column in ddl
 
+    assert "stock_available BOOLEAN DEFAULT TRUE" not in ddl
     assert "specifications JSONB" not in ddl
     assert "parent_id BIGINT" not in ddl
     assert "url TEXT,\n        rating DECIMAL" not in ddl

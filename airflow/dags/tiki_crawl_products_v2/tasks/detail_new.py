@@ -206,9 +206,13 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
                     else:
                         result["detail"]["needs_enrichment"] = False
                         result["detail"]["crawl_quality"] = "full"
-                        result["status"] = (
-                            "success_api" if extraction_method == "api" else "success_html"
-                        )
+                        if extraction_method == "api":
+                            result["status"] = "success_api"
+                        else:
+                            result["status"] = "failed"
+                            result["error"] = (
+                                f"Unsupported detail extraction method: {extraction_method}"
+                            )
                 else:
                     # Failed to get structured data via API/HTML
                     # Mark as failed so it might be retried or picked up by enrichment if we insert a stub?
@@ -318,7 +322,7 @@ def crawl_product_batch_fast(
 
         status = r.get("status")
         detail = r.get("detail") or {}
-        is_success = status in {"success", "success_api", "success_html"}
+        is_success = status in {"success", "success_api"}
 
         if is_success:
             success += 1

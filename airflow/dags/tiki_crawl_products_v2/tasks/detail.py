@@ -1702,7 +1702,7 @@ def merge_product_details(**context) -> dict[str, Any]:
             "partial_needs_enrichment": 0,
             "circuit_breaker_open": 0,
         }
-        success_statuses = {"success", "success_api", "success_html"}
+        success_statuses = {"success", "success_api"}
         partial_statuses = {"partial_needs_enrichment"}
 
         logger.info(f"📊 Đang xử lý {len(all_detail_results)} detail results...")
@@ -1725,7 +1725,6 @@ def merge_product_details(**context) -> dict[str, Any]:
                     if status in [
                         "success",
                         "success_api",
-                        "success_html",
                         "partial_needs_enrichment",
                         "failed",
                         "timeout",

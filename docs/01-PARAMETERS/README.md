@@ -52,6 +52,9 @@ Defined in `src/pipelines/crawl/config.py`.
 | `DATA_QUALITY_OPTIONAL_FIELDS` | `rating_average`, `sales_count`, `stock_quantity` | Nice-to-have fields |
 | `DATA_QUALITY_MIN_SCORE` | `0.7` | Minimum completeness score |
 | `PRODUCT_RETRY_MAX_ATTEMPTS` | `2` | Retry count for missing important fields |
+| `TIKI_AUDIT_HTTP_TIMEOUT` | `20` | Live Tiki API timeout for DB audit |
+| `TIKI_AUDIT_REQUEST_DELAY` | `0.1` | Delay between live audit requests |
+| `TIKI_AUDIT_MAX_PRODUCTS` | `0` | Optional product cap for live audit; `0` means no cap |
 
 ## Tuning Rules
 

@@ -352,7 +352,10 @@ class DataTransformer:
         if not db_product["image_url"]:
             db_product["image_url"] = self._first_image_url(db_product["images"])
         db_product["shipping"] = self._normalize_shipping(product.get("shipping"))
-        db_product["stock_available"] = self._stock_available(product)
+        stock_info = self._stock_info(product)
+        db_product["stock_available"] = stock_info["available"]
+        db_product["stock_status"] = stock_info["status"]
+        db_product["stock_source"] = stock_info["source"]
         db_product["detail_status"] = product.get("detail_status")
 
         # Metadata (không lưu vào DB nhưng giữ lại cho reference)
@@ -523,13 +526,97 @@ class DataTransformer:
 
         return normalized if any(not cls._is_missing(v) for v in normalized.values()) else None
 
-    @staticmethod
-    def _stock_available(product: dict[str, Any]) -> bool | None:
+    def _stock_info(self, product: dict[str, Any]) -> dict[str, Any]:
+        status = self._normalize_stock_status(product.get("stock_status"))
+        source = self._stock_source(product)
+        inventory_status = self._normalize_stock_status(product.get("inventory_status"))
+
+        if inventory_status:
+            status = inventory_status
+            return {
+                "available": self._available_from_status(inventory_status),
+                "status": inventory_status,
+                "source": source,
+            }
+
         if product.get("stock_available") is not None:
-            return bool(product.get("stock_available"))
+            available = bool(product.get("stock_available"))
+            status = status or ("available" if available else "out_of_stock")
+            return {"available": available, "status": status, "source": source or "explicit"}
+
         stock = product.get("stock")
-        if isinstance(stock, dict) and stock.get("available") is not None:
-            return bool(stock.get("available"))
+        if not isinstance(stock, dict):
+            return {"available": None, "status": status or "unknown", "source": source}
+
+        stock_status = self._normalize_stock_status(
+            stock.get("stock_status") or stock.get("status") or stock.get("inventory_status")
+        )
+        if stock_status:
+            status = stock_status
+            return {
+                "available": self._available_from_status(stock_status),
+                "status": stock_status,
+                "source": source,
+            }
+
+        quantity = self._parse_int(stock.get("quantity", stock.get("qty")))
+        if quantity is not None:
+            return {
+                "available": quantity > 0,
+                "status": "available" if quantity > 0 else "out_of_stock",
+                "source": source,
+            }
+
+        if stock.get("available") is True:
+            return {"available": True, "status": "available", "source": source}
+
+        return {"available": None, "status": status or "unknown", "source": source}
+
+    @staticmethod
+    def _normalize_stock_status(value: Any) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip().lower()
+        if not normalized:
+            return None
+        aliases = {
+            "in_stock": "available",
+            "instock": "available",
+            "available": "available",
+            "out_of_stock": "out_of_stock",
+            "outofstock": "out_of_stock",
+            "unavailable": "out_of_stock",
+            "sold_out": "out_of_stock",
+            "hethang": "out_of_stock",
+            "het_hang": "out_of_stock",
+        }
+        return aliases.get(normalized, normalized)
+
+    @staticmethod
+    def _available_from_status(status: str) -> bool | None:
+        if status == "available":
+            return True
+        if status in {"out_of_stock", "discontinued", "inactive"}:
+            return False
+        return None
+
+    @staticmethod
+    def _stock_source(product: dict[str, Any]) -> str | None:
+        if product.get("stock_source"):
+            return str(product["stock_source"])
+
+        metadata = product.get("_metadata")
+        crawl_status = metadata.get("crawl_status") if isinstance(metadata, dict) else None
+        extraction_method = metadata.get("extraction_method") if isinstance(metadata, dict) else None
+
+        if crawl_status == "success_api" or extraction_method == "api":
+            return "detail_api"
+        if crawl_status == "success_html" or extraction_method in {"aiohttp", "html"}:
+            return "detail_html"
+        if product.get("extraction_method") == "listing_api":
+            return "listing_api"
+        if product.get("detail_status"):
+            return str(product["detail_status"])
         return None
 
     @staticmethod

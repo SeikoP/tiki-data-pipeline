@@ -209,20 +209,10 @@ def merge_products(**context) -> dict[str, Any]:
 
         stats["raw_products"] = stats["total_products"]
         stats["unique_products"] = len(unique_products)
-        crawl_run_id = _get_crawl_run_id(context)
-        if crawl_run_id:
-            try:
-                from common.pipeline_tracking import save_raw_products
-
-                raw_saved = save_raw_products(
-                    unique_products, crawl_run_id=crawl_run_id, source_stage="list"
-                )
-                stats["raw_products_saved"] = raw_saved
-                logger.info(
-                    "🧾 Đã lưu %s raw list products cho crawl_run_id=%s", raw_saved, crawl_run_id
-                )
-            except Exception as raw_error:
-                logger.warning("⚠️ Không thể lưu raw list products: %s", raw_error)
+        stats["raw_products_saved"] = 0
+        logger.info(
+            "⏭️ Bỏ qua lưu raw list products để tránh phình raw_products theo mỗi crawl run"
+        )
 
         logger.info("=" * 40)
         logger.info("📊 TỔNG KẾT GIAI ĐOẠN CRAWL")

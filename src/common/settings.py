@@ -205,6 +205,15 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     "TIKI_FORCE_REFRESH_CACHE": SettingSpec(
         "TIKI_FORCE_REFRESH_CACHE", False, "bool", description="Bypass detail file cache"
     ),
+    "TIKI_AUDIT_HTTP_TIMEOUT": SettingSpec(
+        "TIKI_AUDIT_HTTP_TIMEOUT", 20, "int", description="Live Tiki audit HTTP timeout seconds"
+    ),
+    "TIKI_AUDIT_REQUEST_DELAY": SettingSpec(
+        "TIKI_AUDIT_REQUEST_DELAY", 0.1, "float", description="Delay between live audit requests"
+    ),
+    "TIKI_AUDIT_MAX_PRODUCTS": SettingSpec(
+        "TIKI_AUDIT_MAX_PRODUCTS", 0, "int", description="Optional live audit product cap"
+    ),
     # Load
     "TIKI_SAVE_BATCH_SIZE": SettingSpec(
         "TIKI_SAVE_BATCH_SIZE", 2000, "int", description="DB save batch size"

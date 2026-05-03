@@ -496,6 +496,8 @@ def load_layered_products(
                 product.get("review_count"),
                 product.get("sales_count"),
                 product.get("stock_available"),
+                product.get("stock_status"),
+                product.get("stock_source"),
                 Json(product["shipping"]) if product.get("shipping") else None,
                 product.get("detail_status"),
                 Json(product["missing_fields"]) if product.get("missing_fields") is not None else None,
@@ -515,7 +517,8 @@ def load_layered_products(
             description, description_text,
             category_id, category_url, seller_id, seller_name, seller_is_official,
             price, original_price, discount_percent, rating_average, review_count, sales_count,
-            stock_available, shipping, detail_status, missing_fields, data_quality_score,
+            stock_available, stock_status, stock_source, shipping, detail_status,
+            missing_fields, data_quality_score,
             crawl_quality, needs_enrichment, crawled_at, updated_at
         )
         VALUES %s
@@ -541,6 +544,8 @@ def load_layered_products(
             review_count = COALESCE(EXCLUDED.review_count, products.review_count),
             sales_count = COALESCE(EXCLUDED.sales_count, products.sales_count),
             stock_available = COALESCE(EXCLUDED.stock_available, products.stock_available),
+            stock_status = COALESCE(NULLIF(EXCLUDED.stock_status, ''), products.stock_status),
+            stock_source = COALESCE(NULLIF(EXCLUDED.stock_source, ''), products.stock_source),
             shipping = COALESCE(EXCLUDED.shipping, products.shipping),
             detail_status = COALESCE(EXCLUDED.detail_status, products.detail_status),
             missing_fields = COALESCE(EXCLUDED.missing_fields, products.missing_fields),

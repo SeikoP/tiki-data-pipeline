@@ -321,6 +321,79 @@ class TestDiscordNotifier:
         assert len(embeds) >= 2
 
 
+class TestDiscordReportFormatting:
+    """Test deterministic Discord report formatting."""
+
+    @pytest.fixture
+    def sample_summary(self):
+        return {
+            "statistics": {
+                "total_products": 200,
+                "crawled_count": 200,
+                "with_detail": 190,
+                "failed": 6,
+                "timeout": 4,
+                "cached": 30,
+                "products_saved": 190,
+                "products_skipped": 10,
+            },
+            "price_analysis": {
+                "avg_price": 150000,
+                "min_price": 10000,
+                "max_price": 990000,
+                "avg_discount": 12.5,
+                "max_discount": 40,
+                "total_products_with_price": 190,
+            },
+            "rating_analysis": {
+                "avg_rating": 4.6,
+                "total_products_with_rating": 120,
+            },
+            "category_analysis": {"total_categories": 5},
+            "seller_analysis": {"total_sellers": 80},
+            "issues": ["Có 6 sản phẩm crawl thất bại"],
+            "trends": {
+                "has_previous_data": True,
+                "success_rate_change": 1.5,
+                "changes": {
+                    "crawled_count": {
+                        "current": 200,
+                        "previous": 180,
+                        "diff": 20,
+                        "pct_change": 11.1,
+                    }
+                },
+            },
+        }
+
+    def test_notification_fields_are_grouped_for_readability(self, sample_summary):
+        from airflow.dags.tiki_crawl_products_v2.tasks.monitoring import (
+            _build_notification_fields,
+        )
+
+        fields = _build_notification_fields(sample_summary)
+
+        field_names = [field["name"] for field in fields]
+        assert "Pipeline" in field_names
+        assert "Detail result" in field_names
+        assert "Coverage" in field_names
+        assert "Operational notes" in field_names
+        assert "Trend vs previous run" in field_names
+        assert "Saved DB: **190**" in fields[0]["value"]
+
+    def test_detail_report_includes_data_quality_sections(self, sample_summary):
+        from airflow.dags.tiki_crawl_products_v2.tasks.monitoring import _build_detail_report
+
+        report = _build_detail_report(sample_summary, ai_summary="AI note")
+
+        assert "**Tổng quan phiên crawl**" in report
+        assert "**Giá và giảm giá**" in report
+        assert "**Độ phủ dữ liệu**" in report
+        assert "**Vấn đề cần chú ý**" in report
+        assert "**Nhận định AI**" in report
+        assert "AI note" in report
+
+
 class TestMonitoringTask:
     """Test aggregate_and_notify task integration."""
 
