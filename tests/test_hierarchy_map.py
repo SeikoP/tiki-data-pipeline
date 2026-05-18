@@ -1,8 +1,19 @@
 #!/usr/bin/env python
 import json
+from pathlib import Path
+
+import pytest
+
+HIERARCHY_FILE = Path("data/raw/category_hierarchy_map.json")
+
+if not HIERARCHY_FILE.exists():
+    pytest.skip(
+        f"Missing generated hierarchy fixture: {HIERARCHY_FILE}",
+        allow_module_level=True,
+    )
 
 # Load hierarchy map
-with open("data/raw/category_hierarchy_map.json", encoding="utf-8") as f:
+with HIERARCHY_FILE.open(encoding="utf-8") as f:
     hierarchy = json.load(f)
 
 # Find one level 1 category and check its hierarchy

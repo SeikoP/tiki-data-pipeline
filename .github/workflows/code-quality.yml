@@ -40,7 +40,8 @@ jobs:
         run: pylint src/ airflow/dags/ --exit-zero
 
       - name: Run Vulture (find dead code)
-        run: vulture src/ airflow/dags/ --min-confidence 80 --exit-zero
+        run: vulture src/ airflow/dags/ --min-confidence 80
+        continue-on-error: true
 
       - name: Run Bandit security check
         run: |

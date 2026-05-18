@@ -911,7 +911,7 @@ def crawl_category_products(
     if cache_dir:  # Always prepare cache_file path
         import hashlib
 
-        url_hash = hashlib.md5(category_url.encode()).hexdigest()
+        url_hash = hashlib.md5(category_url.encode(), usedforsecurity=False).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 
         # Check file cache nếu Redis miss hoặc không available
@@ -954,7 +954,7 @@ def crawl_category_products(
         # Prepare cache_file path for later saving (but don't read from it)
         import hashlib
 
-        url_hash = hashlib.md5(category_url.encode()).hexdigest()
+        url_hash = hashlib.md5(category_url.encode(), usedforsecurity=False).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 
     # Tier 3: Thử Listing API (Nhanh nhất nếu cache miss)

@@ -56,8 +56,7 @@ def _select_categories_for_product_refs(
     missing_category_ids = sorted(cat_id for cat_id in used_category_ids if cat_id not in id_to_cat)
     if missing_category_ids:
         raise ValueError(
-            "Product categories missing from category JSON: "
-            + ", ".join(missing_category_ids[:20])
+            "Product categories missing from category JSON: " + ", ".join(missing_category_ids[:20])
         )
 
     for cat_id in sorted(used_category_ids):
@@ -121,9 +120,7 @@ def load_categories(json_file_path: str, product_file_path: str | None = None):
             from common.category_utils import normalize_category_tree
 
             normalized_categories = normalize_category_tree(categories)
-            categories_to_load = [
-                cat for cat in normalized_categories if cat.get("is_leaf")
-            ]
+            categories_to_load = [cat for cat in normalized_categories if cat.get("is_leaf")]
 
         logger.info(
             "Sẽ load %s categories theo current product refs",

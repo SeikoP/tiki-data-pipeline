@@ -146,7 +146,7 @@ class DataAggregator:
                 key_str = f"{self.data_file_path}:{mtime}"
             else:
                 key_str = f"{self.data_file_path}:nofile"
-            return hashlib.md5(key_str.encode()).hexdigest()
+            return hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest()
         except Exception:
             return "default"
 

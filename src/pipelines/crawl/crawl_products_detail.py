@@ -1775,6 +1775,7 @@ async def crawl_product_detail_via_api(
         return None
 
     api_url = f"https://tiki.vn/api/v2/products/{product_id}"
+
     def build_headers() -> dict[str, str]:
         try:
             from .ua_rotation import get_api_headers
