@@ -180,10 +180,19 @@ with DAG(**dag_config) as dag:
         doc_md="Refresh filtered product rows for the main Power BI dashboard.",
     )
 
-    task_resolve_context >> task_ensure_schema >> task_refresh_dimensions >> task_refresh_product_daily
-    task_refresh_product_daily >> [
-        task_refresh_category_daily,
-        task_refresh_seller_daily,
-        task_refresh_price_change,
-        task_refresh_crawl_quality,
-    ] >> task_refresh_analysis_ready
+    (
+        task_resolve_context
+        >> task_ensure_schema
+        >> task_refresh_dimensions
+        >> task_refresh_product_daily
+    )
+    (
+        task_refresh_product_daily
+        >> [
+            task_refresh_category_daily,
+            task_refresh_seller_daily,
+            task_refresh_price_change,
+            task_refresh_crawl_quality,
+        ]
+        >> task_refresh_analysis_ready
+    )

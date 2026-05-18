@@ -22,9 +22,7 @@ REQUIRED_QUALITY_FIELDS = (
     "seller_name",
     "category_id",
 )
-ENRICHMENT_QUALITY_FIELDS = (
-    "review_count",
-)
+ENRICHMENT_QUALITY_FIELDS = ("review_count",)
 
 
 class DataTransformer:
@@ -607,7 +605,9 @@ class DataTransformer:
 
         metadata = product.get("_metadata")
         crawl_status = metadata.get("crawl_status") if isinstance(metadata, dict) else None
-        extraction_method = metadata.get("extraction_method") if isinstance(metadata, dict) else None
+        extraction_method = (
+            metadata.get("extraction_method") if isinstance(metadata, dict) else None
+        )
 
         if crawl_status == "success_api" or extraction_method == "api":
             return "detail_api"
@@ -1058,7 +1058,9 @@ class DataTransformer:
             return ""
 
         cleaned = " ".join(name.split())
-        cleaned = re.sub(r"\b(?:cho|với|và|của|dành|kèm|tặng)\s*$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(
+            r"\b(?:cho|với|và|của|dành|kèm|tặng)\s*$", "", cleaned, flags=re.IGNORECASE
+        )
         cleaned = cleaned.strip(" -,+/&|()[]")
 
         words = cleaned.split()

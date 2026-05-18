@@ -420,7 +420,7 @@ class MultiLevelCache:
         """
         Tạo cache key từ URL.
         """
-        url_hash = hashlib.md5(url.encode()).hexdigest()
+        url_hash = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()
         return f"{cache_type}:{url_hash}"
 
     def cache_html(self, url: str, html: str, ttl: int | None = None) -> bool:

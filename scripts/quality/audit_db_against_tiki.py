@@ -192,7 +192,9 @@ def normalize_db_product(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def compare_products(db_product: dict[str, Any], live_product: dict[str, Any]) -> list[dict[str, Any]]:
+def compare_products(
+    db_product: dict[str, Any], live_product: dict[str, Any]
+) -> list[dict[str, Any]]:
     mismatches = []
     for field in CORE_COMPARE_FIELDS:
         db_value = db_product.get(field)
@@ -348,7 +350,7 @@ def summarize_categories(product_results: list[dict[str, Any]]) -> list[dict[str
                 field = mismatch["field"]
                 item["mismatch_fields"][field] = item["mismatch_fields"].get(field, 0) + 1
 
-    return sorted(grouped.values(), key=lambda row: (row["category_id"]))
+    return sorted(grouped.values(), key=lambda row: row["category_id"])
 
 
 def run_audit(conn, config: AuditConfig) -> dict[str, Any]:
