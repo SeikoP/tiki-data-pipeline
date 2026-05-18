@@ -349,7 +349,9 @@ class OptimizedDataLoader:
                 product.get("stock_source"),
                 Json(product["shipping"]) if product.get("shipping") else None,
                 product.get("detail_status"),
-                Json(product["missing_fields"]) if product.get("missing_fields") is not None else None,
+                Json(product["missing_fields"])
+                if product.get("missing_fields") is not None
+                else None,
                 product.get("data_quality_score"),
                 product.get("crawled_at"),
                 now,
