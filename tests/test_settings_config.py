@@ -123,6 +123,7 @@ def test_runtime_crawl_settings_are_airflow_overridable():
         "TIKI_CACHE_RELAX_DAYS",
         "TIKI_FORCE_CRAWL",
         "TIKI_MAX_CATEGORIES",
+        "TIKI_ANALYTICS_SCHEMA",
     }
 
     assert all(SETTINGS_REGISTRY[key].airflow_variable for key in keys)

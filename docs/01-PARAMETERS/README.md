@@ -25,6 +25,7 @@ Runtime defaults are defined in `src/common/settings.py`; Airflow setup, docs an
 | `TIKI_FORCE_CRAWL` | Airflow Variable, fallback `false` | Ignores recent DB detail hits when a forced recrawl is needed |
 | `TIKI_SAVE_BATCH_SIZE` | Airflow Variable, fallback `1000` | Database save batch size for local stability |
 | `TIKI_LOAD_MODE` | Airflow Variable, fallback `auto` | Selects safe or optimized DB batch sizing |
+| `TIKI_ANALYTICS_SCHEMA` | Airflow Variable, fallback `analytics` | PostgreSQL schema for analysis-ready mart tables |
 | `TIKI_FORCE_REFRESH` | env/Airflow usage | Bypass cache when stale or incomplete data must be refreshed |
 | `DISCORD_ENABLED` | env, default `false` | Enables final aggregate Discord notification |
 

@@ -34,7 +34,7 @@ from .maintenance import (  # validate_data - REMOVED: Not critical, only counte
 )
 from .monitoring import aggregate_and_notify
 from .product import merge_products, transform_products
-from .tracking import finish_crawl_run, start_crawl_run
+from .tracking import finish_crawl_run, publish_core_tables_asset, start_crawl_run
 
 __all__ = [
     "get_logger",
@@ -65,4 +65,5 @@ __all__ = [
     "aggregate_and_notify",
     "start_crawl_run",
     "finish_crawl_run",
+    "publish_core_tables_asset",
 ]

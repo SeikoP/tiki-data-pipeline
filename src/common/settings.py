@@ -293,6 +293,13 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "bool",
         description="Allow final file output when DB load fails",
     ),
+    # Analytics
+    "TIKI_ANALYTICS_SCHEMA": SettingSpec(
+        "TIKI_ANALYTICS_SCHEMA",
+        "analytics",
+        description="PostgreSQL schema for analysis-ready mart tables",
+        airflow_variable=True,
+    ),
     # Resilience
     "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD": SettingSpec(
         "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD",
@@ -788,6 +795,7 @@ def airflow_variable_defaults() -> dict[str, str]:
         "TIKI_PRODUCTS_PER_DAY",
         "TIKI_LOAD_MODE",
         "TIKI_LOAD_OPTIMIZED_THRESHOLD",
+        "TIKI_ANALYTICS_SCHEMA",
         "TIKI_CACHE_RELAX_DAYS",
         "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD",
         "TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT",
