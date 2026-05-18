@@ -30,9 +30,7 @@ def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
     return None
 
 
-def _track_detail_results(
-    results: list[dict[str, Any]], context: dict[str, Any], logger
-) -> None:
+def _track_detail_results(results: list[dict[str, Any]], context: dict[str, Any], logger) -> None:
     crawl_run_id = _get_crawl_run_id(context)
     if not crawl_run_id or not results:
         return
@@ -82,6 +80,11 @@ def _get_detail_concurrency(logger) -> int:
             max_concurrency,
         )
     return concurrency
+
+
+def _detail_request_delay(index: int, rate_limit_delay: float) -> float:
+    """Return per-item stagger delay for detail requests."""
+    return max(0, index) * max(0.0, rate_limit_delay)
 
 
 def _write_detail_batch_results(
@@ -181,12 +184,14 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
             }
 
             try:
+                failure_details: dict[str, Any] = {}
                 # Force NO Selenium fallback
                 detail = await crawl_product_detail_async(
                     product_url,
                     session=session,
                     use_selenium_fallback=False,
                     verbose=True,  # Enable Verbose Logging
+                    failure_details=failure_details,
                 )
 
                 if detail and isinstance(detail, dict):
@@ -219,7 +224,7 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
                     # Ideally we should insert a stub if we think it exists but failed to parse.
                     # But for now, just mark failed.
                     # Actually, if we want enrichment to pick it up, we might need to save it as 'failed' quality?
-                    result["error"] = "Fast crawl failed"
+                    result["error"] = failure_details.get("message") or "Fast crawl failed"
                     result["status"] = "failed"
 
             except Exception as e:
@@ -237,7 +242,7 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
     # Create tasks with delay
     tasks = []
     for i, product in enumerate(product_batch):
-        delay = i * rate_limit_delay / len(product_batch)
+        delay = _detail_request_delay(i, rate_limit_delay)
 
         async def task_with_delay(p, d):
             if d > 0:

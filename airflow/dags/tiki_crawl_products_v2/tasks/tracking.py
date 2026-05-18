@@ -3,6 +3,13 @@ from __future__ import annotations
 from tiki_crawl_products_v2.bootstrap import Any, get_logger
 from tiki_crawl_products_v2.tasks.common import _fix_sys_path_for_pipelines_import  # noqa: F401
 
+try:
+    from airflow.exceptions import AirflowSkipException
+except Exception:
+
+    class AirflowSkipException(Exception):
+        """Fallback for local tests without a usable Airflow runtime."""
+
 
 def _context_ids(context: dict[str, Any]) -> tuple[str | None, str | None]:
     dag = context.get("dag")
@@ -85,4 +92,33 @@ def finish_crawl_run(**context) -> dict[str, Any]:
         "total_transformed_items": transformed_count,
         "total_loaded_items": loaded_count,
         "error_message": error_message,
+    }
+
+
+def publish_core_tables_asset(**context) -> dict[str, Any]:
+    """Publish the core-table asset only after a successful crawl/load run."""
+    logger = get_logger(context)
+    from tiki_assets import TIKI_CORE_TABLES_ASSET_URI
+
+    finish_info = _xcom_dict(
+        context,
+        [
+            "maintenance_and_reports.finish_crawl_run",
+            "finish_crawl_run",
+        ],
+    )
+    if not finish_info or finish_info.get("status") != "success":
+        status = finish_info.get("status") if finish_info else "missing"
+        raise AirflowSkipException(f"Core table asset not published because crawl status={status}")
+
+    crawl_run_id = finish_info.get("crawl_run_id")
+    logger.info(
+        "📦 Published core table asset %s for crawl_run_id=%s",
+        TIKI_CORE_TABLES_ASSET_URI,
+        crawl_run_id,
+    )
+    return {
+        "status": "success",
+        "crawl_run_id": crawl_run_id,
+        "asset_uri": TIKI_CORE_TABLES_ASSET_URI,
     }

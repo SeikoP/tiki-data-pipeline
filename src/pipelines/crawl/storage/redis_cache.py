@@ -210,7 +210,7 @@ class RedisCache:
 
     def _legacy_key_for_url(self, url: str, cache_type: str = "html") -> str:
         # Legacy behavior: hash nguyên URL không chuẩn hóa
-        url_hash = hashlib.md5(url.encode()).hexdigest()  # noqa: S324 - legacy compat
+        url_hash = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()  # legacy compat
         return f"{cache_type}:{url_hash}"
 
     def get_cache_key(

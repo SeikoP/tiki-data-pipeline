@@ -1547,22 +1547,34 @@ class PostgresStorage:
         """
         select_query = """
             SELECT count(*) FROM categories
-            WHERE url IN (
-                SELECT DISTINCT parent_url
-                FROM categories
-                WHERE parent_url IS NOT NULL
+            WHERE (
+                url IN (
+                    SELECT DISTINCT parent_url
+                    FROM categories
+                    WHERE parent_url IS NOT NULL
+                )
+                OR is_leaf = FALSE
             )
-            OR is_leaf = FALSE
+            AND NOT EXISTS (
+                SELECT 1 FROM products p
+                WHERE p.category_id = categories.category_id
+            )
         """
 
         delete_query = """
             DELETE FROM categories
-            WHERE url IN (
-                SELECT DISTINCT parent_url
-                FROM categories
-                WHERE parent_url IS NOT NULL
+            WHERE (
+                url IN (
+                    SELECT DISTINCT parent_url
+                    FROM categories
+                    WHERE parent_url IS NOT NULL
+                )
+                OR is_leaf = FALSE
             )
-            OR is_leaf = FALSE
+            AND NOT EXISTS (
+                SELECT 1 FROM products p
+                WHERE p.category_id = categories.category_id
+            )
         """
 
         if cur:

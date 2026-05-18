@@ -8,14 +8,24 @@ Runtime defaults are defined in `src/common/settings.py`; Airflow setup, docs an
 
 | Parameter | Default/current source | Purpose |
 | --- | --- | --- |
-| `TIKI_CATEGORY_NUM_BATCHES` | Airflow Variable, fallback `3` | Splits categories for dynamic task mapping |
-| `TIKI_PRODUCTS_PER_DAY` | Airflow/env dependent | Limits daily product volume when enabled by tasks |
-| `TIKI_DETAIL_ACTIVE_BATCHES` | Airflow Variable, fallback `6` | Detail mapped batches to fill one Airflow wave |
-| `TIKI_DETAIL_BATCH_SIZE` | Airflow Variable, fallback `500` | Soft target before planner allows more than one wave |
-| `TIKI_DETAIL_MAX_CONCURRENT_TASKS` | Airflow Variable, fallback `8` | Async requests inside each detail task |
-| `TIKI_DETAIL_CONCURRENCY_MIN` | Airflow Variable, fallback `4` | Minimum clamp for per-task async concurrency |
-| `TIKI_DETAIL_CONCURRENCY_MAX` | Airflow Variable, fallback `10` | Maximum clamp for per-task async concurrency |
+| `TIKI_CATEGORY_NUM_BATCHES` | Airflow Variable, fallback `6` | Splits categories for dynamic task mapping |
+| `TIKI_CRAWL_ONLY_LEAF` | Airflow Variable, fallback `true` | Crawls only leaf categories so listing scope matches product detail capacity |
+| `TIKI_MIN_CATEGORY_LEVEL` | Airflow Variable, fallback `2` | Minimum category tree level selected for category crawl |
+| `TIKI_MAX_CATEGORY_LEVEL` | Airflow Variable, fallback `4` | Maximum category tree level selected for category crawl |
+| `TIKI_MAX_CATEGORIES` | Airflow Variable, fallback `0` | Optional rotating category window; `0` means no category cap |
+| `TIKI_MAX_PAGES_PER_CATEGORY` | Airflow Variable, fallback `20` | Listing pages crawled for each selected category |
+| `TIKI_PRODUCTS_PER_DAY` | Airflow Variable, fallback `1000` | Detail candidates selected per run |
+| `TIKI_MAX_PRODUCTS_FOR_DETAIL` | Airflow Variable, fallback `0` | Hard cap for detail candidates; `0` means no extra cap |
+| `TIKI_DETAIL_ACTIVE_BATCHES` | Airflow Variable, fallback `3` | Detail mapped batches to fill one Airflow wave |
+| `TIKI_DETAIL_BATCH_SIZE` | Airflow Variable, fallback `300` | Soft target before planner allows more than one wave |
+| `TIKI_DETAIL_MAX_CONCURRENT_TASKS` | Airflow Variable, fallback `4` | Async requests inside each detail task |
+| `TIKI_DETAIL_CONCURRENCY_MIN` | Airflow Variable, fallback `2` | Minimum clamp for per-task async concurrency |
+| `TIKI_DETAIL_CONCURRENCY_MAX` | Airflow Variable, fallback `6` | Maximum clamp for per-task async concurrency |
+| `TIKI_CACHE_RELAX_DAYS` | Airflow Variable, fallback `2` | Freshness window for skipping products already detailed in DB |
+| `TIKI_FORCE_CRAWL` | Airflow Variable, fallback `false` | Ignores recent DB detail hits when a forced recrawl is needed |
+| `TIKI_SAVE_BATCH_SIZE` | Airflow Variable, fallback `1000` | Database save batch size for local stability |
 | `TIKI_LOAD_MODE` | Airflow Variable, fallback `auto` | Selects safe or optimized DB batch sizing |
+| `TIKI_ANALYTICS_SCHEMA` | Airflow Variable, fallback `analytics` | PostgreSQL schema for analysis-ready mart tables |
 | `TIKI_FORCE_REFRESH` | env/Airflow usage | Bypass cache when stale or incomplete data must be refreshed |
 | `DISCORD_ENABLED` | env, default `false` | Enables final aggregate Discord notification |
 
@@ -60,5 +70,6 @@ Defined in `src/pipelines/crawl/config.py`.
 
 - Increase `PRODUCT_BATCH_SIZE` only when memory and target-site stability are acceptable.
 - Increase `HTTP_CONNECTOR_LIMIT` with care; it can improve API throughput but can also amplify rate limits.
+- Keep `TIKI_MAX_CATEGORIES`, `TIKI_PRODUCTS_PER_DAY`, and `TIKI_MAX_PRODUCTS_FOR_DETAIL` aligned so the category list does not expand far beyond detail capacity in one run.
 - Use `TIKI_FORCE_REFRESH=true` for stale cache investigations, then turn it off for normal runs.
 - Keep Redis TTL high for detail pages and lower for product lists because list contents change more often.

@@ -9,6 +9,9 @@ except ImportError:
         from airflow.operators.python import ShortCircuitOperator
     except ImportError:
         ShortCircuitOperator = None
+
+from tiki_assets import TIKI_CORE_TABLES_ASSET
+
 from tiki_crawl_products_v2.bootstrap import (
     DAG,
     DAG_CONFIG,
@@ -33,6 +36,7 @@ from tiki_crawl_products_v2.tasks import (
     merge_product_details,
     merge_products,
     prepare_products_for_detail,
+    publish_core_tables_asset,
     reconcile_categories_wrapper,
     start_crawl_run,
     transform_products,
@@ -471,9 +475,9 @@ with DAG(
             **Output:** Load stats (inserted, updated, failed)
             """,
         )
-        # Categories MUST be loaded before products (FK constraint)
-        # Transform can run in parallel with load_categories
-        [task_load_categories_db, task_transform_products] >> task_load_products
+        # Transform first so categories can be seeded only for products that will be loaded.
+        # Categories still run before products to satisfy the FK constraint.
+        task_transform_products >> task_load_categories_db >> task_load_products
 
     # TaskGroup: Maintenance and Reports
     with TaskGroup("maintenance_and_reports") as maintenance_group:
@@ -639,6 +643,23 @@ with DAG(
             """,
         )
 
+        task_publish_core_tables_asset = PythonOperator(
+            task_id="publish_core_tables_asset",
+            python_callable=publish_core_tables_asset,
+            execution_timeout=timedelta(minutes=1),
+            pool="fast_pool",
+            outlets=[TIKI_CORE_TABLES_ASSET],
+            doc_md="""
+            ### Publish Core Tables Asset
+            **Nhiệm vụ:** Emit Airflow asset sau khi crawl/load thành công.
+
+            **Chi tiết:**
+            - Chỉ success khi `finish_crawl_run` trả `status=success`
+            - Nếu crawl/load fail thì task bị skip và không trigger analytics DAG
+            - Asset này tự động schedule DAG `tiki_analytics_normalize`
+            """,
+        )
+
         task_reconcile >> task_cleanup_categories
 
         # Aggregate and notify - only if Discord enabled
@@ -648,6 +669,7 @@ with DAG(
             task_cleanup_cache,
             task_backup_database,
         ] >> task_finish_crawl_run
+        task_finish_crawl_run >> task_publish_core_tables_asset
 
     # ===== FINAL DAG DEPENDENCIES =====
     # Loại bỏ labels và empty operators để tasks gần nhau hơn

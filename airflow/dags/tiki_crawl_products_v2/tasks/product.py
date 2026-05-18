@@ -41,6 +41,36 @@ def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
     return None
 
 
+def _validate_merge_products_quality(stats: dict[str, Any], unique_product_count: int) -> None:
+    total_categories = int(stats.get("total_categories") or 0)
+    success_categories = int(stats.get("success_categories") or 0)
+    if total_categories > 0 and success_categories <= 0:
+        raise RuntimeError("No category crawl succeeded; refusing to write empty product output")
+    if unique_product_count <= 0:
+        raise RuntimeError("No products were merged; refusing to write empty product output")
+
+
+def _resolve_detail_output_file(detail_result: Any, default_output_file: str) -> str:
+    if isinstance(detail_result, dict):
+        if "output_file" in detail_result:
+            output_file = detail_result.get("output_file")
+            if not output_file or not os.path.exists(output_file):
+                raise ValueError(
+                    f"merge_product_details returned invalid output_file: {output_file}"
+                )
+            return output_file
+        raise ValueError("merge_product_details returned no output_file")
+    if isinstance(detail_result, str):
+        if not os.path.exists(detail_result):
+            raise ValueError(f"merge_product_details output file does not exist: {detail_result}")
+        return detail_result
+    if detail_result is None:
+        if os.path.exists(default_output_file):
+            return default_output_file
+        raise FileNotFoundError(f"Không tìm thấy file: {default_output_file}")
+    raise ValueError(f"Unsupported merge_product_details result: {type(detail_result).__name__}")
+
+
 @profile_task("merge_products")
 def merge_products(**context) -> dict[str, Any]:
     """
@@ -209,10 +239,9 @@ def merge_products(**context) -> dict[str, Any]:
 
         stats["raw_products"] = stats["total_products"]
         stats["unique_products"] = len(unique_products)
+        _validate_merge_products_quality(stats, len(unique_products))
         stats["raw_products_saved"] = 0
-        logger.info(
-            "⏭️ Bỏ qua lưu raw list products để tránh phình raw_products theo mỗi crawl run"
-        )
+        logger.info("⏭️ Bỏ qua lưu raw list products để tránh phình raw_products theo mỗi crawl run")
 
         logger.info("=" * 40)
         logger.info("📊 TỔNG KẾT GIAI ĐOẠN CRAWL")
@@ -286,28 +315,16 @@ def transform_products(**context) -> dict[str, Any]:
         ti = context["ti"]
 
         # Lấy file từ merge_product_details
-        output_file = None
+        detail_result = None
         try:
             detail_result = ti.xcom_pull(task_ids="crawl_product_details.merge_product_details")
-            if isinstance(detail_result, dict):
-                output_file = detail_result.get("output_file")
-            elif isinstance(detail_result, str):
-                output_file = detail_result
         except Exception:
             try:
                 detail_result = ti.xcom_pull(task_ids="merge_product_details")
-                if isinstance(detail_result, dict):
-                    output_file = detail_result.get("output_file")
-                elif isinstance(detail_result, str):
-                    output_file = detail_result
             except Exception:
                 pass
 
-        if not output_file:
-            output_file = str(OUTPUT_FILE_WITH_DETAIL)
-
-        if not os.path.exists(output_file):
-            raise FileNotFoundError(f"Không tìm thấy file: {output_file}")
+        output_file = _resolve_detail_output_file(detail_result, str(OUTPUT_FILE_WITH_DETAIL))
 
         logger.info(f"📂 Đang đọc file: {output_file}")
 

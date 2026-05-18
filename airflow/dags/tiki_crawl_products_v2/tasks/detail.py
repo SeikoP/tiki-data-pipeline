@@ -97,6 +97,18 @@ def _detail_result_product_ids(xcom_value: Any, logger) -> set[Any]:
     }
 
 
+def _validate_detail_results_available(
+    *,
+    expected_products_count: int,
+    actual_crawl_count: int,
+    detail_result_count: int,
+) -> None:
+    if expected_products_count > 0 and actual_crawl_count > 0 and detail_result_count <= 0:
+        raise RuntimeError(
+            "No detail results were available from mapped crawl tasks; refusing to write empty detail output"
+        )
+
+
 def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
     """
     Task: Chuẩn bị danh sách products để crawl detail
@@ -168,8 +180,6 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         # - Not reflecting actual DB state (deleted/outdated products)
         # Solution: Use DB check only - simpler, more accurate
 
-        # Lọc products cần crawl detail
-        products_to_crawl = []
         cache_hits = 0
         db_hits = 0  # Products đã có trong DB
 
@@ -278,49 +288,17 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         logger.info(f"🔄 Bắt đầu kiểm tra {len(products)} products...")
 
-        # Duyệt tất cả products để tìm products cần crawl
-        for _idx, product in enumerate(products):
-            product_id = product.get("product_id")
-            product_url = product.get("url")
-
-            if not product_id or not product_url:
-                continue
-
-            # Kiểm tra xem đã có trong database chưa (với detail đầy đủ) - Trừ khi force crawl
-            if not force_crawl and product_id in existing_product_ids_in_db:
-                # Đã có trong DB với detail đầy đủ (có price và sales_count)
-                # AND updated gần đây (< TIKI_CACHE_RELAX_DAYS)
-                # → Skip crawl lại
-                db_hits += 1
-                continue
-
-            # 3. ❌ REMOVED: Cache check for detail crawl
-            # Detail crawl ALWAYS fetches fresh data to track price changes
-            # Cache was causing issues:
-            # - Price changes not tracked
-            # - Sales count not updated
-            # - crawl_history table bypassed
-            # - products table not updated
-            # Solution: Always crawl fresh data, use DB check with short interval instead
-
-            products_to_crawl.append(
-                {
-                    "product_id": product_id,
-                    "url": product_url,
-                    "name": product.get("name", ""),
-                    "product": product,  # Giữ nguyên product data
-                }
+        products_to_crawl = _select_products_for_detail(
+            products,
+            existing_product_ids_in_db=existing_product_ids_in_db,
+            products_per_day=products_per_day,
+            max_products=max_products,
+            force_crawl=force_crawl,
+        )
+        if not force_crawl:
+            db_hits = sum(
+                1 for product in products if product.get("product_id") in existing_product_ids_in_db
             )
-
-            # Giới hạn số lượng products crawl trong ngày này
-            if len(products_to_crawl) >= products_per_day:
-                logger.info(f"✓ Đã đạt giới hạn {products_per_day} products cho ngày hôm nay")
-                break
-
-            # Giới hạn tổng số (nếu có)
-            if max_products > 0 and len(products_to_crawl) >= max_products:
-                logger.info(f"✓ Đã đạt giới hạn tổng {max_products} products")
-                break
 
         # Stats Summary
         total_checked = len(products)
@@ -359,6 +337,41 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"❌ Lỗi khi prepare products: {e}", exc_info=True)
         raise
+
+
+def _select_products_for_detail(
+    products: list[dict[str, Any]],
+    *,
+    existing_product_ids_in_db: set[str],
+    products_per_day: int,
+    max_products: int,
+    force_crawl: bool,
+) -> list[dict[str, Any]]:
+    effective_limit = max(0, products_per_day)
+    if max_products > 0:
+        effective_limit = min(effective_limit, max_products) if effective_limit else max_products
+    if effective_limit <= 0:
+        return []
+
+    selected = []
+    for product in products:
+        product_id = product.get("product_id")
+        product_url = product.get("url")
+        if not product_id or not product_url:
+            continue
+        if not force_crawl and product_id in existing_product_ids_in_db:
+            continue
+        selected.append(
+            {
+                "product_id": product_id,
+                "url": product_url,
+                "name": product.get("name", ""),
+                "product": product,
+            }
+        )
+        if len(selected) >= effective_limit:
+            break
+    return selected
 
 
 def crawl_product_batch(
@@ -1688,6 +1701,12 @@ def merge_product_details(**context) -> dict[str, Any]:
             logger.info(
                 f"✅ Sau khi lấy từng map_index: tổng {len(all_detail_results)} detail results (lấy thêm {fetched_count})"
             )
+
+        _validate_detail_results_available(
+            expected_products_count=expected_products_count,
+            actual_crawl_count=actual_crawl_count,
+            detail_result_count=len(all_detail_results),
+        )
 
         # Tạo dict để lookup nhanh
         detail_dict = {}

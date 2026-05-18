@@ -32,21 +32,21 @@ class TestAirflowOptimizationConfig:
         config = AirflowOptimizationConfig()
 
         # Scheduler settings
-        assert config.scheduler_heartbeat_sec == 5
-        assert config.min_file_process_interval == 15
+        assert config.scheduler_heartbeat_sec == 10
+        assert config.min_file_process_interval == 30
         assert config.dag_dir_list_interval == 30
         assert config.parsing_processes == 2
 
         # Database settings
-        assert config.sql_alchemy_pool_size == 20
-        assert config.sql_alchemy_max_overflow == 40
+        assert config.sql_alchemy_pool_size == 10
+        assert config.sql_alchemy_max_overflow == 20
         assert config.sql_alchemy_pool_recycle == 3600
         assert config.sql_alchemy_pool_timeout == 30
 
         # Parallelism settings
-        assert config.parallelism == 20
-        assert config.max_active_tasks_per_dag == 10
-        assert config.max_active_runs_per_dag == 3
+        assert config.parallelism == 6
+        assert config.max_active_tasks_per_dag == 3
+        assert config.max_active_runs_per_dag == 1
 
         # DAG serialization settings
         assert config.store_serialized_dags is True

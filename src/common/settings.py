@@ -86,7 +86,11 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         airflow_variable=True,
     ),
     "TIKI_DAG_SCHEDULE_HOURS": SettingSpec(
-        "TIKI_DAG_SCHEDULE_HOURS", 1, "int", description="Scheduled mode interval hours"
+        "TIKI_DAG_SCHEDULE_HOURS",
+        1,
+        "int",
+        description="Scheduled mode interval hours",
+        airflow_variable=True,
     ),
     "AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE": SettingSpec(
         "AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE",
@@ -95,7 +99,7 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     ),
     "TIKI_CATEGORY_NUM_BATCHES": SettingSpec(
         "TIKI_CATEGORY_NUM_BATCHES",
-        12,
+        6,
         "int",
         description="Mapped category batch count",
         airflow_variable=True,
@@ -120,22 +124,42 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         description="Directory for file-backed category mapped results",
     ),
     "TIKI_MIN_CATEGORY_LEVEL": SettingSpec(
-        "TIKI_MIN_CATEGORY_LEVEL", 2, "int", description="Minimum category level to crawl"
+        "TIKI_MIN_CATEGORY_LEVEL",
+        2,
+        "int",
+        description="Minimum category level to crawl",
+        airflow_variable=True,
     ),
     "TIKI_MAX_CATEGORY_LEVEL": SettingSpec(
-        "TIKI_MAX_CATEGORY_LEVEL", 4, "int", description="Maximum category level to crawl"
+        "TIKI_MAX_CATEGORY_LEVEL",
+        4,
+        "int",
+        description="Maximum category level to crawl",
+        airflow_variable=True,
     ),
     "TIKI_MAX_CATEGORY_LEVELS": SettingSpec(
         "TIKI_MAX_CATEGORY_LEVELS", 5, "int", description="Maximum known Tiki category depth"
     ),
     "TIKI_MAX_CATEGORIES": SettingSpec(
-        "TIKI_MAX_CATEGORIES", 0, "int", description="Optional max categories cap"
+        "TIKI_MAX_CATEGORIES",
+        0,
+        "int",
+        description="Optional max categories cap",
+        airflow_variable=True,
     ),
     "TIKI_CRAWL_ONLY_LEAF": SettingSpec(
-        "TIKI_CRAWL_ONLY_LEAF", True, "bool", description="Only crawl leaf categories"
+        "TIKI_CRAWL_ONLY_LEAF",
+        True,
+        "bool",
+        description="Only crawl leaf categories",
+        airflow_variable=True,
     ),
     "TIKI_MAX_PAGES_PER_CATEGORY": SettingSpec(
-        "TIKI_MAX_PAGES_PER_CATEGORY", 20, "int", description="Max listing pages per category"
+        "TIKI_MAX_PAGES_PER_CATEGORY",
+        20,
+        "int",
+        description="Max listing pages per category",
+        airflow_variable=True,
     ),
     "TIKI_CRAWL_TIMEOUT": SettingSpec(
         "TIKI_CRAWL_TIMEOUT", 300, "int", description="Category crawl timeout seconds"
@@ -151,33 +175,53 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     ),
     # Detail crawl
     "TIKI_PRODUCTS_PER_DAY": SettingSpec(
-        "TIKI_PRODUCTS_PER_DAY", 1000, "int", description="Products selected for detail per run"
+        "TIKI_PRODUCTS_PER_DAY",
+        1000,
+        "int",
+        description="Products selected for detail per run",
+        airflow_variable=True,
     ),
     "TIKI_MAX_PRODUCTS_FOR_DETAIL": SettingSpec(
-        "TIKI_MAX_PRODUCTS_FOR_DETAIL", 0, "int", description="Hard cap for detail products"
+        "TIKI_MAX_PRODUCTS_FOR_DETAIL",
+        0,
+        "int",
+        description="Hard cap for detail products",
+        airflow_variable=True,
     ),
     "TIKI_DETAIL_ACTIVE_BATCHES": SettingSpec(
         "TIKI_DETAIL_ACTIVE_BATCHES",
-        6,
+        3,
         "int",
         description="Mapped detail batches intended to run in one Airflow wave",
         airflow_variable=True,
     ),
     "TIKI_DETAIL_BATCH_SIZE": SettingSpec(
-        "TIKI_DETAIL_BATCH_SIZE", 500, "int", description="Soft target detail batch size"
+        "TIKI_DETAIL_BATCH_SIZE",
+        300,
+        "int",
+        description="Soft target detail batch size",
+        airflow_variable=True,
     ),
     "TIKI_DETAIL_MAX_CONCURRENT_TASKS": SettingSpec(
         "TIKI_DETAIL_MAX_CONCURRENT_TASKS",
-        8,
+        4,
         "int",
         description="Async detail requests inside one mapped task",
         airflow_variable=True,
     ),
     "TIKI_DETAIL_CONCURRENCY_MIN": SettingSpec(
-        "TIKI_DETAIL_CONCURRENCY_MIN", 4, "int", description="Minimum detail async concurrency"
+        "TIKI_DETAIL_CONCURRENCY_MIN",
+        2,
+        "int",
+        description="Minimum detail async concurrency",
+        airflow_variable=True,
     ),
     "TIKI_DETAIL_CONCURRENCY_MAX": SettingSpec(
-        "TIKI_DETAIL_CONCURRENCY_MAX", 10, "int", description="Maximum detail async concurrency"
+        "TIKI_DETAIL_CONCURRENCY_MAX",
+        6,
+        "int",
+        description="Maximum detail async concurrency",
+        airflow_variable=True,
     ),
     "TIKI_DETAIL_RATE_LIMIT_DELAY": SettingSpec(
         "TIKI_DETAIL_RATE_LIMIT_DELAY", 0.05, "float", description="Detail request stagger delay"
@@ -194,13 +238,21 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         description="Directory for file-backed detail mapped results",
     ),
     "TIKI_CACHE_RELAX_DAYS": SettingSpec(
-        "TIKI_CACHE_RELAX_DAYS", 2, "int", description="Recent detail data freshness window"
+        "TIKI_CACHE_RELAX_DAYS",
+        2,
+        "int",
+        description="Recent detail data freshness window",
+        airflow_variable=True,
     ),
     "TIKI_CHECK_RECENCY_ONLY": SettingSpec(
         "TIKI_CHECK_RECENCY_ONLY", False, "bool", description="Only check updated_at recency"
     ),
     "TIKI_FORCE_CRAWL": SettingSpec(
-        "TIKI_FORCE_CRAWL", False, "bool", description="Force detail recrawl"
+        "TIKI_FORCE_CRAWL",
+        False,
+        "bool",
+        description="Force detail recrawl",
+        airflow_variable=True,
     ),
     "TIKI_FORCE_REFRESH_CACHE": SettingSpec(
         "TIKI_FORCE_REFRESH_CACHE", False, "bool", description="Bypass detail file cache"
@@ -216,16 +268,24 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     ),
     # Load
     "TIKI_SAVE_BATCH_SIZE": SettingSpec(
-        "TIKI_SAVE_BATCH_SIZE", 2000, "int", description="DB save batch size"
+        "TIKI_SAVE_BATCH_SIZE",
+        1000,
+        "int",
+        description="DB save batch size",
+        airflow_variable=True,
     ),
     "TIKI_LOAD_MODE": SettingSpec(
-        "TIKI_LOAD_MODE", "auto", description="Product load strategy: auto, safe, optimized"
+        "TIKI_LOAD_MODE",
+        "auto",
+        description="Product load strategy: auto, safe, optimized",
+        airflow_variable=True,
     ),
     "TIKI_LOAD_OPTIMIZED_THRESHOLD": SettingSpec(
         "TIKI_LOAD_OPTIMIZED_THRESHOLD",
         1000,
         "int",
         description="Row threshold for optimized load mode",
+        airflow_variable=True,
     ),
     "TIKI_ALLOW_FILE_ONLY_ON_DB_FAILURE": SettingSpec(
         "TIKI_ALLOW_FILE_ONLY_ON_DB_FAILURE",
@@ -233,24 +293,41 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "bool",
         description="Allow final file output when DB load fails",
     ),
+    # Analytics
+    "TIKI_ANALYTICS_SCHEMA": SettingSpec(
+        "TIKI_ANALYTICS_SCHEMA",
+        "analytics",
+        description="PostgreSQL schema for analysis-ready mart tables",
+        airflow_variable=True,
+    ),
     # Resilience
     "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD": SettingSpec(
-        "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5, "int", description="Circuit breaker failures"
+        "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD",
+        5,
+        "int",
+        description="Circuit breaker failures",
+        airflow_variable=True,
     ),
     "TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT": SettingSpec(
         "TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT",
         60,
         "int",
         description="Circuit breaker recovery timeout seconds",
+        airflow_variable=True,
     ),
     "TIKI_DEGRADATION_FAILURE_THRESHOLD": SettingSpec(
-        "TIKI_DEGRADATION_FAILURE_THRESHOLD", 3, "int", description="Degradation failure threshold"
+        "TIKI_DEGRADATION_FAILURE_THRESHOLD",
+        3,
+        "int",
+        description="Degradation failure threshold",
+        airflow_variable=True,
     ),
     "TIKI_DEGRADATION_RECOVERY_THRESHOLD": SettingSpec(
         "TIKI_DEGRADATION_RECOVERY_THRESHOLD",
         5,
         "int",
         description="Degradation recovery threshold",
+        airflow_variable=True,
     ),
     # AI / Discord
     "AI_ENABLED": SettingSpec("AI_ENABLED", False, "bool", description="Enable AI summaries"),
@@ -296,7 +373,11 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     ),
     # Feature flags
     "ENABLE_PROFILING": SettingSpec(
-        "ENABLE_PROFILING", False, "bool", description="Enable task profiling"
+        "ENABLE_PROFILING",
+        False,
+        "bool",
+        description="Enable task profiling",
+        airflow_variable=True,
     ),
     "USE_ASYNC_CRAWLER": SettingSpec(
         "USE_ASYNC_CRAWLER", False, "bool", description="Enable async crawler feature path"
@@ -314,10 +395,18 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "ASYNC_TIMEOUT_CONNECT", 10, "int", description="Async crawler connect timeout"
     ),
     "USE_VECTORIZED_TRANSFORM": SettingSpec(
-        "USE_VECTORIZED_TRANSFORM", False, "bool", description="Enable vectorized transform"
+        "USE_VECTORIZED_TRANSFORM",
+        False,
+        "bool",
+        description="Enable vectorized transform",
+        airflow_variable=True,
     ),
     "ENABLE_METRICS_COLLECTION": SettingSpec(
-        "ENABLE_METRICS_COLLECTION", False, "bool", description="Enable metrics collection"
+        "ENABLE_METRICS_COLLECTION",
+        False,
+        "bool",
+        description="Enable metrics collection",
+        airflow_variable=True,
     ),
     "USE_OPTIMIZED_LOADER": SettingSpec(
         "USE_OPTIMIZED_LOADER", False, "bool", description="Enable optimized loader integration"
@@ -706,6 +795,7 @@ def airflow_variable_defaults() -> dict[str, str]:
         "TIKI_PRODUCTS_PER_DAY",
         "TIKI_LOAD_MODE",
         "TIKI_LOAD_OPTIMIZED_THRESHOLD",
+        "TIKI_ANALYTICS_SCHEMA",
         "TIKI_CACHE_RELAX_DAYS",
         "TIKI_CIRCUIT_BREAKER_FAILURE_THRESHOLD",
         "TIKI_CIRCUIT_BREAKER_RECOVERY_TIMEOUT",

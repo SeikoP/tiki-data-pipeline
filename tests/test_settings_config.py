@@ -11,6 +11,7 @@ from common.config_validator import has_errors, validate_registry, validate_sett
 from common.settings import (  # noqa: E402
     SETTINGS_REGISTRY,
     DatabaseSettings,
+    airflow_variable_defaults,
     get_bool_setting,
     get_int_setting,
     get_pipeline_settings,
@@ -33,6 +34,32 @@ def test_settings_legacy_ai_key_precedence(monkeypatch):
     settings = get_pipeline_settings(use_airflow=False)
 
     assert settings.ai.api_key == "legacy-key"
+
+
+def test_stable_local_resource_profile_defaults(monkeypatch):
+    for key in (
+        "TIKI_CATEGORY_NUM_BATCHES",
+        "TIKI_CATEGORY_CONCURRENCY",
+        "TIKI_DETAIL_ACTIVE_BATCHES",
+        "TIKI_DETAIL_BATCH_SIZE",
+        "TIKI_DETAIL_MAX_CONCURRENT_TASKS",
+        "TIKI_DETAIL_CONCURRENCY_MIN",
+        "TIKI_DETAIL_CONCURRENCY_MAX",
+        "TIKI_SAVE_BATCH_SIZE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = get_pipeline_settings(use_airflow=False)
+
+    assert settings.airflow.category_num_batches == 6
+    assert settings.airflow.max_active_tasks == 3
+    assert settings.crawl.category_concurrency == 1
+    assert settings.detail.active_batches == 3
+    assert settings.detail.batch_size == 300
+    assert settings.detail.max_concurrent_tasks == 4
+    assert settings.detail.concurrency_min == 2
+    assert settings.detail.concurrency_max == 6
+    assert settings.load.save_batch_size == 1000
 
 
 def test_secret_settings_have_empty_defaults():
@@ -85,6 +112,28 @@ def test_validator_catches_detail_batches_above_pool_slots():
 @pytest.mark.parametrize("key", ["POSTGRES_DB", "TIKI_DETAIL_BATCH_SIZE", "AI_MODEL"])
 def test_registry_values_are_available(key):
     assert get_setting(key, use_airflow=False) is not None
+
+
+def test_runtime_crawl_settings_are_airflow_overridable():
+    keys = {
+        "TIKI_PRODUCTS_PER_DAY",
+        "TIKI_MAX_PRODUCTS_FOR_DETAIL",
+        "TIKI_MAX_PAGES_PER_CATEGORY",
+        "TIKI_CRAWL_ONLY_LEAF",
+        "TIKI_CACHE_RELAX_DAYS",
+        "TIKI_FORCE_CRAWL",
+        "TIKI_MAX_CATEGORIES",
+        "TIKI_ANALYTICS_SCHEMA",
+    }
+
+    assert all(SETTINGS_REGISTRY[key].airflow_variable for key in keys)
+
+
+def test_airflow_seeded_settings_are_airflow_overridable():
+    seeded_keys = set(airflow_variable_defaults())
+
+    assert seeded_keys
+    assert all(SETTINGS_REGISTRY[key].airflow_variable for key in seeded_keys)
 
 
 def test_config_sync_check_passes():

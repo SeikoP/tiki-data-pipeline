@@ -68,6 +68,32 @@ def _track_category_result(result: dict[str, Any], context: dict[str, Any], logg
         logger.warning("⚠️ Không thể ghi audit category task %s: %s", task_key, tracking_error)
 
 
+def _category_window_offset(total_categories: int, max_categories: int, run_key: str | None) -> int:
+    if total_categories <= 0 or max_categories <= 0 or max_categories >= total_categories:
+        return 0
+    if not run_key:
+        return 0
+    try:
+        run_number = max(1, int(str(run_key)))
+        return ((run_number - 1) * max_categories) % total_categories
+    except ValueError:
+        stable_value = sum(ord(ch) for ch in str(run_key))
+        return (stable_value * max_categories) % total_categories
+
+
+def _window_categories_for_run(
+    categories: list[dict[str, Any]],
+    *,
+    max_categories: int,
+    run_key: str | None,
+) -> list[dict[str, Any]]:
+    if max_categories <= 0 or len(categories) <= max_categories:
+        return categories
+    offset = _category_window_offset(len(categories), max_categories, run_key)
+    rotated = categories[offset:] + categories[:offset]
+    return rotated[:max_categories]
+
+
 def load_categories(**context) -> list[dict[str, Any]]:
     """
     Task 1: Load danh sách danh mục từ file
@@ -126,6 +152,29 @@ def load_categories(**context) -> list[dict[str, Any]]:
                 f"📊 Lọc theo Level: {len(categories)} danh mục (Level {min_level}-{max_level})"
             )
 
+        max_categories = get_int_setting("TIKI_MAX_CATEGORIES")
+        run_key = None
+        crawl_run_id = _get_crawl_run_id(context)
+        if crawl_run_id:
+            run_key = str(crawl_run_id)
+        else:
+            dag_run = context.get("dag_run")
+            run_key = getattr(dag_run, "run_id", None)
+
+        original_filtered_count = len(categories)
+        categories = _window_categories_for_run(
+            categories,
+            max_categories=max_categories,
+            run_key=run_key,
+        )
+        if len(categories) != original_filtered_count:
+            logger.info(
+                "🪟 Giới hạn category window: %s/%s categories (run_key=%s)",
+                len(categories),
+                original_filtered_count,
+                run_key or "none",
+            )
+
         # Lưu categories vào file thay vì XCom
         from pathlib import Path
 
@@ -142,6 +191,8 @@ def load_categories(**context) -> list[dict[str, Any]]:
             "categories_file": str(output_file),
             "count": len(categories),
             "crawl_only_leaf": crawl_only_leaf,
+            "max_categories": max_categories,
+            "run_key": run_key,
         }
 
     except Exception as e:
