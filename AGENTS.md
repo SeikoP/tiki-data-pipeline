@@ -18,7 +18,7 @@ The main DAG is `tiki_crawl_fast`. Its high-level flow is:
 4. `crawl_categories.crawl_category` usually calls `crawl_category_batch`, which calls `crawl_single_category` per category, writes batch results to `TIKI_CATEGORY_BATCH_OUTPUT_DIR`, and returns only metadata through XCom. Do not assume full product payloads are in XCom in batch mode.
 5. `process_and_save.merge_products` reads category batch output files, merges/deduplicates products, writes merged product files under `/opt/airflow/data`, and saves raw list products when a crawl run id is available.
 6. `crawl_product_details` prepares detail candidates, plans detail batches with `common.detail_batch_planner`, crawls details via async API-first tasks, and merges detail output into `products_with_detail.json`.
-7. `transform_and_load` loads categories first for FK safety, transforms products with `DataTransformer`, then loads normalized data with `OptimizedDataLoader` into sellers/products/snapshots.
+7. `transform_and_load` transforms products with `DataTransformer` first, then loads only the categories needed by the current product file before loading normalized data with `OptimizedDataLoader` into sellers/products/snapshots. Categories still load before products for FK safety.
 8. `maintenance_and_reports` reconciles categories, optionally sends Discord summaries, logs Redis cache stats, backs up PostgreSQL, and finishes the crawl run.
 
 The database model is layered: `crawl_runs`, `crawl_tasks`, `raw_products`, `sellers`, `categories`, `products`, `product_prices`, `product_metrics`, and `crawl_history`. Schema guards are idempotent and live in `src/common/db_schema.py`; loaders should call them instead of assuming tables already exist.
@@ -78,7 +78,7 @@ Vectorized transform and optimized loader paths are feature-flagged. Keep baseli
 
 ## Loading and Database Rules
 
-Use `OptimizedDataLoader` and `common.pipeline_tracking.load_layered_products` for product loads unless a task has a clear reason not to. Categories must be loaded before products because `products.category_id` references `categories.category_id`. Loaders are responsible for preserving existing non-empty data on upsert and for writing price/metric snapshots by crawl run.
+Use `OptimizedDataLoader` and `common.pipeline_tracking.load_layered_products` for product loads unless a task has a clear reason not to. Categories must be loaded before products because `products.category_id` references `categories.category_id`, but category loading may use the current transformed product file to seed only referenced categories plus their parent chain. Loaders are responsible for preserving existing non-empty data on upsert and for writing price/metric snapshots by crawl run.
 
 When testing data quality and needing a clean product database while keeping Redis cache, prefer truncating application tables or removing only the Postgres volume. Do not use `docker compose down -v` unless you intentionally want to reset both database and cache.
 

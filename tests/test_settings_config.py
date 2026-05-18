@@ -35,6 +35,32 @@ def test_settings_legacy_ai_key_precedence(monkeypatch):
     assert settings.ai.api_key == "legacy-key"
 
 
+def test_stable_local_resource_profile_defaults(monkeypatch):
+    for key in (
+        "TIKI_CATEGORY_NUM_BATCHES",
+        "TIKI_CATEGORY_CONCURRENCY",
+        "TIKI_DETAIL_ACTIVE_BATCHES",
+        "TIKI_DETAIL_BATCH_SIZE",
+        "TIKI_DETAIL_MAX_CONCURRENT_TASKS",
+        "TIKI_DETAIL_CONCURRENCY_MIN",
+        "TIKI_DETAIL_CONCURRENCY_MAX",
+        "TIKI_SAVE_BATCH_SIZE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = get_pipeline_settings(use_airflow=False)
+
+    assert settings.airflow.category_num_batches == 6
+    assert settings.airflow.max_active_tasks == 3
+    assert settings.crawl.category_concurrency == 1
+    assert settings.detail.active_batches == 3
+    assert settings.detail.batch_size == 300
+    assert settings.detail.max_concurrent_tasks == 4
+    assert settings.detail.concurrency_min == 2
+    assert settings.detail.concurrency_max == 6
+    assert settings.load.save_batch_size == 1000
+
+
 def test_secret_settings_have_empty_defaults():
     secret_defaults = {key: spec.default for key, spec in SETTINGS_REGISTRY.items() if spec.secret}
 

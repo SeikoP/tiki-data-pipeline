@@ -249,6 +249,92 @@ def fix_missing_parent_categories(**context) -> dict[str, Any]:
         return {"status": "error", "message": str(e), "fixed_count": 0}
 
 
+def _count_product_category_refs(product_file: str) -> int:
+    try:
+        from common.category_utils import normalize_category_id
+
+        with open(product_file, encoding="utf-8") as f:
+            data = json.load(f)
+
+        if isinstance(data, list):
+            products = data
+        elif isinstance(data, dict):
+            products = data.get("products", [])
+            if not isinstance(products, list) and isinstance(data.get("data"), dict):
+                products = data["data"].get("products", [])
+        else:
+            products = []
+
+        category_ids = {
+            normalize_category_id(product.get("category_id"), product.get("category_url"))
+            for product in products
+            if isinstance(product, dict)
+        }
+        return len({cat_id for cat_id in category_ids if cat_id})
+    except Exception:
+        return 0
+
+
+def _resolve_current_product_file(context: dict[str, Any], logger) -> str | None:
+    def usable_product_file(product_file: str | None, *, authoritative: bool = False) -> str | None:
+        if not product_file or not os.path.exists(product_file):
+            return None
+        ref_count = _count_product_category_refs(product_file)
+        if ref_count > 0:
+            logger.info("📂 Product file có %s category refs: %s", ref_count, product_file)
+            return product_file
+        if authoritative:
+            raise ValueError(f"Current product file does not contain category refs: {product_file}")
+        logger.info("⏭️ Bỏ qua product file không có category refs: %s", product_file)
+        return None
+
+    ti = context.get("ti")
+    if ti:
+        for task_id, keys in (
+            ("transform_and_load.transform_products", ("transformed_file",)),
+            ("transform_products", ("transformed_file",)),
+            ("process_and_save.merge_products", ("products_file", "output_file")),
+            ("crawl_product_details.merge_product_details", ("output_file", "products_file")),
+            ("merge_product_details", ("output_file", "products_file")),
+            ("merge_products", ("products_file", "output_file")),
+        ):
+            try:
+                result = ti.xcom_pull(task_ids=task_id)
+            except Exception:
+                continue
+            if isinstance(result, dict):
+                for key in keys:
+                    product_file = usable_product_file(
+                        result.get(key),
+                        authoritative=task_id in {
+                            "transform_and_load.transform_products",
+                            "transform_products",
+                        },
+                    )
+                    if product_file:
+                        return product_file
+            elif isinstance(result, str):
+                product_file = usable_product_file(
+                    result,
+                    authoritative=task_id
+                    in {"transform_and_load.transform_products", "transform_products"},
+                )
+                if product_file:
+                    return product_file
+
+    for candidate in (
+        DATA_DIR / "processed" / "products_transformed.json",
+        DATA_DIR / "processed" / "merged_products.json",
+        DATA_DIR / "processed" / "products_with_detail.json",
+    ):
+        product_file = usable_product_file(str(candidate))
+        if product_file:
+            logger.info("📂 Dùng fallback product file để match categories: %s", product_file)
+            return product_file
+
+    return None
+
+
 def load_categories_to_db_wrapper(**context):
     """Task wrapper to load categories from JSON file into PostgreSQL database.
 
@@ -280,8 +366,22 @@ def load_categories_to_db_wrapper(**context):
             logger.error("❌ load_categories_db_func not available")
             return {"status": "error", "message": "Import failed"}
 
-        logger.info(f"🚀 Loading categories to DB from {json_file}")
-        load_categories_db_func(json_file)
+        product_file = _resolve_current_product_file(context, logger)
+        if product_file:
+            logger.info(
+                "🚀 Loading matched categories to DB from %s using products %s",
+                json_file,
+                product_file,
+            )
+            load_result = load_categories_db_func(json_file, product_file)
+        else:
+            logger.warning(
+                "⚠️  Không tìm thấy current product file; category loader sẽ dùng fallback nội bộ"
+            )
+            load_result = load_categories_db_func(json_file)
+
+        if isinstance(load_result, dict) and load_result.get("status") == "error":
+            raise RuntimeError(load_result.get("message", "load_categories failed"))
 
         # Sau khi load, fix missing parent categories
         logger.info("🔧 Fixing missing parent categories...")

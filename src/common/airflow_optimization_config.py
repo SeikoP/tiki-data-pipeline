@@ -13,21 +13,21 @@ class AirflowOptimizationConfig:
     """Configuration for Airflow optimization settings"""
 
     # Scheduler settings
-    scheduler_heartbeat_sec: int = 5
-    min_file_process_interval: int = 15
+    scheduler_heartbeat_sec: int = 10
+    min_file_process_interval: int = 30
     dag_dir_list_interval: int = 30
     parsing_processes: int = 2
 
     # Database settings
-    sql_alchemy_pool_size: int = 20
-    sql_alchemy_max_overflow: int = 40
+    sql_alchemy_pool_size: int = 10
+    sql_alchemy_max_overflow: int = 20
     sql_alchemy_pool_recycle: int = 3600
     sql_alchemy_pool_timeout: int = 30
 
     # Parallelism settings
-    parallelism: int = 20
-    max_active_tasks_per_dag: int = 10
-    max_active_runs_per_dag: int = 3
+    parallelism: int = 6
+    max_active_tasks_per_dag: int = 3
+    max_active_runs_per_dag: int = 1
 
     # DAG serialization settings
     store_serialized_dags: bool = True

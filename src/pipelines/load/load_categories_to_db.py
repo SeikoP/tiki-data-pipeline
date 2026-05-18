@@ -7,10 +7,80 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def load_categories(json_file_path: str):
+def _extract_products(payload):
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    if isinstance(payload.get("products"), list):
+        return payload["products"]
+    data = payload.get("data")
+    if isinstance(data, dict) and isinstance(data.get("products"), list):
+        return data["products"]
+    return []
+
+
+def _used_category_ids_from_products(product_file_path: str | None) -> set[str]:
+    if not product_file_path or not os.path.exists(product_file_path):
+        return set()
+
+    from common.category_utils import normalize_category_id
+
+    with open(product_file_path, encoding="utf-8") as f:
+        products = _extract_products(json.load(f))
+
+    used_category_ids = set()
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+        category_id = normalize_category_id(
+            product.get("category_id"),
+            product.get("category_url"),
+        )
+        if category_id:
+            used_category_ids.add(category_id)
+    return used_category_ids
+
+
+def _select_categories_for_product_refs(
+    categories: list[dict], used_category_ids: set[str]
+) -> list[dict]:
+    """Return categories referenced by current products plus their parent chain."""
+    from common.category_utils import normalize_category_tree
+
+    normalized = normalize_category_tree(categories)
+    id_to_cat = {cat.get("category_id"): cat for cat in normalized if cat.get("category_id")}
+    url_to_cat = {cat.get("url"): cat for cat in normalized if cat.get("url")}
+
+    selected_by_url: dict[str, dict] = {}
+    missing_category_ids = sorted(cat_id for cat_id in used_category_ids if cat_id not in id_to_cat)
+    if missing_category_ids:
+        raise ValueError(
+            "Product categories missing from category JSON: "
+            + ", ".join(missing_category_ids[:20])
+        )
+
+    for cat_id in sorted(used_category_ids):
+        current = id_to_cat.get(cat_id)
+        visited: set[str] = set()
+        while current:
+            current_url = current.get("url")
+            if not current_url or current_url in visited:
+                break
+            visited.add(current_url)
+            selected_by_url[current_url] = current
+
+            parent_url = current.get("parent_url")
+            current = url_to_cat.get(parent_url) if parent_url else None
+
+    return list(selected_by_url.values())
+
+
+def load_categories(json_file_path: str, product_file_path: str | None = None):
     """Load data from categories JSON file to DB using Bulk Copy.
 
-    Re-creates table if needed.
+    If product_file_path is provided, only categories referenced by current-run products
+    plus their parent chain are loaded.
     """
     from pipelines.crawl.storage.postgres_storage import PostgresStorage
 
@@ -31,105 +101,33 @@ def load_categories(json_file_path: str):
 
         logger.info(f"📊 Found {len(categories)} categories.")
 
-        # 2. CRITICAL: Đảm bảo tất cả parent categories được include
-        # Build URL -> category map từ file JSON đầy đủ
-        url_to_cat_full = {cat.get("url"): cat for cat in categories}
-
-        # Tìm tất cả parent URLs cần thiết cho các leaf categories có products
+        # Tìm tất cả parent URLs cần thiết cho leaf categories có product trong current run.
+        # Không lọc theo bảng products cũ trong DB: task này chạy trước khi load products
+        # của current run, nên product categories mới sẽ chưa tồn tại trong DB.
         storage = PostgresStorage()
-        used_category_ids = set()
-        try:
-            used_category_ids = storage.get_used_category_ids()
-            logger.info(f"🔍 Found {len(used_category_ids)} active categories in products table")
-        except Exception as e:
-            logger.info(f"⚠️  Could not get used category IDs: {e}")
-
-        # CRITICAL: Nếu không có products (DB mới), load tất cả leaf categories và parents
-        # Nếu có products, chỉ load leaf categories có products và parents của chúng
-        parent_urls_needed = set()
-        leaf_categories_to_load = []
-
-        # Xác định leaf categories
-        parent_urls_in_list = {c.get("parent_url") for c in categories if c.get("parent_url")}
-
-        for cat in categories:
-            cat_id = cat.get("category_id")
-            if not cat_id and cat.get("url"):
-                import re
-
-                match = re.search(r"c?(\d+)", cat.get("url", ""))
-                if match:
-                    cat_id = f"c{match.group(1)}"
-
-            # Check if leaf category (không có children trong danh sách)
-            is_leaf = cat.get("url") not in parent_urls_in_list
-
-            should_load = False
-            if not used_category_ids:
-                should_load = is_leaf
-            else:
-                should_load = is_leaf and cat_id and cat_id in used_category_ids
-
-            if should_load:
-                leaf_categories_to_load.append(cat)
-                # Traverse up để collect TẤT CẢ parent URLs lên đến root
-                current = cat
-                visited = set()
-                depth = 0
-                while current and depth < 10:
-                    parent_url = current.get("parent_url")
-                    if not parent_url:
-                        # Đã đến root, dừng lại
-                        break
-                    if parent_url in visited:
-                        # Circular reference, dừng lại
-                        break
-                    visited.add(parent_url)
-                    parent_urls_needed.add(parent_url)
-
-                    # Tìm parent trong url_to_cat_full
-                    if parent_url in url_to_cat_full:
-                        current = url_to_cat_full[parent_url]
-                    else:
-                        # Parent không có trong file JSON
-                        logger.info(f"⚠️  Parent {parent_url} không có trong file JSON")
-                        break
-                    depth += 1
-
-        # Include tất cả parent categories vào danh sách categories để load
-        # CRITICAL: Đảm bảo traverse đầy đủ để include cả parent của parent
-        categories_to_load = list(leaf_categories_to_load)
-        missing_parents = []
-
-        # Traverse đệ quy để include TẤT CẢ parent categories
-        parent_urls_to_check = set(parent_urls_needed)
-        while parent_urls_to_check:
-            current_batch = set(parent_urls_to_check)
-            parent_urls_to_check = set()
-
-            for parent_url in current_batch:
-                if parent_url in url_to_cat_full:
-                    parent_cat = url_to_cat_full[parent_url]
-                    # Chỉ thêm nếu chưa có trong danh sách
-                    if not any(c.get("url") == parent_url for c in categories_to_load):
-                        categories_to_load.append(parent_cat)
-                        # Kiểm tra parent của parent này
-                        grandparent_url = parent_cat.get("parent_url")
-                        if grandparent_url and grandparent_url not in parent_urls_needed:
-                            parent_urls_needed.add(grandparent_url)
-                            parent_urls_to_check.add(grandparent_url)
-                else:
-                    missing_parents.append(parent_url)
-
-        if missing_parents:
+        used_category_ids = _used_category_ids_from_products(product_file_path)
+        if used_category_ids:
             logger.info(
-                f"⚠️  Cảnh báo: {len(missing_parents)} parent URLs không có trong file JSON:"
+                f"🔍 Found {len(used_category_ids)} categories from current product file: {product_file_path}"
             )
-            for url in missing_parents[:5]:
-                logger.info(f"   - {url}")
+        else:
+            logger.info(
+                "⚠️  No current product category IDs found; loading all leaf categories as fallback"
+            )
+
+        if used_category_ids:
+            categories_to_load = _select_categories_for_product_refs(categories, used_category_ids)
+        else:
+            from common.category_utils import normalize_category_tree
+
+            normalized_categories = normalize_category_tree(categories)
+            categories_to_load = [
+                cat for cat in normalized_categories if cat.get("is_leaf")
+            ]
 
         logger.info(
-            f"Sẽ load {len(categories_to_load)} categories ({len(leaf_categories_to_load)} leaves + {len(parent_urls_needed)} parents)"
+            "Sẽ load %s categories theo current product refs",
+            len(categories_to_load),
         )
 
         # Debug: In ra danh sách categories sẽ load (chỉ hiển thị một số)
@@ -148,7 +146,7 @@ def load_categories(json_file_path: str):
         # Load categories với đầy đủ parent hierarchy
         saved_count = storage.save_categories(
             categories_to_load,
-            only_leaf=True,
+            only_leaf=False,
             sync_with_products=False,
         )
 
@@ -161,12 +159,11 @@ def load_categories(json_file_path: str):
         logger.info("📊 Updating product_count from products table...")
         updated_count = storage.update_category_product_counts()
         logger.info(f"✅ Updated product_count for {updated_count} categories.")
+        return {"status": "success", "count": saved_count}
 
     except Exception as e:
-        logger.info(f"❌ Error during load: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"❌ Error during load: {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":

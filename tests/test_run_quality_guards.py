@@ -7,6 +7,7 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "airflow" / "dags"))
 
+from tiki_crawl_products_v2.tasks import loader as dag_loader  # noqa: E402
 from tiki_crawl_products_v2.tasks.detail import (  # noqa: E402
     _extend_detail_results_from_xcom,
 )
@@ -16,6 +17,7 @@ from tiki_crawl_products_v2.tasks.loader import _resolve_product_load_mode  # no
 from common.batch_processor import BatchProcessor  # noqa: E402
 from common.category_utils import normalize_category_tree  # noqa: E402
 from common.detail_batch_planner import plan_detail_batches  # noqa: E402
+from pipelines.load.load_categories_to_db import _select_categories_for_product_refs  # noqa: E402
 from pipelines.load.loader import OptimizedDataLoader  # noqa: E402
 
 
@@ -189,3 +191,62 @@ def test_resolve_product_load_mode_auto_threshold():
     assert _resolve_product_load_mode("auto", product_count=1000, threshold=1000) == "optimized"
     assert _resolve_product_load_mode("traditional", product_count=2000, threshold=1000) == "safe"
     assert _resolve_product_load_mode("bulk", product_count=1, threshold=1000) == "optimized"
+
+
+def test_select_categories_for_product_refs_keeps_referenced_non_leaf_and_parents():
+    categories = [
+        {"name": "Root", "url": "https://tiki.vn/root/c1", "parent_url": None},
+        {
+            "name": "Parent",
+            "url": "https://tiki.vn/parent/c2",
+            "parent_url": "https://tiki.vn/root/c1",
+        },
+        {
+            "name": "Child",
+            "url": "https://tiki.vn/child/c3",
+            "parent_url": "https://tiki.vn/parent/c2",
+        },
+        {
+            "name": "Unrelated",
+            "url": "https://tiki.vn/unrelated/c4",
+            "parent_url": "https://tiki.vn/root/c1",
+        },
+    ]
+
+    selected = _select_categories_for_product_refs(categories, {"c2"})
+
+    assert [cat["category_id"] for cat in selected] == ["c2", "c1"]
+
+
+def test_resolve_current_product_file_does_not_use_stale_fallback_when_transform_xcom_unusable(
+    tmp_path, monkeypatch
+):
+    current_file = tmp_path / "products_transformed.json"
+    current_file.write_text('{"products": [{"product_id": "p1"}]}', encoding="utf-8")
+
+    stale_dir = tmp_path / "processed"
+    stale_dir.mkdir()
+    stale_file = stale_dir / "merged_products.json"
+    stale_file.write_text(
+        '{"products": [{"product_id": "p2", "category_id": "c123"}]}',
+        encoding="utf-8",
+    )
+
+    class FakeTi:
+        def xcom_pull(self, task_ids):
+            if task_ids == "transform_and_load.transform_products":
+                return {"transformed_file": str(current_file)}
+            return None
+
+    logger = type(
+        "Logger",
+        (),
+        {
+            "info": lambda *args: None,
+            "warning": lambda *args: None,
+        },
+    )()
+    monkeypatch.setattr(dag_loader, "DATA_DIR", tmp_path)
+
+    with pytest.raises(ValueError, match="does not contain category refs"):
+        dag_loader._resolve_current_product_file({"ti": FakeTi()}, logger)

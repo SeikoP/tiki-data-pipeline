@@ -20,7 +20,8 @@ load_categories + cleanup_incomplete_products
   -> prepare_products_for_detail
   -> crawl_product_batch_fast
   -> merge_product_details
-  -> load_categories_to_db + transform_products
+  -> transform_products
+  -> load_categories_to_db
   -> load_products
   -> reconcile/cleanup/report
 ```

@@ -471,9 +471,9 @@ with DAG(
             **Output:** Load stats (inserted, updated, failed)
             """,
         )
-        # Categories MUST be loaded before products (FK constraint)
-        # Transform can run in parallel with load_categories
-        [task_load_categories_db, task_transform_products] >> task_load_products
+        # Transform first so categories can be seeded only for products that will be loaded.
+        # Categories still run before products to satisfy the FK constraint.
+        task_transform_products >> task_load_categories_db >> task_load_products
 
     # TaskGroup: Maintenance and Reports
     with TaskGroup("maintenance_and_reports") as maintenance_group:

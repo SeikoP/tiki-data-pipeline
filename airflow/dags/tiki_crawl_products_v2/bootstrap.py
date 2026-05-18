@@ -702,7 +702,7 @@ def get_dag_config():
         "catchup": False,  # Không chạy lại các task đã bỏ lỡ
         "tags": dag_tags,
         "max_active_runs": 1,  # Chỉ chạy 1 DAG instance tại một thời điểm
-        "max_active_tasks": get_int_variable("TIKI_DETAIL_ACTIVE_BATCHES", default=6),
+        "max_active_tasks": get_int_variable("TIKI_DETAIL_ACTIVE_BATCHES", default=3),
     }
 
 

@@ -95,7 +95,7 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     ),
     "TIKI_CATEGORY_NUM_BATCHES": SettingSpec(
         "TIKI_CATEGORY_NUM_BATCHES",
-        12,
+        6,
         "int",
         description="Mapped category batch count",
         airflow_variable=True,
@@ -158,26 +158,26 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     ),
     "TIKI_DETAIL_ACTIVE_BATCHES": SettingSpec(
         "TIKI_DETAIL_ACTIVE_BATCHES",
-        6,
+        3,
         "int",
         description="Mapped detail batches intended to run in one Airflow wave",
         airflow_variable=True,
     ),
     "TIKI_DETAIL_BATCH_SIZE": SettingSpec(
-        "TIKI_DETAIL_BATCH_SIZE", 500, "int", description="Soft target detail batch size"
+        "TIKI_DETAIL_BATCH_SIZE", 300, "int", description="Soft target detail batch size"
     ),
     "TIKI_DETAIL_MAX_CONCURRENT_TASKS": SettingSpec(
         "TIKI_DETAIL_MAX_CONCURRENT_TASKS",
-        8,
+        4,
         "int",
         description="Async detail requests inside one mapped task",
         airflow_variable=True,
     ),
     "TIKI_DETAIL_CONCURRENCY_MIN": SettingSpec(
-        "TIKI_DETAIL_CONCURRENCY_MIN", 4, "int", description="Minimum detail async concurrency"
+        "TIKI_DETAIL_CONCURRENCY_MIN", 2, "int", description="Minimum detail async concurrency"
     ),
     "TIKI_DETAIL_CONCURRENCY_MAX": SettingSpec(
-        "TIKI_DETAIL_CONCURRENCY_MAX", 10, "int", description="Maximum detail async concurrency"
+        "TIKI_DETAIL_CONCURRENCY_MAX", 6, "int", description="Maximum detail async concurrency"
     ),
     "TIKI_DETAIL_RATE_LIMIT_DELAY": SettingSpec(
         "TIKI_DETAIL_RATE_LIMIT_DELAY", 0.05, "float", description="Detail request stagger delay"
@@ -216,7 +216,7 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
     ),
     # Load
     "TIKI_SAVE_BATCH_SIZE": SettingSpec(
-        "TIKI_SAVE_BATCH_SIZE", 2000, "int", description="DB save batch size"
+        "TIKI_SAVE_BATCH_SIZE", 1000, "int", description="DB save batch size"
     ),
     "TIKI_LOAD_MODE": SettingSpec(
         "TIKI_LOAD_MODE", "auto", description="Product load strategy: auto, safe, optimized"

@@ -21,6 +21,25 @@ This README keeps only current, verifiable performance guidance. Historical benc
 - Airflow scheduling overhead for too many tiny tasks.
 - Excessive logging or cache bypass during local debugging.
 
+## Stable Local Profile
+
+For a 4-core/8-thread laptop with 16 GB RAM, keep Airflow and crawl concurrency aligned:
+
+| Setting | Value |
+| --- | ---: |
+| `AIRFLOW__CORE__PARALLELISM` | `6` |
+| `AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG` | `3` |
+| `TIKI_CATEGORY_NUM_BATCHES` | `6` |
+| `TIKI_CATEGORY_MAX_ACTIVE_TASKS` | `2` |
+| `TIKI_DETAIL_ACTIVE_BATCHES` | `3` |
+| `TIKI_DETAIL_BATCH_SIZE` | `300` |
+| `TIKI_DETAIL_MAX_CONCURRENT_TASKS` | `4` |
+| `TIKI_DETAIL_CONCURRENCY_MIN` | `2` |
+| `TIKI_DETAIL_CONCURRENCY_MAX` | `6` |
+| `TIKI_SAVE_BATCH_SIZE` | `1000` |
+
+The active DAG is API-first; Selenium pool settings are kept for legacy/manual crawl flows and should not be used to size normal DAG concurrency.
+
 ## Checks
 
 ```powershell
