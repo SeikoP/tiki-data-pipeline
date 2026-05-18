@@ -1725,8 +1725,41 @@ def extract_product_detail_from_json(data: dict[str, Any], url: str) -> dict[str
     return product_data
 
 
+def _record_api_failure(
+    failure_details: dict[str, Any] | None,
+    *,
+    reason: str,
+    product_id: str,
+    status: str | int | None = None,
+    message: str | None = None,
+) -> None:
+    if failure_details is None:
+        return
+    default_messages = {
+        "api_html_instead_of_json": "API returned HTML instead of JSON",
+        "api_redirected_home": "API redirected to Tiki homepage",
+        "api_json_decode_error": "API returned invalid JSON",
+        "api_retriable_http_status": "API returned retriable HTTP status",
+        "api_http_error": "API returned non-retriable HTTP status",
+        "api_exception": "API request raised exception",
+        "api_incomplete_data": "API response missing name or price",
+    }
+    failure_details.clear()
+    failure_details.update(
+        {
+            "reason": reason,
+            "product_id": product_id,
+            "status": status,
+            "message": message or default_messages.get(reason, reason),
+        }
+    )
+
+
 async def crawl_product_detail_via_api(
-    url: str, session: Any, verbose: bool = False
+    url: str,
+    session: Any,
+    verbose: bool = False,
+    failure_details: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Crawl chi tiết sản phẩm qua Tiki API v2.
 
@@ -1742,42 +1775,58 @@ async def crawl_product_detail_via_api(
         return None
 
     api_url = f"https://tiki.vn/api/v2/products/{product_id}"
-    try:
-        from .ua_rotation import get_api_headers
+    def build_headers() -> dict[str, str]:
+        try:
+            from .ua_rotation import get_api_headers
 
-        headers = get_api_headers(
-            {
+            return get_api_headers(
+                {
+                    "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
+                    "Referer": url,
+                    "Origin": "https://tiki.vn",
+                    "X-Guest-Token": "no-token",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                }
+            )
+        except ImportError:
+            return {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
                 "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
                 "Referer": url,
                 "Origin": "https://tiki.vn",
                 "X-Guest-Token": "no-token",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
             }
-        )
-    except ImportError:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
-            "Referer": url,
-            "Origin": "https://tiki.vn",
-            "X-Guest-Token": "no-token",
-        }
 
     max_retries = 3
     retry_delay = 2  # Increased invalid delay
 
     for attempt in range(max_retries):
         try:
+            headers = build_headers()
             async with session.get(api_url, headers=headers, allow_redirects=True) as response:
                 # Detect redirection to homepage (indicates bot block/redirect)
                 is_homepage_redirect = str(response.url).strip("/") == "https://tiki.vn"
-                is_html_response = "text/html" in response.content_type
+                response_content_type = str(response.content_type or "").lower()
+                is_html_response = "text/html" in response_content_type
 
                 if response.status == 200 and not is_homepage_redirect and not is_html_response:
                     try:
                         data = await response.json()
+                        if failure_details is not None:
+                            failure_details.clear()
                         return extract_product_detail_from_json(data, url)
                     except Exception as json_err:
+                        _record_api_failure(
+                            failure_details,
+                            reason="api_json_decode_error",
+                            product_id=product_id,
+                            status=response.status,
+                            message=str(json_err),
+                        )
                         logger.warning(
                             "[API] ⚠️ Failed to decode JSON for %s: %s", product_id, json_err
                         )
@@ -1790,10 +1839,20 @@ async def crawl_product_detail_via_api(
                     or (response.status == 200 and is_html_response)
                 ):
                     status_desc = response.status
+                    reason = "api_retriable_http_status"
                     if is_homepage_redirect:
                         status_desc = "302 (Redirected to Home)"
+                        reason = "api_redirected_home"
                     elif is_html_response:
                         status_desc = "200 (HTML instead of JSON)"
+                        reason = "api_html_instead_of_json"
+
+                    _record_api_failure(
+                        failure_details,
+                        reason=reason,
+                        product_id=product_id,
+                        status=status_desc,
+                    )
 
                     is_last_attempt = attempt == max_retries - 1
                     if verbose:
@@ -1813,6 +1872,12 @@ async def crawl_product_detail_via_api(
                     continue
                 else:
                     # Non-retriable error (404, 403, 400...)
+                    _record_api_failure(
+                        failure_details,
+                        reason="api_http_error",
+                        product_id=product_id,
+                        status=response.status,
+                    )
                     if verbose:
                         text = await response.text()
                         logger.error(
@@ -1833,6 +1898,12 @@ async def crawl_product_detail_via_api(
                             pass  # Non-critical, intentional swallow
                     return None
         except Exception as e:
+            _record_api_failure(
+                failure_details,
+                reason="api_exception",
+                product_id=product_id,
+                message=str(e),
+            )
             logger.error("[API] ❌ Lỗi attempt %d: %s", attempt + 1, e)
             if attempt < max_retries - 1:
                 await asyncio.sleep(retry_delay * (2**attempt))
@@ -1846,6 +1917,7 @@ async def crawl_product_detail_async(
     session=None,
     use_selenium_fallback: bool = False,  # Force False
     verbose: bool = False,
+    failure_details: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Crawl product detail bằng aiohttp (async).
 
@@ -1898,7 +1970,9 @@ async def crawl_product_detail_async(
         # Tier 1: Thử crawl bằng Tiki API (Nhanh nhất & Chính xác nhất)
         if verbose:
             logger.info(f"[Async] 🚀 Thử API cho {url[:60]}...")
-        product_data = await crawl_product_detail_via_api(url, session, verbose=verbose)
+        product_data = await crawl_product_detail_via_api(
+            url, session, verbose=verbose, failure_details=failure_details
+        )
 
         if product_data:
             has_name = bool(product_data.get("name"))
@@ -1911,6 +1985,13 @@ async def crawl_product_detail_async(
                     logger.info(f"[Async] ✅ API thành công cho {url[:60]}...")
                 return product_data
             else:
+                product_id = extract_product_id_from_url(url) or "unknown"
+                _record_api_failure(
+                    failure_details,
+                    reason="api_incomplete_data",
+                    product_id=product_id,
+                    message="API response missing name or price",
+                )
                 if verbose:
                     logger.warning(
                         f"[Async] ⚠️ API thiếu thông tin cơ bản (Name/Price) cho {url[:60]}"

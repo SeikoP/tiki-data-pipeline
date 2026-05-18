@@ -11,6 +11,7 @@ from common.config_validator import has_errors, validate_registry, validate_sett
 from common.settings import (  # noqa: E402
     SETTINGS_REGISTRY,
     DatabaseSettings,
+    airflow_variable_defaults,
     get_bool_setting,
     get_int_setting,
     get_pipeline_settings,
@@ -111,6 +112,27 @@ def test_validator_catches_detail_batches_above_pool_slots():
 @pytest.mark.parametrize("key", ["POSTGRES_DB", "TIKI_DETAIL_BATCH_SIZE", "AI_MODEL"])
 def test_registry_values_are_available(key):
     assert get_setting(key, use_airflow=False) is not None
+
+
+def test_runtime_crawl_settings_are_airflow_overridable():
+    keys = {
+        "TIKI_PRODUCTS_PER_DAY",
+        "TIKI_MAX_PRODUCTS_FOR_DETAIL",
+        "TIKI_MAX_PAGES_PER_CATEGORY",
+        "TIKI_CRAWL_ONLY_LEAF",
+        "TIKI_CACHE_RELAX_DAYS",
+        "TIKI_FORCE_CRAWL",
+        "TIKI_MAX_CATEGORIES",
+    }
+
+    assert all(SETTINGS_REGISTRY[key].airflow_variable for key in keys)
+
+
+def test_airflow_seeded_settings_are_airflow_overridable():
+    seeded_keys = set(airflow_variable_defaults())
+
+    assert seeded_keys
+    assert all(SETTINGS_REGISTRY[key].airflow_variable for key in seeded_keys)
 
 
 def test_config_sync_check_passes():

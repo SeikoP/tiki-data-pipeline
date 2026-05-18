@@ -8,11 +8,18 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "airflow" / "dags"))
 
 from tiki_crawl_products_v2.tasks import loader as dag_loader  # noqa: E402
+from tiki_crawl_products_v2.tasks.category import _window_categories_for_run  # noqa: E402
 from tiki_crawl_products_v2.tasks.detail import (  # noqa: E402
     _extend_detail_results_from_xcom,
+    _select_products_for_detail,
+    _validate_detail_results_available,
 )
 from tiki_crawl_products_v2.tasks.detail_new import _get_detail_concurrency  # noqa: E402
 from tiki_crawl_products_v2.tasks.loader import _resolve_product_load_mode  # noqa: E402
+from tiki_crawl_products_v2.tasks.product import (  # noqa: E402
+    _resolve_detail_output_file,
+    _validate_merge_products_quality,
+)
 
 from common.batch_processor import BatchProcessor  # noqa: E402
 from common.category_utils import normalize_category_tree  # noqa: E402
@@ -186,11 +193,97 @@ def test_detail_concurrency_is_clamped(monkeypatch):
     assert _get_detail_concurrency(logger) == 10
 
 
+def test_detail_request_delay_staggers_by_configured_interval():
+    from tiki_crawl_products_v2.tasks.detail_new import _detail_request_delay
+
+    assert _detail_request_delay(index=0, rate_limit_delay=0.05) == 0
+    assert _detail_request_delay(index=3, rate_limit_delay=0.05) == pytest.approx(0.15)
+
+
 def test_resolve_product_load_mode_auto_threshold():
     assert _resolve_product_load_mode("auto", product_count=999, threshold=1000) == "safe"
     assert _resolve_product_load_mode("auto", product_count=1000, threshold=1000) == "optimized"
     assert _resolve_product_load_mode("traditional", product_count=2000, threshold=1000) == "safe"
     assert _resolve_product_load_mode("bulk", product_count=1, threshold=1000) == "optimized"
+
+
+def test_window_categories_for_run_rotates_by_run_key():
+    categories = [{"category_id": f"c{i}"} for i in range(1, 7)]
+
+    first = _window_categories_for_run(categories, max_categories=2, run_key="1")
+    second = _window_categories_for_run(categories, max_categories=2, run_key="2")
+
+    assert [cat["category_id"] for cat in first] == ["c1", "c2"]
+    assert [cat["category_id"] for cat in second] == ["c3", "c4"]
+
+
+def test_select_products_for_detail_applies_effective_limit_and_skips_recent_db_hits():
+    products = [
+        {"product_id": "p1", "url": "https://tiki.vn/p1.html", "name": "P1"},
+        {"product_id": "p2", "url": "https://tiki.vn/p2.html", "name": "P2"},
+        {"product_id": "p3", "url": "https://tiki.vn/p3.html", "name": "P3"},
+    ]
+
+    selected = _select_products_for_detail(
+        products,
+        existing_product_ids_in_db={"p1"},
+        products_per_day=3,
+        max_products=1,
+        force_crawl=False,
+    )
+
+    assert [item["product_id"] for item in selected] == ["p2"]
+    assert selected[0]["product"] == products[1]
+
+
+def test_select_products_for_detail_force_crawl_ignores_recent_db_hits():
+    products = [
+        {"product_id": "p1", "url": "https://tiki.vn/p1.html", "name": "P1"},
+        {"product_id": "p2", "url": "https://tiki.vn/p2.html", "name": "P2"},
+    ]
+
+    selected = _select_products_for_detail(
+        products,
+        existing_product_ids_in_db={"p1"},
+        products_per_day=2,
+        max_products=0,
+        force_crawl=True,
+    )
+
+    assert [item["product_id"] for item in selected] == ["p1", "p2"]
+
+
+def test_validate_merge_products_quality_rejects_empty_successful_crawl():
+    with pytest.raises(RuntimeError, match="No products were merged"):
+        _validate_merge_products_quality(
+            {"total_categories": 2, "success_categories": 2, "failed_categories": 0},
+            unique_product_count=0,
+        )
+
+
+def test_validate_merge_products_quality_rejects_all_failed_categories():
+    with pytest.raises(RuntimeError, match="No category crawl succeeded"):
+        _validate_merge_products_quality(
+            {"total_categories": 2, "success_categories": 0, "failed_categories": 2},
+            unique_product_count=0,
+        )
+
+
+def test_resolve_detail_output_file_rejects_invalid_upstream_xcom(tmp_path):
+    default_file = tmp_path / "products_with_detail.json"
+    default_file.write_text('{"products": [{"product_id": "stale"}]}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid output_file"):
+        _resolve_detail_output_file({"output_file": None}, str(default_file))
+
+
+def test_validate_detail_results_available_rejects_missing_mapped_results():
+    with pytest.raises(RuntimeError, match="No detail results were available"):
+        _validate_detail_results_available(
+            expected_products_count=3,
+            actual_crawl_count=2,
+            detail_result_count=0,
+        )
 
 
 def test_select_categories_for_product_refs_keeps_referenced_non_leaf_and_parents():
