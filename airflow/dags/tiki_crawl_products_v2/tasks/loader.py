@@ -306,7 +306,8 @@ def _resolve_current_product_file(context: dict[str, Any], logger) -> str | None
                 for key in keys:
                     product_file = usable_product_file(
                         result.get(key),
-                        authoritative=task_id in {
+                        authoritative=task_id
+                        in {
                             "transform_and_load.transform_products",
                             "transform_products",
                         },

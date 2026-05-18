@@ -241,9 +241,7 @@ def merge_products(**context) -> dict[str, Any]:
         stats["unique_products"] = len(unique_products)
         _validate_merge_products_quality(stats, len(unique_products))
         stats["raw_products_saved"] = 0
-        logger.info(
-            "⏭️ Bỏ qua lưu raw list products để tránh phình raw_products theo mỗi crawl run"
-        )
+        logger.info("⏭️ Bỏ qua lưu raw list products để tránh phình raw_products theo mỗi crawl run")
 
         logger.info("=" * 40)
         logger.info("📊 TỔNG KẾT GIAI ĐOẠN CRAWL")

@@ -30,9 +30,7 @@ def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
     return None
 
 
-def _track_detail_results(
-    results: list[dict[str, Any]], context: dict[str, Any], logger
-) -> None:
+def _track_detail_results(results: list[dict[str, Any]], context: dict[str, Any], logger) -> None:
     crawl_run_id = _get_crawl_run_id(context)
     if not crawl_run_id or not results:
         return
