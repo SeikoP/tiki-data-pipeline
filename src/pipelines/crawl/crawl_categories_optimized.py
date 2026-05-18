@@ -174,7 +174,7 @@ def crawl_single_category(
         os.makedirs(cache_dir, exist_ok=True)
         import hashlib
 
-        url_hash = hashlib.md5(url.encode()).hexdigest()
+        url_hash = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 
         if os.path.exists(cache_file):
@@ -548,10 +548,10 @@ def main():
     # Default: danh sách mặc định nếu không có config
     if not root_urls:
         root_urls = [
-            #"https://tiki.vn/thoi-trang-nu/c931",
+            # "https://tiki.vn/thoi-trang-nu/c931",
             # Có thể thêm các root categories khác ở đây
-             "https://tiki.vn/nha-cua-doi-song/c1883",
-             "https://tiki.vn/dien-tu-dien-lanh/c4221",
+            "https://tiki.vn/nha-cua-doi-song/c1883",
+            "https://tiki.vn/dien-tu-dien-lanh/c4221",
         ]
         print("ℹ️  Sử dụng root categories mặc định")
 

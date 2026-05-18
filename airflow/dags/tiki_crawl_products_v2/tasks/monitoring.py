@@ -135,8 +135,12 @@ def _build_notification_fields(summary: dict[str, Any]) -> list[dict[str, Any]]:
         ):
             if key in changes:
                 trend_lines.append(_delta_line(label, changes[key]))
-        trend_lines.append(f"Success rate: {_as_float(trends.get('success_rate_change')):+.1f} điểm")
-        fields.append({"name": "Trend vs previous run", "value": "\n".join(trend_lines), "inline": False})
+        trend_lines.append(
+            f"Success rate: {_as_float(trends.get('success_rate_change')):+.1f} điểm"
+        )
+        fields.append(
+            {"name": "Trend vs previous run", "value": "\n".join(trend_lines), "inline": False}
+        )
 
     return fields
 

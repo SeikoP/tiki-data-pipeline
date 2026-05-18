@@ -297,9 +297,7 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
         )
         if not force_crawl:
             db_hits = sum(
-                1
-                for product in products
-                if product.get("product_id") in existing_product_ids_in_db
+                1 for product in products if product.get("product_id") in existing_product_ids_in_db
             )
 
         # Stats Summary

@@ -80,4 +80,3 @@ def test_classify_category_path_for_graduation_scope(
     assert result["home_segment"] == expected_segment
     assert result["is_analysis_target"] is expected_target
     assert result["exclusion_reason"] == expected_reason
-
