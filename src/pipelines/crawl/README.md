@@ -1,190 +1,192 @@
-# Crawl Pipeline - Hướng Dẫn Sử Dụng
+# Crawl Pipeline
 
-## 1. Crawl Danh Mục (Categories)
+Module này chứa phần crawl Tiki dùng cho cả chạy local và DAG Airflow `tiki_crawl_fast`.
 
-Tiki có cấu trúc danh mục phân cấp (5 level). Crawl danh mục **chia 3 bước**:
+## Vai Tro Cac File
 
-### Bước 1: Crawl Danh Mục Gốc (Level 0-1)
-```bash
-python src/pipelines/crawl/extract_category_link_selenium.py
-```
-- URL: `https://tiki.vn/nha-cua-doi-song/c1883`
-- Output: `data/raw/categories.json` (các danh mục level 1 con)
-- Thời gian: ~2 phút
-- **Chỉ chạy 1 lần để khởi tạo**
+| File | Vai tro | Khi nao chay truc tiep |
+| --- | --- | --- |
+| `extract_category_link_selenium.py` | Helper Selenium de mo trang category va parse link con | Chi chay de debug parse root category; khong phai buoc bat buoc cua full flow |
+| `crawl_categories_optimized.py` | File chinh de crawl cay category tu root URLs | Chay truoc Airflow de tao `data/raw/categories_recursive_optimized.json` |
+| `crawl_products.py` | Crawl danh sach san pham tu categories da crawl | Chay smoke test local truoc khi trigger Airflow |
+| `crawl_products_detail.py` | Crawl chi tiet tung san pham | Thuong chay qua Airflow task, chi chay truc tiep khi debug detail crawler |
+| `config.py` | Hang so crawl/cache/retry/data quality | Khong chay truc tiep |
+| `storage/redis_cache.py` | Redis cache integration | Khong chay truc tiep |
+| `storage/postgres_storage.py` | PostgreSQL storage helpers | Khong chay truc tiep |
+| `resilience/` | Circuit breaker, DLQ, graceful degradation, exceptions | Khong chay truc tiep |
 
-### Bước 2A: Crawl Danh Mục Đệ Quy (Cách 1 - Chậm)
-```bash
-python src/pipelines/crawl/crawl_categories_recursive.py
-```
-- Output: `data/raw/categories_recursive.json`
-- Thời gian: ~5-10 phút
-- Phương pháp: Sequential (tuần tự)
+## Chuan Bi Truoc Khi Chay
 
-### Bước 2B: Crawl Danh Mục Đệ Quy Tối Ưu (Cách 2 - Nhanh) ⭐
-```bash
-python src/pipelines/crawl/crawl_categories_optimized.py
-```
-- Output: `data/raw/categories_recursive_optimized.json`
-- Thời gian: ~3-5 phút
-- Phương pháp: Parallel với ThreadPoolExecutor
-- **KHUYẾN NGHỊ: Dùng cách này**
+Chay cac lenh tu project root:
 
-### Thứ Tự Chạy Lần Đầu:
-1. `extract_category_link_selenium.py` (lấy level 1)
-2. `crawl_categories_optimized.py` (lấy hết tất cả level)
-
-## 2. Crawl Chi Tiết Sản Phẩm (Product Details)
-
-### Tự Động (DAG Airflow)
-```bash
-docker-compose up -d
-# Truy cập: http://localhost:8080
-# Trigger DAG: tiki_crawl_products
+```powershell
+cd E:\Project\tiki-data-pipeline
 ```
 
-### Thủ Công (Testing)
-```bash
-python src/pipelines/crawl/crawl_products.py
-```
-- Crawl tất cả products từ categories.json
-- Output: `data/raw/products.json`
+Neu dung virtualenv local:
 
-```bash
-python src/pipelines/crawl/crawl_products_detail.py
-```
-- Crawl chi tiết (price, rating, images, etc.) cho mỗi product
-- Output: `data/raw/products_detail.json`
-
-## 3. Cấu Trúc Category Path
-
-**Tiki breadcrumb trên website chỉ hiển thị 3-4 level, nhưng Tiki có tối đa 5 level:**
-
-```
-Level 0: "Nhà cửa - đời sống" (Level cha - HIDDEN trên breadcrumb)
-Level 1: "Ngoài trời & sân vườn" 
-Level 2: "Áo mưa, ô dù và phụ kiện đi mưa"
-Level 3: "Phụ kiện đi mưa"
-Level 4: (nếu có subcategory)
+```powershell
+.\.venv\Scripts\python.exe --version
 ```
 
-**✅ VẤN ĐỀ ĐÃ ĐƯỢC SỬA:**
+Neu can Redis/Postgres cho cache hoac storage:
 
-Trước: Breadcrumb từ website chỉ có 3 level, không có Level 0 (parent)
-
-Giải pháp:
-- Tạo `build_category_hierarchy.py` để mapping tất cả categories với parent chain
-- Generate `category_hierarchy_map.json` chứa full hierarchy
-- Sửa `extract_product_detail()` để auto-detect parent khi path có 3 level
-- Tích hợp vào DAG để sử dụng hierarchy_map trong mỗi product extraction
-
-**Kết quả:** Tất cả products đều có 4 levels với parent category tự động được thêm vào!
-
-## 4. Quy Trình Crawl Hoàn Chỉnh (E2E)
-
-```mermaid
-extract_category_link_selenium.py 
-    ↓
-crawl_categories_optimized.py (tất cả danh mục với hierarchy)
-    ↓
-crawl_products.py (lấy product URLs từ categories)
-    ↓
-crawl_products_detail.py (lấy chi tiết + category_path)
-    ↓
-Transform (normalize dữ liệu)
-    ↓
-Load (đưa vào PostgreSQL)
-    ↓
-Warehouse (Star Schema)
+```powershell
+docker compose up -d postgres redis
 ```
 
-## 5. Debugging
+## 1. Khai Bao Root Categories
 
-### Kiểm Tra Category Hierarchy
-```bash
-python -c "
-import json
-with open('data/raw/categories_recursive_optimized.json') as f:
-    cats = json.load(f)
-    print(f'Tổng: {len(cats)} danh mục')
-    levels = {}
-    for cat in cats:
-        l = cat.get('level', 0)
-        levels[l] = levels.get(l, 0) + 1
-    for l in sorted(levels.keys()):
-        print(f'  Level {l}: {levels[l]}')
-"
+File category crawl chinh doc root URLs tu `data/raw/root_categories.json`.
+
+Vi du:
+
+```json
+[
+  "https://tiki.vn/thoi-trang-nam/c915",
+  "https://tiki.vn/thoi-trang-nu/c931"
+]
 ```
 
-### Kiểm Tra Product Category Path
-```bash
-python -c "
-import psycopg2, json
-conn = psycopg2.connect('dbname=crawl_data user=postgres password=postgres host=localhost')
-cur = conn.cursor()
-cur.execute('SELECT COUNT(*), jsonb_array_length(category_path) FROM products GROUP BY jsonb_array_length(category_path)')
-for row in cur.fetchall():
-    print(f'{row[1]} levels: {row[0]} products')
-cur.close()
-conn.close()
-"
+Co the dung bien moi truong `TIKI_ROOT_CATEGORIES` neu khong muon tao file:
+
+```powershell
+$env:TIKI_ROOT_CATEGORIES="https://tiki.vn/thoi-trang-nam/c915,https://tiki.vn/thoi-trang-nu/c931"
 ```
 
-## 6. Thông Số Cấu Hình & Cache
+## 2. Debug Helper Root Category Neu Can
 
-| Tham Số | Giá Trị | Ghi Chú |
-|---------|--------|--------|
-| Root URL | `https://tiki.vn/nha-cua-doi-song/c1883` | Danh mục gốc |
-| Max Level (Categories) | 3 | Độ sâu tối đa |
-| Max Level (Category Path) | 4 | Tối đa 4 level trong product |
-| Cache Dir | `data/raw/cache/` | Cache crawl results |
-| Redis Cache | `redis://redis:6379/1` | Distributed cache (L2) |
-| Cache TTL | 86400s (24h) | Thời gian sống của cache |
-| Force Refresh | `TIKI_FORCE_REFRESH` | Biến môi trường để bỏ qua cache |
+`extract_category_link_selenium.py` chi la helper cho parse category link bang Selenium. Chay file nay khi can kiem tra Selenium/browser hoac logic parse tren mot root page.
 
-## 7. Resilience & Reliability (Độ Tin Cậy)
+```powershell
+.\.venv\Scripts\python.exe src\pipelines\crawl\extract_category_link_selenium.py
+```
 
-Hệ thống tích hợp các pattern giúp pipeline vận hành bền bỉ:
+Output debug:
 
-- **Circuit Breaker:** Tự động ngắt kết nối khi Tiki trả về 429 (Rate Limit) hoặc timeout quá nhiều, tránh bị ban IP.
-- **Dead Letter Queue (DLQ):** Các sản phẩm lỗi được đẩy vào hàng chờ riêng để xử lý lại thay vì làm chết toàn bộ tiến trình.
-- **Multi-level Cache (L1-L2-L3):** Tối ưu tốc độ cực đại (hit cache trong 0ms) và cho phép fallback linh hoạt khi Redis hoặc File system có vấn đề.
-- **Adaptive Rate Limiting:** Tự động điều chỉnh tốc độ crawl dựa trên phản hồi của server.
+| File | Y nghia |
+| --- | --- |
+| `data/raw/categories.json` | Category con parse duoc tu root page |
+| `full_page.html` | HTML debug neu script duoc cau hinh luu HTML |
 
-## 8. Cải Tiến Dữ Liệu (v1.2) - MỚI ⭐
+Neu file nay parse duoc 0 category, kiem tra root URL, Chrome/Selenium, hoac Tiki page layout. Full flow category van nen chay qua `crawl_categories_optimized.py`.
 
-- **`review_count`:** Đã thêm cột số lượng đánh giá vào bảng `products`.
-- **Preserve Data (COALESCE):** Khi crawl lại, nếu dữ liệu mới bị thiếu (NULL), hệ thống sẽ **giữ lại dữ liệu cũ** trong Database thay vì ghi đè giá trị rỗng.
-- **Improved Pagination:** Phân trang dựa trên `paging` metadata của Tiki API, đảm bảo lấy đủ 100% sản phẩm mà không bị kẹt ở con số 40.
+## 3. Crawl Category Tree
 
-## 9. Troubleshooting
+Day la buoc local quan trong truoc khi chay full Airflow flow.
 
-| Lỗi | Nguyên Nhân | Giải Pháp |
-|-----|-----------|----------|
-| Luôn crawl ra 40 sản phẩm | Cache cũ hoặc lỗi phân trang | Set `TIKI_FORCE_REFRESH=true` và cập nhật logic paging |
-| Review count bị NULL | Sản phẩm chưa có đánh giá | Đã hỗ trợ lấy `review_count` từ API |
-| Dữ liệu bị ghi đè rỗng | Missing fields trong HTML | Đã sửa logic Load (Upsert với COALESCE) |
-| Driver Selenium error | Chrome chưa cài | Cài: `pip install webdriver-manager` |
+```powershell
+.\.venv\Scripts\python.exe src\pipelines\crawl\crawl_categories_optimized.py
+```
 
-## 10. Pipeline Initialization Checklist
+Output chinh:
 
-Khi setup lần đầu:
+| File | Y nghia |
+| --- | --- |
+| `data/raw/categories_recursive_optimized.json` | Cay category da crawl de dung cho product crawl va Airflow |
+| `data/raw/cache/categories/` | Cache category crawl |
 
-- [ ] Chạy `extract_category_link_selenium.py` (lấy danh mục gốc)
-- [ ] Chạy `crawl_categories_optimized.py` (lấy tất cả danh mục)
-- [ ] Chạy `build_category_hierarchy.py` (tạo hierarchy map)
-- [ ] Kiểm tra `data/raw/category_hierarchy_map.json` tồn tại
-- [ ] Start Docker: `docker-compose up -d`
-- [ ] Trigger DAG `tiki_crawl_products` trong Airflow UI
-- [ ] Kiểm tra products trong DB có 4 levels và `review_count`
+Neu lenh loi, sua loi o buoc nay truoc khi chay product crawl hoac Airflow. Khong trigger Airflow khi file category output chua co hoac rong.
 
----
+## 4. Build Category Hierarchy
 
-**Cập nhật lần cuối:** 2026-01-30
+Sau khi co `categories_recursive_optimized.json`, build map cha-con:
 
-### Tính Năng Mới (v1.2)
-- ✅ `review_count` field support
-- ✅ Smart pagination (Tiki API paging)
-- ✅ Cache TTL & Force Refresh logic
-- ✅ Data persistence (COALESCE logic)
-- ✅ Adaptive Rate Limiting integration
+```powershell
+.\.venv\Scripts\python.exe src\tools\build_category_hierarchy.py
+```
+
+Output:
+
+| File | Y nghia |
+| --- | --- |
+| `data/raw/category_hierarchy_map.json` | Map hierarchy dung de gan parent/root category cho san pham |
+
+## 5. Smoke Test Product List Crawl
+
+Chay product list crawler sau khi category tree da co du lieu:
+
+```powershell
+.\.venv\Scripts\python.exe src\pipelines\crawl\crawl_products.py
+```
+
+Output:
+
+| File | Y nghia |
+| --- | --- |
+| `data/demo/products/products.json` hoac thu muc products cau hinh trong `crawl_utils.py` | Danh sach san pham crawl tu categories |
+| `data/raw/cache/product_lists/` | Cache product listing |
+
+Nen gioi han so category/page khi debug local neu crawl qua lau. Cac bien runtime lien quan nen khai bao qua `.env`/settings thay vi hardcode trong code.
+
+## 6. Chay Full Flow Bang Airflow
+
+Chi trigger Airflow sau khi cac buoc local toi thieu sau da OK:
+
+1. `data/raw/root_categories.json` da dung root URLs.
+2. `crawl_categories_optimized.py` chay xong.
+3. `data/raw/categories_recursive_optimized.json` ton tai va co du lieu.
+4. `build_category_hierarchy.py` chay xong.
+5. `crawl_products.py` smoke test khong loi import/runtime co ban.
+
+Start stack:
+
+```powershell
+docker compose up -d --build
+```
+
+Kiem tra service:
+
+```powershell
+docker compose ps
+docker compose exec -T airflow-scheduler airflow dags list
+docker compose exec -T airflow-scheduler airflow dags list-import-errors
+```
+
+Mo UI:
+
+```text
+http://localhost:8080/ui/
+```
+
+Trigger DAG:
+
+```powershell
+docker compose exec -T airflow-scheduler airflow dags trigger tiki_crawl_fast
+```
+
+## Thu Tu Chay Khuyen Nghi
+
+```powershell
+# Optional debug helper
+.\.venv\Scripts\python.exe src\pipelines\crawl\extract_category_link_selenium.py
+
+# Required before Airflow full flow
+.\.venv\Scripts\python.exe src\pipelines\crawl\crawl_categories_optimized.py
+.\.venv\Scripts\python.exe src\tools\build_category_hierarchy.py
+
+# Product list smoke test
+.\.venv\Scripts\python.exe src\pipelines\crawl\crawl_products.py
+
+# Then Airflow
+docker compose up -d --build
+docker compose exec -T airflow-scheduler airflow dags trigger tiki_crawl_fast
+```
+
+## Runtime Controls
+
+| Control | Muc dich |
+| --- | --- |
+| `TIKI_ROOT_CATEGORIES` | Root category URLs, cach nhau bang dau phay |
+| `TIKI_CATEGORY_NUM_BATCHES` | So batch category mapped trong DAG |
+| `TIKI_FORCE_REFRESH` | Bo qua cache khi can crawl lai |
+| `PRODUCT_BATCH_SIZE` | So product moi detail batch |
+| `REDIS_CACHE_TTL_PRODUCT_DETAIL` | TTL cache product detail |
+| `DATA_QUALITY_MIN_SCORE` | Diem day du toi thieu cua product |
+
+## Validation
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_crawl_products.py tests/test_tiki_crawl_api.py -q
+.\.venv\Scripts\python.exe -m pytest tests/test_crawl_retry_logic.py tests/test_cache_hit_rate_fix.py -q
+```

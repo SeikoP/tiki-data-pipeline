@@ -54,6 +54,7 @@ class BatchProcessor:
         self.total_processed = 0
         self.total_failed = 0
         self.total_time = 0.0
+        self.errors: list[str] = []
 
     def process(
         self,
@@ -73,6 +74,10 @@ class BatchProcessor:
         """
         start_time = time.time()
         batch_num = 0
+        self.total_processed = 0
+        self.total_failed = 0
+        self.total_time = 0.0
+        self.errors = []
 
         for batch in create_batches(items, self.batch_size):
             batch_num += 1
@@ -99,6 +104,7 @@ class BatchProcessor:
 
             except Exception as e:
                 self.total_failed += len(batch)
+                self.errors.append(f"Batch {batch_num} failed: {e}")
 
                 if self.show_progress:
                     print(f"❌ Batch {batch_num} failed: {e}")
@@ -114,6 +120,7 @@ class BatchProcessor:
             "total_batches": batch_num,
             "total_time": total_time,
             "avg_rate": self.total_processed / total_time if total_time > 0 else 0,
+            "errors": self.errors,
         }
 
 

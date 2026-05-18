@@ -5,11 +5,9 @@ Module để tổng hợp dữ liệu sử dụng Groq AI.
 import hashlib
 import json
 import logging
-import os
 import re
 import time
 from datetime import datetime, timedelta
-from functools import lru_cache
 from typing import Any
 
 import requests
@@ -18,17 +16,9 @@ import requests
 try:
     from ..config import AI_CONFIG
 except ImportError:
-    # Fallback: đọc trực tiếp từ environment
-    AI_CONFIG = {
-        "enabled": os.getenv("AI_ENABLED", os.getenv("GROQ_ENABLED", "false")).lower() == "true",
-        "api_key": os.getenv("AI_API_KEY", os.getenv("GROQ_API_KEY", "")),
-        "base_url": os.getenv(
-            "AI_API_BASE", os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
-        ),
-        "model": os.getenv(
-            "AI_MODEL", os.getenv("GROQ_MODEL", "arcee-ai/trinity-large-preview:free")
-        ),
-    }
+    from common.settings import get_pipeline_settings
+
+    AI_CONFIG = get_pipeline_settings(use_airflow=False).ai.as_config()
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +38,14 @@ class AISummarizer:
         self.api_keys = [k.strip() for k in self.raw_api_key.split(",") if k.strip()]
         self.current_key_index = 0
 
-        self.base_url = AI_CONFIG.get("base_url", "https://openrouter.ai/api/v1")
-        self.model = AI_CONFIG.get("model", "arcee-ai/trinity-large-preview:free")
+        self.base_url = AI_CONFIG.get("base_url", "https://api.groq.com/openai/v1")
+        self.model = AI_CONFIG.get("model", "llama-3.3-70b-versatile")
         self.enabled = AI_CONFIG.get("enabled", False)
 
-        if not self.api_keys:
+        if self.enabled and not self.api_keys:
             logger.warning("⚠️  AI_API_KEY không được cấu hình trong environment variables")
         if not self.enabled:
-            logger.warning("⚠️  AI_ENABLED chưa được bật")
+            logger.info("AI summary disabled")
 
         if len(self.api_keys) > 1:
             logger.info(f"🔑 Đã load {len(self.api_keys)} API keys cho Groq AI")
@@ -81,8 +71,13 @@ class AISummarizer:
         Returns:
             String chứa bản tổng hợp từ AI
         """
-        if not self.enabled or not self.api_keys:
-            logger.warning("⚠️  Groq AI không được bật hoặc thiếu API key, bỏ qua tổng hợp")
+        if (
+            not self.enabled
+            or not self.api_keys
+            or self.__class__._auth_disabled
+            or self.__class__._rate_limit_disabled
+        ):
+            logger.info("Groq AI disabled or missing API key, skipping summary")
             return ""
 
         try:
@@ -123,7 +118,7 @@ class AISummarizer:
             "timeout": stats.get("timeout", 0),
         }
         key_str = json.dumps(key_data, sort_keys=True)
-        return hashlib.md5(key_str.encode()).hexdigest()
+        return hashlib.sha256(key_str.encode()).hexdigest()[:32]
 
     def _get_summary_from_cache(self, key: str) -> str | None:
         """Get AI summary from cache if not expired."""
@@ -203,7 +198,15 @@ Trả về ĐÚNG format trên:"""
 
         return prompt
 
-    @lru_cache(maxsize=2048)  # noqa: B019
+    # Class-level cache for shorten_product_name to avoid lru_cache memory leak
+    # on instance methods (lru_cache holds reference to self, preventing GC)
+    _short_name_cache: dict[str, str] = {}
+    _SHORT_NAME_CACHE_MAXSIZE = 2048
+    _auth_disabled = False
+    _auth_failure_logged = False
+    _rate_limit_disabled = False
+    _rate_limit_logged = False
+
     def shorten_product_name(self, product_name: str) -> str:
         """Rút gọn tên sản phẩm sử dụng AI (có caching và regex fallback).
 
@@ -216,8 +219,13 @@ Trả về ĐÚNG format trên:"""
         if not product_name:
             return ""
 
+        # Check class-level cache first
+        if product_name in self._short_name_cache:
+            return self._short_name_cache[product_name]
+
         # 0. Pre-check: Nếu tên đã ngắn (< 15 chars) hoặc quá dài (> 200 chars - có thể là spam), trả về regex clean luôn
         if len(product_name) < 15:
+            self._cache_short_name(product_name, product_name)
             return product_name
 
         # 1. Regex Cleanup (Heuristic) - Luôn chạy cái này trước để tiết kiệm token
@@ -226,9 +234,14 @@ Trả về ĐÚNG format trên:"""
 
         # Nếu sau khi regex clean, tên đã đủ ngắn (< 40 chars) -> Return luôn, không cần AI
         if len(cleaned_name) < 40:
+            self._cache_short_name(product_name, cleaned_name)
             return cleaned_name
 
         if not self.enabled or not self.api_keys:
+            self._cache_short_name(product_name, cleaned_name)
+            return cleaned_name
+        if self.__class__._auth_disabled or self.__class__._rate_limit_disabled:
+            self._cache_short_name(product_name, cleaned_name)
             return cleaned_name
 
         try:
@@ -270,14 +283,29 @@ Tên rút gọn:
                 cleaned_name_ai = response.strip().strip('"').strip("'")
                 # Fallback check: Nếu AI trả về tên quá ngắn hoặc rỗng, dùng regex clean
                 if len(cleaned_name_ai) < 3:
+                    self._cache_short_name(product_name, cleaned_name)
                     return cleaned_name
+                self._cache_short_name(product_name, cleaned_name_ai)
                 return cleaned_name_ai
 
+            self._cache_short_name(product_name, cleaned_name)
             return cleaned_name
 
         except Exception as e:
             logger.error(f"❌ Lỗi khi rút gọn tên sản phẩm: {e}")
+            self._cache_short_name(product_name, cleaned_name)
             return cleaned_name
+
+    def _cache_short_name(self, key: str, value: str) -> None:
+        """Store result in class-level cache, evicting oldest if full."""
+        if len(self._short_name_cache) >= self._SHORT_NAME_CACHE_MAXSIZE:
+            # Evict first (oldest) entry
+            try:
+                oldest_key = next(iter(self._short_name_cache))
+                del self._short_name_cache[oldest_key]
+            except StopIteration:
+                pass
+        self._short_name_cache[key] = value
 
     def _regex_clean_name(self, name: str) -> str:
         """
@@ -325,9 +353,14 @@ Tên rút gọn:
         """
         Gọi Groq API để tổng hợp (với Retry và Key Rotation)
         """
-        # Thử với tối đa số lượng key * 2 lần (để retry mỗi key ít nhất 1 lần nếu cần)
-        max_attempts = len(self.api_keys) * 2 if self.api_keys else 1
+        if self.__class__._auth_disabled or self.__class__._rate_limit_disabled:
+            return ""
+
+        # Auth errors should try each configured key once, then fail open for this process.
+        max_attempts = len(self.api_keys) if self.api_keys else 1
         attempts = 0
+        auth_failed_keys: set[int] = set()
+        rate_limited_keys: set[int] = set()
 
         while attempts < max_attempts:
             attempts += 1
@@ -381,6 +414,10 @@ Tên rút gọn:
                     logger.warning(
                         f"⚠️  Rate Limit (429) hit on Key #{self.current_key_index}. Waiting {wait_time}s then rotating..."
                     )
+                    rate_limited_keys.add(self.current_key_index)
+                    if len(rate_limited_keys) >= len(self.api_keys):
+                        self._disable_ai_for_rate_limit()
+                        return ""
                     time.sleep(wait_time)
                     self._rotate_key()
                     continue
@@ -389,6 +426,10 @@ Tên rút gọn:
                     logger.warning(
                         f"⚠️  Auth Error (401) on Key #{self.current_key_index}. Rotating..."
                     )
+                    auth_failed_keys.add(self.current_key_index)
+                    if len(auth_failed_keys) >= len(self.api_keys):
+                        self._disable_ai_for_auth_failure()
+                        return ""
                     self._rotate_key()
                     continue
 
@@ -422,8 +463,31 @@ Tên rút gọn:
                 logger.error(f"❌ Lỗi không xác định khi gọi Groq API: {e}")
                 return ""
 
-        logger.error("❌ Đã thử tất cả API keys nhưng đều thất bại.")
+        if auth_failed_keys and len(auth_failed_keys) >= len(self.api_keys):
+            self._disable_ai_for_auth_failure()
+        elif rate_limited_keys and len(rate_limited_keys) >= len(self.api_keys):
+            self._disable_ai_for_rate_limit()
+        else:
+            logger.error("❌ Đã thử tất cả API keys nhưng đều thất bại.")
         return ""
+
+    @classmethod
+    def _disable_ai_for_auth_failure(cls) -> None:
+        cls._auth_disabled = True
+        if not cls._auth_failure_logged:
+            logger.error(
+                "❌ Tất cả AI_API_KEY đều bị 401. Tắt AI cho process hiện tại và dùng fallback local."
+            )
+            cls._auth_failure_logged = True
+
+    @classmethod
+    def _disable_ai_for_rate_limit(cls) -> None:
+        cls._rate_limit_disabled = True
+        if not cls._rate_limit_logged:
+            logger.error(
+                "❌ Tất cả AI_API_KEY đều bị rate limit 429. Tắt AI cho process hiện tại và dùng fallback local."
+            )
+            cls._rate_limit_logged = True
 
     def generate_data_quality_report(self, conn) -> str:
         """Tạo báo cáo chất lượng dữ liệu với phân tích chiến lược giảm giá.

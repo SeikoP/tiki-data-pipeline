@@ -1,21 +1,37 @@
 import json
+import logging
 import re
 import sys
 import time
 
-from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
+logger = logging.getLogger(__name__)
 
-# Thử import webdriver-manager
-try:
-    from webdriver_manager.chrome import ChromeDriverManager
+# Lazy imports - Selenium/BS4 loaded on first use to avoid DAG import overhead
+_BeautifulSoup = None
+_HAS_WEBDRIVER_MANAGER = None
+ChromeDriverManager = None
 
-    HAS_WEBDRIVER_MANAGER = True
-except ImportError:
-    HAS_WEBDRIVER_MANAGER = False
+
+def _get_bs4():
+    global _BeautifulSoup
+    if _BeautifulSoup is None:
+        from bs4 import BeautifulSoup
+
+        _BeautifulSoup = BeautifulSoup
+    return _BeautifulSoup
+
+
+def _check_webdriver_manager():
+    global ChromeDriverManager, _HAS_WEBDRIVER_MANAGER
+    if _HAS_WEBDRIVER_MANAGER is None:
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+
+            _HAS_WEBDRIVER_MANAGER = True
+        except ImportError:
+            _HAS_WEBDRIVER_MANAGER = False
+    return _HAS_WEBDRIVER_MANAGER
+
 
 # Set UTF-8 encoding cho stdout trên Windows
 if sys.platform == "win32":
@@ -33,15 +49,24 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
         save_html: Có lưu HTML vào file không (mặc định False để tối ưu)
         verbose: Có in log không (mặc định True)
     """
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.by import By
 
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    )
+    try:
+        from .ua_rotation import get_chrome_user_agent
+
+        chrome_options.add_argument(f"user-agent={get_chrome_user_agent()}")
+    except ImportError:
+        chrome_options.add_argument(
+            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
 
     # Tối ưu: tắt một số tính năng không cần
     prefs = {
@@ -57,12 +82,13 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
         pass
 
     # Sử dụng webdriver-manager nếu có
-    if HAS_WEBDRIVER_MANAGER:
+    if _check_webdriver_manager():
         try:
             import os
             import stat
 
             # Install ChromeDriver
+            assert ChromeDriverManager is not None
             driver_path = ChromeDriverManager().install()
 
             # QUAN TRỌNG: Set quyền thực thi cho ChromeDriver (fix lỗi status code 127)
@@ -104,23 +130,25 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
                     f"Lỗi gốc: {error_msg}"
                 )
                 if verbose:
-                    print(f"[Selenium] {enhanced_error}")
+                    logger.info(f"[Selenium] {enhanced_error}")
                 raise enhanced_error from e
 
             if verbose:
-                print(f"[Selenium] Không thể dùng webdriver-manager: {e}, thử Chrome mặc định")
+                logger.info(
+                    f"[Selenium] Không thể dùng webdriver-manager: {e}, thử Chrome mặc định"
+                )
             try:
                 driver = webdriver.Chrome(options=chrome_options)
             except Exception as e2:
                 if verbose:
-                    print(f"[Selenium] Lỗi khi tạo Chrome driver: {e2}")
+                    logger.error(f"[Selenium] Lỗi khi tạo Chrome driver: {e2}")
                 raise
     else:
         driver = webdriver.Chrome(options=chrome_options)
 
     try:
         if verbose:
-            print(f"[Selenium] Đang mở {url}...")
+            logger.info(f"[Selenium] Đang mở {url}...")
         driver.get(url)
 
         # Optimized wait time
@@ -128,7 +156,7 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
 
         # Scroll để load phần "Khám phá theo danh mục"
         if verbose:
-            print("[Selenium] Đang scroll để load phần 'Khám phá theo danh mục'...")
+            logger.info("[Selenium] Đang scroll để load phần 'Khám phá theo danh mục'...")
         driver.execute_script("window.scrollTo(0, 500);")
         time.sleep(0.3)  # Reduced from 0.5s to 0.3s
         driver.execute_script("window.scrollTo(0, 1000);")
@@ -146,7 +174,7 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
                     btn.click()
                     time.sleep(0.2)  # Reduced from 0.3s to 0.2s
                     if verbose:
-                        print("[Selenium] Đã click expand danh mục")
+                        logger.info("[Selenium] Đã click expand danh mục")
                 except Exception:
                     continue
         except Exception:
@@ -164,7 +192,7 @@ def crawl_with_selenium(url, save_html=False, verbose=True):
             with open("full_page.html", "w", encoding="utf-8") as f:
                 f.write(full_html)
             if verbose:
-                print("[Selenium] ✓ Đã lưu HTML vào full_page.html")
+                logger.info("[Selenium] ✓ Đã lưu HTML vào full_page.html")
 
         return full_html
 
@@ -184,9 +212,11 @@ def crawl_with_driver(driver, url, save_html=False, verbose=True):
     Returns:
         str: HTML content hoặc None nếu lỗi
     """
+    from selenium.webdriver.common.by import By
+
     try:
         if verbose:
-            print(f"[Selenium] Đang mở {url}... (reuse driver)")
+            logger.info(f"[Selenium] Đang mở {url}... (reuse driver)")
         driver.get(url)
 
         # Optimized wait time
@@ -194,7 +224,7 @@ def crawl_with_driver(driver, url, save_html=False, verbose=True):
 
         # Scroll để load phần "Khám phá theo danh mục"
         if verbose:
-            print("[Selenium] Đang scroll để load phần 'Khám phá theo danh mục'...")
+            logger.info("[Selenium] Đang scroll để load phần 'Khám phá theo danh mục'...")
         driver.execute_script("window.scrollTo(0, 500);")
         time.sleep(0.3)
         driver.execute_script("window.scrollTo(0, 1000);")
@@ -212,7 +242,7 @@ def crawl_with_driver(driver, url, save_html=False, verbose=True):
                     btn.click()
                     time.sleep(0.2)
                     if verbose:
-                        print("[Selenium] Đã click expand danh mục")
+                        logger.info("[Selenium] Đã click expand danh mục")
                 except Exception:
                     continue
         except Exception:
@@ -230,13 +260,13 @@ def crawl_with_driver(driver, url, save_html=False, verbose=True):
             with open("full_page.html", "w", encoding="utf-8") as f:
                 f.write(full_html)
             if verbose:
-                print("[Selenium] ✓ Đã lưu HTML vào full_page.html")
+                logger.info("[Selenium] ✓ Đã lưu HTML vào full_page.html")
 
         return full_html
 
     except Exception as e:
         if verbose:
-            print(f"[Selenium] Lỗi khi crawl (reuse driver): {type(e).__name__}: {e}")
+            logger.info(f"[Selenium] Lỗi khi crawl (reuse driver): {type(e).__name__}: {e}")
         return None
 
 
@@ -246,6 +276,7 @@ def parse_categories(html_content, parent_url=None, level=0):
     Parse các link danh mục từ phần 'Khám phá theo danh mục' của Tiki.
     """
 
+    BeautifulSoup = _get_bs4()
     soup = BeautifulSoup(html_content, "html.parser")
 
     # Pattern URL danh mục Tiki: /c[0-9]+
@@ -274,10 +305,10 @@ def parse_categories(html_content, parent_url=None, level=0):
         candidate_sections.extend(sections)
 
     if not candidate_sections:
-        print("[Parse] ⚠ Không tìm thấy phần 'Khám phá theo danh mục' nào")
+        logger.info("[Parse] ⚠ Không tìm thấy phần 'Khám phá theo danh mục' nào")
         return []
 
-    print(f"[Parse] Đang kiểm tra {len(candidate_sections)} candidate sections...")
+    logger.info(f"[Parse] Đang kiểm tra {len(candidate_sections)} candidate sections...")
 
     best_categories_with_images = []
     best_section_index = -1
@@ -380,10 +411,10 @@ def parse_categories(html_content, parent_url=None, level=0):
             best_section_index = i
 
     if not best_categories_with_images:
-        print("[Parse] ⚠ Không tìm thấy danh mục nào có hình ảnh trong tất cả sections")
+        logger.info("[Parse] ⚠ Không tìm thấy danh mục nào có hình ảnh trong tất cả sections")
         return []
 
-    print(
+    logger.info(
         f"[Parse] ✓ Chọn Section {best_section_index} với {len(best_categories_with_images)} danh mục có hình ảnh"
     )
 
@@ -392,35 +423,39 @@ def parse_categories(html_content, parent_url=None, level=0):
         output_file = "data/raw/categories.json"
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(best_categories_with_images, f, ensure_ascii=False, indent=2)
-        print(f"[Parse] ✓ Đã lưu dữ liệu vào {output_file}")
+        logger.info(f"[Parse] ✓ Đã lưu dữ liệu vào {output_file}")
 
     return best_categories_with_images
 
 
 # ========== MAIN ==========
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+
     url = "https://tiki.vn/nha-cua-doi-song/c1883"
 
     # Bước 1: Crawl với Selenium
-    print("=" * 50)
-    print("BƯỚC 1: Crawl với Selenium")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("BƯỚC 1: Crawl với Selenium")
+    logger.info("=" * 50)
     html_content = crawl_with_selenium(url)
 
     # Bước 2: Parse dữ liệu danh mục
-    print("\n" + "=" * 50)
-    print("BƯỚC 2: Parse dữ liệu danh mục")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("BƯỚC 2: Parse dữ liệu danh mục")
+    logger.info("=" * 50)
     categories = parse_categories(html_content)
 
     # In vài danh mục đầu
-    print("\nVài danh mục đầu tiên:")
+    logger.info("Vài danh mục đầu tiên:")
     for category in categories[:10]:
-        print(f"  - {category['name']}: {category['url']}")
+        logger.info(f"  - {category['name']}: {category['url']}")
 
-    print("\n" + "=" * 50)
-    print("✓ Hoàn thành!")
-    print("=" * 50)
-    print("Các file output:")
-    print("  - full_page.html (HTML đầy đủ)")
-    print("  - categories.json (Dữ liệu danh mục)")
+    logger.info("=" * 50)
+    logger.info("✓ Hoàn thành!")
+    logger.info("Các file output:")
+    logger.info("  - full_page.html (HTML đầy đủ)")
+    logger.info("  - categories.json (Dữ liệu danh mục)")

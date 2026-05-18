@@ -53,10 +53,10 @@ def load_environment(env_path: str | None = None) -> bool:
         # Determine .env file path
         if env_path is None:
             # Try multiple locations
+            project_root = Path(__file__).parent.parent.parent
             possible_paths = [
                 Path.cwd() / ".env",  # Current working directory
-                Path(__file__).parent.parent.parent / ".env",  # Project root
-                Path(__file__).parent / ".env",  # Module directory
+                project_root / ".env",  # Project root
             ]
 
             env_file = None

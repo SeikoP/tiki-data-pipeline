@@ -146,9 +146,8 @@ class MetricsCollector:
             raise ValueError("No active run to end. Call start_run() first.")
 
         self._current_run.end_time = datetime.now()
-        self._current_run.duration_seconds = (
-            self._current_run.end_time - self._current_run.start_time
-        ).total_seconds()
+        elapsed = (self._current_run.end_time - self._current_run.start_time).total_seconds()
+        self._current_run.duration_seconds = max(elapsed, 1e-9)
 
         # Calculate throughput
         if self._current_run.duration_seconds > 0:

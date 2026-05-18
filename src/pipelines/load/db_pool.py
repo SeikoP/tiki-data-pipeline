@@ -7,9 +7,10 @@ Optimizations:
 - Automatic reconnection
 """
 
-import os
+import logging
 from collections.abc import Generator
 from contextlib import contextmanager
+from threading import Lock
 from typing import Any
 
 try:
@@ -21,25 +22,36 @@ except ImportError:
     PSYCOPG2_AVAILABLE = False
     pool = None
 
+logger = logging.getLogger(__name__)
+
+try:
+    from common.settings import get_pipeline_settings
+except ImportError:
+    get_pipeline_settings = None
+
 
 class PostgresConnectionPool:
     """
-    Thread-safe PostgreSQL connection pool.
+    Thread-safe PostgreSQL connection pool with proper singleton pattern.
     """
 
     _instance = None
     _pool = None
+    _init_lock = Lock()
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._init_lock:
+                # Double-checked locking
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
 
     def initialize(
         self,
         host: str | None = None,
-        port: int = 5432,
-        database: str = "crawl_data",
+        port: int | None = None,
+        database: str | None = None,
         user: str | None = None,
         password: str | None = None,
         minconn: int = 2,
@@ -62,10 +74,16 @@ class PostgresConnectionPool:
         if self._pool is not None:
             return  # Already initialized
 
-        # Get credentials from environment if not provided
-        host = host or os.getenv("POSTGRES_HOST", "localhost")
-        user = user or os.getenv("POSTGRES_USER", "postgres")
-        password = password or os.getenv("POSTGRES_PASSWORD", "")
+        settings = (
+            get_pipeline_settings(use_airflow=False).database if get_pipeline_settings else None
+        )
+        host = host or (settings.host if settings else None)
+        port = port or (settings.port if settings else 5432)
+        database = database or (settings.database if settings else None)
+        user = user or (settings.user if settings else None)
+        password = password if password is not None else (settings.password if settings else "")
+        if not host or not database or not user:
+            raise ValueError("PostgreSQL host, database, and user must be configured")
 
         try:
             self._pool = pool.ThreadedConnectionPool(
@@ -79,9 +97,9 @@ class PostgresConnectionPool:
                 connect_timeout=10,
                 options="-c statement_timeout=30000",  # 30s statement timeout
             )
-            print(f"✅ PostgreSQL connection pool initialized: {minconn}-{maxconn} connections")
+            logger.info(f"PostgreSQL connection pool initialized: {minconn}-{maxconn} connections")
         except Exception as e:
-            print(f"❌ Failed to initialize connection pool: {e}")
+            logger.error(f"Failed to initialize connection pool: {e}")
             raise
 
     def get_connection(self):
@@ -106,7 +124,7 @@ class PostgresConnectionPool:
         if self._pool is not None:
             self._pool.closeall()
             self._pool = None
-            print("✅ All connections closed")
+            logger.info("All database connections closed")
 
     @contextmanager
     def get_cursor(self, commit: bool = True) -> Generator[Any, None, None]:

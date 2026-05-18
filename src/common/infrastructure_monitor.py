@@ -9,6 +9,7 @@ Features:
 
 import json
 import logging
+import os
 import subprocess
 from typing import Any
 
@@ -204,7 +205,8 @@ def print_monitoring_report():
 
     # PostgreSQL stats
     print("🗄️ PostgreSQL:")
-    pg_stats = get_postgres_stats("postgresql://localhost:5432/crawl_data")
+    db_name = os.getenv("POSTGRES_DB", "tiki")
+    pg_stats = get_postgres_stats(f"postgresql://localhost:5432/{db_name}")
     if pg_stats:
         print(f"   Database size: {pg_stats['db_size_mb']:.1f} MB")
         print(f"   Active connections: {pg_stats['active_connections']}")

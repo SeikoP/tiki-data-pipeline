@@ -22,6 +22,8 @@ from .crawl_utils import (
     setup_utf8_encoding,
 )
 
+logger = logging.getLogger(__name__)
+
 # Lazy import BeautifulSoup để tránh timeout khi load DAG
 # from bs4 import BeautifulSoup  # Moved to function level
 
@@ -71,7 +73,7 @@ def _get_tqdm():
                     if self.n > 0:
                         rate = self.n / elapsed if elapsed > 0 else 0
                         eta = (self.total - self.n) / rate if rate > 0 else 0
-                        print(
+                        logger.info(
                             f"\r{self.desc} {self.n}/{self.total} ({pct:.1f}%) | "
                             f"Tốc độ: {rate:.2f}/s | ETA: {eta:.0f}s",
                             end="",
@@ -117,10 +119,11 @@ def _check_selenium_available():
     return HAS_SELENIUM
 
 
-# Tạo thư mục output
-# Tạo thư mục output
-os.makedirs(DEFAULT_PRODUCTS_DIR, exist_ok=True)
-os.makedirs(DEFAULT_PRODUCT_LIST_CACHE_DIR, exist_ok=True)
+# Tạo thư mục output (deferred to ensure safe for import-time)
+def _ensure_output_dirs():
+    os.makedirs(DEFAULT_PRODUCTS_DIR, exist_ok=True)
+    os.makedirs(DEFAULT_PRODUCT_LIST_CACHE_DIR, exist_ok=True)
+
 
 # Thread-safe locks và stats
 stats_lock = Lock()
@@ -187,9 +190,14 @@ def get_page_with_selenium(url, timeout=30, use_redis_cache=True, use_rate_limit
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
+    try:
+        from .ua_rotation import get_chrome_user_agent
+
+        chrome_options.add_argument(f"user-agent={get_chrome_user_agent()}")
+    except ImportError:
+        chrome_options.add_argument(
+            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
 
     prefs = {
         "profile.managed_default_content_settings.images": 2,
@@ -322,14 +330,19 @@ def get_page_with_requests(url, max_retries=3, use_redis_cache=True, use_rate_li
         except Exception:
             time.sleep(1.0)  # Fixed delay fallback - tăng từ 0.7s để giảm 429 errors
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-    }
+    try:
+        from .ua_rotation import get_default_headers
+
+        headers = get_default_headers()
+    except ImportError:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+        }
 
     for attempt in range(max_retries):
         try:
@@ -737,11 +750,16 @@ def get_products_via_listing_api(category_url, max_pages=5, use_rate_limiting=Tr
     numeric_cat_id = re.sub(r"\D", "", category_id)
 
     all_products = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "X-Guest-Token": "no-token",  # Tiki API often works without token but headers help
-    }
+    try:
+        from .ua_rotation import get_api_headers
+
+        headers = get_api_headers({"X-Guest-Token": "no-token"})
+    except ImportError:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "X-Guest-Token": "no-token",
+        }
 
     # Adaptive Rate Limiting
     adaptive_limiter = None
@@ -789,9 +807,15 @@ def get_products_via_listing_api(category_url, max_pages=5, use_rate_limiting=Tr
                         if isinstance(item.get("quantity_sold"), dict)
                         else item.get("quantity_sold"),
                         "image_url": item.get("thumbnail_url"),
-                        "stock": {"available": True}
+                        "inventory_status": item.get("inventory_status"),
+                        "stock": {"available": True, "stock_status": "available"}
                         if item.get("inventory_status") == "available"
-                        else {"available": False},
+                        else (
+                            {"available": False, "stock_status": "out_of_stock"}
+                            if item.get("inventory_status") == "out_of_stock"
+                            else {}
+                        ),
+                        "stock_source": "listing_api",
                         "shipping": item.get("badges_new") or item.get("badges"),
                         "thumbnail_url": item.get("thumbnail_url"),
                         "rating_average": item.get("rating_average"),
@@ -813,7 +837,7 @@ def get_products_via_listing_api(category_url, max_pages=5, use_rate_limiting=Tr
                 break
 
         except Exception as e:
-            print(f"⚠️ Error fetching listing API (page {page}): {e}")
+            logger.error(f"⚠️ Error fetching listing API (page {page}): {e}")
             break
 
     return all_products
@@ -871,7 +895,7 @@ def crawl_category_products(
                     # Debug: Check if key exists
                     key_exists = redis_cache.exists(cache_key)
                     logger.info(
-                        f"[Redis Cache] ❌ Cache miss cho {category_url[:60]}... (key exists: {key_exists})"
+                        f"[Redis Cache] Cache miss cho {category_url[:60]}... (key exists: {key_exists})"
                     )
             elif force_refresh:
                 logger.info("[Redis Cache] 🔄 Force refresh enabled, skipping cache")
@@ -887,7 +911,7 @@ def crawl_category_products(
     if cache_dir:  # Always prepare cache_file path
         import hashlib
 
-        url_hash = hashlib.md5(category_url.encode()).hexdigest()
+        url_hash = hashlib.md5(category_url.encode(), usedforsecurity=False).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 
         # Check file cache nếu Redis miss hoặc không available
@@ -930,7 +954,7 @@ def crawl_category_products(
         # Prepare cache_file path for later saving (but don't read from it)
         import hashlib
 
-        url_hash = hashlib.md5(category_url.encode()).hexdigest()
+        url_hash = hashlib.md5(category_url.encode(), usedforsecurity=False).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 
     # Tier 3: Thử Listing API (Nhanh nhất nếu cache miss)
@@ -1105,14 +1129,12 @@ def crawl_category_products(
                         indent=2,
                     )
             except Exception as e:
-                if logger:
-                    logger.error(f"[File Cache] ❌ Lỗi khi ghi cache file {cache_file}: {e}")
-                else:
-                    print(f"[File Cache] ❌ Lỗi khi ghi cache file {cache_file}: {e}")
+                logger.error(f"[File Cache] Lỗi khi ghi cache file {cache_file}: {e}")
 
         return unique_products
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to crawl category {category_url[:80]}: {e}")
         return []
 
 
@@ -1140,7 +1162,8 @@ def crawl_single_category(category, max_pages=None, use_selenium=False):
 
         return category, products
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error crawling category {category_url[:80]}: {e}")
         with stats_lock:
             stats["total_categories"] += 1
             stats["total_failed"] += 1
@@ -1180,31 +1203,31 @@ def crawl_products_from_categories(
     }
 
     # Đọc danh mục
-    print(f"📖 Đang đọc danh mục từ: {categories_file}")
+    logger.info(f"📖 Đang đọc danh mục từ: {categories_file}")
     try:
         with open(categories_file, encoding="utf-8") as f:
             categories = json.load(f)
-        print(f"✓ Đã đọc {len(categories)} danh mục")
+        logger.info(f"✓ Đã đọc {len(categories)} danh mục")
     except Exception as e:
-        print(f"❌ Lỗi khi đọc file: {e}")
+        logger.error(f"❌ Lỗi khi đọc file: {e}")
         return []
 
     # Lọc danh mục nếu có filter
     if categories_filter:
         categories = [cat for cat in categories if categories_filter(cat)]
-        print(f"✓ Sau khi lọc: {len(categories)} danh mục")
+        logger.info(f"✓ Sau khi lọc: {len(categories)} danh mục")
 
     # Giới hạn số danh mục
     if max_categories:
         categories = categories[:max_categories]
-        print(f"✓ Giới hạn: {len(categories)} danh mục")
+        logger.info(f"✓ Giới hạn: {len(categories)} danh mục")
 
     # Crawl song song
-    print("\n🚀 Bắt đầu crawl sản phẩm...")
-    print(f"📊 Số thread: {max_workers}")
-    print(f"🔧 Sử dụng Selenium: {use_selenium}")
-    print(f"📄 Trang tối đa mỗi danh mục: {max_pages_per_category or 'Tất cả'}")
-    print("=" * 70)
+    logger.info("\n🚀 Bắt đầu crawl sản phẩm...")
+    logger.info(f"📊 Số thread: {max_workers}")
+    logger.info(f"🔧 Sử dụng Selenium: {use_selenium}")
+    logger.info(f"📄 Trang tối đa mỗi danh mục: {max_pages_per_category or 'Tất cả'}")
+    logger.info("=" * 70)
 
     all_products = []
     category_results = {}
@@ -1265,9 +1288,9 @@ def crawl_products_from_categories(
     if not output_file:
         output_file = DEFAULT_PRODUCTS_DIR / "products.json"
 
-    print(f"\n💾 Đang lưu kết quả vào: {output_file}")
-    print("📝 Lưu ý: Crawl thông tin cơ bản (ID, tên, URL, hình, số lượng bán)")
-    print("          Giá, đánh giá chi tiết sẽ được crawl detail sau")
+    logger.info(f"\n💾 Đang lưu kết quả vào: {output_file}")
+    logger.info("📝 Lưu ý: Crawl thông tin cơ bản (ID, tên, URL, hình, số lượng bán)")
+    logger.info("          Giá, đánh giá chi tiết sẽ được crawl detail sau")
 
     # Đảm bảo tất cả products có sales_count (kể cả None)
     for product in unique_products:
@@ -1290,16 +1313,18 @@ def crawl_products_from_categories(
 
     # In thống kê
     elapsed = time.time() - stats["start_time"]
-    print("\n" + "=" * 70)
-    print("📈 THỐNG KÊ")
-    print("=" * 70)
-    print(f"⏱  Thời gian: {elapsed:.1f}s")
-    print(f"📁 Danh mục đã crawl: {stats['total_categories']}")
-    print(f"✅ Thành công: {stats['total_success']}")
-    print(f"❌ Thất bại: {stats['total_failed']}")
-    print(f"📦 Tổng sản phẩm: {len(unique_products)}")
-    print(f"⚡ Tốc độ: {stats['total_products'] / elapsed:.2f} sản phẩm/s" if elapsed > 0 else "")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("📈 THỐNG KÊ")
+    logger.info("=" * 70)
+    logger.info(f"⏱  Thời gian: {elapsed:.1f}s")
+    logger.info(f"📁 Danh mục đã crawl: {stats['total_categories']}")
+    logger.info(f"✅ Thành công: {stats['total_success']}")
+    logger.error(f"❌ Thất bại: {stats['total_failed']}")
+    logger.info(f"📦 Tổng sản phẩm: {len(unique_products)}")
+    logger.info(
+        f"⚡ Tốc độ: {stats['total_products'] / elapsed:.2f} sản phẩm/s" if elapsed > 0 else ""
+    )
+    logger.info("=" * 70)
 
     return unique_products
 

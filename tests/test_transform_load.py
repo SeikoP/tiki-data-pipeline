@@ -11,10 +11,11 @@ from typing import Any
 
 # Fix encoding cho Windows console
 if sys.platform == "win32":
-    import io
-
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
 
 # Thêm src vào path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -168,7 +169,6 @@ def test_transform_validation():
     assert len(transformed) == stats["valid_products"], "Số products transformed phải khớp"
 
     print("\n✅ Test validation thành công!")
-    return transformed, stats
 
 
 def test_transform_normalization():
@@ -210,13 +210,11 @@ def test_transform_normalization():
         assert transformed.get("sales_count") == 500, "sales_count phải được parse thành int"
         assert transformed.get("price") == 100000.0, "price phải được parse thành float"
         assert transformed.get("original_price") == 150000.0, "original_price phải được parse"
-        assert transformed.get("discount_percent") in [
-            33,
-            34,
-        ], "discount_percent phải được tính lại (có thể làm tròn)"
+        assert abs(transformed.get("discount_percent") - 33.33) < 0.01, (
+            "discount_percent phải được tính lại và làm tròn 2 chữ số"
+        )
 
     print("\n✅ Test normalization thành công!")
-    return transformed
 
 
 def test_transform_db_format():
@@ -242,7 +240,6 @@ def test_transform_db_format():
             print(f"   - rating_average: {transformed.get('rating_average')}")
             print(f"   - review_count: {transformed.get('review_count')}")
             print(f"   - sales_count: {transformed.get('sales_count')}")
-            print(f"   - specifications: {type(transformed.get('specifications'))}")
             print(f"   - images: {type(transformed.get('images'))}")
 
             # Kiểm tra format
@@ -252,6 +249,199 @@ def test_transform_db_format():
             assert "rating_average" in transformed, "Phải có rating_average (flatten từ dict)"
 
     print("\n✅ Test database format thành công!")
+
+
+def test_transform_preserves_missing_metrics(monkeypatch):
+    """Missing metrics must stay NULL-like instead of becoming fake zeroes."""
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "111",
+            "name": "Sản phẩm thiếu metric",
+            "url": "https://tiki.vn/p/111",
+            "price": {"current_price": 100000, "original_price": 100000},
+            "seller": {"name": "Test Seller"},
+            "brand": "Test Brand",
+            "category_id": "123",
+            "description": "<p>Mô tả <strong>sản phẩm</strong></p>",
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["sales_count"] is None
+    assert transformed["rating_average"] is None
+    assert transformed["review_count"] is None
+    assert transformed["description_text"] == "Mô tả sản phẩm"
+    assert set(transformed["missing_fields"]) == {"review_count"}
+    assert transformed["crawl_quality"] == "partial"
+    assert transformed["detail_status"] == "partial_needs_enrichment"
+    assert transformed["needs_enrichment"] is True
+
+
+def test_transform_nullable_metrics_are_allowed_for_full_quality(monkeypatch):
+    """Sales and rating can stay NULL when the source has no evidence for those metrics."""
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "221",
+            "name": "Sản phẩm không có specs",
+            "url": "https://tiki.vn/p/221",
+            "category_id": "123",
+            "brand": "Test Brand",
+            "price": {"current_price": 100000, "original_price": 120000},
+            "rating": {"average": None, "total_reviews": 0},
+            "sales_count": None,
+            "seller": {"name": "Test Seller"},
+            "images": [{"url": "https://example.com/image.jpg"}],
+            "stock": {"available": False, "quantity": 0},
+        }
+    )
+
+    assert transformed is not None
+    assert "specifications" not in transformed
+    assert transformed["rating_average"] is None
+    assert transformed["review_count"] == 0
+    assert transformed["sales_count"] is None
+    assert transformed["stock_available"] is False
+    assert transformed["stock_status"] == "out_of_stock"
+    assert transformed["missing_fields"] == []
+    assert transformed["crawl_quality"] == "full"
+    assert transformed["detail_status"] == "full"
+    assert transformed["needs_enrichment"] is False
+
+
+def test_transform_stock_false_without_evidence_stays_unknown(monkeypatch):
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "222",
+            "name": "Sản phẩm fallback không rõ tồn kho",
+            "url": "https://tiki.vn/p/222",
+            "category_id": "123",
+            "brand": "Test Brand",
+            "price": {"current_price": 100000, "original_price": 100000},
+            "rating": {"average": None, "total_reviews": 0},
+            "seller": {"name": "Test Seller"},
+            "images": [{"url": "https://example.com/image.jpg"}],
+            "stock": {"available": False},
+            "_metadata": {"crawl_status": "success_html", "extraction_method": "aiohttp"},
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["stock_available"] is None
+    assert transformed["stock_status"] == "unknown"
+    assert transformed["stock_source"] == "detail_html"
+
+
+def test_transform_inventory_out_of_stock_is_trusted(monkeypatch):
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "9982840",
+            "name": "Gel tắm trắng face & body D.S White (250ml)",
+            "url": "https://tiki.vn/gel-tam-trang-face-body-d-s-white-250ml-p9982840.html",
+            "category_id": "123",
+            "brand": "D.S White",
+            "price": {"current_price": 320000, "original_price": 320000},
+            "rating": {"average": 5, "total_reviews": 1},
+            "seller": {"name": "Tiki"},
+            "images": [{"url": "https://example.com/image.jpg"}],
+            "inventory_status": "out_of_stock",
+            "_metadata": {"crawl_status": "success_api", "extraction_method": "api"},
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["stock_available"] is False
+    assert transformed["stock_status"] == "out_of_stock"
+    assert transformed["stock_source"] == "detail_api"
+
+
+def test_transform_missing_rating_is_flagged_when_reviews_exist(monkeypatch):
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "223",
+            "name": "Sản phẩm có review thiếu rating",
+            "url": "https://tiki.vn/p/223",
+            "category_id": "123",
+            "brand": "Test Brand",
+            "price": {"current_price": 100000, "original_price": 100000},
+            "rating": {"average": None, "total_reviews": 12},
+            "seller": {"name": "Test Seller"},
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["discount_percent"] == 0.0
+    assert transformed["missing_fields"] == ["rating_average"]
+    assert transformed["crawl_quality"] == "partial"
+
+
+def test_transform_full_quality_contract(monkeypatch):
+    """A product with required and enrichment fields is marked full."""
+    monkeypatch.setenv("SHORT_NAME_USE_AI", "false")
+    transformer = DataTransformer()
+
+    transformed = transformer.transform_product(
+        {
+            "product_id": "222",
+            "name": "Sản phẩm đủ dữ liệu",
+            "url": "https://tiki.vn/p/222",
+            "category_id": "123",
+            "brand": "Test Brand",
+            "price": {"current_price": 100000, "original_price": 120000},
+            "rating": {"average": 4.7, "total_reviews": 0},
+            "sales_count": 0,
+            "seller": {"name": "Test Seller"},
+            "images": [{"url": "https://example.com/image.jpg"}],
+        }
+    )
+
+    assert transformed is not None
+    assert transformed["review_count"] == 0
+    assert transformed["sales_count"] == 0
+    assert transformed["image_url"] == "https://example.com/image.jpg"
+    assert transformed["missing_fields"] == []
+    assert transformed["crawl_quality"] == "full"
+    assert transformed["detail_status"] == "full"
+    assert transformed["needs_enrichment"] is False
+
+
+def test_short_name_uses_local_heuristics_by_default(monkeypatch):
+    """Short names should not depend on AI calls in the transform critical path."""
+    monkeypatch.delenv("SHORT_NAME_USE_AI", raising=False)
+    transformer = DataTransformer()
+
+    assert transformer.ai_summarizer is None
+
+    examples = [
+        "Máy hút bụi mini cầm tay không dây cao cấp bảo hành 12 tháng",
+        "Chổi Chà Sàn Nhà Tắm Kết Hợp Gạt Nước Đầu Chữ V Deli - Chính Hãng",
+        "Bàn Chải Nylon Vệ Sinh Khe Hở Cửa Sổ / Khe Hở Nhà Tắm",
+    ]
+
+    for raw_name in examples:
+        short_name = transformer._get_short_name(raw_name)
+        assert short_name
+        assert len(short_name.split()) <= 8
+        assert "chính hãng" not in short_name.lower()
+        assert "bảo hành" not in short_name.lower()
+
+    assert "mini" in transformer._get_short_name(examples[0]).lower()
+    assert "cầm tay" in transformer._get_short_name(examples[0]).lower()
+    assert "không dây" in transformer._get_short_name(examples[0]).lower()
 
 
 def test_transform_duplicates():
@@ -319,7 +509,6 @@ def test_load_to_file():
             assert "loaded_at" in data, "File phải có 'loaded_at'"
 
         print("\n✅ Test load to file thành công!")
-        return temp_file
 
     finally:
         # Cleanup
@@ -360,7 +549,6 @@ def test_load_from_file():
             assert stats["file_loaded"] > 0, "Phải có products được load từ file"
 
             print("\n✅ Test load from file thành công!")
-            return output_file
 
         finally:
             if Path(output_file).exists():
@@ -403,7 +591,6 @@ def test_load_integration():
         )
 
         print("\n✅ Test integration thành công!")
-        return transform_stats, load_stats
 
     finally:
         if Path(output_file).exists():

@@ -1,6 +1,7 @@
 # Import từ file cùng thư mục
 import importlib.util
 import json
+import logging
 import os
 import sys
 import time
@@ -8,6 +9,8 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
+
+logger = logging.getLogger(__name__)
 
 # Try importing constants from crawl_utils
 try:
@@ -20,15 +23,29 @@ except ImportError:
         DEFAULT_DATA_DIR = Path("data/raw")
         DEFAULT_CATEGORY_CACHE_DIR = DEFAULT_DATA_DIR / "cache" / "categories"
 
-spec = importlib.util.spec_from_file_location(
-    "extract_category_link_selenium",
-    os.path.join(os.path.dirname(__file__), "extract_category_link_selenium.py"),
-)
-extract_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(extract_module)
+# Lazy-load selenium extraction module to avoid import-time overhead
+_extract_module = None
 
-crawl_with_selenium = extract_module.crawl_with_selenium
-parse_categories = extract_module.parse_categories
+
+def _get_extract_module():
+    global _extract_module
+    if _extract_module is None:
+        spec = importlib.util.spec_from_file_location(
+            "extract_category_link_selenium",
+            os.path.join(os.path.dirname(__file__), "extract_category_link_selenium.py"),
+        )
+        _extract_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_extract_module)
+    return _extract_module
+
+
+def crawl_with_selenium(*args, **kwargs):
+    return _get_extract_module().crawl_with_selenium(*args, **kwargs)
+
+
+def parse_categories(*args, **kwargs):
+    return _get_extract_module().parse_categories(*args, **kwargs)
+
 
 # Set UTF-8 encoding cho stdout trên Windows
 if sys.platform == "win32":
@@ -53,53 +70,72 @@ try:
     HAS_TQDM = True
 except ImportError:
     HAS_TQDM = False
-    print("⚠️  Khuyến nghị cài đặt tqdm để hiển thị progress bar: pip install tqdm")
+    logger.warning("⚠️  Khuyến nghị cài đặt tqdm để hiển thị progress bar: pip install tqdm")
 
-    # Fallback progress bar đơn giản
-    class tqdm:
-        def __init__(self, iterable=None, total=None, desc="", **kwargs):
-            self.iterable = iterable
-            self.total = total or (len(iterable) if iterable else 0)
-            self.desc = desc
-            self.n = 0
-            self.start_time = time.time()
+    tqdm = None
 
-        def __enter__(self):
+
+class SafeProgress:
+    """Minimal tqdm-compatible progress helper for non-interactive or closed stdout runs."""
+
+    def __init__(self, iterable=None, total=None, desc="", **kwargs):
+        self.iterable = iterable
+        self.total = total or (len(iterable) if iterable else 0)
+        self.desc = desc
+        self.n = 0
+        self.start_time = time.time()
+        self.last_print_time = 0.0
+        self.print_interval = 5.0
+
+    def __enter__(self):
+        print(f"{self.desc}: starting {self.total} items", flush=True)
+        return self
+
+    def __exit__(self, *args):
+        print(f"{self.desc}: completed {self.n}/{self.total} items", flush=True)
+
+    def __iter__(self):
+        if self.iterable:
+            for item in self.iterable:
+                self.update(1)
+                yield item
+        else:
             return self
 
-        def __exit__(self, *args):
-            pass
+    def update(self, n=1):
+        self.n += n
+        now = time.time()
+        if self.n == self.total or now - self.last_print_time >= self.print_interval:
+            pct = (self.n / self.total * 100) if self.total else 100.0
+            elapsed = now - self.start_time
+            rate = self.n / elapsed if elapsed > 0 else 0.0
+            print(
+                f"{self.desc}: {self.n}/{self.total} ({pct:.1f}%) | {rate:.2f} items/s",
+                flush=True,
+            )
+            self.last_print_time = now
 
-        def __iter__(self):
-            if self.iterable:
-                for item in self.iterable:
-                    self.n += 1
-                    self.update(1)
-                    yield item
-            else:
-                return self
+    def set_description(self, desc):
+        self.desc = desc
 
-        def update(self, n=1):
-            self.n += n
-            if self.total > 0:
-                pct = (self.n / self.total) * 100
-                elapsed = time.time() - self.start_time
-                if self.n > 0:
-                    rate = self.n / elapsed if elapsed > 0 else 0
-                    eta = (self.total - self.n) / rate if rate > 0 else 0
-                    print(
-                        f"\r{self.desc} {self.n}/{self.total} ({pct:.1f}%) | "
-                        f"Tốc độ: {rate:.2f}/s | ETA: {eta:.0f}s",
-                        end="",
-                        flush=True,
-                    )
-
-        def set_description(self, desc):
-            self.desc = desc
+    def set_postfix(self, _postfix=None, **kwargs):
+        pass
 
 
-# Tạo thư mục output nếu chưa có
-os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
+def progress_bar(*args, **kwargs):
+    if not HAS_TQDM or tqdm is None or sys.stdout.closed:
+        return SafeProgress(*args, **kwargs)
+    try:
+        return tqdm(*args, file=sys.stdout, **kwargs)
+    except Exception as exc:
+        logger.warning("Progress bar unavailable, continuing without tqdm: %s", exc)
+        return SafeProgress(*args, **kwargs)
+
+
+# Tạo thư mục output (deferred to avoid import-time side effects)
+def _ensure_output_dirs():
+    os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
+
 
 # Thread-safe locks và counters
 stats_lock = Lock()
@@ -138,7 +174,7 @@ def crawl_single_category(
         os.makedirs(cache_dir, exist_ok=True)
         import hashlib
 
-        url_hash = hashlib.md5(url.encode()).hexdigest()
+        url_hash = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()
         cache_file = os.path.join(cache_dir, f"{url_hash}.json")
 
         if os.path.exists(cache_file):
@@ -153,7 +189,7 @@ def crawl_single_category(
                 return True, cached_categories, None
             except Exception as e:
                 # Nếu cache file bị lỗi, tiếp tục crawl lại
-                print(f"  ⚠️  Cache file lỗi, sẽ crawl lại: {cache_file} - {str(e)}")
+                logger.warning(f"  ⚠️  Cache file lỗi, sẽ crawl lại: {cache_file} - {str(e)}")
 
     try:
         # Crawl với Selenium (ưu tiên driver pool nếu có)
@@ -216,7 +252,7 @@ def crawl_single_category(
             stats["total_crawled"] += 1
             stats["total_failed"] += 1
         # Log chi tiết hơn cho debugging
-        print(f"  ⚠️  Lỗi crawl {url}: [{error_type}] {error_msg}")
+        logger.error(f"  ⚠️  Lỗi crawl {url}: [{error_type}] {error_msg}")
         return False, [], error_msg
 
 
@@ -241,16 +277,18 @@ def crawl_level_parallel(
 
     # Lọc các URL chưa crawl
     tasks = []
+    queued_urls = set()
     for url, parent_url in zip(urls_to_crawl, parent_urls, strict=False):
-        if url not in visited_urls:
+        if url not in visited_urls and url not in queued_urls:
             tasks.append((url, parent_url))
+            queued_urls.add(url)
 
     if not tasks:
         return results
 
     # Tạo progress bar
     desc = f"Level {level}"
-    with tqdm(total=len(tasks), desc=desc, unit="danh mục") as pbar:
+    with progress_bar(total=len(tasks), desc=desc, unit="danh mục") as pbar:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit tất cả tasks
             future_to_url = {}
@@ -285,7 +323,7 @@ def crawl_level_parallel(
                             pbar.set_postfix(
                                 {"✅": stats["total_success"], "❌": stats["total_failed"]}
                             )
-                        print(f"\n  ❌ Lỗi crawl {url}: {error}")
+                        logger.error(f"\n  ❌ Lỗi crawl {url}: {error}")
                 except Exception as e:
                     error_msg = str(e)
                     error_type = type(e).__name__
@@ -293,7 +331,7 @@ def crawl_level_parallel(
                     visited_urls.add(url)  # Đánh dấu đã thử crawl
                     with stats_lock:
                         stats["total_failed"] += 1
-                    print(f"\n  ❌ Exception khi crawl {url}: [{error_type}] {error_msg}")
+                    logger.error(f"\n  ❌ Exception khi crawl {url}: [{error_type}] {error_msg}")
 
                 pbar.update(1)
 
@@ -338,7 +376,7 @@ def crawl_category_recursive_optimized(
                     driver_pool = SeleniumDriverPool(
                         pool_size=max_workers, headless=True, timeout=90
                     )
-                    print(f"✅ Đã khởi tạo driver pool với {max_workers} drivers")
+                    logger.info(f"✅ Đã khởi tạo driver pool với {max_workers} drivers")
         except Exception:
             pass  # Fallback: không dùng pool
 
@@ -374,7 +412,7 @@ def crawl_category_recursive_optimized(
                 }
                 all_categories.append(root_category)
                 existing_root_urls.add(root_url)
-                print(f"✅ Đã thêm root category: {root_name} ({root_cat_id})")
+                logger.info(f"✅ Đã thêm root category: {root_name} ({root_cat_id})")
 
         # Crawl từng level một
         for current_level in range(max_level + 1):
@@ -395,9 +433,9 @@ def crawl_category_recursive_optimized(
             if not new_urls:
                 continue
 
-            print(f"\n{'=' * 70}")
-            print(f"Level {current_level}: Dang crawl {len(new_urls)} danh muc...")
-            print(f"{'=' * 70}")
+            logger.info(f"\n{'=' * 70}")
+            logger.info(f"Level {current_level}: Dang crawl {len(new_urls)} danh muc...")
+            logger.info(f"{'=' * 70}")
 
             # Crawl song song
             results = crawl_level_parallel(
@@ -411,6 +449,7 @@ def crawl_category_recursive_optimized(
             )
 
             # Xử lý kết quả và chuẩn bị level tiếp theo
+            queued_next_urls = {next_url for next_url, _ in queue[current_level + 1]}
             for url, (success, categories, error) in results.items():
                 if success:
                     # Thêm vào danh sách tổng
@@ -420,10 +459,11 @@ def crawl_category_recursive_optimized(
                     if current_level < max_level:
                         for cat in categories:
                             child_url = cat["url"]
-                            if child_url not in visited_urls:
+                            if child_url not in visited_urls and child_url not in queued_next_urls:
                                 queue[current_level + 1].append((child_url, url))
+                                queued_next_urls.add(child_url)
                 else:
-                    print(f"  ❌ Lỗi crawl {url}: {error}")
+                    logger.error(f"  ❌ Lỗi crawl {url}: {error}")
 
         return all_categories
     finally:
@@ -431,7 +471,7 @@ def crawl_category_recursive_optimized(
         if driver_pool is not None:
             try:
                 driver_pool.cleanup()
-                print("✅ Đã cleanup driver pool")
+                logger.info("✅ Đã cleanup driver pool")
             except Exception:
                 pass
 
@@ -445,26 +485,30 @@ def print_stats():
         elapsed = time.time() - stats["start_time"]
         rate = stats["total_crawled"] / elapsed if elapsed > 0 else 0
 
-        print(f"\n{'=' * 70}")
-        print("📈 THỐNG KÊ")
-        print(f"{'=' * 70}")
-        print(f"⏱  Thời gian: {elapsed:.1f}s")
-        print(f"📥 Đã crawl: {stats['total_crawled']} danh mục")
-        print(f"✅ Thành công: {stats['total_success']}")
-        print(f"❌ Thất bại: {stats['total_failed']}")
-        print(f"📊 Tổng danh mục tìm được: {stats['total_categories']}")
-        print(f"⚡ Tốc độ: {rate:.2f} danh mục/s")
+        logger.info(f"\n{'=' * 70}")
+        logger.info("📈 THỐNG KÊ")
+        logger.info(f"{'=' * 70}")
+        logger.info(f"⏱  Thời gian: {elapsed:.1f}s")
+        logger.info(f"📥 Đã crawl: {stats['total_crawled']} danh mục")
+        logger.info(f"✅ Thành công: {stats['total_success']}")
+        logger.error(f"❌ Thất bại: {stats['total_failed']}")
+        logger.info(f"📊 Tổng danh mục tìm được: {stats['total_categories']}")
+        logger.info(f"⚡ Tốc độ: {rate:.2f} danh mục/s")
 
         if stats["by_level"]:
-            print("\n📋 Theo level:")
+            logger.info("\n📋 Theo level:")
             for level in sorted(stats["by_level"].keys()):
-                print(f"  Level {level}: {stats['by_level'][level]} danh mục")
+                logger.info(f"  Level {level}: {stats['by_level'][level]} danh mục")
 
 
 def main():
     """
     Hàm main để crawl đệ quy với tối ưu.
     """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
 
     # Hỗ trợ nhiều root categories từ config file hoặc tham số
     # Có thể cấu hình qua:
@@ -504,15 +548,15 @@ def main():
     # Default: danh sách mặc định nếu không có config
     if not root_urls:
         root_urls = [
-            "https://tiki.vn/thoi-trang-nam/c915",
+            # "https://tiki.vn/thoi-trang-nu/c931",
             # Có thể thêm các root categories khác ở đây
-            # "https://tiki.vn/nha-cua-doi-song/c1883",
-            # "https://tiki.vn/dien-tu-dien-lanh/c4221",
+            "https://tiki.vn/nha-cua-doi-song/c1883",
+            "https://tiki.vn/dien-tu-dien-lanh/c4221",
         ]
         print("ℹ️  Sử dụng root categories mặc định")
 
     # Độ sâu tối đa
-    max_level = int(os.getenv("TIKI_MAX_CATEGORY_LEVEL", "4"))
+    max_level = int(os.getenv("TIKI_MAX_CATEGORY_LEVEL", "5"))
 
     # Số thread song song (giới hạn để tránh quá tải server)
     max_workers = int(os.getenv("TIKI_CRAWL_MAX_WORKERS", "3"))

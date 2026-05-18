@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from common.settings import get_pipeline_settings
+
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from tiki_crawl_products_v2.bootstrap import (
@@ -9,13 +11,42 @@ from tiki_crawl_products_v2.bootstrap import (
     dag_file_dir,
     get_load_categories_db_func,
     get_logger,
-    get_variable,
     json,
     os,
     sys,
 )
 from tiki_crawl_products_v2.tasks.common import _fix_sys_path_for_pipelines_import  # noqa: F401
 from tiki_crawl_products_v2.tasks.optimizations import profile_task
+
+
+def _resolve_product_load_mode(raw_mode: str | None, product_count: int, threshold: int) -> str:
+    """Resolve the load strategy label used by the Airflow task."""
+    mode = (raw_mode or "auto").strip().lower()
+    threshold = max(1, threshold)
+
+    if mode in {"safe", "traditional"}:
+        return "safe"
+    if mode in {"optimized", "bulk"}:
+        return "optimized"
+    if mode == "auto":
+        return "optimized" if product_count >= threshold else "safe"
+    raise ValueError("TIKI_LOAD_MODE must be one of: auto, safe, traditional, optimized, bulk")
+
+
+def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
+    ti = context.get("ti")
+    if not ti:
+        return None
+    for task_id in ("start_crawl_run", "pipeline_tracking.start_crawl_run"):
+        try:
+            result = ti.xcom_pull(task_ids=task_id)
+        except Exception:
+            continue
+        if isinstance(result, dict) and result.get("crawl_run_id"):
+            return int(result["crawl_run_id"])
+        if isinstance(result, int):
+            return result
+    return None
 
 
 def fix_missing_parent_categories(**context) -> dict[str, Any]:
@@ -218,6 +249,93 @@ def fix_missing_parent_categories(**context) -> dict[str, Any]:
         return {"status": "error", "message": str(e), "fixed_count": 0}
 
 
+def _count_product_category_refs(product_file: str) -> int:
+    try:
+        from common.category_utils import normalize_category_id
+
+        with open(product_file, encoding="utf-8") as f:
+            data = json.load(f)
+
+        if isinstance(data, list):
+            products = data
+        elif isinstance(data, dict):
+            products = data.get("products", [])
+            if not isinstance(products, list) and isinstance(data.get("data"), dict):
+                products = data["data"].get("products", [])
+        else:
+            products = []
+
+        category_ids = {
+            normalize_category_id(product.get("category_id"), product.get("category_url"))
+            for product in products
+            if isinstance(product, dict)
+        }
+        return len({cat_id for cat_id in category_ids if cat_id})
+    except Exception:
+        return 0
+
+
+def _resolve_current_product_file(context: dict[str, Any], logger) -> str | None:
+    def usable_product_file(product_file: str | None, *, authoritative: bool = False) -> str | None:
+        if not product_file or not os.path.exists(product_file):
+            return None
+        ref_count = _count_product_category_refs(product_file)
+        if ref_count > 0:
+            logger.info("📂 Product file có %s category refs: %s", ref_count, product_file)
+            return product_file
+        if authoritative:
+            raise ValueError(f"Current product file does not contain category refs: {product_file}")
+        logger.info("⏭️ Bỏ qua product file không có category refs: %s", product_file)
+        return None
+
+    ti = context.get("ti")
+    if ti:
+        for task_id, keys in (
+            ("transform_and_load.transform_products", ("transformed_file",)),
+            ("transform_products", ("transformed_file",)),
+            ("process_and_save.merge_products", ("products_file", "output_file")),
+            ("crawl_product_details.merge_product_details", ("output_file", "products_file")),
+            ("merge_product_details", ("output_file", "products_file")),
+            ("merge_products", ("products_file", "output_file")),
+        ):
+            try:
+                result = ti.xcom_pull(task_ids=task_id)
+            except Exception:
+                continue
+            if isinstance(result, dict):
+                for key in keys:
+                    product_file = usable_product_file(
+                        result.get(key),
+                        authoritative=task_id
+                        in {
+                            "transform_and_load.transform_products",
+                            "transform_products",
+                        },
+                    )
+                    if product_file:
+                        return product_file
+            elif isinstance(result, str):
+                product_file = usable_product_file(
+                    result,
+                    authoritative=task_id
+                    in {"transform_and_load.transform_products", "transform_products"},
+                )
+                if product_file:
+                    return product_file
+
+    for candidate in (
+        DATA_DIR / "processed" / "products_transformed.json",
+        DATA_DIR / "processed" / "merged_products.json",
+        DATA_DIR / "processed" / "products_with_detail.json",
+    ):
+        product_file = usable_product_file(str(candidate))
+        if product_file:
+            logger.info("📂 Dùng fallback product file để match categories: %s", product_file)
+            return product_file
+
+    return None
+
+
 def load_categories_to_db_wrapper(**context):
     """Task wrapper to load categories from JSON file into PostgreSQL database.
 
@@ -231,13 +349,40 @@ def load_categories_to_db_wrapper(**context):
             logger.error(f"❌ File categories không tồn tại: {json_file}")
             return {"status": "error", "message": "File not found", "count": 0}
 
+        try:
+            from common.db_schema import ensure_crawl_schema
+            from pipelines.crawl.storage.postgres_storage import PostgresStorage
+
+            storage = PostgresStorage()
+            with storage.get_connection() as conn:
+                with conn.cursor() as cur:
+                    ensure_crawl_schema(cur)
+                conn.commit()
+            storage.close()
+        except Exception as schema_error:
+            logger.warning(f"⚠️  Schema preflight trước load categories có vấn đề: {schema_error}")
+
         load_categories_db_func = get_load_categories_db_func()
         if not load_categories_db_func:
             logger.error("❌ load_categories_db_func not available")
             return {"status": "error", "message": "Import failed"}
 
-        logger.info(f"🚀 Loading categories to DB from {json_file}")
-        load_categories_db_func(json_file)
+        product_file = _resolve_current_product_file(context, logger)
+        if product_file:
+            logger.info(
+                "🚀 Loading matched categories to DB from %s using products %s",
+                json_file,
+                product_file,
+            )
+            load_result = load_categories_db_func(json_file, product_file)
+        else:
+            logger.warning(
+                "⚠️  Không tìm thấy current product file; category loader sẽ dùng fallback nội bộ"
+            )
+            load_result = load_categories_db_func(json_file)
+
+        if isinstance(load_result, dict) and load_result.get("status") == "error":
+            raise RuntimeError(load_result.get("message", "load_categories failed"))
 
         # Sau khi load, fix missing parent categories
         logger.info("🔧 Fixing missing parent categories...")
@@ -396,6 +541,9 @@ def load_products(**context) -> dict[str, Any]:
 
         products = data.get("products", [])
         logger.info(f"📊 Tổng số products để load: {len(products)}")
+        crawl_run_id = _get_crawl_run_id(context)
+        if crawl_run_id:
+            logger.info("🧾 Loading snapshots for crawl_run_id=%s", crawl_run_id)
 
         # Import OptimizedDataLoader
         try:
@@ -403,15 +551,12 @@ def load_products(**context) -> dict[str, Any]:
             # Ưu tiên load từ file src/pipelines/load/loader.py
             from pipelines.load.loader import OptimizedDataLoader
 
-            # Lấy database config từ Airflow Variables hoặc environment variables
-            db_host = get_variable("POSTGRES_HOST", default=os.getenv("POSTGRES_HOST", "postgres"))
-            db_port = int(get_variable("POSTGRES_PORT", default=os.getenv("POSTGRES_PORT", "5432")))
-            db_name = get_variable("POSTGRES_DB", default=os.getenv("POSTGRES_DB", "crawl_data"))
-            db_user = get_variable("POSTGRES_USER", default=os.getenv("POSTGRES_USER", "postgres"))
-            # trufflehog:ignore
-            db_password = get_variable(
-                "POSTGRES_PASSWORD", default=os.getenv("POSTGRES_PASSWORD", "postgres")
-            )
+            settings = get_pipeline_settings()
+            db_host = settings.database.host
+            db_port = settings.database.port
+            db_name = settings.database.database
+            db_user = settings.database.user
+            db_password = settings.database.password
 
             # Prepare DB Config for OptimizedDataLoader
             db_config = {
@@ -421,14 +566,33 @@ def load_products(**context) -> dict[str, Any]:
                 "user": db_user,
                 "password": db_password,
             }
+            allow_file_only = settings.load.allow_file_only_on_db_failure
+            load_mode = _resolve_product_load_mode(
+                settings.load.mode,
+                len(products),
+                settings.load.optimized_threshold,
+            )
+            configured_batch_size = settings.load.save_batch_size
+            if load_mode == "optimized":
+                batch_size = max(configured_batch_size, 1000)
+            else:
+                batch_size = configured_batch_size
+            logger.info(
+                "⚙️ Load mode=%s batch_size=%s products=%s",
+                load_mode,
+                batch_size,
+                len(products),
+            )
 
             # Initialize OptimizedDataLoader
             # Note: OptimizedDataLoader uses connection pooling internally
             loader = OptimizedDataLoader(
-                batch_size=int(get_variable("TIKI_SAVE_BATCH_SIZE", default=2000)),
+                batch_size=batch_size,
                 enable_db=True,
                 db_config=db_config,
                 show_progress=True,
+                continue_on_error=allow_file_only,
+                require_db=not allow_file_only,
             )
 
             try:
@@ -465,8 +629,22 @@ def load_products(**context) -> dict[str, Any]:
                 # Sử dụng OptimizedDataLoader.load_products
                 # Signature: load_products(products, upsert=True, validate_before_load=True, save_to_file=None)
                 load_stats = loader.load_products(
-                    products, upsert=True, validate_before_load=True, save_to_file=str(final_file)
+                    products,
+                    upsert=True,
+                    validate_before_load=True,
+                    save_to_file=str(final_file),
+                    raise_on_db_error=not allow_file_only,
+                    crawl_run_id=crawl_run_id,
                 )
+                if not allow_file_only and load_stats.get("db_loaded", 0) < len(products):
+                    raise RuntimeError(
+                        "Database load incomplete: "
+                        f"db_loaded={load_stats.get('db_loaded', 0)} "
+                        f"expected={len(products)} failed={load_stats.get('failed_count', 0)} "
+                        f"errors={load_stats.get('errors', [])[:3]}"
+                    )
+                load_stats["load_mode"] = load_mode
+                load_stats["batch_size"] = batch_size
 
                 # Kiểm tra số lượng products trong DB sau khi load
                 try:

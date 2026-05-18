@@ -12,16 +12,28 @@ from .component_profiler import get_global_component_profiler
 def profile_crawler(func: Callable) -> Callable:
     """Decorator to add component profiling to crawler functions.
 
+    Thread-safe: uses unique component name per thread to avoid conflicts
+    when multiple crawl tasks run concurrently via ThreadPoolExecutor.
+
     Args:
         func: Crawler function to profile
 
     Returns:
         Wrapped function with profiling
     """
+    import threading
 
     def wrapper(*args, **kwargs):
         profiler = get_global_component_profiler()
-        profiler.start_component("Crawler")
+        # Use thread-unique name to avoid "already active" errors in concurrent execution
+        thread_id = threading.current_thread().ident
+        comp_name = f"Crawler_{thread_id}"
+
+        try:
+            profiler.start_component(comp_name)
+        except (ValueError, RuntimeError):
+            # If profiling fails (e.g., already active), just run the function
+            return func(*args, **kwargs)
 
         try:
             result = func(*args, **kwargs)
@@ -33,12 +45,12 @@ def profile_crawler(func: Callable) -> Callable:
             elif isinstance(result, dict) and "products" in result:
                 items_processed = len(result["products"])
 
-            profiler.end_component("Crawler", items_processed=items_processed)
+            profiler.end_component(comp_name, items_processed=items_processed)
             return result
         except Exception as e:
             # End profiling even on error
             try:
-                profiler.end_component("Crawler", items_processed=0)
+                profiler.end_component(comp_name, items_processed=0)
             except Exception:
                 pass
             raise e

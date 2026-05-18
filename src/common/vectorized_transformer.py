@@ -7,6 +7,7 @@ performance for CPU-bound operations.
 """
 
 import logging
+import re
 from typing import Any
 
 import numpy as np
@@ -52,6 +53,9 @@ class VectorizedTransformer:
 
         # Vectorized string cleaning
         df = self._clean_strings(df)
+
+        # Generate short_name from cleaned name
+        df = self._generate_short_names(df)
 
         # Vectorized discount calculations
         df = self._calculate_discounts(df)
@@ -137,9 +141,7 @@ class VectorizedTransformer:
             # Only convert non-None values to string
             mask = df["seller_name"].notna()
             df.loc[mask, "seller_name"] = df.loc[mask, "seller_name"].astype(str).str.strip()
-            # Clean up 'None' strings and empty strings
-            df.loc[df["seller_name"] == "None", "seller_name"] = None
-            df.loc[df["seller_name"] == "", "seller_name"] = None
+            # Match the loop-based transformer: preserve stripped empty strings and "None".
 
         # Clean product_id
         if "product_id" in df.columns:
@@ -152,6 +154,62 @@ class VectorizedTransformer:
                 df.loc[mask, url_field] = df.loc[mask, url_field].astype(str).str.strip()
                 df.loc[df[url_field] == "None", url_field] = None
 
+        return df
+
+    def _generate_short_names(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate short product names using vectorized string operations.
+
+        Applies heuristic extraction: split by delimiters, cut at stop phrases,
+        and clean up trailing noise. Mirrors the logic in DataTransformer._extract_short_name_heuristics.
+        """
+        if "name" not in df.columns:
+            df["short_name"] = None
+            return df
+
+        # Start with cleaned names
+        short = df["name"].copy().fillna("")
+
+        # Step 1: Split by priority delimiters — take first meaningful segment
+        for sep in [r"\|", r"\s-\s", r"\s–\s", r"\(", r"\[", r",", r"\s\/\s"]:
+            short = short.str.split(sep, n=1).str[0].str.strip()
+
+        # Step 2: Semantic cutoff — truncate at common Vietnamese stop phrases
+        _stop_phrases = [
+            "chính hãng",
+            "cao cấp",
+            "nhập khẩu",
+            "giá rẻ",
+            "bảo hành",
+            "dành cho",
+            "tặng kèm",
+            "miễn phí",
+            "freeship",
+            "fullbox",
+            "nguyên seal",
+            "hàng mới",
+            "xả kho",
+            "thanh lý",
+        ]
+        _stop_pattern = re.compile(
+            r"\b(" + "|".join(re.escape(p) for p in _stop_phrases) + r")\b",
+            re.IGNORECASE,
+        )
+
+        def _cut_at_stop(name: str) -> str:
+            if not name:
+                return name
+            m = _stop_pattern.search(name)
+            if m and m.start() > 5:
+                return name[: m.start()].strip()
+            return name
+
+        short = short.apply(_cut_at_stop)
+
+        # Step 3: Cleanup trailing punctuation/noise
+        short = short.str.replace(r"[\s\-\+\&\,\/\|\(\)\[\]]+$", "", regex=True)
+        short = short.str.replace(r"^[\s\-\+\&\,\/\|\(\)\[\]]+", "", regex=True)
+
+        df["short_name"] = short
         return df
 
     def _calculate_discounts(self, df: pd.DataFrame) -> pd.DataFrame:

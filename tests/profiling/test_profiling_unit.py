@@ -8,22 +8,24 @@ Feature: performance-optimization
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 # Disable psutil to avoid hanging
-import common.profiling.component_profiler as cp_module
+import common.profiling.component_profiler as cp_module  # noqa: E402
 
 cp_module.PSUTIL_AVAILABLE = False
 
-from common.profiling import (
+from common.profiling import (  # noqa: E402
     BottleneckAnalyzer,
     BottleneckCategory,
     BottleneckSeverity,
     ComponentProfiler,
     FunctionProfiler,
 )
-from common.profiling.component_profiler import ComponentStats
+from common.profiling.component_profiler import ComponentStats  # noqa: E402
 
 
 def test_function_profiler_basic():
@@ -155,9 +157,6 @@ def test_bottleneck_analyzer_basic():
     print("✅ test_bottleneck_analyzer_basic passed")
 
     print("✅ test_bottleneck_analyzer_basic passed")
-
-
-import pytest
 
 
 def test_profiling_report_structure():

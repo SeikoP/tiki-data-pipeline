@@ -7,12 +7,15 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 # Fix encoding cho Windows console
 if sys.platform == "win32":
-    import io
-
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
 
 # Thêm src vào path - cần thêm cả common, pipelines và crawl
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -21,9 +24,14 @@ common_path = os.path.join(src_path, "common")
 pipelines_path = os.path.join(src_path, "pipelines")
 crawl_path = os.path.join(pipelines_path, "crawl")
 
-# Load .env từ src/common/ nếu có
-env_file = os.path.join(common_path, ".env")
-if os.path.exists(env_file):
+# Load env hợp nhất nếu có
+env_candidates = [
+    os.getenv("ENV_FILE_PATH", ""),
+    os.path.join(project_root, ".env"),
+    os.path.join(common_path, ".env"),
+]
+env_file = next((path for path in env_candidates if path and os.path.exists(path)), "")
+if env_file:
     try:
         from dotenv import load_dotenv
 
@@ -39,55 +47,9 @@ for path in [project_root, src_path, common_path, pipelines_path, crawl_path]:
     if path not in sys.path:
         sys.path.insert(0, path)
 
-import importlib.util  # noqa: E402
-
-# Setup package structure để relative imports hoạt động
-import types  # noqa: E402
-
-# Tạo package structure trong sys.modules
-if "pipelines" not in sys.modules:
-    sys.modules["pipelines"] = types.ModuleType("pipelines")
-if "pipelines.crawl" not in sys.modules:
-    sys.modules["pipelines.crawl"] = types.ModuleType("pipelines.crawl")
-if "common" not in sys.modules:
-    sys.modules["common"] = types.ModuleType("common")
-if "common.analytics" not in sys.modules:
-    sys.modules["common.analytics"] = types.ModuleType("common.analytics")
-if "common.ai" not in sys.modules:
-    sys.modules["common.ai"] = types.ModuleType("common.ai")
-if "common.notifications" not in sys.modules:
-    sys.modules["common.notifications"] = types.ModuleType("common.notifications")
-
-# Import config trước (cần thiết cho các module khác)
-config_path = os.path.join(crawl_path, "config.py")
-spec = importlib.util.spec_from_file_location("pipelines.crawl.config", config_path)
-config_module = importlib.util.module_from_spec(spec)
-sys.modules["pipelines.crawl.config"] = config_module
-spec.loader.exec_module(config_module)
-
-# Import DataAggregator từ common/analytics/
-aggregator_path = os.path.join(common_path, "analytics", "aggregator.py")
-spec = importlib.util.spec_from_file_location("common.analytics.aggregator", aggregator_path)
-aggregator_module = importlib.util.module_from_spec(spec)
-sys.modules["common.analytics.aggregator"] = aggregator_module
-spec.loader.exec_module(aggregator_module)
-DataAggregator = aggregator_module.DataAggregator
-
-# Import AISummarizer từ common/ai/
-summarizer_path = os.path.join(common_path, "ai", "summarizer.py")
-spec = importlib.util.spec_from_file_location("common.ai.summarizer", summarizer_path)
-summarizer_module = importlib.util.module_from_spec(spec)
-sys.modules["common.ai.summarizer"] = summarizer_module
-spec.loader.exec_module(summarizer_module)
-AISummarizer = summarizer_module.AISummarizer
-
-# Import DiscordNotifier từ common/notifications/
-discord_path = os.path.join(common_path, "notifications", "discord.py")
-spec = importlib.util.spec_from_file_location("common.notifications.discord", discord_path)
-discord_module = importlib.util.module_from_spec(spec)
-sys.modules["common.notifications.discord"] = discord_module
-spec.loader.exec_module(discord_module)
-DiscordNotifier = discord_module.DiscordNotifier
+from common.ai.summarizer import AISummarizer  # noqa: E402
+from common.analytics.aggregator import DataAggregator  # noqa: E402
+from common.notifications.discord import DiscordNotifier  # noqa: E402
 
 
 def create_sample_data_file(output_path: str) -> str:
@@ -185,7 +147,7 @@ def create_sample_data_file(output_path: str) -> str:
     return output_path
 
 
-def test_data_aggregator():
+def _run_data_aggregator():
     """Test 1: Kiểm tra DataAggregator"""
     print("=" * 70)
     print("🧪 TEST 1: DataAggregator - Tổng hợp dữ liệu")
@@ -249,6 +211,11 @@ def test_data_aggregator():
         return None
 
 
+def test_data_aggregator():
+    """Test 1: Kiểm tra DataAggregator"""
+    assert _run_data_aggregator()
+
+
 def test_ai_summarizer(summary=None):
     """Test 2: Kiểm tra AISummarizer"""
     print("\n" + "=" * 70)
@@ -266,9 +233,9 @@ def test_ai_summarizer(summary=None):
         print("\n⚙️  Cấu hình:")
         print(f"   - Enabled: {summarizer.enabled}")
         print(f"   - Model: {summarizer.model}")
-        print(f"   - API Key: {'✅ Có' if summarizer.api_key else '❌ Không có'}")
+        print(f"   - API Key: {'✅ Có' if summarizer.api_keys else '❌ Không có'}")
 
-        if not summarizer.enabled or not summarizer.api_key:
+        if not summarizer.enabled or not summarizer.api_keys:
             print("\n⚠️  Groq AI chưa được bật hoặc thiếu API key")
             print("   💡 Để test đầy đủ, cần set environment variables:")
             print("      - GROQ_ENABLED=true")
@@ -299,7 +266,7 @@ def test_ai_summarizer(summary=None):
         return None
 
 
-def test_discord_notifier(ai_summary=None, stats=None):
+def _run_discord_notifier(ai_summary=None, stats=None):
     """Test 3: Kiểm tra DiscordNotifier"""
     print("\n" + "=" * 70)
     print("🧪 TEST 3: DiscordNotifier - Gửi thông báo qua Discord")
@@ -319,7 +286,7 @@ def test_discord_notifier(ai_summary=None, stats=None):
             print("      - DISCORD_ENABLED=true")
             print("      - DISCORD_WEBHOOK_URL=your_webhook_url")
             print("\n   ⏭️  Bỏ qua test gửi Discord (chỉ test cấu hình)")
-            return False
+            return None
 
         # Test send message
         print("\n📤 Test gửi thông báo...")
@@ -362,7 +329,13 @@ def test_discord_notifier(ai_summary=None, stats=None):
         return False
 
 
-def test_integration():
+def test_discord_notifier():
+    """Test 3: Kiểm tra DiscordNotifier"""
+    result = _run_discord_notifier()
+    assert result is not False
+
+
+def _run_integration():
     """Test 4: Test tích hợp toàn bộ flow"""
     print("\n" + "=" * 70)
     print("🧪 TEST 4: Integration Test - Toàn bộ flow")
@@ -384,7 +357,7 @@ def test_integration():
         # 2. Tổng hợp với AI
         summarizer = AISummarizer()
         ai_summary = None
-        if summarizer.enabled and summarizer.api_key:
+        if summarizer.enabled and summarizer.api_keys:
             ai_summary = summarizer.summarize_data(summary, max_tokens=1000)
             if ai_summary:
                 print("✅ Bước 2: Tổng hợp với AI thành công")
@@ -424,7 +397,12 @@ def test_integration():
         return False
 
 
-def test_with_real_data():
+def test_integration():
+    """Test 4: Test tích hợp toàn bộ flow"""
+    assert _run_integration()
+
+
+def _run_with_real_data():
     """Test 5: Test với dữ liệu thực từ products_with_detail.json"""
     print("\n" + "=" * 70)
     print("🧪 TEST 5: Test với dữ liệu thực")
@@ -449,6 +427,8 @@ def test_with_real_data():
     if not data_file:
         print("⚠️  Không tìm thấy file products_with_detail.json")
         print("   💡 Cần crawl dữ liệu trước hoặc tạo file test")
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            pytest.skip("Missing products_with_detail.json")
         return None
 
     print(f"📂 Sử dụng file: {data_file}")
@@ -470,7 +450,7 @@ def test_with_real_data():
 
         # Test AI summary nếu có config
         summarizer = AISummarizer()
-        if summarizer.enabled and summarizer.api_key:
+        if summarizer.enabled and summarizer.api_keys:
             print("\n🤖 Đang tổng hợp với AI...")
             ai_summary = summarizer.summarize_data(summary, max_tokens=2000)
             if ai_summary:
@@ -491,6 +471,11 @@ def test_with_real_data():
         return None, None
 
 
+def test_with_real_data():
+    """Test 5: Test với dữ liệu thực từ products_with_detail.json"""
+    _run_with_real_data()
+
+
 def main():
     """
     Chạy tất cả tests.
@@ -509,7 +494,7 @@ def main():
 
     # Test 1: DataAggregator
     try:
-        summary = test_data_aggregator()
+        summary = _run_data_aggregator()
         if summary:
             results["data_aggregator"] = True
     except Exception as e:
@@ -526,7 +511,7 @@ def main():
     # Test 3: DiscordNotifier
     try:
         stats = summary.get("statistics", {}) if summary else {}
-        discord_success = test_discord_notifier(ai_summary, stats)
+        discord_success = _run_discord_notifier(ai_summary, stats)
         if discord_success:
             results["discord_notifier"] = True
     except Exception as e:
@@ -534,7 +519,7 @@ def main():
 
     # Test 4: Integration
     try:
-        integration_success = test_integration()
+        integration_success = _run_integration()
         if integration_success:
             results["integration"] = True
     except Exception as e:
@@ -542,7 +527,7 @@ def main():
 
     # Test 5: Real data
     try:
-        real_ai_summary, real_stats = test_with_real_data()
+        real_ai_summary, real_stats = _run_with_real_data()
         if real_ai_summary or real_stats:
             results["real_data"] = True
     except Exception as e:

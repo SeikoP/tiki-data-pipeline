@@ -4,15 +4,25 @@ Transform pipeline để làm sạch, validate và chuẩn hóa dữ liệu sả
 
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from threading import Lock
+from html import unescape
 from typing import Any
 
 # Import profiling utilities
 from common.profiling import profile_transformer
 
 logger = logging.getLogger(__name__)
+
+REQUIRED_QUALITY_FIELDS = (
+    "product_id",
+    "name",
+    "url",
+    "price",
+    "brand",
+    "seller_name",
+    "category_id",
+)
+ENRICHMENT_QUALITY_FIELDS = ("review_count",)
 
 
 class DataTransformer:
@@ -45,61 +55,36 @@ class DataTransformer:
         }
 
         # Initialize AI Summarizer for name shortening
-        # Initialize AI Summarizer for name shortening
+        self.ai_summarizer = self._init_ai_summarizer()
+
+    @staticmethod
+    def _init_ai_summarizer():
+        """Try to load AISummarizer with multiple import strategies."""
         try:
-            from src.common.ai.summarizer import AISummarizer
+            from common.settings import get_bool_setting
 
-            # Try to import config to check if AI short name is enabled
+            use_ai = get_bool_setting("SHORT_NAME_USE_AI", use_airflow=False)
+        except Exception:
+            use_ai = False
+
+        if not use_ai:
+            logger.info("AI Short Name disabled; using local heuristic rules")
+            return None
+
+        # Try import strategies in order
+        for import_fn in [
+            lambda: __import__("src.common.ai.summarizer", fromlist=["AISummarizer"]).AISummarizer,
+            lambda: __import__("common.ai.summarizer", fromlist=["AISummarizer"]).AISummarizer,
+        ]:
             try:
-                from src.common.config import SHORT_NAME_CONFIG
-
-                use_ai_short_name = SHORT_NAME_CONFIG.get("use_ai", True)
+                cls = import_fn()
+                logger.info("AI Short Name enabled")
+                return cls()
             except ImportError:
-                import os
+                continue
 
-                # Fallback to env var directly
-                use_ai_short_name = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
-
-            if use_ai_short_name:
-                self.ai_summarizer = AISummarizer()
-                logger.info("✅ AI Short Name enabled")
-            else:
-                self.ai_summarizer = None
-                logger.info("⚠️  AI Short Name DISABLED by config")
-
-        except ImportError:
-            # Fallback for relative import if src is not in path
-            try:
-                import os
-
-                from ..common.ai.summarizer import AISummarizer
-
-                use_ai_short_name = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
-
-                if use_ai_short_name:
-                    self.ai_summarizer = AISummarizer()
-                else:
-                    self.ai_summarizer = None
-            except ImportError:
-                # Try absolute path from project root
-                try:
-                    import os
-                    import sys
-                    from pathlib import Path
-
-                    root_path = Path(__file__).resolve().parent.parent.parent.parent
-                    if str(root_path) not in sys.path:
-                        sys.path.append(str(root_path))
-                    from src.common.ai.summarizer import AISummarizer
-
-                    use_ai_short_name = os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true"
-                    if use_ai_short_name:
-                        self.ai_summarizer = AISummarizer()
-                    else:
-                        self.ai_summarizer = None
-                except Exception as e:
-                    logger.warning(f"Could not import AISummarizer: {e}")
-                    self.ai_summarizer = None
+        logger.warning("Could not import AISummarizer")
+        return None
 
     @profile_transformer
     def transform_products(
@@ -128,58 +113,48 @@ class DataTransformer:
 
         transformed = []
         seen_product_ids = set()
-        seen_lock = Lock()
+        max_errors = 100  # Cap error list to prevent unbounded memory growth
 
-        # Determine max_workers based on list size, but cap at reasonable limit (e.g. 20)
-        # Higher if IO bound (AI calls), lower if CPU bound.
-        max_workers = min(20, len(products)) if len(products) > 0 else 1
+        for idx, product in enumerate(products):
+            try:
+                transformed_product = self.transform_product(product)
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Map futures to original index to maintain error context (log only)
-            future_to_product = {
-                executor.submit(self.transform_product, p): idx for idx, p in enumerate(products)
-            }
-
-            for future in as_completed(future_to_product):
-                idx = future_to_product[future]
-                try:
-                    transformed_product = future.result()
-
-                    if not transformed_product:
-                        self.stats["invalid_products"] += 1
-                        continue
-
-                    # Thread-safe duplicate check
-                    product_id = transformed_product.get("product_id")
-                    with seen_lock:
-                        if product_id in seen_product_ids:
-                            self.stats["duplicates_removed"] += 1
-                            logger.debug(f"⚠️  Duplicate product_id: {product_id}")
-                            continue
-                        seen_product_ids.add(product_id)
-
-                    # Validate if needed
-                    if validate:
-                        is_valid, error = self.validate_product(transformed_product)
-                        if not is_valid:
-                            if self.remove_invalid:
-                                self.stats["invalid_products"] += 1
-                                self.stats["errors"].append(f"Product {product_id}: {error}")
-                                continue
-                            elif self.strict_validation:
-                                raise ValueError(f"Invalid product {product_id}: {error}")
-
-                    transformed.append(transformed_product)
-                    self.stats["valid_products"] += 1
-
-                except Exception as e:
+                if not transformed_product:
                     self.stats["invalid_products"] += 1
-                    error_msg = f"Error transforming product at index {idx}: {str(e)}"
-                    self.stats["errors"].append(error_msg)
-                    logger.error(f"❌ {error_msg}")
+                    continue
 
-                    if self.strict_validation:
-                        raise
+                # Duplicate check
+                product_id = transformed_product.get("product_id")
+                if product_id in seen_product_ids:
+                    self.stats["duplicates_removed"] += 1
+                    logger.debug(f"Duplicate product_id: {product_id}")
+                    continue
+                seen_product_ids.add(product_id)
+
+                # Validate if needed
+                if validate:
+                    is_valid, error = self.validate_product(transformed_product)
+                    if not is_valid:
+                        if self.remove_invalid:
+                            self.stats["invalid_products"] += 1
+                            if len(self.stats["errors"]) < max_errors:
+                                self.stats["errors"].append(f"Product {product_id}: {error}")
+                            continue
+                        elif self.strict_validation:
+                            raise ValueError(f"Invalid product {product_id}: {error}")
+
+                transformed.append(transformed_product)
+                self.stats["valid_products"] += 1
+
+            except Exception as e:
+                self.stats["invalid_products"] += 1
+                error_msg = f"Error transforming product at index {idx}: {e}"
+                if len(self.stats["errors"]) < max_errors:
+                    self.stats["errors"].append(error_msg)
+                logger.error(error_msg)
+
+                if self.strict_validation:
+                    raise
 
         logger.info(
             f"✅ Transform hoàn tất: {self.stats['valid_products']}/{self.stats['total_processed']} products hợp lệ"
@@ -307,7 +282,7 @@ class DataTransformer:
             "category_url": product.get("category_url"),
             "category_id": product.get("category_id"),
             "category_path": product.get("category_path") or [],
-            "sales_count": int(product.get("sales_count") or 0),
+            "sales_count": self._parse_int(product.get("sales_count")),
         }
 
         # Extract category_id từ category_url nếu chưa có
@@ -326,11 +301,14 @@ class DataTransformer:
         if isinstance(price, dict):
             db_product["price"] = price.get("current_price")
             db_product["original_price"] = price.get("original_price") or db_product["price"]
-            db_product["discount_percent"] = (
-                int(round(price["discount_percent"]))
-                if price.get("discount_percent") is not None
-                else None
-            )
+            if price.get("discount_percent") is not None:
+                db_product["discount_percent"] = round(float(price["discount_percent"]), 2)
+            elif db_product["price"] is not None and db_product["original_price"] is not None:
+                db_product["discount_percent"] = (
+                    0.0 if db_product["price"] == db_product["original_price"] else None
+                )
+            else:
+                db_product["discount_percent"] = None
         else:
             db_product["price"] = None
             db_product["original_price"] = None
@@ -340,13 +318,16 @@ class DataTransformer:
         rating = product.get("rating", {})
         if isinstance(rating, dict):
             db_product["rating_average"] = rating.get("average")
-            db_product["review_count"] = rating.get("total_reviews") or rating.get("review_count")
+            db_product["review_count"] = self._first_present(
+                rating.get("total_reviews"), rating.get("review_count")
+            )
         else:
             db_product["rating_average"] = None
             db_product["review_count"] = None
 
         # Description
         db_product["description"] = product.get("description")
+        db_product["description_text"] = self._html_to_text(product.get("description"))
 
         # Seller fields (flatten từ dict) - với validation để loại bỏ giá trị rác
         seller = product.get("seller", {})
@@ -364,8 +345,16 @@ class DataTransformer:
         db_product["brand"] = product.get("brand")
 
         # JSONB fields
-        db_product["specifications"] = product.get("specifications")
-        db_product["images"] = product.get("images")
+        db_product["images"] = self._normalize_json_payload(product.get("images"))
+        db_product["image_url"] = product.get("image_url") or product.get("thumbnail_url")
+        if not db_product["image_url"]:
+            db_product["image_url"] = self._first_image_url(db_product["images"])
+        db_product["shipping"] = self._normalize_shipping(product.get("shipping"))
+        stock_info = self._stock_info(product)
+        db_product["stock_available"] = stock_info["available"]
+        db_product["stock_status"] = stock_info["status"]
+        db_product["stock_source"] = stock_info["source"]
+        db_product["detail_status"] = product.get("detail_status")
 
         # Metadata (không lưu vào DB nhưng giữ lại cho reference)
         if "_metadata" in product:
@@ -382,6 +371,7 @@ class DataTransformer:
                 parsed_dt = self._parse_datetime(crawled_at)
                 db_product["crawled_at"] = parsed_dt.isoformat() if parsed_dt else str(crawled_at)
 
+        self._apply_quality_contract(db_product)
         return db_product
 
     def validate_product(self, product: dict[str, Any]) -> tuple[bool, str | None]:
@@ -400,9 +390,8 @@ class DataTransformer:
         if not product.get("url"):
             return False, "Missing url"
 
-        # CRITICAL: Validate seller_name (Task: Xóa seller_name null trước khi load db)
-        if not product.get("seller_name"):
-            return False, f"Missing or invalid seller_name for product {product.get('product_id')}"
+        # seller_name is optional — listing API products may not have it
+        # Database cleanup handles missing sellers separately
 
         # Validate product_id format (chỉ số)
         product_id = str(product["product_id"]).strip()
@@ -435,6 +424,225 @@ class DataTransformer:
             return False, "Sales count cannot be negative"
 
         return True, None
+
+    def _apply_quality_contract(self, product: dict[str, Any]) -> None:
+        """Set quality fields from the flattened DB payload."""
+        missing_required = [
+            field for field in REQUIRED_QUALITY_FIELDS if self._is_missing(product.get(field))
+        ]
+        missing_enrichment = [
+            field for field in ENRICHMENT_QUALITY_FIELDS if self._is_missing(product.get(field))
+        ]
+        review_count = product.get("review_count")
+        if (
+            review_count is not None
+            and self._parse_int(review_count) is not None
+            and self._parse_int(review_count) > 0
+            and self._is_missing(product.get("rating_average"))
+        ):
+            missing_enrichment.append("rating_average")
+        missing_fields = missing_required + missing_enrichment
+
+        if missing_required:
+            crawl_quality = "basic"
+        elif missing_enrichment:
+            crawl_quality = "partial"
+        else:
+            crawl_quality = "full"
+
+        total_fields = len(REQUIRED_QUALITY_FIELDS) + len(ENRICHMENT_QUALITY_FIELDS)
+        present_fields = total_fields - len(missing_fields)
+        quality_score = round(present_fields / total_fields, 2) if total_fields else 0.0
+
+        product["missing_fields"] = missing_fields
+        product["needs_enrichment"] = bool(missing_fields)
+        product["crawl_quality"] = crawl_quality
+        product["data_quality_score"] = quality_score
+
+        if crawl_quality == "full":
+            product["detail_status"] = "full"
+        elif crawl_quality == "partial":
+            product["detail_status"] = "partial_needs_enrichment"
+        else:
+            product["detail_status"] = "basic_needs_enrichment"
+
+        metadata = product.setdefault("_metadata", {})
+        if isinstance(metadata, dict):
+            metadata["missing_fields"] = missing_fields
+            metadata["data_completeness_score"] = quality_score
+            metadata["crawl_quality"] = crawl_quality
+
+    @staticmethod
+    def _is_missing(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() == ""
+        if isinstance(value, (list, dict, tuple, set)):
+            return len(value) == 0
+        return False
+
+    @staticmethod
+    def _first_present(*values: Any) -> Any:
+        for value in values:
+            if value is not None:
+                return value
+        return None
+
+    @staticmethod
+    def _normalize_json_payload(value: Any) -> Any:
+        if value in ("", [], {}):
+            return None
+        return value
+
+    @classmethod
+    def _normalize_shipping(cls, value: Any) -> dict[str, Any] | None:
+        normalized = {
+            "free_shipping": None,
+            "fast_delivery": None,
+            "delivery_time": None,
+            "badges": [],
+        }
+        if not value:
+            return None
+        if isinstance(value, dict):
+            normalized["free_shipping"] = value.get("free_shipping")
+            normalized["fast_delivery"] = value.get("fast_delivery")
+            normalized["delivery_time"] = value.get("delivery_time")
+            extras = {
+                key: val
+                for key, val in value.items()
+                if key not in {"free_shipping", "fast_delivery", "delivery_time"}
+                and not cls._is_missing(val)
+            }
+            if extras:
+                normalized["extra"] = extras
+        elif isinstance(value, list):
+            normalized["badges"] = value
+        else:
+            normalized["raw"] = value
+
+        return normalized if any(not cls._is_missing(v) for v in normalized.values()) else None
+
+    def _stock_info(self, product: dict[str, Any]) -> dict[str, Any]:
+        status = self._normalize_stock_status(product.get("stock_status"))
+        source = self._stock_source(product)
+        inventory_status = self._normalize_stock_status(product.get("inventory_status"))
+
+        if inventory_status:
+            status = inventory_status
+            return {
+                "available": self._available_from_status(inventory_status),
+                "status": inventory_status,
+                "source": source,
+            }
+
+        if product.get("stock_available") is not None:
+            available = bool(product.get("stock_available"))
+            status = status or ("available" if available else "out_of_stock")
+            return {"available": available, "status": status, "source": source or "explicit"}
+
+        stock = product.get("stock")
+        if not isinstance(stock, dict):
+            return {"available": None, "status": status or "unknown", "source": source}
+
+        stock_status = self._normalize_stock_status(
+            stock.get("stock_status") or stock.get("status") or stock.get("inventory_status")
+        )
+        if stock_status:
+            status = stock_status
+            return {
+                "available": self._available_from_status(stock_status),
+                "status": stock_status,
+                "source": source,
+            }
+
+        quantity = self._parse_int(stock.get("quantity", stock.get("qty")))
+        if quantity is not None:
+            return {
+                "available": quantity > 0,
+                "status": "available" if quantity > 0 else "out_of_stock",
+                "source": source,
+            }
+
+        if stock.get("available") is True:
+            return {"available": True, "status": "available", "source": source}
+
+        return {"available": None, "status": status or "unknown", "source": source}
+
+    @staticmethod
+    def _normalize_stock_status(value: Any) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip().lower()
+        if not normalized:
+            return None
+        aliases = {
+            "in_stock": "available",
+            "instock": "available",
+            "available": "available",
+            "out_of_stock": "out_of_stock",
+            "outofstock": "out_of_stock",
+            "unavailable": "out_of_stock",
+            "sold_out": "out_of_stock",
+            "hethang": "out_of_stock",
+            "het_hang": "out_of_stock",
+        }
+        return aliases.get(normalized, normalized)
+
+    @staticmethod
+    def _available_from_status(status: str) -> bool | None:
+        if status == "available":
+            return True
+        if status in {"out_of_stock", "discontinued", "inactive"}:
+            return False
+        return None
+
+    @staticmethod
+    def _stock_source(product: dict[str, Any]) -> str | None:
+        if product.get("stock_source"):
+            return str(product["stock_source"])
+
+        metadata = product.get("_metadata")
+        crawl_status = metadata.get("crawl_status") if isinstance(metadata, dict) else None
+        extraction_method = (
+            metadata.get("extraction_method") if isinstance(metadata, dict) else None
+        )
+
+        if crawl_status == "success_api" or extraction_method == "api":
+            return "detail_api"
+        if crawl_status == "success_html" or extraction_method in {"aiohttp", "html"}:
+            return "detail_html"
+        if product.get("extraction_method") == "listing_api":
+            return "listing_api"
+        if product.get("detail_status"):
+            return str(product["detail_status"])
+        return None
+
+    @staticmethod
+    def _first_image_url(images: Any) -> str | None:
+        if not isinstance(images, list):
+            return None
+        for image in images:
+            if isinstance(image, str) and image.strip():
+                return image.strip()
+            if isinstance(image, dict):
+                url = image.get("url") or image.get("base_url") or image.get("large_url")
+                if url:
+                    return str(url).strip()
+        return None
+
+    @staticmethod
+    def _html_to_text(value: Any) -> str | None:
+        if not value:
+            return None
+        text = str(value)
+        text = re.sub(r"<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>", " ", text, flags=re.I)
+        text = re.sub(r"<style\b[^<]*(?:(?!</style>)<[^<]*)*</style>", " ", text, flags=re.I)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = unescape(text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text or None
 
     def _normalize_text(self, text: str) -> str:
         """
@@ -644,8 +852,6 @@ class DataTransformer:
             "sale sốc",
             "khuyến mãi",
             "quà tặng",
-            "combo",
-            "set",
             "uy tín",
             "nhập khẩu",
             "xuất khẩu",
@@ -658,11 +864,9 @@ class DataTransformer:
             "luxury",
             "limited",
             "bản giới hạn",
-            "đa năng",
             "tiện lợi",
             "tiện dụng",
             "thông minh",
-            "tự động",
             "chính hãng",
             "hàng công ty",
             "fullbox",
@@ -672,14 +876,10 @@ class DataTransformer:
             "mẫu mới",
             "mẫu hot",
             "hàng nội địa",
-            "nhập khẩu",
             "chất lượng cao",
             "siêu cấp",
             "siêu sạch",
             "siêu gọn",
-            "nhỏ gọn",
-            "cầm tay",
-            "mini",
             "loại 1",
             "bản cao cấp",
             "chống trầy",
@@ -716,7 +916,8 @@ class DataTransformer:
             r"\b[A-Za-z]?\d+[\.,]?\d*\s*[xX]\s*[A-Za-z]?\d+[\.,]?\d*(?:\s*[xX]\s*[A-Za-z]?\d+[\.,]?\d*)?[^ ]*\b",  # W76xD30.5xH11.5Cm
             r"\b\d+[\.,]?\d*\s*(?:m|cm|mm|kg|g|l|ml|w|v|kw|ah|ma|mah)\b",  # 5m, 10kg, 100w, 2000mah
             r"\b\d+\s*(?:chế độ|đầu|món|chi tiết|cái|nấc|vị|mùi|lít|hũ|gói|viên)\b",  # 5 chế độ, 4 đầu
-            r"\b\d+[-/]\d+\b",  # 2/3, 2-1
+            r"\b\d+\s*(?:tháng|năm)\s*(?:bảo hành|bh)\b",
+            r"\b(?:bảo hành|bh)\s*\d+\s*(?:tháng|năm)\b",
         ]
         for pattern in spec_patterns:
             cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
@@ -820,13 +1021,10 @@ class DataTransformer:
             "chống",
             "tặng",
             "kèm",
-            "set",
-            "combo",
             "mẫu mã",
             "mẫu mới",
             "thiết kế",
             "phong cách",
-            "không dây",
             "không dùng",
             "dùng cho",
         ]
@@ -852,14 +1050,47 @@ class DataTransformer:
         cleaned = re.sub(r"[\s\-\+\&\,\/\|\(\)\[\]]+$", "", cleaned)
         cleaned = re.sub(r"^[\s\-\+\&\,\/\|\(\)\[\]]+", "", cleaned)
 
+        return self._compact_short_name_candidate(cleaned)
+
+    def _compact_short_name_candidate(self, name: str) -> str:
+        """Keep a local short name readable without calling AI."""
+        if not name:
+            return ""
+
+        cleaned = " ".join(name.split())
+        cleaned = re.sub(
+            r"\b(?:cho|với|và|của|dành|kèm|tặng)\s*$", "", cleaned, flags=re.IGNORECASE
+        )
+        cleaned = cleaned.strip(" -,+/&|()[]")
+
+        words = cleaned.split()
+        if len(words) > 8:
+            cleaned = " ".join(words[:8])
+            cleaned = re.sub(
+                r"\b(?:cho|với|và|của|dành|kèm|tặng)\s*$",
+                "",
+                cleaned,
+                flags=re.IGNORECASE,
+            ).strip()
+
+        if len(cleaned) > 60:
+            truncated = cleaned[:60].rstrip()
+            last_space = truncated.rfind(" ")
+            if last_space > 30:
+                cleaned = truncated[:last_space]
+
+        if cleaned:
+            cleaned = cleaned.lower()
+            cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
+
         return cleaned
 
     def _get_short_name(self, name: str) -> str:
         """
         Get shortened name using:
         1. Advanced Heuristics (Extract core name).
-        2. Validation (Is heuristic result good enough?).
-        3. AI Fallback (Only if heuristics fail/result too long).
+        2. Local compaction.
+        3. Optional AI Fallback (Only if local rules fail and feature flag is enabled).
         4. Hard Fallback (Truncate).
         """
         if not name:
@@ -869,34 +1100,16 @@ class DataTransformer:
         # This handles cleaning, splitting, and stop-word removal locally
         heuristic_name = self._extract_short_name_heuristics(name)
 
-        # 2. Heuristic Validation
-        # Explicitly accept if result looks "good enough" to avoid AI costs
-        # Criteria:
-        # - Reasonable length (e.g., < 75 chars)
-        # - Reasonable word count (e.g., < 12 words)
-        # - Not empty
         if heuristic_name:
-            word_count = len(heuristic_name.split())
-            char_count = len(heuristic_name)
-
-            # Acceptance Thresholds (Stricter for higher quality)
-            # - Short enough to be a "name", not a description
-            # - But long enough to be descriptive
-            if 2 <= word_count <= 7 and char_count <= 45:
-                # logger.debug(f"✅ Heuristic accepted: '{name}' -> '{heuristic_name}'")
-                return heuristic_name
+            return heuristic_name
 
         # 3. AI Fallback (Smart Summarization)
-        # Use AI only if heuristic result is still too long or complex
+        # Use AI only if local extraction failed completely.
         if self.ai_summarizer:
             try:
-                # Pass the *heuristic* result to AI (it's already cleaner than raw name)
-                # If heuristic failed (empty), use original name
-                input_name = heuristic_name if heuristic_name and len(heuristic_name) > 3 else name
+                short_name = self.ai_summarizer.shorten_product_name(name)
 
-                short_name = self.ai_summarizer.shorten_product_name(input_name)
-
-                if short_name and short_name != input_name:
+                if short_name:
                     return short_name
 
             except Exception as e:

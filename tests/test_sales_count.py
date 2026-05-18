@@ -6,12 +6,16 @@ crawl_products_detail.py.
 import json
 import os
 import sys
+from pathlib import Path
 
 # Thêm src vào path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src", "pipelines", "crawl"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from crawl_products import crawl_category_products
-from crawl_products_detail import crawl_product_detail_with_selenium, extract_product_detail
+from pipelines.crawl.crawl_products import crawl_category_products
+from pipelines.crawl.crawl_products_detail import (
+    crawl_product_detail_with_selenium,
+    extract_product_detail,
+)
 
 
 def test_crawl_products_sales_count():

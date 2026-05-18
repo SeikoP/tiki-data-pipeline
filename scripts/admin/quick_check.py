@@ -7,6 +7,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+from common.settings import get_pipeline_settings
 
 
 def quick_check():
@@ -74,13 +77,8 @@ def quick_check():
         import psycopg2
 
         try:
-            conn = psycopg2.connect(
-                host="localhost",
-                database="crawl_data",
-                user="postgres",
-                password="postgres",
-                port=5432,
-            )
+            db_settings = get_pipeline_settings(use_airflow=False).database
+            conn = psycopg2.connect(**db_settings.as_dict())
             cur = conn.cursor()
             cur.execute("SELECT COUNT(*) FROM products WHERE category_path IS NOT NULL")
             count = cur.fetchone()[0]

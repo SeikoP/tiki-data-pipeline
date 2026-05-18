@@ -1,268 +1,75 @@
-# 📋 01-PARAMETERS - THAM SỐ & CẤU HÌNH
+# Parameters
 
-**Thư mục này chứa**: Tất cả tham số cấu hình của dự án (88+ parameters)
+This file is the canonical parameter reference for the current compact docs set.
+Runtime defaults are defined in `src/common/settings.py`; Airflow setup, docs and
+`.env.example` should stay in sync with that registry.
 
----
+## Airflow and Run Size
 
-## 📁 FILE STRUCTURE
+| Parameter | Default/current source | Purpose |
+| --- | --- | --- |
+| `TIKI_CATEGORY_NUM_BATCHES` | Airflow Variable, fallback `6` | Splits categories for dynamic task mapping |
+| `TIKI_CRAWL_ONLY_LEAF` | Airflow Variable, fallback `true` | Crawls only leaf categories so listing scope matches product detail capacity |
+| `TIKI_MIN_CATEGORY_LEVEL` | Airflow Variable, fallback `2` | Minimum category tree level selected for category crawl |
+| `TIKI_MAX_CATEGORY_LEVEL` | Airflow Variable, fallback `4` | Maximum category tree level selected for category crawl |
+| `TIKI_MAX_CATEGORIES` | Airflow Variable, fallback `0` | Optional rotating category window; `0` means no category cap |
+| `TIKI_MAX_PAGES_PER_CATEGORY` | Airflow Variable, fallback `20` | Listing pages crawled for each selected category |
+| `TIKI_PRODUCTS_PER_DAY` | Airflow Variable, fallback `1000` | Detail candidates selected per run |
+| `TIKI_MAX_PRODUCTS_FOR_DETAIL` | Airflow Variable, fallback `0` | Hard cap for detail candidates; `0` means no extra cap |
+| `TIKI_DETAIL_ACTIVE_BATCHES` | Airflow Variable, fallback `3` | Detail mapped batches to fill one Airflow wave |
+| `TIKI_DETAIL_BATCH_SIZE` | Airflow Variable, fallback `300` | Soft target before planner allows more than one wave |
+| `TIKI_DETAIL_MAX_CONCURRENT_TASKS` | Airflow Variable, fallback `4` | Async requests inside each detail task |
+| `TIKI_DETAIL_CONCURRENCY_MIN` | Airflow Variable, fallback `2` | Minimum clamp for per-task async concurrency |
+| `TIKI_DETAIL_CONCURRENCY_MAX` | Airflow Variable, fallback `6` | Maximum clamp for per-task async concurrency |
+| `TIKI_CACHE_RELAX_DAYS` | Airflow Variable, fallback `2` | Freshness window for skipping products already detailed in DB |
+| `TIKI_FORCE_CRAWL` | Airflow Variable, fallback `false` | Ignores recent DB detail hits when a forced recrawl is needed |
+| `TIKI_SAVE_BATCH_SIZE` | Airflow Variable, fallback `1000` | Database save batch size for local stability |
+| `TIKI_LOAD_MODE` | Airflow Variable, fallback `auto` | Selects safe or optimized DB batch sizing |
+| `TIKI_ANALYTICS_SCHEMA` | Airflow Variable, fallback `analytics` | PostgreSQL schema for analysis-ready mart tables |
+| `TIKI_FORCE_REFRESH` | env/Airflow usage | Bypass cache when stale or incomplete data must be refreshed |
+| `DISCORD_ENABLED` | env, default `false` | Enables final aggregate Discord notification |
 
-| File | Mô Tả | Sử Dụng Khi |
-|------|--------|-----------|
-| `PARAMETERS_QUICK_REFERENCE.md` | ⚡ Top 10 tham số + quick tuning | Cần nhanh chóng |
-| `PARAMETERS_DETAILED.md` | 📖 Chi tiết 88+ tham số | Cần tìm hiểu sâu |
-| `PARAMETERS_MATRIX.md` | 📊 Bảng so sánh, trước/sau | Muốn so sánh |
-| `README.md` | 📌 File này | Overview |
+## Crawl Config
 
----
+Defined in `src/pipelines/crawl/config.py`.
 
-## 🎯 QUICK START
+| Setting | Current value | Purpose |
+| --- | ---: | --- |
+| `MAX_CATEGORY_LEVELS` | `5` | Maximum Tiki category depth |
+| `CATEGORY_BATCH_SIZE` | `20` | Categories per crawl batch |
+| `CATEGORY_CONCURRENT_REQUESTS` | `10` | Parallel category API requests |
+| `PRODUCT_BATCH_SIZE` | `50` | Products per detail batch |
+| `PRODUCT_POOL_SIZE` | `12` | Selenium driver pool target for product detail |
+| `HTTP_CONNECTOR_LIMIT` | `300` | Total aiohttp connections |
+| `HTTP_CONNECTOR_LIMIT_PER_HOST` | `50` | Per-host aiohttp limit |
+| `HTTP_TIMEOUT_TOTAL` | `15` | Total HTTP timeout in seconds |
 
-### Bạn muốn...
+## Cache Config
 
-| Mục Đích | Đọc File |
-|---------|----------|
-| Tuning nhanh | `PARAMETERS_QUICK_REFERENCE.md` |
-| Tìm tham số cụ thể | `PARAMETERS_DETAILED.md` |
-| So sánh cũ vs mới | `PARAMETERS_MATRIX.md` |
+| Setting | Current value | Purpose |
+| --- | ---: | --- |
+| `REDIS_CACHE_TTL_PRODUCT_DETAIL` | `604800` | Product detail cache TTL, 7 days |
+| `REDIS_CACHE_TTL_PRODUCT_LIST` | `43200` | Product list cache TTL, 12 hours |
+| `REDIS_CACHE_TTL_HTML` | `604800` | HTML cache TTL, 7 days |
+| `CACHE_ACCEPT_PARTIAL_DATA` | `True` | Allows partial cached records when useful |
 
----
+## Data Quality
 
-## 📊 THAM SỐ OVERVIEW
+| Setting | Current value | Purpose |
+| --- | --- | --- |
+| `DATA_QUALITY_CRITICAL_FIELDS` | `name`, `price`, `product_id` | Required to save a product |
+| `DATA_QUALITY_IMPORTANT_FIELDS` | `seller_name`, `brand`, `category_id` | Missing values can trigger retry |
+| `DATA_QUALITY_OPTIONAL_FIELDS` | `rating_average`, `sales_count`, `stock_quantity` | Nice-to-have fields |
+| `DATA_QUALITY_MIN_SCORE` | `0.7` | Minimum completeness score |
+| `PRODUCT_RETRY_MAX_ATTEMPTS` | `2` | Retry count for missing important fields |
+| `TIKI_AUDIT_HTTP_TIMEOUT` | `20` | Live Tiki API timeout for DB audit |
+| `TIKI_AUDIT_REQUEST_DELAY` | `0.1` | Delay between live audit requests |
+| `TIKI_AUDIT_MAX_PRODUCTS` | `0` | Optional product cap for live audit; `0` means no cap |
 
-### Phân Loại
+## Tuning Rules
 
-```
-Tổng: 88+ parameters
-
-├─ Airflow Variables (26)
-│  ├─ Category Crawling (8)
-│  ├─ Product Crawling (5)
-│  ├─ Selenium Pool (3)
-│  ├─ Circuit Breaker (2)
-│  ├─ Degradation Mode (2)
-│  ├─ Database (4)
-│  ├─ Redis (1)
-│  └─ DAG Scheduling (1)
-│
-├─ Environment Variables (10)
-│  ├─ Airflow Config (4)
-│  ├─ PostgreSQL (2)
-│  ├─ Redis (1)
-│  ├─ Airflow Web UI (2)
-│  └─ Python Deps (1)
-│
-├─ Code Configuration (12)
-│  ├─ Category Config (4)
-│  ├─ Product Config (3)
-│  ├─ HTTP Client Config (5)
-│
-├─ Pool Configuration (8)
-│  ├─ PostgreSQL Pool (4)
-│  ├─ Batch Processor (3)
-│  └─ Redis Pool (4)
-│
-└─ Task-Level Timeout (12)
-   ├─ Category Task (3)
-   ├─ Product Task (4)
-   ├─ Merge Task (1)
-   └─ Selenium Config (6)
-```
-
----
-
-## 🚀 OPTIMIZATION APPLIED (V2)
-
-| Tham Số | Từ | Thành | Impact |
-|---------|-----|--------|--------|
-| **SELENIUM_POOL_SIZE** | 5 | 15 | +200% 🚀 |
-| **PRODUCT_BATCH_SIZE** | 15 | 12 | -12% (23 vs 19 batches) |
-| **PRODUCT_TIMEOUT** | 90s | 60s | -33% |
-| **HTTP_TIMEOUT_TOTAL** | 30s | 20s | -33% |
-| **HTTP_CONNECTOR_LIMIT** | N/A | 100 | NEW pooling ✨ |
-| **CATEGORY_TIMEOUT** | 180s | 120s | -33% |
-| **CATEGORY_CONCURRENT** | 3 | 5 | +67% |
-| **RETRY_COUNT** | 2 | 1 | -50% |
-| **RETRY_DELAY** | 2min | 30s | -75% |
-
-**Kết quả**: E2E speedup **22x** (110 min → 5-15 min)
-
----
-
-## 💡 TOP PARAMETERS TO TUNE
-
-### 1. `TIKI_DETAIL_POOL_SIZE` (Selenium drivers)
-- Default: 5
-- Optimized: 15
-- Min: 1, Max: 50
-- Impact: 3x parallelism
-- Use case: Increase for fast crawl, decrease for safety
-
-### 2. `PRODUCT_BATCH_SIZE` (Products per batch)
-- Default: 15
-- Optimized: 12
-- Min: 5, Max: 50
-- Impact: 23 batches vs 19
-- Use case: Smaller = more parallel, larger = less overhead
-
-### 3. `TIKI_PRODUCTS_PER_DAY` (Run size)
-- Default: 280
-- Min: 1, Max: 10000
-- Impact: Full run size
-- Use case: Scale up/down based on need
-
-### 4. `CATEGORY_TIMEOUT` (Category batch timeout)
-- Default: 120s
-- Min: 30s, Max: 300s
-- Impact: Fail-fast vs generous
-- Use case: Low for speed, high for reliability
-
-### 5. `HTTP_TIMEOUT_TOTAL` (aiohttp request timeout)
-- Default: 20s
-- Min: 5s, Max: 60s
-- Impact: Fast fail vs slow tolerance
-- Use case: Low for responsive, high for slow network
-
-### 6. `TIKI_FORCE_REFRESH` (Bypass all caches)
-- Default: false
-- Impact: Complete re-crawl from scratch
-- Use case: Force update when data is stale or corrupted
-
-### 7. `TIKI_CACHE_TTL` (Cache expiration time)
-- Default: 86400 (24h)
-- Impact: Control frequency of data refresh
-- Use case: Set lower for more frequent updates
-
-### 8. `TIKI_CATEGORY_NUM_BATCHES` (Dynamic Category Distribution)
-- Default: 4
-- Impact: Fill Airflow worker pool efficiently
-- Use case: Match with `max_active_tasks` to minimize orchestration overhead
-
----
-
-## 🔧 HOW TO CHANGE PARAMETERS
-
-### Method 1: Airflow Variables UI (Easiest)
-```
-1. Go to: http://localhost:8080
-2. Admin → Variables
-3. Find: TIKI_DETAIL_POOL_SIZE
-4. Change: 15 → 20
-5. Save → Auto reload
-```
-
-### Method 2: Command Line
-```bash
-docker exec tiki-data-pipeline-airflow-scheduler-1 \
-  airflow variables set TIKI_DETAIL_POOL_SIZE 20
-```
-
-### Method 3: DAG Trigger with Override
-```bash
-docker exec tiki-data-pipeline-airflow-scheduler-1 \
-  airflow dags trigger tiki_crawl_products \
-  --conf '{"TIKI_DETAIL_POOL_SIZE": 20}'
-```
-
-### Method 4: Code Config File
-```python
-# Edit: src/pipelines/crawl/config.py
-PRODUCT_BATCH_SIZE = 12        # Change here
-CATEGORY_TIMEOUT = 120         # Change here
-HTTP_TIMEOUT_TOTAL = 20        # Change here
-```
-
----
-
-## ⚠️ TUNING RECOMMENDATIONS
-
-### For FAST Crawl (Aggressive)
-```
-TIKI_DETAIL_POOL_SIZE = 20
-PRODUCT_BATCH_SIZE = 10
-CATEGORY_CONCURRENT_REQUESTS = 8
-HTTP_CONNECTOR_LIMIT = 150
-Expected: 5-10 min for 280 products
-Risk: Rate limit, OOM
-```
-
-### For BALANCED (Default)
-```
-TIKI_DETAIL_POOL_SIZE = 15
-PRODUCT_BATCH_SIZE = 12
-CATEGORY_CONCURRENT_REQUESTS = 5
-HTTP_CONNECTOR_LIMIT = 100
-Expected: 12-15 min for 280 products
-Risk: Low
-```
-
-### For SAFE Crawl (Conservative)
-```
-TIKI_DETAIL_POOL_SIZE = 8
-PRODUCT_BATCH_SIZE = 15
-CATEGORY_CONCURRENT_REQUESTS = 3
-HTTP_CONNECTOR_LIMIT = 50
-Expected: 20-25 min for 280 products
-Risk: Very low
-```
-
----
-
-## 🎓 UNDERSTANDING PARAMETERS
-
-### Parameter Categories
-
-1. **Concurrency Parameters** (Parallelism)
-   - SELENIUM_POOL_SIZE: Number of parallel Selenium drivers
-   - PRODUCT_BATCH_SIZE: Products per batch task
-   - CATEGORY_CONCURRENT_REQUESTS: HTTP requests parallel
-
-2. **Timeout Parameters** (Fail-Fast vs Tolerance)
-   - PRODUCT_TIMEOUT: Selenium timeout
-   - HTTP_TIMEOUT_TOTAL: aiohttp timeout
-   - CATEGORY_TIMEOUT: Category batch timeout
-
-3. **Retry Parameters** (Error Recovery)
-   - RETRY_COUNT: Number of retries
-   - RETRY_DELAY: Wait between retries
-   - CIRCUIT_BREAKER_THRESHOLD: Failures before stop
-
-4. **Pool Parameters** (Resource Management)
-   - DB_POOL_SIZE: Database connections
-   - HTTP_CONNECTOR_LIMIT: HTTP connections
-   - REDIS_POOL_SIZE: Redis connections
-
-5. **Rate Limiting Parameters** (Avoid Blocking)
-   - TIKI_DETAIL_RATE_LIMIT_DELAY: Delay per request
-   - HTTP_CONNECTOR_LIMIT_PER_HOST: Per-host limit
-   - CATEGORY_CONCURRENT_REQUESTS: Category concurrency
-
----
-
-## 📊 PARAMETER IMPACT MATRIX
-
-| Parameter | Impact | Effort | ROI |
-|-----------|--------|--------|-----|
-| SELENIUM_POOL_SIZE | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐⭐ |
-| PRODUCT_BATCH_SIZE | ⭐⭐⭐⭐ | ⭐ | ⭐⭐⭐⭐⭐ |
-| HTTP_CONNECTOR_LIMIT | ⭐⭐⭐ | ⭐ | ⭐⭐⭐⭐ |
-| PRODUCT_TIMEOUT | ⭐⭐⭐ | ⭐ | ⭐⭐⭐⭐ |
-| TIKI_PRODUCTS_PER_DAY | ⭐⭐ | ⭐ | ⭐⭐⭐ |
-
----
-
-## ✅ CHECKLIST
-
-- [ ] Đọc `PARAMETERS_QUICK_REFERENCE.md`
-- [ ] Hiểu TOP 5 parameters
-- [ ] Know current values (check Airflow Variables)
-- [ ] Know recommended values (see PARAMETERS_MATRIX.md)
-- [ ] Plan tuning strategy
-- [ ] Test with small DAG run (50 products)
-- [ ] Monitor: CPU, Memory, Network
-- [ ] Adjust based on results
-- [ ] Document final settings
-
----
-
-**Last Updated**: 31/01/2026  
-**Status**: ✅ Complete & Organized (v1.2)
+- Increase `PRODUCT_BATCH_SIZE` only when memory and target-site stability are acceptable.
+- Increase `HTTP_CONNECTOR_LIMIT` with care; it can improve API throughput but can also amplify rate limits.
+- Keep `TIKI_MAX_CATEGORIES`, `TIKI_PRODUCTS_PER_DAY`, and `TIKI_MAX_PRODUCTS_FOR_DETAIL` aligned so the category list does not expand far beyond detail capacity in one run.
+- Use `TIKI_FORCE_REFRESH=true` for stale cache investigations, then turn it off for normal runs.
+- Keep Redis TTL high for detail pages and lower for product lists because list contents change more often.

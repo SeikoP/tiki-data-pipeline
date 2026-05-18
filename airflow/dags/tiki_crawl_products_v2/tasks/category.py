@@ -4,6 +4,7 @@ from __future__ import annotations
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from concurrent.futures import ThreadPoolExecutor
 
+from common.settings import get_bool_setting, get_int_setting, get_setting
 from tiki_crawl_products_v2.bootstrap import (
     CACHE_DIR,
     CATEGORIES_FILE,
@@ -14,11 +15,9 @@ from tiki_crawl_products_v2.bootstrap import (
     crawl_category_products,
     datetime,
     ensure_output_dirs,
-    get_int_variable,
     get_tiki_circuit_breaker,
     get_tiki_degradation,
     get_tiki_dlq,
-    get_variable,
     json,
     os,
     sys,
@@ -28,6 +27,71 @@ from tiki_crawl_products_v2.tasks.common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
     get_logger,  # noqa: F401
 )
+
+
+def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
+    ti = context.get("ti")
+    if not ti:
+        return None
+    for task_id in ("start_crawl_run", "pipeline_tracking.start_crawl_run"):
+        try:
+            value = ti.xcom_pull(task_ids=task_id)
+        except Exception:
+            continue
+        if isinstance(value, dict) and value.get("crawl_run_id"):
+            return int(value["crawl_run_id"])
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _track_category_result(result: dict[str, Any], context: dict[str, Any], logger) -> None:
+    crawl_run_id = _get_crawl_run_id(context)
+    if not crawl_run_id:
+        return
+    category_id = result.get("category_id")
+    task_key = f"category:{category_id or result.get('category_url') or 'unknown'}"
+    try:
+        from common.pipeline_tracking import upsert_crawl_task
+
+        upsert_crawl_task(
+            crawl_run_id=crawl_run_id,
+            task_key=task_key,
+            task_type="category",
+            status=result.get("status") or "unknown",
+            url=result.get("category_url"),
+            category_id=str(category_id) if category_id else None,
+            retry_count=0,
+            error_message=result.get("error"),
+        )
+    except Exception as tracking_error:
+        logger.warning("⚠️ Không thể ghi audit category task %s: %s", task_key, tracking_error)
+
+
+def _category_window_offset(total_categories: int, max_categories: int, run_key: str | None) -> int:
+    if total_categories <= 0 or max_categories <= 0 or max_categories >= total_categories:
+        return 0
+    if not run_key:
+        return 0
+    try:
+        run_number = max(1, int(str(run_key)))
+        return ((run_number - 1) * max_categories) % total_categories
+    except ValueError:
+        stable_value = sum(ord(ch) for ch in str(run_key))
+        return (stable_value * max_categories) % total_categories
+
+
+def _window_categories_for_run(
+    categories: list[dict[str, Any]],
+    *,
+    max_categories: int,
+    run_key: str | None,
+) -> list[dict[str, Any]]:
+    if max_categories <= 0 or len(categories) <= max_categories:
+        return categories
+    offset = _category_window_offset(len(categories), max_categories, run_key)
+    rotated = categories[offset:] + categories[:offset]
+    return rotated[:max_categories]
 
 
 def load_categories(**context) -> list[dict[str, Any]]:
@@ -59,18 +123,14 @@ def load_categories(**context) -> list[dict[str, Any]]:
         with open(categories_file, encoding="utf-8") as f:
             categories = json.load(f)
 
+        from common.category_utils import normalize_category_tree
+
+        categories = normalize_category_tree(categories)
         logger.info(f"✅ Đã load {len(categories)} danh mục")
-
-        # 1. Xác định is_leaf cho từng danh mục
-        # Một danh mục là leaf nếu URL của nó không được dùng làm parent_url của bất kỳ danh mục nào khác
-        parent_urls = {cat.get("parent_url") for cat in categories if cat.get("parent_url")}
-
-        for cat in categories:
-            cat["is_leaf"] = cat.get("url") not in parent_urls
 
         # 2. Lọc danh mục: Chỉ lấy leaf categories theo đúng định hướng
         # Cho phép override bằng variable nếu cần (mặc định crawl_only_leaf=True)
-        crawl_only_leaf = get_variable("TIKI_CRAWL_ONLY_LEAF", default="true").lower() == "true"
+        crawl_only_leaf = get_bool_setting("TIKI_CRAWL_ONLY_LEAF")
 
         if crawl_only_leaf:
             original_count = len(categories)
@@ -81,8 +141,8 @@ def load_categories(**context) -> list[dict[str, Any]]:
         else:
             # Fallback về lọc theo level nếu không chỉ lọc leaf
             try:
-                min_level = get_int_variable("TIKI_MIN_CATEGORY_LEVEL", default=2)
-                max_level = get_int_variable("TIKI_MAX_CATEGORY_LEVEL", default=4)
+                min_level = get_int_setting("TIKI_MIN_CATEGORY_LEVEL")
+                max_level = get_int_setting("TIKI_MAX_CATEGORY_LEVEL")
             except Exception:
                 min_level, max_level = 2, 4
             categories = [
@@ -92,8 +152,48 @@ def load_categories(**context) -> list[dict[str, Any]]:
                 f"📊 Lọc theo Level: {len(categories)} danh mục (Level {min_level}-{max_level})"
             )
 
-        # Push categories lên XCom để các task khác dùng
-        return categories
+        max_categories = get_int_setting("TIKI_MAX_CATEGORIES")
+        run_key = None
+        crawl_run_id = _get_crawl_run_id(context)
+        if crawl_run_id:
+            run_key = str(crawl_run_id)
+        else:
+            dag_run = context.get("dag_run")
+            run_key = getattr(dag_run, "run_id", None)
+
+        original_filtered_count = len(categories)
+        categories = _window_categories_for_run(
+            categories,
+            max_categories=max_categories,
+            run_key=run_key,
+        )
+        if len(categories) != original_filtered_count:
+            logger.info(
+                "🪟 Giới hạn category window: %s/%s categories (run_key=%s)",
+                len(categories),
+                original_filtered_count,
+                run_key or "none",
+            )
+
+        # Lưu categories vào file thay vì XCom
+        from pathlib import Path
+
+        output_file = Path("/opt/airflow/data/processed") / "loaded_categories.json"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(categories, f, ensure_ascii=False)
+
+        logger.info(f"💾 Đã lưu {len(categories)} categories vào {output_file}")
+
+        # Return chỉ file path và metadata
+        return {
+            "categories_file": str(output_file),
+            "count": len(categories),
+            "crawl_only_leaf": crawl_only_leaf,
+            "max_categories": max_categories,
+            "run_key": run_key,
+        }
 
     except Exception as e:
         logger.error(f"❌ Lỗi khi load categories: {e}", exc_info=True)
@@ -184,24 +284,25 @@ def crawl_single_category(
             result["error"] = "Service đang ở trạng thái FAILED, skip crawl"
             result["status"] = "degraded"
             logger.warning(f"⚠️  Service degraded, skip category {category_name}")
+            _track_category_result(result, context, logger)
             return result
 
         # Lấy cấu hình từ Airflow Variables hoặc tham số truyền vào (để giảm DB hit trong batch)
         max_pages = (
             max_pages_param
             if max_pages_param is not None
-            else int(get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20"))
+            else get_int_setting("TIKI_MAX_PAGES_PER_CATEGORY")
         )
         use_selenium = (
             use_selenium_param
             if use_selenium_param is not None
-            else get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
+            else get_bool_setting("TIKI_USE_SELENIUM")
         )
-        timeout = int(get_variable("TIKI_CRAWL_TIMEOUT", default="300"))
+        timeout = get_int_setting("TIKI_CRAWL_TIMEOUT")
 
         # Thêm cấu hình cache
-        force_refresh = get_variable("TIKI_FORCE_REFRESH", default="false").lower() == "true"
-        cache_ttl = int(get_variable("TIKI_CACHE_TTL", default="86400"))
+        force_refresh = get_bool_setting("TIKI_FORCE_REFRESH")
+        cache_ttl = get_int_setting("TIKI_CACHE_TTL")
 
         # Rate limiting: được xử lý bên trong crawl_category_products (smart rate limit / cache check)
         # Không sleep ở đây để tránh chậm khi hit cache
@@ -254,6 +355,7 @@ def crawl_single_category(
                 logger.info(f"📬 Đã thêm vào DLQ: crawl_category_{category_id}")
             except Exception as dlq_error:
                 logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
+            _track_category_result(result, context, logger)
             return result
         except Exception:
             # Ghi nhận failure
@@ -326,12 +428,13 @@ def crawl_single_category(
             logger.warning(f"⚠️  Không thể thêm vào DLQ: {dlq_error}")
         # Không raise để tiếp tục với danh mục khác
 
+    _track_category_result(result, context, logger)
     return result
 
 
 def crawl_category_batch(
     category_batch: list[dict[str, Any]] = None, batch_index: int = -1, **context
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """
     Task 3: Crawl sản phẩm từ một batch danh mục (Giảm overhead của Airflow)
 
@@ -341,7 +444,7 @@ def crawl_category_batch(
         context: Airflow context
 
     Returns:
-        List[Dict]: Kết quả crawl cho toàn bộ batch
+        Dict: File path và metadata cho kết quả crawl của batch
     """
     logger = get_logger(context)
 
@@ -356,12 +459,19 @@ def crawl_category_batch(
 
     if not category_batch:
         logger.error(f"❌ MISSING CATEGORY_BATCH! Batch index: {batch_index}")
-        return []
+        return {
+            "batch_index": batch_index,
+            "output_file": None,
+            "category_count": 0,
+            "success_count": 0,
+            "failed_count": 0,
+            "product_count": 0,
+        }
 
     # Lấy cấu hình cho cả batch
-    max_pages = int(get_variable("TIKI_MAX_PAGES_PER_CATEGORY", default="20"))
-    use_selenium = get_variable("TIKI_USE_SELENIUM", default="false").lower() == "true"
-    concurrency = int(get_variable("TIKI_CATEGORY_CONCURRENCY", default="10"))
+    max_pages = get_int_setting("TIKI_MAX_PAGES_PER_CATEGORY")
+    use_selenium = get_bool_setting("TIKI_USE_SELENIUM")
+    concurrency = get_int_setting("TIKI_CATEGORY_CONCURRENCY")
 
     def process_category(cat):
         try:
@@ -374,11 +484,15 @@ def crawl_category_batch(
             )
         except Exception as e:
             logger.error(f"❌ Batch error for category {cat.get('name')}: {e}")
-            return {
+            failed_result = {
                 "category_id": cat.get("id", "unknown"),
+                "category_name": cat.get("name"),
+                "category_url": cat.get("url"),
                 "status": "failed",
                 "error": str(e),
             }
+            _track_category_result(failed_result, context, logger)
+            return failed_result
 
     # Chạy song song dùng ThreadPoolExecutor
     logger.info(
@@ -387,5 +501,40 @@ def crawl_category_batch(
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         results = list(executor.map(process_category, category_batch))
 
-    logger.info(f"✅ Hoàn thành BATCH CATEGORY {batch_index}: {len(results)} kết quả")
-    return results
+    success_count = sum(1 for item in results if item.get("status") == "success")
+    failed_count = sum(1 for item in results if item.get("status") == "failed")
+    product_count = sum(len(item.get("products", [])) for item in results)
+    output_dir = str(get_setting("TIKI_CATEGORY_BATCH_OUTPUT_DIR"))
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"category_batch_{batch_index}.json")
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "batch_index": batch_index,
+                "category_count": len(results),
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "product_count": product_count,
+                "created_at": datetime.now().isoformat(),
+                "results": results,
+            },
+            f,
+            ensure_ascii=False,
+        )
+    logger.info(
+        "✅ Hoàn thành BATCH CATEGORY %s: categories=%s success=%s failed=%s products=%s",
+        batch_index,
+        len(results),
+        success_count,
+        failed_count,
+        product_count,
+    )
+    logger.info("💾 Đã lưu category batch %s vào %s", batch_index, output_file)
+    return {
+        "batch_index": batch_index,
+        "output_file": output_file,
+        "category_count": len(results),
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "product_count": product_count,
+    }

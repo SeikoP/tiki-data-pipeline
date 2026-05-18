@@ -4,17 +4,19 @@ Fix category_path data in database - add parent categories to 3-4 level paths
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 # Add src to path
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from src.pipelines.crawl.config import MAX_CATEGORY_LEVELS
-from src.pipelines.crawl.crawl_products_detail import (
+from src.pipelines.crawl.config import MAX_CATEGORY_LEVELS  # noqa: E402
+from src.pipelines.crawl.crawl_products_detail import (  # noqa: E402
     get_parent_category_name,
     load_category_hierarchy,
 )
@@ -24,37 +26,14 @@ load_dotenv()
 
 def get_db_connection():
     """
-    Connect to crawl_data database.
+    Connect to configured crawl database.
     """
     import psycopg2
 
-    # Try multiple connection options
-    connections = [
-        # Option 1: From .env (Docker)
-        {
-            "host": os.getenv("POSTGRES_HOST", "localhost"),
-            "database": os.getenv("POSTGRES_DB", "crawl_data"),
-            "user": os.getenv("POSTGRES_USER", "postgres"),
-            "password": os.getenv("POSTGRES_PASSWORD", "postgres"),
-            "port": int(os.getenv("POSTGRES_PORT", 5432)),
-        },
-        # Option 2: Docker service name
-        {
-            "host": "postgres",
-            "database": "crawl_data",
-            "user": "postgres",
-            "password": "postgres",
-            "port": 5432,
-        },
-        # Option 3: Local
-        {
-            "host": "localhost",
-            "database": "crawl_data",
-            "user": "postgres",
-            "password": "postgres",
-            "port": 5432,
-        },
-    ]
+    from common.settings import get_pipeline_settings
+
+    db_settings = get_pipeline_settings(use_airflow=False).database
+    connections = [db_settings.as_dict()]
 
     for i, conn_info in enumerate(connections):
         try:
@@ -66,7 +45,7 @@ def get_db_connection():
             print(f"  ✗ Failed: {e}")
             continue
 
-    raise Exception("Could not connect to any database")
+    raise Exception("Could not connect to configured database")
 
 
 def add_parent_to_path(category_path, hierarchy_map, name_to_url):
@@ -126,7 +105,7 @@ def main():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        print("✓ Connected to crawl_data database")
+        print(f"✓ Connected to {conn.info.dbname} database")
     except Exception as e:
         print(f"❌ ERROR: Could not connect to database: {e}")
         return

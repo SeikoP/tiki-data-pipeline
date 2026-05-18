@@ -1,4 +1,4 @@
-name: CI - Lint & Test
+name: CI
 
 on:
   push:
@@ -6,9 +6,17 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.11'
+  PYTHONPATH: src:airflow/dags
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+
 jobs:
   lint:
-    name: Lint Code
+    name: Ruff
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -17,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install dependencies
@@ -25,14 +33,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff
 
-      - name: Check code formatting and lint with Ruff
+      - name: Check format and lint
         run: |
-          # Use ruff for both formatting and linting (matches local ci.py)
-          ruff format --check src/ airflow/dags/
-          ruff check src/ airflow/dags/
+          ruff format --check src/ airflow/dags/ scripts/ tests/
+          ruff check src/ airflow/dags/ scripts/ tests/
 
-  test:
-    name: Run Tests
+  config:
+    name: Config Sync
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -41,39 +48,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-mock
 
-      - name: Run tests with pytest
-        run: |
-          pytest tests/ -v --cov=src --cov-report=xml --cov-report=term || true
-      
-      - name: Test Transform and Load modules
-        run: |
-          python -c "
-          import sys
-          sys.path.insert(0, 'src')
-          from pipelines.transform.transformer import DataTransformer
-          from pipelines.load.loader import DataLoader
-          print('✅ Transform and Load modules imported successfully')
-          "
+      - name: Validate settings and docs
+        run: python scripts/config/sync_config_docs.py --check
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-        continue-on-error: true
-
-  validate-dags:
-    name: Validate Airflow DAGs
+  test:
+    name: Pytest
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -82,21 +69,50 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-mock pytest-asyncio hypothesis
+
+      - name: Run tests with pytest
+        run: |
+          pytest tests/ -m "not integration and not slow" --cov=src --cov-report=xml --cov-report=term
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+        continue-on-error: true
+
+  validate-dags:
+    name: Airflow DAG Import
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install Airflow and dependencies
         run: |
           python -m pip install --upgrade pip
-          # Airflow 3 is in development, using latest 2.x for validation if 3.x not on PyPI
           pip install "apache-airflow>=2.10.0"
           pip install -r requirements.txt
 
-      - name: Validate DAGs
+      - name: Validate DAG imports
         run: |
           mkdir -p airflow/dags airflow/logs airflow/config airflow/plugins
           mkdir -p data/raw data/processed
-          export PYTHONPATH=$PYTHONPATH:$(pwd)/src:$(pwd)/airflow/dags
           
           python -c "
           import sys

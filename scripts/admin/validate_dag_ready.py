@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
+from common.settings import get_pipeline_settings
 from pipelines.crawl.config import MAX_CATEGORY_LEVELS
 
 
@@ -90,14 +91,14 @@ def check_category_path_in_db():
     try:
         import psycopg2
 
-        # Try multiple connections
+        db_settings = get_pipeline_settings(use_airflow=False).database
         connections = [
             {
-                "host": "localhost",
-                "database": "crawl_data",
-                "user": "postgres",
-                "password": "postgres",
-                "port": 5432,
+                "host": db_settings.host,
+                "database": db_settings.database,
+                "user": db_settings.user,
+                "password": db_settings.password,
+                "port": db_settings.port,
             },
         ]
 

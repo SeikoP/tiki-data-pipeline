@@ -98,8 +98,10 @@ class DataCompletenessTracker:
             value = record.get(field_name)
             # Consider None, empty string, or missing key as incomplete
             if value is None or value == "":
-                missing.append(field)
-                self.metrics.missing_fields[field] = self.metrics.missing_fields.get(field, 0) + 1
+                missing.append(field_name)
+                self.metrics.missing_fields[field_name] = (
+                    self.metrics.missing_fields.get(field_name, 0) + 1
+                )
 
         if missing:
             self.metrics.incomplete_records += 1
@@ -365,7 +367,7 @@ class ValidationPreservationChecker:
                     return ValidationResult(
                         is_valid=False,
                         error_message=error_msg,
-                        field_name=field,
+                        field_name=_field_name,
                         validation_rule=name,
                     )
                 else:
@@ -531,7 +533,7 @@ def register_tiki_product_validations(checker: ValidationPreservationChecker) ->
     # Discount rate validation
     checker.register_validation(
         "discount_rate_range",
-        lambda x: (x.get("discount_rate") is None or 0 <= float(x.get("discount_rate", 0)) <= 100),
+        lambda x: x.get("discount_rate") is None or 0 <= float(x.get("discount_rate", 0)) <= 100,
         "Discount rate must be between 0 and 100",
         "discount_rate",
     )
@@ -539,7 +541,7 @@ def register_tiki_product_validations(checker: ValidationPreservationChecker) ->
     # Rating validation
     checker.register_validation(
         "rating_range",
-        lambda x: (x.get("rating_average") is None or 0 <= float(x.get("rating_average", 0)) <= 5),
+        lambda x: x.get("rating_average") is None or 0 <= float(x.get("rating_average", 0)) <= 5,
         "Rating must be between 0 and 5",
         "rating_average",
     )
@@ -547,7 +549,7 @@ def register_tiki_product_validations(checker: ValidationPreservationChecker) ->
     # Review count validation
     checker.register_validation(
         "review_count_non_negative",
-        lambda x: (x.get("review_count") is None or int(x.get("review_count", 0)) >= 0),
+        lambda x: x.get("review_count") is None or int(x.get("review_count", 0)) >= 0,
         "Review count must be non-negative",
         "review_count",
     )

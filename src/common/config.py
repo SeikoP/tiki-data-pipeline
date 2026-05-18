@@ -7,11 +7,20 @@ import logging
 import os
 from pathlib import Path
 
+from common.settings import get_pipeline_settings
+
 logger = logging.getLogger(__name__)
 
 # Tìm file .env ở root (lên 2 cấp từ src/common/)
 current_dir = Path(__file__).parent
-env_file = current_dir.parent.parent / ".env"
+project_root = current_dir.parent.parent
+env_file_candidates = [
+    Path(os.getenv("ENV_FILE_PATH", "")) if os.getenv("ENV_FILE_PATH") else None,
+    project_root / ".env",
+]
+env_file = next(
+    (path for path in env_file_candidates if path and path.exists()), project_root / ".env"
+)
 
 # Load .env nếu có
 if env_file.exists():
@@ -29,47 +38,16 @@ if env_file.exists():
 else:
     logger.debug(f"📝 File .env không tồn tại tại: {env_file.absolute()}")
 
-# AI configuration (Groq or OpenRouter)
-# Models examples:
-# Groq: llama-3.3-70b-versatile, llama-3.1-8b-instant
-# OpenRouter: arcee-ai/trinity-large-preview:free, google/learnlm-1.5-pro-experimental:free
-AI_CONFIG = {
-    "enabled": os.getenv("AI_ENABLED", os.getenv("GROQ_ENABLED", "false")).lower() == "true",
-    "api_key": os.getenv("AI_API_KEY", os.getenv("GROQ_API_KEY", "")),
-    "base_url": os.getenv(
-        "AI_API_BASE", os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
-    ),
-    "model": os.getenv("AI_MODEL", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")),
-}
+_SETTINGS = get_pipeline_settings(use_airflow=False)
+
+# AI configuration (Groq or any OpenAI-compatible provider)
+AI_CONFIG = _SETTINGS.ai.as_config()
 
 # Discord configuration
-DISCORD_CONFIG = {
-    "webhook_url": os.getenv("DISCORD_WEBHOOK_URL", ""),  # Legacy support
-    "webhook_url_notification": os.getenv(
-        "DISCORD_WEBHOOK_URL_NOTIFICATION", ""
-    ),  # Kênh thông báo tổng hợp
-    "webhook_url_alert": os.getenv("DISCORD_WEBHOOK_URL_ALERT", ""),  # Kênh cảnh báo/chi tiết
-    "enabled": os.getenv("DISCORD_ENABLED", "false").lower() == "true",
-    "fallback_webhook_url": os.getenv("DISCORD_FALLBACK_WEBHOOK_URL", ""),
-}
+DISCORD_CONFIG = _SETTINGS.notifications.as_discord_config()
 
 # Short Name AI Configuration
-SHORT_NAME_CONFIG = {
-    "use_ai": os.getenv("SHORT_NAME_USE_AI", "true").lower() == "true",
-}
+SHORT_NAME_CONFIG = {"use_ai": _SETTINGS.short_name_use_ai}
 
 # Performance Optimization Feature Flags
-OPTIMIZATION_CONFIG = {
-    # Async I/O optimization (Task 14.1)
-    "use_async_crawler": os.getenv("USE_ASYNC_CRAWLER", "false").lower() == "true",
-    "async_connector_limit": int(os.getenv("ASYNC_CONNECTOR_LIMIT", "300")),
-    "async_batch_size": int(os.getenv("ASYNC_BATCH_SIZE", "50")),
-    "async_timeout_total": int(os.getenv("ASYNC_TIMEOUT_TOTAL", "15")),
-    "async_timeout_connect": int(os.getenv("ASYNC_TIMEOUT_CONNECT", "10")),
-    # Vectorized transformation optimization (Task 14.2)
-    "use_vectorized_transform": os.getenv("USE_VECTORIZED_TRANSFORM", "false").lower() == "true",
-    # Optimized batch loading (Task 14.3)
-    "use_optimized_loader": os.getenv("USE_OPTIMIZED_LOADER", "false").lower() == "true",
-    "optimized_batch_size": int(os.getenv("OPTIMIZED_BATCH_SIZE", "1000")),
-    "use_copy_command": os.getenv("USE_COPY_COMMAND", "true").lower() == "true",
-}
+OPTIMIZATION_CONFIG = _SETTINGS.optimization

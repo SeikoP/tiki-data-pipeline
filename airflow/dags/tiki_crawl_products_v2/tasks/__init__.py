@@ -13,7 +13,6 @@ from .detail import (
     crawl_single_product_detail,
     merge_product_details,
     prepare_products_for_detail,
-    save_products_with_detail,
 )
 from .detail_new import (
     crawl_product_batch_fast,
@@ -27,15 +26,15 @@ from .loader import (
 )
 from .maintenance import (  # validate_data - REMOVED: Not critical, only counted valid/invalid products
     backup_database,
+    cleanup_categories_wrapper,
     cleanup_incomplete_products_wrapper,
     cleanup_old_history_wrapper,
-    cleanup_orphan_categories_wrapper,
     cleanup_redis_cache,
-    cleanup_redundant_categories_wrapper,
     reconcile_categories_wrapper,
 )
 from .monitoring import aggregate_and_notify
-from .product import merge_products, save_products, transform_products
+from .product import merge_products, transform_products
+from .tracking import finish_crawl_run, publish_core_tables_asset, start_crawl_run
 
 __all__ = [
     "get_logger",
@@ -45,13 +44,11 @@ __all__ = [
     "crawl_single_category",
     "crawl_category_batch",
     "merge_products",
-    "save_products",
     "transform_products",
     "prepare_products_for_detail",
     "crawl_product_batch",
     "crawl_single_product_detail",
     "merge_product_details",
-    "save_products_with_detail",
     "crawl_product_batch_fast",
     "crawl_product_batch_selenium",
     "fix_missing_parent_categories",
@@ -59,12 +56,14 @@ __all__ = [
     "_import_postgres_storage",
     "load_products",
     "cleanup_incomplete_products_wrapper",
-    "cleanup_orphan_categories_wrapper",
-    "cleanup_redundant_categories_wrapper",
+    "cleanup_categories_wrapper",
     "reconcile_categories_wrapper",
     "cleanup_old_history_wrapper",
     # "validate_data",  # REMOVED
     "cleanup_redis_cache",
     "backup_database",
     "aggregate_and_notify",
+    "start_crawl_run",
+    "finish_crawl_run",
+    "publish_core_tables_asset",
 ]

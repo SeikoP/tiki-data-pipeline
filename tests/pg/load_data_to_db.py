@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Thêm src vào path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
 try:
@@ -22,7 +22,9 @@ except ImportError as e:
     sys.exit(1)
 
 # Load .env
-env_file = project_root / ".env"
+env_file = (
+    Path(os.getenv("ENV_FILE_PATH", "")) if os.getenv("ENV_FILE_PATH") else project_root / ".env"
+)
 if env_file.exists():
     try:
         from dotenv import load_dotenv
@@ -44,7 +46,7 @@ if env_file.exists():
 # trufflehog:ignore - Test file with development defaults
 db_host = os.getenv("POSTGRES_HOST", "localhost")
 db_port = os.getenv("POSTGRES_PORT", "5432")
-db_name = os.getenv("POSTGRES_DB", "crawl_data")
+db_name = os.getenv("POSTGRES_DB", "tiki")
 db_user = os.getenv("POSTGRES_USER", "postgres")
 db_password = os.getenv("POSTGRES_PASSWORD", "postgres")  # DEVELOPMENT ONLY  # trufflehog:ignore
 

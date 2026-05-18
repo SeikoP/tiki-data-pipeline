@@ -104,7 +104,7 @@ class CIRunner:
             "format": {
                 "formatter": "ruff",
                 "line_length": 100,
-                "target_version": "py39",
+                "target_version": "py311",
                 "skip_string_normalization": False,
                 "use_autoflake": True,
                 "use_docformatter": True,
@@ -409,7 +409,7 @@ class CIRunner:
             use_ruff if use_ruff is not None else (fmt_config.get("formatter", "ruff") == "ruff")
         )
         line_length = line_length or fmt_config.get("line_length", 100)
-        target_version = target_version or fmt_config.get("target_version", "py39")
+        target_version = target_version or fmt_config.get("target_version", "py311")
         skip_string_normalization = (
             skip_string_normalization
             if skip_string_normalization is not None
@@ -678,18 +678,22 @@ class CIRunner:
             # Bandit
             self._print_info("Running Bandit...")
             self._run_command(
-                [self.python_cmd, "-m", "bandit", "-r", "src/", "--exit-zero"],
+                [
+                    self.python_cmd,
+                    "-m",
+                    "bandit",
+                    "-r",
+                    "src/",
+                    "airflow/dags/",
+                    "scripts/",
+                    "-lll",
+                ],
                 "Bandit security check",
             )
 
             # Safety
             self._print_info("Running Safety...")
-            try:
-                self._run_command(
-                    [self.python_cmd, "-m", "safety", "check"], "Safety check", check=False
-                )
-            except Exception:
-                self._print_warning("Safety check encountered issues (non-critical)")
+            self._run_command([self.python_cmd, "-m", "safety", "check"], "Safety check")
 
             duration = time.time() - start
             return TaskResult(
@@ -705,6 +709,37 @@ class CIRunner:
                 status=TaskStatus.WARNING,
                 duration=duration,
                 message=f"Security issues found (exit code: {e.returncode})",
+                exit_code=e.returncode,
+            )
+
+    def config_check(self) -> TaskResult:
+        """
+        Validate configuration registry/docs consistency and forbidden hardcoded defaults.
+        """
+        import time
+
+        start = time.time()
+
+        try:
+            self._print_info("⚙️ Running config consistency checks...")
+            self._run_command(
+                [self.python_cmd, "scripts/config/sync_config_docs.py", "--check"],
+                "Config registry/docs check",
+            )
+            duration = time.time() - start
+            return TaskResult(
+                name="Config",
+                status=TaskStatus.SUCCESS,
+                duration=duration,
+                message="Config checks completed",
+            )
+        except subprocess.CalledProcessError as e:
+            duration = time.time() - start
+            return TaskResult(
+                name="Config",
+                status=TaskStatus.FAILED,
+                duration=duration,
+                message=f"Config check failed (exit code: {e.returncode})",
                 exit_code=e.returncode,
             )
 
@@ -1096,6 +1131,7 @@ exit 0
             tasks = [
                 ("Format Check", self.format_code, True),
                 ("Lint", self.lint, False),
+                ("Config", self.config_check),
                 ("Performance", self.perf_check),
                 ("Type Check", self.type_check),
                 ("Security", self.security_check),
@@ -1112,6 +1148,7 @@ exit 0
             # Run all checks sequentially
             self.results.append(self.format_code(check_only=True))
             self.results.append(self.lint())
+            self.results.append(self.config_check())
             self.results.append(self.perf_check())
             self.results.append(self.type_check())
             self.results.append(self.security_check())
@@ -1138,6 +1175,7 @@ exit 0
         tasks = [
             ("Format Check", self.format_code, True),
             ("Lint", self.lint, False),
+            ("Config", self.config_check),
         ]
 
         results = self.run_parallel_tasks(tasks)
@@ -1160,6 +1198,7 @@ exit 0
 
         self.results.append(self.format_code(check_only=True))
         self.results.append(self.lint())
+        self.results.append(self.config_check())
         self.results.append(self.perf_check())
 
         self._display_results()
@@ -1281,7 +1320,9 @@ def main():
         "perf-check": lambda: runner.perf_check(),
         "dead-code": lambda: runner.dead_code_check(),
         "complexity": lambda: runner.complexity_check(),
+        "config-check": lambda: runner.config_check(),
         "code-quality": lambda: [
+            runner.config_check(),
             runner.perf_check(),
             runner.dead_code_check(),
             runner.complexity_check(),
@@ -1340,6 +1381,7 @@ def print_help():
   format             Format code (Ruff + isort + autoflake + docformatter)
   format-check       Check code formatting (no modifications)
   type-check         Run type checking with mypy
+  config-check       Validate settings registry, docs and hardcode rules
   perf-check         Check performance with Ruff PERF
   dead-code          Find unused code with Vulture
   complexity         Analyze code complexity with Radon

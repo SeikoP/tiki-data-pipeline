@@ -1,16 +1,121 @@
 from __future__ import annotations
 
+from common.settings import get_float_setting, get_int_setting, get_setting
 from tiki_crawl_products_v2.bootstrap import (  # crawl_product_detail_async,  <-- REMOVED
     Any,
     crawl_product_detail_with_driver,
     datetime,
     get_hierarchy_map,
     get_logger,
-    get_variable,
 )
 from tiki_crawl_products_v2.tasks.common import (
+    atomic_write_file,
     get_selenium_driver_pool_class,
 )
+
+
+def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
+    ti = context.get("ti")
+    if not ti:
+        return None
+    for task_id in ("start_crawl_run", "pipeline_tracking.start_crawl_run"):
+        try:
+            value = ti.xcom_pull(task_ids=task_id)
+        except Exception:
+            continue
+        if isinstance(value, dict) and value.get("crawl_run_id"):
+            return int(value["crawl_run_id"])
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _track_detail_results(results: list[dict[str, Any]], context: dict[str, Any], logger) -> None:
+    crawl_run_id = _get_crawl_run_id(context)
+    if not crawl_run_id or not results:
+        return
+    try:
+        from common.pipeline_tracking import upsert_crawl_tasks
+
+        tasks = []
+        for result in results:
+            product_id = result.get("product_id")
+            if not product_id:
+                continue
+            tasks.append(
+                {
+                    "crawl_run_id": crawl_run_id,
+                    "task_key": f"detail:{product_id}",
+                    "task_type": "detail",
+                    "status": result.get("status") or "unknown",
+                    "url": result.get("url"),
+                    "retry_count": 0,
+                    "error_message": result.get("error"),
+                }
+            )
+        upsert_crawl_tasks(tasks)
+    except Exception as tracking_error:
+        logger.warning("⚠️ Không thể ghi audit detail tasks: %s", tracking_error)
+
+
+def _get_detail_concurrency(logger) -> int:
+    """Return clamped per-task async concurrency for fast detail crawl."""
+    configured = get_int_setting("TIKI_DETAIL_MAX_CONCURRENT_TASKS")
+    min_concurrency = get_int_setting("TIKI_DETAIL_CONCURRENCY_MIN")
+    max_concurrency = get_int_setting("TIKI_DETAIL_CONCURRENCY_MAX")
+
+    if min_concurrency > max_concurrency:
+        logger.warning(
+            "⚠️ TIKI_DETAIL_CONCURRENCY_MIN > TIKI_DETAIL_CONCURRENCY_MAX; swapping values"
+        )
+        min_concurrency, max_concurrency = max_concurrency, min_concurrency
+
+    concurrency = max(min_concurrency, min(configured, max_concurrency))
+    if concurrency != configured:
+        logger.info(
+            "ℹ️ Detail concurrency clamped from %s to %s (range %s-%s)",
+            configured,
+            concurrency,
+            min_concurrency,
+            max_concurrency,
+        )
+    return concurrency
+
+
+def _detail_request_delay(index: int, rate_limit_delay: float) -> float:
+    """Return per-item stagger delay for detail requests."""
+    return max(0, index) * max(0.0, rate_limit_delay)
+
+
+def _write_detail_batch_results(
+    results: list[dict[str, Any]], batch_index: int, context: dict[str, Any]
+) -> str:
+    """Persist detail results and return the file path kept in XCom metadata."""
+    output_dir = get_setting("TIKI_DETAIL_BATCH_OUTPUT_DIR")
+    run_id = "manual"
+    ti = context.get("ti") or context.get("task_instance")
+    if ti is not None:
+        run_id = getattr(ti, "run_id", run_id)
+
+    safe_run_id = (
+        str(run_id).replace(":", "-").replace("/", "_").replace("\\", "_").replace("+", "_")
+    )
+
+    from pathlib import Path
+
+    output_path = Path(output_dir) / safe_run_id / f"detail_batch_{batch_index:05d}.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_file(
+        str(output_path),
+        {
+            "batch_index": batch_index,
+            "result_count": len(results),
+            "written_at": datetime.now().isoformat(),
+            "results": results,
+        },
+        **context,
+    )
+    return str(output_path)
 
 
 async def _crawl_fast_internal(product_batch, logger, session=None):
@@ -58,8 +163,9 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
             logger.error(f"❌ Failed to create session: {e}")
             return []
 
-    rate_limit_delay = float(get_variable("TIKI_DETAIL_RATE_LIMIT_DELAY", default="0.05"))
-    max_concurrent = int(get_variable("TIKI_DETAIL_MAX_CONCURRENT_TASKS", default="5"))
+    rate_limit_delay = get_float_setting("TIKI_DETAIL_RATE_LIMIT_DELAY")
+    max_concurrent = _get_detail_concurrency(logger)
+    logger.info("⚙️ FAST detail async concurrency: %s", max_concurrent)
     semaphore = asyncio.Semaphore(max_concurrent)
 
     async def crawl_single(product_info):
@@ -78,37 +184,47 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
             }
 
             try:
+                failure_details: dict[str, Any] = {}
                 # Force NO Selenium fallback
                 detail = await crawl_product_detail_async(
                     product_url,
                     session=session,
                     use_selenium_fallback=False,
                     verbose=True,  # Enable Verbose Logging
+                    failure_details=failure_details,
                 )
 
                 if detail and isinstance(detail, dict):
                     result["detail"] = detail
-                    result["status"] = "success"
 
                     # Logic: Needs Enrichment?
                     # Check for critical fields
                     has_brand = detail.get("brand") and detail.get("brand") != "Unknown"
-                    has_specs = bool(detail.get("specifications"))
                     has_seller = bool(detail.get("seller", {}).get("name"))
+                    metadata = detail.get("_metadata") or {}
+                    extraction_method = metadata.get("extraction_method", "unknown")
 
-                    if not has_brand or not has_specs or not has_seller:
+                    if not has_brand or not has_seller:
                         result["detail"]["needs_enrichment"] = True
                         result["detail"]["crawl_quality"] = "partial"
+                        result["status"] = "partial_needs_enrichment"
                     else:
                         result["detail"]["needs_enrichment"] = False
                         result["detail"]["crawl_quality"] = "full"
+                        if extraction_method == "api":
+                            result["status"] = "success_api"
+                        else:
+                            result["status"] = "failed"
+                            result["error"] = (
+                                f"Unsupported detail extraction method: {extraction_method}"
+                            )
                 else:
                     # Failed to get structured data via API/HTML
                     # Mark as failed so it might be retried or picked up by enrichment if we insert a stub?
                     # Ideally we should insert a stub if we think it exists but failed to parse.
                     # But for now, just mark failed.
                     # Actually, if we want enrichment to pick it up, we might need to save it as 'failed' quality?
-                    result["error"] = "Fast crawl failed"
+                    result["error"] = failure_details.get("message") or "Fast crawl failed"
                     result["status"] = "failed"
 
             except Exception as e:
@@ -126,7 +242,7 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
     # Create tasks with delay
     tasks = []
     for i, product in enumerate(product_batch):
-        delay = i * rate_limit_delay / len(product_batch)
+        delay = _detail_request_delay(i, rate_limit_delay)
 
         async def task_with_delay(p, d):
             if d > 0:
@@ -146,7 +262,7 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
 
 def crawl_product_batch_fast(
     product_batch: list[dict[str, Any]] = None, batch_index: int = -1, **context
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """
     Task: FAST Crawl - API & HTML only, No Selenium.
     Sets needs_enrichment=True if data is incomplete.
@@ -163,7 +279,13 @@ def crawl_product_batch_fast(
 
     if not product_batch:
         logger.warning(f"⚠️  Batch {batch_index} empty")
-        return []
+        return {
+            "xcom_payload_version": 2,
+            "batch_index": batch_index,
+            "results_file": None,
+            "result_count": 0,
+            "stats": {"success": 0, "partial": 0, "failed": 0, "needs_enrichment": 0},
+        }
 
     logger.info(f"🚀 FAST BATCH {batch_index}: {len(product_batch)} items")
 
@@ -183,17 +305,37 @@ def crawl_product_batch_fast(
     # Determine stats & Clean up results for XCom
     final_results = []
     success = 0
+    partial = 0
     needs_enrich = 0
+    failed = 0
 
     for r in results:
+        if isinstance(r, Exception):
+            failed += 1
+            final_results.append(
+                {
+                    "product_id": None,
+                    "url": None,
+                    "status": "failed",
+                    "error": str(r),
+                    "detail": {},
+                    "needs_enrichment": False,
+                    "crawl_quality": "unknown",
+                }
+            )
+            continue
+
         status = r.get("status")
         detail = r.get("detail") or {}
-        is_success = status == "success"
+        is_success = status in {"success", "success_api"}
 
         if is_success:
             success += 1
-            if detail.get("needs_enrichment"):
-                needs_enrich += 1
+        elif status == "partial_needs_enrichment":
+            partial += 1
+            needs_enrich += 1
+        elif status == "failed":
+            failed += 1
 
         # Full payload for XCom
         final_results.append(
@@ -209,9 +351,28 @@ def crawl_product_batch_fast(
         )
 
     logger.info(
-        f"✅ FAST BATCH DONE: {success}/{len(product_batch)} success. Needs Enrichment: {needs_enrich}. Saved: {saved_count}"
+        "✅ FAST BATCH DONE: success=%s partial=%s failed=%s total=%s needs_enrichment=%s saved=%s",
+        success,
+        partial,
+        failed,
+        len(product_batch),
+        needs_enrich,
+        saved_count,
     )
-    return final_results
+    _track_detail_results(final_results, context, logger)
+    results_file = _write_detail_batch_results(final_results, batch_index, context)
+    return {
+        "xcom_payload_version": 2,
+        "batch_index": batch_index,
+        "results_file": results_file,
+        "result_count": len(final_results),
+        "stats": {
+            "success": success,
+            "partial": partial,
+            "failed": failed,
+            "needs_enrichment": needs_enrich,
+        },
+    }
 
 
 def crawl_product_batch_selenium(
@@ -237,7 +398,7 @@ def crawl_product_batch_selenium(
 
     # Initialize Driver Pool
     DriverPool = get_selenium_driver_pool_class(logger)
-    pool_size = int(get_variable("TIKI_DETAIL_POOL_SIZE", default="2"))
+    pool_size = get_int_setting("TIKI_DETAIL_POOL_SIZE")
     driver_pool = DriverPool(pool_size=pool_size, headless=True)
 
     results = []

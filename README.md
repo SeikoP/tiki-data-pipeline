@@ -1,44 +1,119 @@
-# 🛒 Tiki Data Pipeline - Hệ Thống Thu Thập Dữ Liệu Chuyên Sâu
+# Tiki Data Pipeline
 
-Dữ liệu trên các sàn thương mại điện tử luôn biến động từng giây. Dự án này được xây dựng để giải quyết thách thức về việc thu thập và quản lý nguồn thông tin khổng lồ từ Tiki một cách tự động và bền vững. Mục tiêu cốt lõi là chuyển hóa những dữ liệu thô trên web thành một kho lưu trữ có cấu trúc, cho phép quan sát được sự thay đổi của thị trường theo thời gian.
+Pipeline thu thập, chuẩn hóa và phân tích dữ liệu sản phẩm Tiki bằng Airflow,
+PostgreSQL, Redis và Python.
 
-## 🎯 Điểm Nhấn Kỹ Thuật (v1.2) - Mới Nhất
+Mục tiêu chính: crawl dữ liệu sản phẩm, lưu theo mô hình nhiều lớp, tạo dữ liệu
+sạch cho phân tích/dashboard Power BI và theo dõi chất lượng crawl.
 
-Hệ thống được thiết kế hướng tới sự bền bỉ, độ chính xác cao và hiệu suất tối đa:
+## Luồng Chính
 
-- **Kiến trúc Layered (Speed & Enrichment):** 
-    - **Speed Layer:** Sử dụng API-based crawling để lấy hàng ngàn sản phẩm trong vài phút.
-    - **Enrichment Layer:** Sử dụng Selenium (Pool) để lấy thông tin chi tiết (Review, Brand, Seller) một cách đầy đủ.
-- **Tối ưu Performance (22x Speedup):** 
-    - **Connection Pooling:** Đạt tỷ lệ tái sử dụng connection >75% cho Postgres, Redis và HTTP.
-    - **Dynamic Batching:** Tự động chia task thành 4 luồng song song (Optimize Pool) để tận dụng tối đa tài nguyên worker.
-- **Hệ thống Resilience (Độ tin cậy):** 
-    - **Circuit Breaker:** Tự động ngắt kết nối khi server source bị lỗi hoặc rate limit, tránh "cascade failure".
-    - **Dead Letter Queue (DLQ):** Toàn bộ dữ liệu lỗi được gom lại để xử lý độc lập, không làm dừng pipeline.
-    - **Adaptive Rate Limiting:** Tự điều chỉnh tốc độ crawl dựa trên tình trạng server đích.
-- **Quản lý Dữ liệu Thông Minh:**
-    - **Smart Pagination:** Phân trang thông minh dựa trên API metadata (paging), lấy đủ 100% sản phẩm (không bị giới hạn 40).
-    - **Data Persistence:** Logic COALESCE trong Database giúp giữ lại dữ liệu lịch sử nếu bản crawl mới bị thiếu trường thông tin.
-- **Multi-Level Caching:** Hệ thống cache 3 lớp (L1 Memory, L2 Redis, L3 File) đảm bảo tốc độ phản hồi tính bằng milisecond.
+```text
+Tiki API
+-> raw files / raw_products
+-> products / categories / sellers / price snapshots
+-> analytics mart
+-> Power BI
+```
 
-## 🚀 Cách thức vận hành
+DAG crawl chính: `tiki_crawl_fast`.
 
-Thay vì thu thập dữ liệu một cách tuần tự, hệ thống được thiết kế để phân rã công việc thành hàng trăm luồng xử lý độc lập thông qua Airflow Dynamic Task Mapping. Cơ chế này cho phép pipeline tự điều chỉnh quy mô dựa trên số lượng danh mục sản phẩm.
+Điểm quan trọng: dữ liệu batch lớn được ghi ra file, XCom chỉ giữ metadata để
+tránh làm phình Airflow metadata database.
 
-Dữ liệu sau khi thu thập sẽ đi qua một bộ lọc khắt khe để đảm bảo tính đồng nhất. Những thông tin nhiễu hoặc sai lệch được loại bỏ ngay từ đầu. Một điểm đặc biệt là sự tích lũy lịch sử giúp ghi lại từng thay đổi về giá cả, số lượng bán và xếp hạng của sản phẩm theo thời gian.
+## Thành Phần Chính
 
-## 📁 Tổ Chức Tài Liệu
+| Đường dẫn | Vai trò |
+| --- | --- |
+| `airflow/dags/tiki_crawl_products_v2/` | DAG crawl sản phẩm Tiki |
+| `airflow/dags/tiki_analytics_normalize.py` | DAG tạo analytics mart |
+| `src/common/` | Settings, schema, tracking, cache và tiện ích chung |
+| `src/pipelines/crawl/` | Crawl category, product list và product detail |
+| `src/pipelines/transform/` | Chuẩn hóa dữ liệu sản phẩm |
+| `src/pipelines/load/` | Load dữ liệu vào PostgreSQL |
+| `src/pipelines/analytics/` | Tạo bảng/view phục vụ phân tích |
+| `scripts/` | CI, cleanup, backup và công cụ vận hành |
+| `tests/` | Test và kiểm tra hợp đồng dữ liệu |
+| `docs/` | Tài liệu kỹ thuật |
+| `graduation_docs/` | Tài liệu đồ án tốt nghiệp, không commit |
 
-| Tài liệu | Nội dung | Link |
-|----------|----------|------|
-| **01-PARAMETERS** | Tất cả tham số cấu hình Airflow & Env | [Xem chi tiết](./docs/01-PARAMETERS/README.md) |
-| **02-OPTIMIZATION** | Roadmap và các kỹ thuật tăng tốc 22x | [Xem chi tiết](./docs/02-OPTIMIZATION/README.md) |
-| **03-ARCHITECTURE** | Kiến trúc 3-stage ETL & Database Schema | [Xem chi tiết](./docs/03-ARCHITECTURE/README.md) |
-| **04-CONFIGURATION** | Hướng dẫn thiết lập hạ tầng (Redis, DB, HTTP) | [Xem chi tiết](./docs/04-CONFIGURATION/README.md) |
-| **CRAWL PIPELINE** | Hướng dẫn sử dụng module crawl chi tiết | [Xem chi tiết](./src/pipelines/crawl/README.md) |
+## Chạy Local
 
----
+Yêu cầu:
 
-**Trạng thái:** ✅ Hoàn thiện & Ổn định (v1.2)
-**Cập nhật lần cuối:** 2026-01-31
-*Dự án là sự kết hợp giữa tư duy logic chặt chẽ và các giải pháp kỹ thuật hiện đại để xây dựng nên một dòng chảy dữ liệu thông suốt.*
+- Python 3.11.
+- Docker Desktop hoặc Docker Engine có Compose plugin.
+
+Thiết lập:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --build
+```
+
+Sau đó mở Airflow UI:
+
+```text
+http://localhost:8080/ui/
+```
+
+Trigger DAG:
+
+- `tiki_crawl_fast`: crawl và load dữ liệu sản phẩm.
+- `tiki_analytics_normalize`: tạo analytics mart cho dashboard.
+
+Không dùng `docker compose down -v` nếu muốn giữ dữ liệu PostgreSQL và Redis
+cache. Lệnh đó xóa volume.
+
+## Lệnh Hay Dùng
+
+```powershell
+# Chạy stack local
+docker compose up -d --build
+
+# Dừng container, giữ volume
+docker compose down
+
+# CI trong container Airflow
+.\scripts\ci.ps1
+
+# CI nhanh bằng Python local
+python scripts/ci.py ci-fast
+
+# Test nhanh
+.\.venv\Scripts\python.exe -m pytest tests -m "not integration and not slow" -q
+
+# Kiểm tra cấu hình và docs
+.\.venv\Scripts\python.exe scripts/config/sync_config_docs.py --check
+```
+
+## Cấu Hình
+
+Runtime configuration đi qua `src/common/settings.py`.
+
+Khi thêm biến cấu hình, cập nhật đồng bộ:
+
+- `SETTINGS_REGISTRY`.
+- `.env.example`.
+- Airflow Variable defaults nếu cần override khi chạy DAG.
+- Tài liệu liên quan trong `docs/`.
+- Test/validator cấu hình.
+
+Secrets như password, webhook URL và API key không được có default thật trong
+code, docs hoặc test fixture.
+
+## Dữ Liệu
+
+- `data/`, `backups/`, Airflow logs, cache và Docker volumes là runtime artifact.
+- Redis dùng prefix `tiki:crawl:` cho cache crawl.
+- PostgreSQL lưu dữ liệu theo lớp: raw, core normalized và analytics mart.
+- Muốn reset dữ liệu nhưng giữ Redis cache, ưu tiên truncate bảng ứng dụng thay
+  vì chạy `docker compose down -v`.
+
+## Tài Liệu
+
+- Tài liệu kỹ thuật: [docs/INDEX.md](docs/INDEX.md)
+- Tài liệu tham số: [docs/01-PARAMETERS/README.md](docs/01-PARAMETERS/README.md)
+- Tài liệu crawl module: [src/pipelines/crawl/README.md](src/pipelines/crawl/README.md)
+- Tài liệu test: [tests/README.md](tests/README.md)
+- Tài liệu đồ án: `graduation_docs/README.md`

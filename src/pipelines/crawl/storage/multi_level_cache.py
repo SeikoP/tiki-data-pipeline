@@ -11,10 +11,13 @@ Strategy: Check L1 -> L2 -> L3, write to all levels
 import gzip
 import hashlib
 import json
+import logging
 import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 try:
     import redis
@@ -118,7 +121,7 @@ class FileCache:
         Lấy đường dẫn file từ key.
         """
         # Hash key để tránh tên file quá dài
-        key_hash = hashlib.md5(key.encode()).hexdigest()
+        key_hash = hashlib.sha256(key.encode()).hexdigest()[:32]
         return self.cache_dir / f"{key_hash}{self.extension}"
 
     def get(self, key: str) -> Any | None:
@@ -144,12 +147,13 @@ class FileCache:
                     return None
 
             return data.get("value")
-        except Exception:
+        except Exception as e:
             # Nếu lỗi, xóa file corrupt
+            logger.debug("File cache read error for key, removing corrupt file: %s", e)
             try:
                 filepath.unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
             return None
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
@@ -172,7 +176,8 @@ class FileCache:
                 with open(filepath, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False)
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug("File cache write failed: %s", e)
             return False
 
     def delete(self, key: str) -> bool:
@@ -185,7 +190,8 @@ class FileCache:
                 filepath.unlink()
                 return True
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug("File cache delete failed: %s", e)
             return False
 
     def exists(self, key: str) -> bool:
@@ -236,7 +242,7 @@ class MultiLevelCache:
 
                 self.l2 = RedisCache(redis_url=redis_url, default_ttl=default_ttl)
             except Exception:
-                pass
+                logger.debug("Failed to initialize L2 Redis cache", exc_info=True)
 
         # L3: File cache
         self.l3 = None
@@ -290,7 +296,7 @@ class MultiLevelCache:
                         self.l1.set(key, value)
                     return value
             except Exception:
-                pass
+                logger.debug("L2 Redis cache get failed for key %s", key, exc_info=True)
 
         # L3: File cache
         if self.l3:
@@ -303,8 +309,8 @@ class MultiLevelCache:
                 if self.l2:
                     try:
                         self.l2.set(key, value, ttl=self.default_ttl)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Cache operation failed: %s", e)
                 return value
 
         self.stats["misses"] += 1
@@ -329,24 +335,24 @@ class MultiLevelCache:
             try:
                 self.l1.set(key, value)
                 success = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
 
         # L2: Redis
         if self.l2:
             try:
                 if self.l2.set(key, value, ttl=ttl):
                     success = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
 
         # L3: File cache
         if self.l3:
             try:
                 if self.l3.set(key, value, ttl=ttl):
                     success = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
 
         if success:
             self.stats["writes"] += 1
@@ -365,14 +371,14 @@ class MultiLevelCache:
         if self.l2:
             try:
                 results.append(self.l2.delete(key))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
 
         if self.l3:
             try:
                 results.append(self.l3.delete(key))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
 
         return any(results)
 
@@ -386,14 +392,14 @@ class MultiLevelCache:
             try:
                 if self.l2.exists(key):
                     return True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
         if self.l3:
             try:
                 if self.l3.exists(key):
                     return True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
         return False
 
     def clear(self) -> None:
@@ -406,15 +412,15 @@ class MultiLevelCache:
             try:
                 # Redis không có clear all, cần xóa từng key hoặc flushdb
                 pass
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
         # L3: Không clear file cache (có thể rất nhiều files)
 
     def get_cache_key(self, url: str, cache_type: str = "html") -> str:
         """
         Tạo cache key từ URL.
         """
-        url_hash = hashlib.md5(url.encode()).hexdigest()
+        url_hash = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()
         return f"{cache_type}:{url_hash}"
 
     def cache_html(self, url: str, html: str, ttl: int | None = None) -> bool:

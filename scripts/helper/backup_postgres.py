@@ -34,8 +34,11 @@ def get_env_value(key: str, default: str | None = None) -> str | None:
     val = os.getenv(key)
     if val:
         return val
-    env_file = PROJECT_ROOT / ".env"
-    if env_file.exists():
+    env_files = [
+        Path(os.getenv("ENV_FILE_PATH", "")) if os.getenv("ENV_FILE_PATH") else None,
+        PROJECT_ROOT / ".env",
+    ]
+    for env_file in [path for path in env_files if path and path.exists()]:
         try:
             with open(env_file, encoding="utf-8") as f:
                 for line in f:
@@ -43,7 +46,7 @@ def get_env_value(key: str, default: str | None = None) -> str | None:
                     if line.startswith(f"{key}="):
                         return line.split("=", 1)[1].strip()
         except Exception:
-            return default
+            continue
     return default
 
 
@@ -254,7 +257,7 @@ def main():
         "--database",
         "-d",
         default="all",
-        choices=["all", "airflow", "tiki"],
+        choices=["all", "airflow", "tiki", "crawl_data"],
         help="Database để backup (default: all)",
     )
     parser.add_argument(
@@ -294,7 +297,8 @@ def main():
         # Backup airflow metadata (optional) - ignore failure
         airflow_ok = backup_database("airflow", args.format)
         print()
-        data_ok = backup_database("tiki", args.format)
+        data_db = get_env_value("POSTGRES_DB", "tiki") or "tiki"
+        data_ok = backup_database(data_db, args.format)
         success = airflow_ok and data_ok
     else:
         success = backup_database(args.database, args.format)

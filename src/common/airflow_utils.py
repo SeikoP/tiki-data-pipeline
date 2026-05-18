@@ -99,7 +99,10 @@ def get_variable(key: str, default: Any = None) -> Any:
     # 1. Try Airflow Variable first
     if Variable:
         try:
-            return Variable.get(key, default_var=default)
+            try:
+                return Variable.get(key, default)
+            except TypeError:
+                return Variable.get(key, default_var=default)
         except Exception:
             pass
 
@@ -133,7 +136,16 @@ def load_env_file(search_paths: list[Path] | None = None) -> bool:
         return False
 
     if not search_paths:
-        search_paths = [Path("/opt/airflow/.env"), Path(os.getcwd()) / ".env"]  # Docker root  # CWD
+        search_paths = []
+        env_file_path = os.getenv("ENV_FILE_PATH")
+        if env_file_path:
+            search_paths.append(Path(env_file_path))
+        search_paths.extend(
+            [
+                Path("/opt/airflow/.env"),
+                Path(os.getcwd()) / ".env",
+            ]
+        )
         # Add local dev path relative to this file if possible,
         # but since this file is in src/common, we can try to look up to project root
         # src/common/airflow_utils.py -> src/common -> src -> project_root
@@ -146,5 +158,5 @@ def load_env_file(search_paths: list[Path] | None = None) -> bool:
             logging.info(f"✅ Loaded .env from {env_p}")
             return True
 
-    logging.warning("⚠️ Could not find .env file")
+    logging.debug("No .env file found; using process environment")
     return False

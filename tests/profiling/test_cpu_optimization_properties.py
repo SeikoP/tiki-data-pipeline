@@ -125,6 +125,7 @@ def _normalize_product_original(product: dict[str, Any]) -> dict[str, Any]:
     # Clean strings
     if "name" in result and result["name"]:
         result["name"] = " ".join(str(result["name"]).split()).strip()
+        result["short_name"] = result["name"]
 
     if "brand" in result and result["brand"]:
         result["brand"] = str(result["brand"]).strip().replace("Thương hiệu: ", "")
@@ -135,6 +136,8 @@ def _normalize_product_original(product: dict[str, Any]) -> dict[str, Any]:
         result["seller_name"] = result["seller"].get("name")
         if result["seller_name"]:
             result["seller_name"] = str(result["seller_name"]).strip()
+    elif "seller" in result:
+        result["seller_name"] = None
 
     if "product_id" in result:
         result["product_id"] = str(result["product_id"]).strip()

@@ -91,11 +91,24 @@ class PostgresStorage:
             keepalives_count: Number of keepalive probes before considering connection dead
         """
         self.logger = logger or logging.getLogger(__name__)
-        self.host = host or os.getenv("POSTGRES_HOST", "postgres")
-        self.port = port
-        self.database = database or os.getenv("POSTGRES_DB", "tiki")
-        self.user = user or os.getenv("POSTGRES_USER", "airflow_user")
-        self.password = password or os.getenv("POSTGRES_PASSWORD", "")
+        try:
+            from common.settings import get_pipeline_settings
+
+            db_settings = get_pipeline_settings(use_airflow=False).database
+        except Exception:
+            db_settings = None
+
+        self.host = host or (db_settings.host if db_settings else os.getenv("POSTGRES_HOST"))
+        self.port = port or (db_settings.port if db_settings else 5432)
+        self.database = database or (
+            db_settings.database if db_settings else os.getenv("POSTGRES_DB")
+        )
+        self.user = user or (db_settings.user if db_settings else os.getenv("POSTGRES_USER"))
+        self.password = (
+            password if password is not None else (db_settings.password if db_settings else "")
+        )
+        if not self.host or not self.database or not self.user:
+            raise ValueError("PostgreSQL host, database, and user must be configured")
         self.minconn = minconn
         self.maxconn = maxconn
         self._pool: ThreadedConnectionPool | None = None
@@ -112,12 +125,23 @@ class PostgresStorage:
             "keepalives_interval": keepalives_interval,
             "keepalives_count": keepalives_count,
         }
-        self.connect_kwargs = {
-            "connect_timeout": connect_timeout,
-            "keepalives_idle": keepalives_idle,
-            "keepalives_interval": keepalives_interval,
-            "keepalives_count": keepalives_count,
-        }
+
+    def close(self):
+        """Close the connection pool and release resources."""
+        if self._pool is not None:
+            try:
+                self._pool.closeall()
+            except Exception:
+                pass
+            finally:
+                self._pool = None
+                self._pool_stats["active_connections"] = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
+        self.close()
 
     def _get_pool(self) -> ThreadedConnectionPool:
         """
@@ -361,7 +385,7 @@ class PostgresStorage:
     def save_categories(
         self,
         categories: list[dict[str, Any]],
-        only_leaf: bool = True,  # Changed: Start defaulting to True to prevent redundant data
+        only_leaf: bool = True,
         sync_with_products: bool = False,
     ) -> int:
         """Lưu danh sách categories vào DB sử dụng bulk processing tối ưu.
@@ -731,7 +755,7 @@ class PostgresStorage:
                         if cat.get("url") not in urls_to_keep:
                             continue
 
-                    # Extract level_1 đến level_5 từ category_path để thể hiện rõ theo từng độ sâu
+                    # Extract level columns for common category reporting.
                     level_1 = category_path[0] if len(category_path) > 0 else None
                     level_2 = category_path[1] if len(category_path) > 1 else None
                     level_3 = category_path[2] if len(category_path) > 2 else None
@@ -864,7 +888,6 @@ class PostgresStorage:
                             f"Auto-added {len(missing_parents)} missing parent categories"
                         )
 
-                # CRITICAL: If only_leaf=True, ensure NO non-leaf categories remain
                 if only_leaf:
                     self.cleanup_redundant_categories(cur)
 
@@ -974,9 +997,11 @@ class PostgresStorage:
                                 product.get("seller_name"),
                                 product.get("seller_id"),
                                 product.get("seller_is_official"),
-                                # Brand and stock (only stock_available)
+                                # Brand and stock
                                 product.get("brand"),
                                 product.get("stock_available"),
+                                product.get("stock_status"),
+                                product.get("stock_source"),
                                 Json(product.get("shipping")) if product.get("shipping") else None,
                             )
                             for product in batch
@@ -1000,7 +1025,7 @@ class PostgresStorage:
                                     (product_id, name, short_name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average, review_count,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, shipping)
+                                     stock_available, stock_status, stock_source, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id)
                                 DO UPDATE SET
@@ -1021,6 +1046,8 @@ class PostgresStorage:
                                     seller_is_official = COALESCE(EXCLUDED.seller_is_official, products.seller_is_official),
                                     brand = COALESCE(NULLIF(EXCLUDED.brand, ''), products.brand),
                                     stock_available = COALESCE(EXCLUDED.stock_available, products.stock_available),
+                                    stock_status = COALESCE(NULLIF(EXCLUDED.stock_status, ''), products.stock_status),
+                                    stock_source = COALESCE(NULLIF(EXCLUDED.stock_source, ''), products.stock_source),
                                     shipping = COALESCE(EXCLUDED.shipping, products.shipping),
                                     updated_at = CURRENT_TIMESTAMP
                                 """,
@@ -1044,10 +1071,10 @@ class PostgresStorage:
                                 cur,
                                 """
                                 INSERT INTO products
-                                    (product_id, name, url, image_url, category_url, category_id, sales_count,
+                                    (product_id, name, short_name, url, image_url, category_url, category_id, sales_count,
                                      price, original_price, discount_percent, rating_average, review_count,
                                      seller_name, seller_id, seller_is_official, brand,
-                                     stock_available, shipping)
+                                     stock_available, stock_status, stock_source, shipping)
                                 VALUES %s
                                 ON CONFLICT (product_id) DO NOTHING
                                 """,
@@ -1512,10 +1539,7 @@ class PostgresStorage:
                 return cur.rowcount
 
     def cleanup_redundant_categories(self, cur=None, dry_run: bool = False) -> int:
-        """Xóa các categories không phải là leaf (có categories con) hoặc các categories không có
-        sản phẩm nếu cần thiết.
-
-        Method này đảm bảo bảng categories chỉ chứa dữ liệu 'leaf' thực sự.
+        """Remove non-leaf categories when categories table is synced to loaded products.
 
         Args:
             cur: Database cursor
@@ -1523,22 +1547,34 @@ class PostgresStorage:
         """
         select_query = """
             SELECT count(*) FROM categories
-            WHERE url IN (
-                SELECT DISTINCT parent_url
-                FROM categories
-                WHERE parent_url IS NOT NULL
+            WHERE (
+                url IN (
+                    SELECT DISTINCT parent_url
+                    FROM categories
+                    WHERE parent_url IS NOT NULL
+                )
+                OR is_leaf = FALSE
             )
-            OR is_leaf = FALSE
+            AND NOT EXISTS (
+                SELECT 1 FROM products p
+                WHERE p.category_id = categories.category_id
+            )
         """
 
         delete_query = """
             DELETE FROM categories
-            WHERE url IN (
-                SELECT DISTINCT parent_url
-                FROM categories
-                WHERE parent_url IS NOT NULL
+            WHERE (
+                url IN (
+                    SELECT DISTINCT parent_url
+                    FROM categories
+                    WHERE parent_url IS NOT NULL
+                )
+                OR is_leaf = FALSE
             )
-            OR is_leaf = FALSE
+            AND NOT EXISTS (
+                SELECT 1 FROM products p
+                WHERE p.category_id = categories.category_id
+            )
         """
 
         if cur:
@@ -1555,22 +1591,20 @@ class PostgresStorage:
             if count > 0:
                 self.logger.info(f"Cleanup: Removed {count} non-leaf categories from DB")
             return count
-        else:
-            with self.get_connection() as conn:
-                with conn.cursor() as standalone_cur:
-                    if dry_run:
-                        standalone_cur.execute(select_query)
-                        count = standalone_cur.fetchone()[0]
-                        print(
-                            f"🔍 [DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB"
-                        )
-                        return 0
 
-                    standalone_cur.execute(delete_query)
-                    count = standalone_cur.rowcount
-                    if count > 0:
-                        self.logger.info(f"Cleanup: Removed {count} non-leaf categories from DB")
-                    return count
+        with self.get_connection() as conn:
+            with conn.cursor() as standalone_cur:
+                if dry_run:
+                    standalone_cur.execute(select_query)
+                    count = standalone_cur.fetchone()[0]
+                    print(f"[DRY RUN] Cleanup: Would remove {count} non-leaf categories from DB")
+                    return 0
+
+                standalone_cur.execute(delete_query)
+                count = standalone_cur.rowcount
+                if count > 0:
+                    self.logger.info(f"Cleanup: Removed {count} non-leaf categories from DB")
+                return count
 
     def get_products_by_category(self, category_url: str, limit: int = 100) -> list[dict[str, Any]]:
         """
@@ -1629,15 +1663,6 @@ class PostgresStorage:
                 pass
         return stats
 
-    def close(self):
-        """
-        Đóng connection pool.
-        """
-        if self._pool:
-            self._pool.closeall()
-            self._pool = None
-            self._pool_stats["active_connections"] = 0
-
     def cleanup_incomplete_products(
         self,
         require_seller: bool = True,
@@ -1688,33 +1713,33 @@ class PostgresStorage:
                 # Get counts before deletion for detailed reporting
                 # Only calculate stats if both requirements are enabled
                 if require_seller and require_brand:
-                    # Calculate detailed stats: missing seller only, missing brand only, missing both, missing rating
-                    stats_query = f"""
+                    # Calculate detailed stats using parameterized query
+                    cur.execute(
+                        """
                         SELECT
                             COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND NOT (brand IS NULL OR brand = '')) as no_seller,
                             COUNT(*) FILTER (WHERE NOT (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as no_brand,
                             COUNT(*) FILTER (WHERE (seller_name IS NULL OR seller_name = '') AND (brand IS NULL OR brand = '')) as both_missing,
                             COUNT(*) FILTER (WHERE rating_average IS NULL) as no_rating
                         FROM products
-                        WHERE {where_clause}
-                    """
-                    cur.execute(stats_query)
+                        WHERE (seller_name IS NULL OR seller_name = '') OR (brand IS NULL OR brand = '')
+                        """
+                    )
                     stats_row = cur.fetchone()
                     deleted_no_seller = stats_row[0] if stats_row else 0
                     deleted_no_brand = stats_row[1] if stats_row else 0
                     deleted_both = stats_row[2] if stats_row else 0
                     deleted_no_rating = stats_row[3] if stats_row and require_rating else 0
                 elif require_seller:
-                    # Only seller required - count all as no_seller
-                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    cur.execute(
+                        "SELECT COUNT(*) FROM products WHERE seller_name IS NULL OR seller_name = ''"
+                    )
                     deleted_no_seller = cur.fetchone()[0] or 0
                 elif require_brand:
-                    # Only brand required - count all as no_brand
-                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    cur.execute("SELECT COUNT(*) FROM products WHERE brand IS NULL OR brand = ''")
                     deleted_no_brand = cur.fetchone()[0] or 0
                 elif require_rating:
-                    # Only rating required - count all as no_rating
-                    cur.execute(f"SELECT COUNT(*) FROM products WHERE {conditions[0]}")
+                    cur.execute("SELECT COUNT(*) FROM products WHERE rating_average IS NULL")
                     deleted_no_rating = cur.fetchone()[0] or 0
 
                 # 1. Delete from crawl_history (orphaned records prevention)
@@ -1774,10 +1799,9 @@ class PostgresStorage:
         self, archive_months: int = 6, delete_months: int = 12
     ) -> dict[str, Any]:
         """
-        Cleanup old crawl history records:
-        - Archive records older than `archive_months`
-        - Delete records older than `delete_months`
-        - Vacuum table to reclaim space
+        Cleanup old snapshot records:
+        - Archive product_prices and product_metrics older than `archive_months`
+        - Delete snapshot records older than `delete_months`
 
         Returns:
             Dict with statistics on archived and deleted records
@@ -1795,38 +1819,52 @@ class PostgresStorage:
 
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                # 1. Create archive table if not exists
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS crawl_history_archive (
-                        LIKE crawl_history INCLUDING ALL
-                    );
-                    """)
+                    CREATE TABLE IF NOT EXISTS product_prices_archive (
+                        LIKE product_prices INCLUDING ALL
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS product_metrics_archive (
+                        LIKE product_metrics INCLUDING ALL
+                    )
+                """)
 
-                # 2. Archive records
                 cur.execute(
                     """
-                    INSERT INTO crawl_history_archive
-                    SELECT * FROM crawl_history
-                    WHERE crawled_at >= %s AND crawled_at < %s
+                    INSERT INTO product_prices_archive
+                    SELECT * FROM product_prices
+                    WHERE recorded_at >= %s AND recorded_at < %s
                     ON CONFLICT DO NOTHING
                     """,
                     (delete_date, archive_date),
                 )
-                result["archived_count"] = cur.rowcount
-
-                # 3. Delete old records
+                archived_prices = cur.rowcount
                 cur.execute(
-                    "DELETE FROM crawl_history WHERE crawled_at < %s",
+                    """
+                    INSERT INTO product_metrics_archive
+                    SELECT * FROM product_metrics
+                    WHERE recorded_at >= %s AND recorded_at < %s
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (delete_date, archive_date),
+                )
+                archived_metrics = cur.rowcount
+
+                cur.execute(
+                    "DELETE FROM product_prices WHERE recorded_at < %s",
                     (delete_date,),
                 )
-                result["deleted_count"] = cur.rowcount
+                deleted_prices = cur.rowcount
+                cur.execute(
+                    "DELETE FROM product_metrics WHERE recorded_at < %s",
+                    (delete_date,),
+                )
+                deleted_metrics = cur.rowcount
 
+                result["archived_count"] = archived_prices + archived_metrics
+                result["deleted_count"] = deleted_prices + deleted_metrics
                 conn.commit()
-
-                # 4. Vacuum (cannot be inside a transaction block in some versions,
-                # but with autocommit=True it works. SimpleConnectionPool usually uses autocommit=False)
-                # We'll skip VACUUM here to avoid transaction issues in Airflow tasks,
-                # as VACUUM is often managed by Autovacuum anyway.
 
         return result
 
@@ -1844,11 +1882,7 @@ class PostgresStorage:
         return result["deleted_count"]
 
     def cleanup_orphan_categories(self) -> int:
-        """Remove categories that don't have any matching products. This ensures categories table
-        stays clean after product crawls.
-
-        Only removes leaf categories (is_leaf = true) that have no products.
-        Parent categories are kept to maintain hierarchy.
+        """Remove leaf categories that do not match loaded products.
 
         Returns:
             Number of categories deleted

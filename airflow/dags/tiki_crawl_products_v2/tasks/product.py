@@ -14,7 +14,6 @@ from tiki_crawl_products_v2.bootstrap import (
     datetime,
     ensure_output_dirs,
     get_logger,
-    get_variable,
     json,
     os,
 )
@@ -24,6 +23,52 @@ from tiki_crawl_products_v2.tasks.optimizations import (
     VectorizedTransformerWrapper,
     profile_task,
 )
+
+
+def _get_crawl_run_id(context: dict[str, Any]) -> int | None:
+    ti = context.get("ti")
+    if not ti:
+        return None
+    for task_id in ("start_crawl_run", "pipeline_tracking.start_crawl_run"):
+        try:
+            value = ti.xcom_pull(task_ids=task_id)
+        except Exception:
+            continue
+        if isinstance(value, dict) and value.get("crawl_run_id"):
+            return int(value["crawl_run_id"])
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _validate_merge_products_quality(stats: dict[str, Any], unique_product_count: int) -> None:
+    total_categories = int(stats.get("total_categories") or 0)
+    success_categories = int(stats.get("success_categories") or 0)
+    if total_categories > 0 and success_categories <= 0:
+        raise RuntimeError("No category crawl succeeded; refusing to write empty product output")
+    if unique_product_count <= 0:
+        raise RuntimeError("No products were merged; refusing to write empty product output")
+
+
+def _resolve_detail_output_file(detail_result: Any, default_output_file: str) -> str:
+    if isinstance(detail_result, dict):
+        if "output_file" in detail_result:
+            output_file = detail_result.get("output_file")
+            if not output_file or not os.path.exists(output_file):
+                raise ValueError(
+                    f"merge_product_details returned invalid output_file: {output_file}"
+                )
+            return output_file
+        raise ValueError("merge_product_details returned no output_file")
+    if isinstance(detail_result, str):
+        if not os.path.exists(detail_result):
+            raise ValueError(f"merge_product_details output file does not exist: {detail_result}")
+        return detail_result
+    if detail_result is None:
+        if os.path.exists(default_output_file):
+            return default_output_file
+        raise FileNotFoundError(f"Không tìm thấy file: {default_output_file}")
+    raise ValueError(f"Unsupported merge_product_details result: {type(detail_result).__name__}")
 
 
 @profile_task("merge_products")
@@ -41,20 +86,31 @@ def merge_products(**context) -> dict[str, Any]:
         ensure_output_dirs()
         ti = context["ti"]
 
-        # Lấy danh sách categories từ các task upstream
-        categories = None
+        # Lấy danh sách categories từ file
+        result = None
         for task_id in [
             "pre_crawl.load_categories",
             "load_and_prepare.load_categories",
             "load_categories",
         ]:
-            categories = ti.xcom_pull(task_ids=task_id)
-            if categories:
-                logger.info(f"📂 Đã nạp {len(categories)} danh mục từ task: {task_id}")
+            result = ti.xcom_pull(task_ids=task_id)
+            if result:
+                logger.info(f"📂 Đã lấy categories metadata từ task: {task_id}")
                 break
 
-        if not categories:
+        if not result:
             raise ValueError("Không tìm thấy dữ liệu categories từ các task trước đó.")
+
+        # Đọc categories từ file
+        categories_file = result.get("categories_file")
+        if categories_file:
+            with open(categories_file, encoding="utf-8") as f:
+                categories = json.load(f)
+            logger.info(f"📂 Đọc {len(categories)} categories từ {categories_file}")
+        else:
+            # Fallback: legacy XCom
+            categories = result if isinstance(result, list) else []
+            logger.warning("⚠️ Sử dụng legacy XCom format cho categories")
 
         logger.info(f"Đang merge kết quả từ {len(categories)} danh mục...")
 
@@ -67,6 +123,7 @@ def merge_products(**context) -> dict[str, Any]:
             "failed_categories": 0,
             "timeout_categories": 0,
             "total_products": 0,
+            "raw_products": 0,
             "unique_products": 0,
             "total_saved_directly": 0,
         }
@@ -75,6 +132,52 @@ def merge_products(**context) -> dict[str, Any]:
         # Với Dynamic Task Mapping trong Airflow 2.x, cần lấy từ task_id với map_index
         task_id = "crawl_categories.crawl_category"
 
+        def merge_single_result(single_result: dict[str, Any]) -> None:
+            if single_result.get("status") == "success":
+                stats["success_categories"] += 1
+                products = single_result.get("products", [])
+                all_products.extend(products)
+                stats["total_products"] += len(products)
+                stats["total_saved_directly"] += single_result.get("saved_count", 0)
+            elif single_result.get("status") == "timeout":
+                stats["timeout_categories"] += 1
+                logger.warning(f"⏱️  Category {single_result.get('category_name')} timeout")
+            else:
+                stats["failed_categories"] += 1
+                logger.warning(
+                    f"❌ Category {single_result.get('category_name')} failed: {single_result.get('error')}"
+                )
+
+        def merge_result_payload(payload: Any) -> bool:
+            if isinstance(payload, dict) and payload.get("output_file"):
+                output_file = payload["output_file"]
+                with open(output_file, encoding="utf-8") as f:
+                    batch_data = json.load(f)
+                batch_results = batch_data.get("results", [])
+                logger.info(
+                    "📦 Đọc batch %s: categories=%s products=%s file=%s",
+                    batch_data.get("batch_index", payload.get("batch_index")),
+                    len(batch_results),
+                    batch_data.get("product_count", payload.get("product_count", 0)),
+                    output_file,
+                )
+                for single_result in batch_results:
+                    if isinstance(single_result, dict):
+                        merge_single_result(single_result)
+                return True
+
+            if isinstance(payload, list):
+                for single_result in payload:
+                    if isinstance(single_result, dict):
+                        merge_single_result(single_result)
+                return True
+
+            if isinstance(payload, dict):
+                merge_single_result(payload)
+                return True
+
+            return False
+
         # Lấy từ XCom - thử nhiều cách
         try:
             # Cách 1: Lấy tất cả kết quả từ XCom (Airflow 2.x có thể trả về list)
@@ -82,80 +185,15 @@ def merge_products(**context) -> dict[str, Any]:
 
             # Xử lý kết quả
             if isinstance(all_results, list):
-                # Nếu là list, xử lý từng phần tử
-                # Với batch processing, mỗi phần tử có thể là list of results (từ 1 batch)
                 for result in all_results:
-                    # Check if result is a list (batch result) hoặc dict (single category result)
-                    if isinstance(result, list):
-                        # Batch result - flatten it
-                        for single_result in result:
-                            if single_result and isinstance(single_result, dict):
-                                if single_result.get("status") == "success":
-                                    stats["success_categories"] += 1
-                                    products = single_result.get("products", [])
-                                    all_products.extend(products)
-                                    stats["total_products"] += len(products)
-                                    stats["total_saved_directly"] += single_result.get(
-                                        "saved_count", 0
-                                    )
-                                elif single_result.get("status") == "timeout":
-                                    stats["timeout_categories"] += 1
-                                    logger.warning(
-                                        f"⏱️  Category {single_result.get('category_name')} timeout"
-                                    )
-                                else:
-                                    stats["failed_categories"] += 1
-                                    logger.warning(
-                                        f"❌ Category {single_result.get('category_name')} failed: {single_result.get('error')}"
-                                    )
-                    elif result and isinstance(result, dict):
-                        # Single category result
-                        if result.get("status") == "success":
-                            stats["success_categories"] += 1
-                            products = result.get("products", [])
-                            all_products.extend(products)
-                            stats["total_products"] += len(products)
-                        elif result.get("status") == "timeout":
-                            stats["timeout_categories"] += 1
-                            logger.warning(f"⏱️  Category {result.get('category_name')} timeout")
-                        else:
-                            stats["failed_categories"] += 1
-                            logger.warning(
-                                f"❌ Category {result.get('category_name')} failed: {result.get('error')}"
-                            )
+                    merge_result_payload(result)
             elif isinstance(all_results, dict):
                 # Nếu là dict, có thể key là map_index hoặc category_id
-                for result in all_results.values():
-                    if result and isinstance(result, dict):
-                        if result.get("status") == "success":
-                            stats["success_categories"] += 1
-                            products = result.get("products", [])
-                            all_products.extend(products)
-                            stats["total_products"] += len(products)
-                        elif result.get("status") == "timeout":
-                            stats["timeout_categories"] += 1
-                            logger.warning(f"⏱️  Category {result.get('category_name')} timeout")
-                        else:
-                            stats["failed_categories"] += 1
-                            logger.warning(
-                                f"❌ Category {result.get('category_name')} failed: {result.get('error')}"
-                            )
-            elif all_results and isinstance(all_results, dict):
-                # Nếu chỉ có 1 kết quả (dict)
-                if all_results.get("status") == "success":
-                    stats["success_categories"] += 1
-                    products = all_results.get("products", [])
-                    all_products.extend(products)
-                    stats["total_products"] += len(products)
-                    stats["total_saved_directly"] += all_results.get("saved_count", 0)
-                elif all_results.get("status") == "timeout":
-                    stats["timeout_categories"] += 1
-                    logger.warning(f"⏱️  Category {all_results.get('category_name')} timeout")
+                if all_results.get("output_file") or all_results.get("status"):
+                    merge_result_payload(all_results)
                 else:
-                    stats["failed_categories"] += 1
-                    logger.warning(
-                        f"❌ Category {all_results.get('category_name')} failed: {all_results.get('error')}"
-                    )
+                    for result in all_results.values():
+                        merge_result_payload(result)
 
             # Nếu không lấy được, thử lấy từng map_index
             if not all_results or (isinstance(all_results, (list, dict)) and len(all_results) == 0):
@@ -166,21 +204,8 @@ def merge_products(**context) -> dict[str, Any]:
                             task_ids=task_id, key="return_value", map_indexes=[map_index]
                         )
 
-                        if result and isinstance(result, dict):
-                            if result.get("status") == "success":
-                                stats["success_categories"] += 1
-                                products = result.get("products", [])
-                                all_products.extend(products)
-                                stats["total_products"] += len(products)
-                                stats["total_saved_directly"] += result.get("saved_count", 0)
-                            elif result.get("status") == "timeout":
-                                stats["timeout_categories"] += 1
-                                logger.warning(f"⏱️  Category {result.get('category_name')} timeout")
-                            else:
-                                stats["failed_categories"] += 1
-                                logger.warning(
-                                    f"❌ Category {result.get('category_name')} failed: {result.get('error')}"
-                                )
+                        if result:
+                            merge_result_payload(result)
                     except Exception as e:
                         stats["failed_categories"] += 1
                         logger.warning(f"Không thể lấy kết quả từ map_index {map_index}: {e}")
@@ -212,7 +237,11 @@ def merge_products(**context) -> dict[str, Any]:
             else "📊 Products có sales_count: 0/0"
         )
 
+        stats["raw_products"] = stats["total_products"]
         stats["unique_products"] = len(unique_products)
+        _validate_merge_products_quality(stats, len(unique_products))
+        stats["raw_products_saved"] = 0
+        logger.info("⏭️ Bỏ qua lưu raw list products để tránh phình raw_products theo mỗi crawl run")
 
         logger.info("=" * 40)
         logger.info("📊 TỔNG KẾT GIAI ĐOẠN CRAWL")
@@ -227,106 +256,44 @@ def merge_products(**context) -> dict[str, Any]:
         logger.info(f"• Saved Directly:    {stats['total_saved_directly']}")
         logger.info("=" * 40)
 
-        result = {
+        # Lưu products vào file merged_products.json
+        from pathlib import Path
+
+        merged_file = Path("/opt/airflow/data/processed") / "merged_products.json"
+        merged_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(merged_file, "w", encoding="utf-8") as f:
+            json.dump({"products": unique_products, "stats": stats}, f, ensure_ascii=False)
+
+        logger.info(f"💾 Đã lưu {len(unique_products)} products vào {merged_file}")
+
+        # Lưu vào file output chính (products.json) với metadata đầy đủ
+        output_data = {
+            "total_products": len(unique_products),
+            "stats": stats,
+            "crawled_at": datetime.now().isoformat(),
+            "note": "Crawl từ Airflow DAG với Dynamic Task Mapping",
             "products": unique_products,
+        }
+
+        output_file = str(OUTPUT_FILE)
+        atomic_write_file(output_file, output_data, **context)
+
+        logger.info(f"✅ Đã lưu {len(unique_products)} sản phẩm vào: {output_file}")
+
+        # Return file paths và metadata
+        result = {
+            "products_file": str(merged_file),
+            "output_file": output_file,
             "stats": stats,
             "merged_at": datetime.now().isoformat(),
+            "product_count": len(unique_products),
         }
 
         return result
 
     except Exception as e:
-        logger.error(f"❌ Lỗi khi merge products: {e}", exc_info=True)
-        raise
-
-
-@profile_task("save_products")
-def save_products(**context) -> str:
-    """
-    Task 4: Lưu sản phẩm vào file (atomic write)
-
-    Tối ưu hóa cho dữ liệu lớn:
-    - Batch processing: chia nhỏ và lưu từng batch
-    - Atomic write: tránh corrupt file
-    - Compression: có thể nén file nếu cần
-
-    Returns:
-        str: Đường dẫn file đã lưu
-    """
-    logger = get_logger(context)
-    logger.info("=" * 70)
-    logger.info("💾 TASK: Save Products")
-    logger.info("=" * 70)
-
-    try:
-        # Lấy kết quả từ task merge_products (trong TaskGroup process_and_save)
-        ti = context["ti"]
-        merge_result = None
-
-        # Cách 1: Lấy từ task_id với TaskGroup prefix
-        try:
-            merge_result = ti.xcom_pull(task_ids="process_and_save.merge_products")
-            # Get merge result from upstream task
-        except Exception as e:
-            logger.warning(f"Không lấy được từ 'process_and_save.merge_products': {e}")
-
-        # Cách 2: Thử không có prefix
-        if not merge_result:
-            try:
-                merge_result = ti.xcom_pull(task_ids="merge_products")
-                # Fallback to merge_products without prefix
-            except Exception as e:
-                logger.warning(f"Không lấy được từ 'merge_products': {e}")
-
-        if not merge_result:
-            raise ValueError("Không tìm thấy kết quả merge từ XCom")
-
-        if not merge_result:
-            raise ValueError("Không tìm thấy kết quả merge từ XCom")
-
-        products = merge_result.get("products", [])
-        stats = merge_result.get("stats", {})
-
-        logger.info(f"Đang lưu {len(products)} sản phẩm...")
-
-        # Batch processing cho dữ liệu lớn
-        batch_size = int(get_variable("TIKI_SAVE_BATCH_SIZE", default="10000"))
-
-        if len(products) > batch_size:
-            logger.info(f"Chia nhỏ thành batches (mỗi batch {batch_size} sản phẩm)...")
-            # Lưu từng batch vào file riêng, sau đó merge
-            batch_files = []
-            for i in range(0, len(products), batch_size):
-                batch = products[i : i + batch_size]
-                batch_file = OUTPUT_DIR / f"products_batch_{i // batch_size}.json"
-                batch_data = {
-                    "batch_index": i // batch_size,
-                    "total_batches": (len(products) + batch_size - 1) // batch_size,
-                    "products": batch,
-                }
-                atomic_write_file(str(batch_file), batch_data, **context)
-                batch_files.append(batch_file)
-                logger.info(f"✓ Đã lưu batch {i // batch_size + 1}: {len(batch)} sản phẩm")
-
-        # Chuẩn bị dữ liệu để lưu
-        output_data = {
-            "total_products": len(products),
-            "stats": stats,
-            "crawled_at": datetime.now().isoformat(),
-            "note": "Crawl từ Airflow DAG với Dynamic Task Mapping",
-            "products": products,
-        }
-
-        # Atomic write
-        output_file = str(OUTPUT_FILE)
-        atomic_write_file(output_file, output_data, **context)
-
-        logger.info(f"✅ Đã lưu {len(products)} sản phẩm vào: {output_file}")
-
-        return output_file
-
-    except Exception as e:
-        logger.error(f"❌ Lỗi khi save products: {e}", exc_info=True)
+        logger.error(f"❌ Lỗi khi merge and save products: {e}", exc_info=True)
         raise
 
 
@@ -347,21 +314,17 @@ def transform_products(**context) -> dict[str, Any]:
         ensure_output_dirs()
         ti = context["ti"]
 
-        # Lấy file từ save_products_with_detail
-        output_file = None
+        # Lấy file từ merge_product_details
+        detail_result = None
         try:
-            output_file = ti.xcom_pull(task_ids="crawl_product_details.save_products_with_detail")
+            detail_result = ti.xcom_pull(task_ids="crawl_product_details.merge_product_details")
         except Exception:
             try:
-                output_file = ti.xcom_pull(task_ids="save_products_with_detail")
+                detail_result = ti.xcom_pull(task_ids="merge_product_details")
             except Exception:
                 pass
 
-        if not output_file:
-            output_file = str(OUTPUT_FILE_WITH_DETAIL)
-
-        if not os.path.exists(output_file):
-            raise FileNotFoundError(f"Không tìm thấy file: {output_file}")
+        output_file = _resolve_detail_output_file(detail_result, str(OUTPUT_FILE_WITH_DETAIL))
 
         logger.info(f"📂 Đang đọc file: {output_file}")
 
@@ -372,6 +335,22 @@ def transform_products(**context) -> dict[str, Any]:
         products = data.get("products", [])
         stats = data.get("stats", {})
         logger.info(f"📊 Tổng số products trong file: {len(products)}")
+        crawl_run_id = _get_crawl_run_id(context)
+        if crawl_run_id:
+            try:
+                from common.pipeline_tracking import save_raw_products
+
+                raw_saved = save_raw_products(
+                    products, crawl_run_id=crawl_run_id, source_stage="detail"
+                )
+                stats["raw_detail_products_saved"] = raw_saved
+                logger.info(
+                    "🧾 Đã lưu %s raw detail products cho crawl_run_id=%s",
+                    raw_saved,
+                    crawl_run_id,
+                )
+            except Exception as raw_error:
+                logger.warning("⚠️ Không thể lưu raw detail products: %s", raw_error)
 
         # Log thông tin về crawl detail nếu có
         crawled_count = stats.get("crawled_count", 0)
@@ -412,54 +391,17 @@ def transform_products(**context) -> dict[str, Any]:
             except Exception as e:
                 logger.warning(f"⚠️  Lỗi khi đọc products.json: {e}")
 
-        # Bước 2: Import utility để extract category_id
+        # Bước 2: Import utility để extract/normalize category metadata
         try:
-            # Tìm đường dẫn utils module
-            utils_paths = [
-                "/opt/airflow/src/pipelines/crawl/crawl_utils.py",
-                os.path.abspath(
-                    os.path.join(
-                        dag_file_dir,
-                        "..",
-                        "..",
-                        "..",
-                        "src",
-                        "pipelines",
-                        "crawl",
-                        "crawl_utils.py",
-                    )
-                ),
-                os.path.join(os.getcwd(), "src", "pipelines", "crawl", "crawl_utils.py"),
-            ]
-
-            utils_path = None
-            for path in utils_paths:
-                if os.path.exists(path):
-                    utils_path = path
-                    break
-
-            if utils_path:
-                import importlib.util
-
-                spec = importlib.util.spec_from_file_location("crawl_utils", utils_path)
-                utils_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(utils_module)
-                extract_category_id_from_url = utils_module.extract_category_id_from_url
-            else:
-                # Fallback: định nghĩa hàm đơn giản
-                import re
-
-                def extract_category_id_from_url(url: str) -> str | None:
-                    if not url:
-                        return None
-                    match = re.search(r"/c(\d+)", url)
-                    if match:
-                        return f"c{match.group(1)}"
-                    return None
-
+            from common.category_utils import build_category_lookup, extract_category_id_from_url
         except Exception as e:
-            logger.warning(f"⚠️  Không thể import extract_category_id_from_url: {e}")
+            logger.warning(f"⚠️  Không thể import category_utils: {e}")
             import re
+
+            def build_category_lookup(
+                categories: list[dict[str, Any]],
+            ) -> dict[str, dict[str, Any]]:
+                return {}
 
             def extract_category_id_from_url(url: str) -> str | None:
                 if not url:
@@ -484,12 +426,10 @@ def transform_products(**context) -> dict[str, Any]:
                 with open(CATEGORIES_FILE, encoding="utf-8") as cf:
                     raw_categories = json.load(cf)
 
-                for cat in raw_categories:
-                    cat_id = cat.get("category_id")
+                category_lookup = build_category_lookup(raw_categories)
+                for cat_id, cat in category_lookup.items():
                     cat_path = cat.get("category_path")
-
-                    # Chỉ thêm vào lookup nếu có category_id và category_path
-                    if cat_id and cat_path:
+                    if cat_path:
                         category_path_lookup[cat_id] = cat_path
 
                 logger.info(f"✅ Loaded {len(category_path_lookup)} category_path từ file")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from common.settings import get_pipeline_settings
+
 # Import all bootstrap globals (paths, config, dynamic imports, singletons).
 # This preserves legacy behavior without renaming any globals referenced by task callables.
 from tiki_crawl_products_v2.bootstrap import CATEGORIES_FILE, Any, datetime, get_variable, json, os
@@ -7,6 +9,49 @@ from tiki_crawl_products_v2.tasks.common import (
     _fix_sys_path_for_pipelines_import,  # noqa: F401
     get_logger,  # noqa: F401
 )
+
+
+def _get_xcom_dict(context, task_ids: list[str]) -> dict[str, Any] | None:
+    ti = context.get("ti")
+    if not ti:
+        return None
+    for task_id in task_ids:
+        try:
+            value = ti.xcom_pull(task_ids=task_id)
+        except Exception:
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _db_load_is_complete(context, logger) -> tuple[bool, str]:
+    load_result = _get_xcom_dict(context, ["transform_and_load.load_products", "load_products"])
+    if not load_result:
+        return False, "missing load_products XCom"
+
+    load_stats = load_result.get("load_stats") or {}
+    db_loaded = int(load_stats.get("db_loaded") or 0)
+    failed_count = int(load_stats.get("failed_count") or 0)
+
+    transform_result = _get_xcom_dict(
+        context, ["transform_and_load.transform_products", "transform_products"]
+    )
+    transformed_count = 0
+    if transform_result:
+        transformed_count = int(transform_result.get("transformed_count") or 0)
+
+    if failed_count > 0:
+        return False, f"load_products reported failed_count={failed_count}"
+    if db_loaded <= 0:
+        return False, "load_products did not load any rows into DB"
+    if transformed_count and db_loaded < transformed_count:
+        return False, f"db_loaded={db_loaded} < transformed_count={transformed_count}"
+
+    logger.info(
+        "✅ DB load guard passed: db_loaded=%s transformed=%s", db_loaded, transformed_count
+    )
+    return True, "ok"
 
 
 def cleanup_incomplete_products_wrapper(**context):
@@ -18,10 +63,15 @@ def cleanup_incomplete_products_wrapper(**context):
     logger = get_logger(context)
 
     try:
+        from common.db_schema import ensure_crawl_schema
         from pipelines.crawl.storage.postgres_storage import PostgresStorage
 
         logger.info("🧹 Starting cleanup of incomplete products (missing seller/brand)...")
         storage = PostgresStorage()
+        with storage.get_connection() as conn:
+            with conn.cursor() as cur:
+                ensure_crawl_schema(cur)
+            conn.commit()
 
         # Clean up products missing seller OR brand (or both)
         # both are required for quality data
@@ -65,13 +115,13 @@ def cleanup_incomplete_products_wrapper(**context):
         }
 
 
-def cleanup_orphan_categories_wrapper(**context):
-    """Task wrapper to cleanup categories that don't have any matching products. Run this after
-    loading categories to keep the table clean.
+def cleanup_categories_wrapper(**context):
+    """
+    Task wrapper to cleanup both orphan and redundant categories.
 
     Xóa:
-    1. Categories có product_count = 0 (hoặc NULL)
-    2. Leaf categories không có products trong bảng products
+    1. Orphan categories: có product_count = 0 hoặc không có products
+    2. Redundant categories: non-leaf categories
     """
     logger = get_logger(context)
 
@@ -79,15 +129,39 @@ def cleanup_orphan_categories_wrapper(**context):
         from pipelines.crawl.storage.postgres_storage import PostgresStorage
 
         logger.info("=" * 70)
-        logger.info("🧹 CLEANUP ORPHAN CATEGORIES")
+        logger.info("🧹 CLEANUP CATEGORIES (Orphan + Redundant)")
         logger.info("=" * 70)
 
-        storage = PostgresStorage()
+        allowed, reason = _db_load_is_complete(context, logger)
+        if not allowed:
+            logger.warning("⏭️  Skipping category cleanup: %s", reason)
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "total_deleted": 0,
+                "orphan_deleted": 0,
+                "redundant_deleted": 0,
+            }
 
-        # 1. Xóa categories có product_count = 0 hoặc NULL
+        storage = PostgresStorage()
         with storage.get_connection() as conn:
             with conn.cursor() as cur:
-                # Xóa categories có product_count = 0 hoặc NULL
+                cur.execute("SELECT COUNT(*) FROM products")
+                product_count = cur.fetchone()[0]
+        if product_count <= 0:
+            logger.warning("⏭️  Skipping category cleanup: products table is empty")
+            return {
+                "status": "skipped",
+                "reason": "products table is empty",
+                "total_deleted": 0,
+                "orphan_deleted": 0,
+                "redundant_deleted": 0,
+            }
+
+        logger.info("📦 Part 1: Cleaning up orphan categories...")
+
+        with storage.get_connection() as conn:
+            with conn.cursor() as cur:
                 cur.execute("""
                     DELETE FROM categories
                     WHERE (product_count = 0 OR product_count IS NULL)
@@ -95,7 +169,6 @@ def cleanup_orphan_categories_wrapper(**context):
                 """)
                 deleted_zero_count = cur.rowcount
 
-                # 2. Xóa leaf categories không có products trong bảng products
                 cur.execute("""
                     DELETE FROM categories
                     WHERE is_leaf = true
@@ -108,48 +181,38 @@ def cleanup_orphan_categories_wrapper(**context):
 
                 conn.commit()
 
-                total_deleted = deleted_zero_count + deleted_no_products
-
-                logger.info("📊 Cleanup results:")
-                logger.info(f"   - Categories với product_count = 0: {deleted_zero_count}")
-                logger.info(f"   - Categories không có products: {deleted_no_products}")
-                logger.info(f"   - Tổng cộng: {total_deleted} categories đã xóa")
-                logger.info("=" * 70)
-
-        # Gọi cleanup_orphan_categories từ storage để đảm bảo consistency
-        # (nó sẽ xóa các categories không có products)
         additional_deleted = storage.cleanup_orphan_categories()
+        total_orphan_deleted = deleted_zero_count + deleted_no_products + additional_deleted
 
-        total_deleted = total_deleted + additional_deleted
+        logger.info("📊 Orphan cleanup results:")
+        logger.info(f"   - Categories với product_count = 0: {deleted_zero_count}")
+        logger.info(
+            f"   - Categories không có products: {deleted_no_products + additional_deleted}"
+        )
+        logger.info(f"   - Tổng orphan deleted: {total_orphan_deleted}")
 
-        logger.info(f"✅ Cleanup complete: {total_deleted} orphan categories deleted")
+        logger.info("📦 Part 2: Cleaning up redundant (non-leaf) categories...")
+        removed_redundant = storage.cleanup_redundant_categories()
+        logger.info(f"   - Non-leaf categories removed: {removed_redundant}")
+
+        logger.info("=" * 70)
+        logger.info(
+            f"✅ Total cleanup: {total_orphan_deleted + removed_redundant} categories deleted"
+        )
+        logger.info(f"   - Orphan: {total_orphan_deleted}")
+        logger.info(f"   - Redundant: {removed_redundant}")
+        logger.info("=" * 70)
+
         return {
             "status": "success",
-            "deleted_count": total_deleted,
-            "deleted_zero_count": deleted_zero_count,
-            "deleted_no_products": deleted_no_products + additional_deleted,
+            "total_deleted": total_orphan_deleted + removed_redundant,
+            "orphan_deleted": total_orphan_deleted,
+            "redundant_deleted": removed_redundant,
         }
 
     except Exception as e:
         logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
         return {"status": "error", "message": str(e), "deleted_count": 0}
-
-
-def cleanup_redundant_categories_wrapper(**context):
-    """
-    Task wrapper to remove non-leaf categories.
-    """
-    logger = get_logger(context)
-    try:
-        from pipelines.crawl.storage.postgres_storage import PostgresStorage
-
-        storage = PostgresStorage()
-        removed = storage.cleanup_redundant_categories()
-        logger.info(f"✅ Removed {removed} non-leaf categories")
-        return {"status": "success", "removed": removed}
-    except Exception as e:
-        logger.error(f"❌ Error during redundant category cleanup: {e}", exc_info=True)
-        return {"status": "error", "message": str(e)}
 
 
 def reconcile_categories_wrapper(**context):
@@ -159,6 +222,11 @@ def reconcile_categories_wrapper(**context):
     """
     logger = get_logger(context)
     try:
+        allowed, reason = _db_load_is_complete(context, logger)
+        if not allowed:
+            logger.warning("⏭️  Skipping category reconciliation: %s", reason)
+            return {"status": "skipped", "message": reason}
+
         from pipelines.crawl.storage.postgres_storage import PostgresStorage
 
         storage = PostgresStorage()
@@ -210,9 +278,14 @@ def cleanup_old_history_wrapper(**context):
     """
     logger = get_logger(context)
     try:
+        from common.db_schema import ensure_crawl_schema
         from pipelines.crawl.storage.postgres_storage import PostgresStorage
 
         storage = PostgresStorage()
+        with storage.get_connection() as conn:
+            with conn.cursor() as cur:
+                ensure_crawl_schema(cur)
+            conn.commit()
 
         # Config via variables
         archive_months = int(get_variable("HISTORY_ARCHIVE_MONTHS", "6"))
@@ -366,7 +439,8 @@ def backup_database(**context) -> dict[str, Any]:
     """
     Task: Backup PostgreSQL database
 
-    Backup database crawl_data vào thư mục backups/postgres sau khi các tasks khác hoàn thành.
+    Backup database cấu hình bởi POSTGRES_DB vào thư mục backups/postgres sau khi các tasks khác
+    hoàn thành.
 
     Returns:
         Dict: Kết quả backup
@@ -392,8 +466,7 @@ def backup_database(**context) -> dict[str, Any]:
             logger.warning(f"⚠️  Không tìm thấy script backup tại: {script_path}")
             logger.info("💡 Sử dụng pg_dump trực tiếp...")
 
-            # Fallback: sử dụng pg_dump trực tiếp
-            container_name = "tiki-data-pipeline-postgres-1"
+            # Use pg_dump directly (available in the Airflow container via postgresql-client)
             # Thử nhiều đường dẫn backup - ưu tiên /opt/airflow/data/backups (có quyền ghi)
             backup_dirs = [
                 Path(
@@ -420,35 +493,41 @@ def backup_database(**context) -> dict[str, Any]:
                 logger.error("❌ Không tìm thấy thư mục backup có thể ghi")
                 return {"status": "failed", "reason": "No writable backup directory"}
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = backup_dir / f"crawl_data_{timestamp}.sql"  # Đổi .dump -> .sql
+            db_settings = get_pipeline_settings(use_airflow=False).database
+            postgres_user = db_settings.user
+            postgres_password = db_settings.password
+            db_name = db_settings.database
 
-            # Lấy thông tin từ environment variables
-            postgres_user = os.getenv("POSTGRES_USER", "airflow_user")
-            postgres_password = os.getenv("POSTGRES_PASSWORD", "")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = backup_dir / f"{db_name}_{timestamp}.sql"  # Đổi .dump -> .sql
 
             if not postgres_password:
                 logger.warning("⚠️  Không tìm thấy POSTGRES_PASSWORD trong environment")
                 return {"status": "skipped", "reason": "No password"}
 
-            logger.info("📦 Đang backup database: crawl_data...")
+            logger.info("📦 Đang backup database: %s...", db_name)
             logger.info(f"   File: {backup_file}")
 
-            # Chạy pg_dump trong container - dùng plain SQL format
+            postgres_host = db_settings.host
+            postgres_port = str(db_settings.port)
+
+            # Run pg_dump directly (postgresql-client is installed in the Airflow image)
             cmd = [
-                "docker",
-                "exec",
-                "-e",
-                f"PGPASSWORD={postgres_password}",
-                container_name,
                 "pg_dump",
+                "-h",
+                postgres_host,
+                "-p",
+                postgres_port,
                 "-U",
                 postgres_user,
                 "--format=plain",  # Plain SQL format - dễ restore, tương thích
                 "--no-owner",  # Không dump owner info
                 "--no-acl",  # Không dump access privileges
-                os.getenv("POSTGRES_DB", "tiki"),
+                db_name,
             ]
+
+            env = os.environ.copy()
+            env["PGPASSWORD"] = postgres_password
 
             try:
                 with open(backup_file, "wb") as f:
@@ -458,6 +537,7 @@ def backup_database(**context) -> dict[str, Any]:
                         stderr=subprocess.PIPE,
                         check=False,
                         timeout=600,  # 10 phút timeout
+                        env=env,
                     )
 
                 if result.returncode == 0:
@@ -491,7 +571,7 @@ def backup_database(**context) -> dict[str, Any]:
             # Sử dụng script backup (dùng format sql để tránh vấn đề version dump)
             logger.info(f"📦 Đang backup database bằng script: {script_path}")
 
-            db_name = os.getenv("POSTGRES_DB", "tiki")
+            db_name = get_pipeline_settings(use_airflow=False).database.database
             cmd = ["python", str(script_path), "--database", db_name, "--format", "sql"]
 
             try:

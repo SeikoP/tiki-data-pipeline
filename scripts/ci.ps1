@@ -1,82 +1,79 @@
-﻿#!/usr/bin/env pwsh
-# CI/CD Pipeline Check Script
-# Checks: Code Style (Ruff), Type Safety (Mypy), Tests, Security
+#!/usr/bin/env pwsh
+# Container-based CI checks for local development.
 # Usage: ./scripts/ci.ps1
 
 $ErrorActionPreference = "Stop"
 
-# --- Colors ---
-$Green = "[32m"
-$Red = "[31m"
-$Yellow = "[33m"
-$Cyan = "[36m"
-$Reset = "[0m"
+$FailedChecks = New-Object System.Collections.Generic.List[string]
 
-function Log-Info ($msg) { Write-Host "${Cyan}[INFO] $msg${Reset}" }
-function Log-Pass ($msg) { Write-Host "${Green}[PASS] $msg${Reset}" }
-function Log-Fail ($msg) { Write-Host "${Red}[FAIL] $msg${Reset}" }
-function Log-Warn ($msg) { Write-Host "${Yellow}[WARN] $msg${Reset}" }
+function Log-Info($Message) { Write-Host "[INFO] $Message" -ForegroundColor Cyan }
+function Log-Pass($Message) { Write-Host "[PASS] $Message" -ForegroundColor Green }
+function Log-Fail($Message) { Write-Host "[FAIL] $Message" -ForegroundColor Red }
+function Log-Warn($Message) { Write-Host "[WARN] $Message" -ForegroundColor Yellow }
 
-# --- Check Environment ---
-Log-Info "Checking Development Environment..."
+function Invoke-Check {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Command
+    )
+
+    Log-Info $Name
+    try {
+        & $Command
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command exited with code $LASTEXITCODE"
+        }
+        Log-Pass $Name
+    } catch {
+        Log-Fail "$Name failed: $_"
+        $script:FailedChecks.Add($Name)
+    }
+}
+
+Log-Info "Checking local CI environment..."
 if (!(Get-Command "docker" -ErrorAction SilentlyContinue)) {
     Log-Fail "Docker is not installed or not in PATH."
     exit 1
 }
 
-# Ensure .env exists
 if (!(Test-Path ".env")) {
-    Log-Warn ".env file not found. Copying from .env.example..."
+    Log-Warn ".env not found. Copying from .env.example..."
     Copy-Item ".env.example" ".env"
 }
 
-# --- 1. Linting & Formatting (Ruff) ---
-Log-Info "1. Running Ruff (Linting & Formatting)..."
-try {
-    # Check only first, then format check
-    docker compose exec -T airflow-webserver ruff check src/ airflow/dags/ scripts/
-    if ($LASTEXITCODE -eq 0) {
-        docker compose exec -T airflow-webserver ruff format --check src/ airflow/dags/ scripts/
-    }
-    
-    if ($LASTEXITCODE -eq 0) {
-        Log-Pass "Code style is clean."
-    } else {
-        throw "Ruff failed"
-    }
-} catch {
-    Log-Fail "Ruff found issues. Try running 'ruff format .' to fix automatically."
-    # Don't exit yet, run all checks
+$runningServices = docker compose ps --services --filter "status=running"
+if ($LASTEXITCODE -ne 0 -or ($runningServices -notcontains "airflow-webserver")) {
+    Log-Fail "airflow-webserver is not running. Start the stack with 'docker compose up -d --build'."
+    exit 1
 }
 
-# --- 2. Type Checking (Mypy) ---
-Log-Info "2. Running Mypy (Type Checking)..."
-try {
+Invoke-Check "Ruff lint" {
+    docker compose exec -T airflow-webserver ruff check src/ airflow/dags/ scripts/ tests/
+}
+
+Invoke-Check "Ruff format check" {
+    docker compose exec -T airflow-webserver ruff format --check src/ airflow/dags/ scripts/ tests/
+}
+
+Invoke-Check "Mypy type check" {
     docker compose exec -T airflow-webserver mypy src/
-    if ($LASTEXITCODE -eq 0) {
-        Log-Pass "Type checking passed."
-    } else {
-        throw "Mypy failed"
-    }
-} catch {
-    Log-Fail "Mypy found type errors."
 }
 
-# --- 3. Unit Tests ---
-Log-Info "3. Running Unit Tests..."
-try {
-    # Run pytest with verbal output
-    docker compose exec -T airflow-webserver pytest tests/ -v
-    if ($LASTEXITCODE -eq 0) {
-        Log-Pass "All unit tests passed."
-    } else {
-        throw "Tests failed"
-    }
-} catch {
-    Log-Fail "Unit tests failed."
+Invoke-Check "Airflow DAG validation" {
+    docker compose exec -T airflow-webserver python scripts/ci.py validate-dags
 }
 
-# --- Summary ---
+Invoke-Check "Pytest unit suite" {
+    docker compose exec -T airflow-webserver pytest tests/ -m "not integration and not slow" -v
+}
+
 Log-Info "----------------------------------------"
-Log-Info "✅ CI PIPELINE FINISHED"
-Log-Info "----------------------------------------"
+if ($FailedChecks.Count -gt 0) {
+    Log-Fail "CI failed: $($FailedChecks -join ', ')"
+    exit 1
+}
+
+Log-Pass "CI pipeline passed."

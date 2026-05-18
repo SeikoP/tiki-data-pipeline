@@ -37,7 +37,7 @@ host = os.getenv("POSTGRES_HOST", "postgres")
 port = int(os.getenv("POSTGRES_PORT", "5432"))
 user = os.getenv("POSTGRES_USER", "airflow_user")
 password = os.getenv("POSTGRES_PASSWORD", "")
-database = os.getenv("POSTGRES_DB", "airflow")
+database = os.getenv("POSTGRES_DB", "tiki")
 
 print(f"Host: {host}, Port: {port}, User: {user}, Database: {database}")
 
@@ -61,7 +61,6 @@ EOF
 echo -e "\n=========================================="
 echo "Hoàn tất chẩn đoán"
 echo "=========================================="
-
 
 
 
