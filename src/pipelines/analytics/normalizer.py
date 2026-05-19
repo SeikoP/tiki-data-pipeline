@@ -1,4 +1,4 @@
-"""Build analysis-ready marts from the core Tiki crawl tables."""
+"""Build normalized analytics tables from the core Tiki product tables."""
 
 from __future__ import annotations
 
@@ -8,15 +8,12 @@ from collections.abc import Iterable
 from typing import Any
 
 REQUIRED_ANALYTICS_TABLES = {
+    "dim_snapshot",
     "dim_category",
     "dim_seller",
     "dim_product",
-    "fact_product_daily",
-    "fact_category_daily",
-    "fact_seller_daily",
-    "fact_price_change",
-    "fact_crawl_quality",
-    "product_analysis_ready",
+    "fact_product_snapshot",
+    "fact_price_snapshot",
 }
 
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -37,11 +34,12 @@ def _normalize_text(value: Any) -> str:
     text = "" if value is None else str(value)
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.replace("đ", "d").replace("Đ", "D")
     return text.casefold()
 
 
 def classify_category_path(category_path: Iterable[Any]) -> dict[str, Any]:
-    """Classify a category path into the graduation-project home taxonomy."""
+    """Classify a category path into stable technical taxonomy codes."""
     text = " ".join(_normalize_text(part) for part in category_path if part)
 
     market_scope = "other"
@@ -78,10 +76,10 @@ def classify_category_path(category_path: Iterable[Any]) -> dict[str, Any]:
 
     segment_rules = [
         (("dung cu nha bep", "do dung phong an", "binh dung nuoc"), "kitchen_cooking"),
-        (("nha tam", "phong tam"), "bathroom"),
         (("ve sinh", "don dep", "hut bui", "loc khong khi"), "cleaning_homecare"),
-        (("gia, moc", "cay treo", "hop dung", "luu tru"), "storage_organization"),
         (("giat", "ui", "say quan ao"), "laundry_garment"),
+        (("gia, moc", "cay treo", "hop dung", "luu tru"), "storage_organization"),
+        (("nha tam", "phong tam"), "bathroom"),
         (("may nuoc nong", "may rua chen", "quat", "tao am", "may suoi"), "home_comfort"),
         (("trang tri", "den", "chieu sang"), "decor_living"),
     ]
@@ -103,20 +101,26 @@ def classify_category_path(category_path: Iterable[Any]) -> dict[str, Any]:
 
 
 def build_schema_sql(schema_name: str) -> list[str]:
-    """Return idempotent DDL statements for analytics tables."""
+    """Return idempotent DDL statements for normalized analytics tables."""
     schema = _q(schema_name)
     return [
         f"CREATE SCHEMA IF NOT EXISTS {schema}",
+        *_drop_legacy_analytics_sql(schema),
+        f"""
+        CREATE TABLE IF NOT EXISTS {schema}."dim_snapshot" (
+            snapshot_id BIGSERIAL PRIMARY KEY,
+            snapshot_at TIMESTAMP NOT NULL,
+            source VARCHAR(50) NOT NULL DEFAULT 'core_current',
+            crawl_run_id BIGINT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (source, snapshot_at)
+        )
+        """,
         f"""
         CREATE TABLE IF NOT EXISTS {schema}."dim_category" (
             category_id VARCHAR(255) PRIMARY KEY,
-            category_name VARCHAR(500),
-            category_url TEXT,
-            level_1 VARCHAR(255),
-            level_2 VARCHAR(255),
-            level_3 VARCHAR(255),
-            level_4 VARCHAR(255),
-            level_5 VARCHAR(255),
+            category_name VARCHAR(500) NOT NULL,
+            category_path TEXT,
             root_category_name VARCHAR(255),
             market_scope VARCHAR(50) NOT NULL,
             home_segment VARCHAR(80) NOT NULL,
@@ -128,162 +132,189 @@ def build_schema_sql(schema_name: str) -> list[str]:
         f"""
         CREATE TABLE IF NOT EXISTS {schema}."dim_seller" (
             seller_id VARCHAR(255) PRIMARY KEY,
-            seller_name VARCHAR(500),
-            seller_display_name VARCHAR(500) NOT NULL,
+            seller_name VARCHAR(500) NOT NULL,
             seller_type VARCHAR(50) NOT NULL,
-            is_official BOOLEAN,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
         f"""
         CREATE TABLE IF NOT EXISTS {schema}."dim_product" (
             product_id VARCHAR(255) PRIMARY KEY,
-            product_name VARCHAR(1000),
+            product_name VARCHAR(1000) NOT NULL,
             short_name VARCHAR(255),
             brand VARCHAR(255),
-            product_url TEXT,
+            category_id VARCHAR(255) NOT NULL REFERENCES {schema}."dim_category"(category_id),
+            seller_id VARCHAR(255) NOT NULL REFERENCES {schema}."dim_seller"(seller_id),
+            product_url TEXT NOT NULL,
             image_url TEXT,
-            category_id VARCHAR(255),
-            seller_id VARCHAR(255),
-            market_scope VARCHAR(50) NOT NULL,
-            home_segment VARCHAR(80) NOT NULL,
-            is_analysis_target BOOLEAN NOT NULL,
-            exclusion_reason VARCHAR(80),
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
         f"""
-        CREATE TABLE IF NOT EXISTS {schema}."fact_product_daily" (
-            product_id VARCHAR(255) NOT NULL,
-            snapshot_date DATE NOT NULL,
-            crawl_run_id BIGINT,
-            price NUMERIC(12, 2),
+        CREATE TABLE IF NOT EXISTS {schema}."fact_product_snapshot" (
+            snapshot_id BIGINT NOT NULL REFERENCES {schema}."dim_snapshot"(snapshot_id),
+            product_id VARCHAR(255) NOT NULL REFERENCES {schema}."dim_product"(product_id),
+            category_id VARCHAR(255) NOT NULL REFERENCES {schema}."dim_category"(category_id),
+            seller_id VARCHAR(255) NOT NULL REFERENCES {schema}."dim_seller"(seller_id),
+            rating_average NUMERIC(4, 2),
+            rating_bucket VARCHAR(50) NOT NULL,
+            review_count INTEGER,
+            review_bucket VARCHAR(50) NOT NULL,
+            sales_count INTEGER,
+            sold_bucket VARCHAR(50) NOT NULL,
+            value_score NUMERIC(8, 2),
+            market_position VARCHAR(80) NOT NULL,
+            normalized_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (snapshot_id, product_id)
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS {schema}."fact_price_snapshot" (
+            snapshot_id BIGINT NOT NULL REFERENCES {schema}."dim_snapshot"(snapshot_id),
+            product_id VARCHAR(255) NOT NULL REFERENCES {schema}."dim_product"(product_id),
+            price NUMERIC(12, 2) NOT NULL,
             original_price NUMERIC(12, 2),
             discount_percent NUMERIC(7, 2),
-            price_bucket VARCHAR(50),
-            discount_bucket VARCHAR(50),
-            rating_average NUMERIC(4, 2),
-            rating_bucket VARCHAR(50),
-            review_count INTEGER,
-            review_bucket VARCHAR(50),
-            sales_count INTEGER,
-            sold_bucket VARCHAR(50),
-            seller_id VARCHAR(255),
-            category_id VARCHAR(255),
-            market_scope VARCHAR(50) NOT NULL,
-            home_segment VARCHAR(80) NOT NULL,
-            is_analysis_target BOOLEAN NOT NULL,
-            value_score NUMERIC(8, 2),
-            market_position VARCHAR(80),
-            recorded_at TIMESTAMP,
+            price_bucket VARCHAR(50) NOT NULL,
+            discount_bucket VARCHAR(50) NOT NULL,
+            normalized_at TIMESTAMP NOT NULL,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (product_id, snapshot_date)
+            PRIMARY KEY (snapshot_id, product_id)
         )
         """,
         f"""
-        CREATE TABLE IF NOT EXISTS {schema}."fact_category_daily" (
-            snapshot_date DATE NOT NULL,
-            category_id VARCHAR(255) NOT NULL,
-            market_scope VARCHAR(50) NOT NULL,
-            home_segment VARCHAR(80) NOT NULL,
-            product_count INTEGER NOT NULL,
-            avg_price NUMERIC(12, 2),
-            avg_discount_percent NUMERIC(7, 2),
-            avg_rating NUMERIC(4, 2),
-            total_reviews BIGINT,
-            total_sold BIGINT,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (snapshot_date, category_id, home_segment)
-        )
+        CREATE INDEX IF NOT EXISTS idx_fact_product_snapshot_product
+            ON {schema}."fact_product_snapshot"(product_id)
         """,
         f"""
-        CREATE TABLE IF NOT EXISTS {schema}."fact_seller_daily" (
-            snapshot_date DATE NOT NULL,
-            seller_id VARCHAR(255) NOT NULL,
-            seller_type VARCHAR(50) NOT NULL,
-            market_scope VARCHAR(50) NOT NULL,
-            home_segment VARCHAR(80) NOT NULL,
-            product_count INTEGER NOT NULL,
-            avg_price NUMERIC(12, 2),
-            avg_discount_percent NUMERIC(7, 2),
-            avg_rating NUMERIC(4, 2),
-            total_reviews BIGINT,
-            total_sold BIGINT,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (snapshot_date, seller_id, home_segment)
-        )
+        CREATE INDEX IF NOT EXISTS idx_fact_product_snapshot_category
+            ON {schema}."fact_product_snapshot"(category_id)
         """,
         f"""
-        CREATE TABLE IF NOT EXISTS {schema}."fact_price_change" (
-            product_id VARCHAR(255) NOT NULL,
-            crawl_run_id BIGINT,
-            crawled_at TIMESTAMP NOT NULL,
-            price NUMERIC(12, 2),
-            previous_price NUMERIC(12, 2),
-            price_change NUMERIC(12, 2),
-            price_change_percent NUMERIC(7, 2),
-            change_direction VARCHAR(20),
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (product_id, crawled_at)
-        )
+        CREATE INDEX IF NOT EXISTS idx_fact_product_snapshot_seller
+            ON {schema}."fact_product_snapshot"(seller_id)
         """,
         f"""
-        CREATE TABLE IF NOT EXISTS {schema}."fact_crawl_quality" (
-            crawl_run_id BIGINT PRIMARY KEY,
-            airflow_dag_id VARCHAR(255),
-            airflow_run_id VARCHAR(255),
-            started_at TIMESTAMP,
-            finished_at TIMESTAMP,
-            status VARCHAR(30),
-            total_raw_items INTEGER,
-            total_transformed_items INTEGER,
-            total_loaded_items INTEGER,
-            raw_product_count INTEGER,
-            task_count INTEGER,
-            failed_task_count INTEGER,
-            detail_product_count INTEGER,
-            avg_data_quality_score NUMERIC(6, 2),
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
+        CREATE INDEX IF NOT EXISTS idx_fact_price_snapshot_product
+            ON {schema}."fact_price_snapshot"(product_id)
         """,
+        *_build_analysis_view_sql(schema),
+    ]
+
+
+def _drop_legacy_analytics_sql(schema: str) -> list[str]:
+    schema_name = schema.strip('"')
+    return [
         f"""
-        CREATE TABLE IF NOT EXISTS {schema}."product_analysis_ready" (
-            LIKE {schema}."fact_product_daily" INCLUDING ALL
-        )
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM pg_class cls
+                JOIN pg_namespace ns ON ns.oid = cls.relnamespace
+                WHERE ns.nspname = {schema_name!r}
+                  AND cls.relname = 'product_analysis_ready'
+                  AND cls.relkind IN ('r', 'p')
+            ) THEN
+                EXECUTE 'DROP TABLE {schema}."product_analysis_ready" CASCADE';
+            ELSIF EXISTS (
+                SELECT 1
+                FROM pg_class cls
+                JOIN pg_namespace ns ON ns.oid = cls.relnamespace
+                WHERE ns.nspname = {schema_name!r}
+                  AND cls.relname = 'product_analysis_ready'
+                  AND cls.relkind = 'v'
+            ) THEN
+                EXECUTE 'DROP VIEW {schema}."product_analysis_ready" CASCADE';
+            END IF;
+        END $$;
+        """,
+        f'DROP VIEW IF EXISTS {schema}."product_analysis_ready" CASCADE',
+        f'DROP VIEW IF EXISTS {schema}."mart_crawl_quality" CASCADE',
+        f'DROP VIEW IF EXISTS {schema}."mart_seller_summary" CASCADE',
+        f'DROP VIEW IF EXISTS {schema}."mart_category_summary" CASCADE',
+        f'DROP VIEW IF EXISTS {schema}."mart_product_wide" CASCADE',
+        f'DROP VIEW IF EXISTS {schema}."mart_product_analysis_ready" CASCADE',
+        f'DROP TABLE IF EXISTS {schema}."fact_crawl_quality" CASCADE',
+        f'DROP TABLE IF EXISTS {schema}."fact_price_change" CASCADE',
+        f'DROP TABLE IF EXISTS {schema}."fact_seller_daily" CASCADE',
+        f'DROP TABLE IF EXISTS {schema}."fact_category_daily" CASCADE',
+        f'DROP TABLE IF EXISTS {schema}."fact_product_daily" CASCADE',
+        f'DROP TABLE IF EXISTS {schema}."seller_summary" CASCADE',
+        f'DROP TABLE IF EXISTS {schema}."category_summary" CASCADE',
+    ]
+
+
+def _build_analysis_view_sql(schema: str) -> list[str]:
+    return [
+        f'DROP VIEW IF EXISTS {schema}."product_analysis_ready" CASCADE',
+        f"""
+        CREATE OR REPLACE VIEW {schema}."product_analysis_ready" AS
+        SELECT
+            ss.snapshot_id,
+            ss.snapshot_at,
+            p.product_id,
+            p.product_name,
+            p.short_name,
+            p.brand,
+            p.category_id,
+            c.category_name,
+            c.category_path,
+            c.root_category_name,
+            c.market_scope,
+            c.home_segment,
+            p.seller_id,
+            s.seller_name,
+            s.seller_type,
+            price.price,
+            price.original_price,
+            price.discount_percent,
+            price.price_bucket,
+            price.discount_bucket,
+            f.rating_average,
+            f.rating_bucket,
+            f.review_count,
+            f.review_bucket,
+            f.sales_count,
+            f.sold_bucket,
+            f.value_score,
+            f.market_position,
+            p.product_url,
+            p.image_url,
+            f.normalized_at
+        FROM {schema}."fact_product_snapshot" f
+        JOIN {schema}."dim_snapshot" ss ON ss.snapshot_id = f.snapshot_id
+        JOIN {schema}."dim_product" p ON p.product_id = f.product_id
+        JOIN {schema}."dim_category" c ON c.category_id = f.category_id
+        JOIN {schema}."dim_seller" s ON s.seller_id = f.seller_id
+        JOIN {schema}."fact_price_snapshot" price
+            ON price.snapshot_id = f.snapshot_id
+            AND price.product_id = f.product_id
         """,
     ]
 
 
-def _execute_many(cursor: Any, statements: Iterable[str]) -> None:
-    for statement in statements:
-        cursor.execute(statement)
-
-
 def ensure_analytics_schema(cursor: Any, schema_name: str) -> dict[str, Any]:
-    """Ensure analytics schema and tables exist."""
+    """Create normalized analytics tables and presentation view."""
     schema = validate_schema_name(schema_name)
     _execute_many(cursor, build_schema_sql(schema))
     return {"schema": schema, "tables": sorted(REQUIRED_ANALYTICS_TABLES)}
 
 
 def refresh_analytics_mart(cursor: Any, schema_name: str) -> dict[str, Any]:
-    """Refresh the full analytics mart and return row-count stats."""
+    """Refresh dimensions, snapshot metadata, and snapshot facts."""
     ensure_analytics_schema(cursor, schema_name)
-
     steps = {
         "dimensions": refresh_dimensions(cursor, schema_name),
-        "fact_product_daily": refresh_product_daily_fact(cursor, schema_name),
-        "fact_category_daily": refresh_category_daily_fact(cursor, schema_name),
-        "fact_seller_daily": refresh_seller_daily_fact(cursor, schema_name),
-        "fact_price_change": refresh_price_change_fact(cursor, schema_name),
-        "fact_crawl_quality": refresh_crawl_quality_fact(cursor, schema_name),
-        "product_analysis_ready": refresh_product_analysis_ready(cursor, schema_name),
+        "dim_snapshot": refresh_snapshot(cursor, schema_name),
+        "fact_product_snapshot": refresh_product_snapshot_fact(cursor, schema_name),
+        "fact_price_snapshot": refresh_price_snapshot_fact(cursor, schema_name),
     }
     return {"schema": validate_schema_name(schema_name), "steps": steps}
 
 
 def refresh_dimensions(cursor: Any, schema_name: str) -> dict[str, int]:
-    """Refresh category, seller, and product dimensions."""
     schema = _q(schema_name)
     ensure_analytics_schema(cursor, schema_name)
     return {
@@ -293,160 +324,199 @@ def refresh_dimensions(cursor: Any, schema_name: str) -> dict[str, int]:
     }
 
 
-def refresh_product_daily_fact(cursor: Any, schema_name: str) -> dict[str, int]:
-    """Refresh product daily fact rows."""
+def refresh_snapshot(cursor: Any, schema_name: str) -> dict[str, int]:
     schema = _q(schema_name)
     ensure_analytics_schema(cursor, schema_name)
-    return {"fact_product_daily": _refresh_fact_product_daily(cursor, schema)}
+    return {"dim_snapshot": _refresh_dim_snapshot(cursor, schema)}
 
 
-def refresh_category_daily_fact(cursor: Any, schema_name: str) -> dict[str, int]:
-    """Refresh category daily aggregate fact rows."""
+def refresh_product_snapshot_fact(cursor: Any, schema_name: str) -> dict[str, int]:
     schema = _q(schema_name)
     ensure_analytics_schema(cursor, schema_name)
-    return {"fact_category_daily": _refresh_fact_category_daily(cursor, schema)}
+    return {"fact_product_snapshot": _refresh_fact_product_snapshot(cursor, schema)}
 
 
-def refresh_seller_daily_fact(cursor: Any, schema_name: str) -> dict[str, int]:
-    """Refresh seller daily aggregate fact rows."""
+def refresh_price_snapshot_fact(cursor: Any, schema_name: str) -> dict[str, int]:
     schema = _q(schema_name)
     ensure_analytics_schema(cursor, schema_name)
-    return {"fact_seller_daily": _refresh_fact_seller_daily(cursor, schema)}
-
-
-def refresh_price_change_fact(cursor: Any, schema_name: str) -> dict[str, int]:
-    """Refresh product price-change events."""
-    schema = _q(schema_name)
-    ensure_analytics_schema(cursor, schema_name)
-    return {"fact_price_change": _refresh_fact_price_change(cursor, schema)}
-
-
-def refresh_crawl_quality_fact(cursor: Any, schema_name: str) -> dict[str, int]:
-    """Refresh crawl-run quality metrics."""
-    schema = _q(schema_name)
-    ensure_analytics_schema(cursor, schema_name)
-    return {"fact_crawl_quality": _refresh_fact_crawl_quality(cursor, schema)}
+    return {"fact_price_snapshot": _refresh_fact_price_snapshot(cursor, schema)}
 
 
 def refresh_product_analysis_ready(cursor: Any, schema_name: str) -> dict[str, int]:
-    """Refresh the filtered product table used by the main Power BI dashboard."""
-    schema = _q(schema_name)
-    ensure_analytics_schema(cursor, schema_name)
-    return {"product_analysis_ready": _refresh_product_analysis_ready(cursor, schema)}
+    """Compatibility wrapper: refresh every table behind the analysis view."""
+    result = refresh_analytics_mart(cursor, schema_name)
+    fact_rows = result["steps"]["fact_product_snapshot"]["fact_product_snapshot"]
+    return {"product_analysis_ready": fact_rows}
+
+
+def _execute_many(cursor: Any, statements: Iterable[str]) -> None:
+    for statement in statements:
+        cursor.execute(statement)
+
+
+def _category_classification_sql() -> str:
+    return """
+        CASE
+            WHEN category_text LIKE '%nhạc cụ%'
+                OR category_text LIKE '%nhac cu%'
+                OR category_text LIKE '%đồ thờ%'
+                OR category_text LIKE '%do tho%'
+                OR category_text LIKE '%sửa chữa nhà cửa%'
+                OR category_text LIKE '%sua chua nha cua%'
+                OR category_text LIKE '%nội thất%'
+                OR category_text LIKE '%noi that%'
+                OR category_text LIKE '%máy giặt%'
+                OR category_text LIKE '%may giat%'
+                OR category_text LIKE '%tủ lạnh%'
+                OR category_text LIKE '%tu lanh%'
+                OR category_text LIKE '%máy lạnh%'
+                OR category_text LIKE '%may lanh%'
+                OR category_text LIKE '%máy điều hòa%'
+                OR category_text LIKE '%may dieu hoa%'
+            THEN 'Ngoài scope'
+            WHEN category_text LIKE '%dụng cụ nhà bếp%'
+                OR category_text LIKE '%dung cu nha bep%'
+                OR category_text LIKE '%đồ dùng phòng ăn%'
+                OR category_text LIKE '%do dung phong an%'
+                OR category_text LIKE '%bình đựng nước%'
+                OR category_text LIKE '%binh dung nuoc%'
+            THEN 'Bếp'
+            WHEN category_text LIKE '%vệ sinh%'
+                OR category_text LIKE '%ve sinh%'
+                OR category_text LIKE '%dọn dẹp%'
+                OR category_text LIKE '%don dep%'
+                OR category_text LIKE '%hút bụi%'
+                OR category_text LIKE '%hut bui%'
+                OR category_text LIKE '%lọc không khí%'
+                OR category_text LIKE '%loc khong khi%'
+            THEN 'Vệ sinh'
+            WHEN category_text LIKE '%giặt%'
+                OR category_text LIKE '%giat%'
+                OR category_text LIKE '%ủi%'
+                OR category_text LIKE '% ui %'
+                OR category_text LIKE '%sấy quần áo%'
+                OR category_text LIKE '%say quan ao%'
+            THEN 'Giặt ủi'
+            WHEN category_text LIKE '%giá, móc%'
+                OR category_text LIKE '%gia, moc%'
+                OR category_text LIKE '%cây treo%'
+                OR category_text LIKE '%cay treo%'
+                OR category_text LIKE '%hộp đựng%'
+                OR category_text LIKE '%hop dung%'
+                OR category_text LIKE '%lưu trữ%'
+                OR category_text LIKE '%luu tru%'
+            THEN 'Lưu trữ'
+            WHEN category_text LIKE '%nhà tắm%'
+                OR category_text LIKE '%nha tam%'
+                OR category_text LIKE '%phòng tắm%'
+                OR category_text LIKE '%phong tam%'
+            THEN 'Nhà tắm'
+            WHEN category_text LIKE '%máy nước nóng%'
+                OR category_text LIKE '%may nuoc nong%'
+                OR category_text LIKE '%máy rửa chén%'
+                OR category_text LIKE '%may rua chen%'
+                OR category_text LIKE '%quạt%'
+                OR category_text LIKE '%quat%'
+                OR category_text LIKE '%tạo ẩm%'
+                OR category_text LIKE '%tao am%'
+                OR category_text LIKE '%máy sưởi%'
+                OR category_text LIKE '%may suoi%'
+            THEN 'Tiện nghi'
+            WHEN category_text LIKE '%trang trí%'
+                OR category_text LIKE '%trang tri%'
+                OR category_text LIKE '%đèn%'
+                OR category_text LIKE '%den%'
+                OR category_text LIKE '%chiếu sáng%'
+                OR category_text LIKE '%chieu sang%'
+            THEN 'Trang trí'
+            ELSE 'Ngoài scope'
+        END
+    """
 
 
 def _refresh_dim_category(cursor: Any, schema: str) -> int:
     cursor.execute(
         f"""
         INSERT INTO {schema}."dim_category" (
-            category_id, category_name, category_url, level_1, level_2, level_3,
-            level_4, level_5, root_category_name, market_scope, home_segment,
-            is_analysis_target, exclusion_reason, updated_at
+            category_id, category_name, category_path, root_category_name,
+            market_scope, home_segment, is_analysis_target, exclusion_reason, updated_at
+        )
+        WITH source AS (
+            SELECT
+                COALESCE(NULLIF(category_id, ''), NULLIF(tiki_category_id, '')) AS category_id,
+                NULLIF(name, '') AS category_name,
+                concat_ws(
+                    ' > ',
+                    NULLIF(level_1, ''),
+                    NULLIF(level_2, ''),
+                    NULLIF(level_3, ''),
+                    NULLIF(level_4, ''),
+                    NULLIF(level_5, '')
+                ) AS category_path,
+                NULLIF(root_category_name, '') AS root_category_name,
+                lower(
+                    concat_ws(
+                        ' ',
+                        level_1, level_2, level_3, level_4, level_5, root_category_name, name
+                    )
+                ) AS category_text
+            FROM categories
+        ),
+        classified AS (
+            SELECT
+                *,
+                CASE
+                    WHEN category_text LIKE '%nhà cửa đời sống%'
+                        OR category_text LIKE '%nha cua doi song%'
+                        OR category_text LIKE '%nhà bếp%'
+                        OR category_text LIKE '%nha bep%'
+                        OR category_text LIKE '%phòng ăn%'
+                        OR category_text LIKE '%phong an%'
+                    THEN 'Nhà cửa'
+                    WHEN category_text LIKE '%điện gia dụng%'
+                        OR category_text LIKE '%dien gia dung%'
+                        OR category_text LIKE '%điện tử điện lạnh%'
+                        OR category_text LIKE '%dien tu dien lanh%'
+                    THEN 'Điện GD'
+                    ELSE 'Khác'
+                END AS market_scope,
+                {_category_classification_sql()} AS home_segment,
+                CASE
+                    WHEN category_text LIKE '%nhạc cụ%'
+                        OR category_text LIKE '%nhac cu%' THEN 'Nhạc cụ'
+                    WHEN category_text LIKE '%đồ thờ%'
+                        OR category_text LIKE '%do tho%' THEN 'Đồ thờ'
+                    WHEN category_text LIKE '%sửa chữa nhà cửa%'
+                        OR category_text LIKE '%sua chua nha cua%' THEN 'Sửa chữa'
+                    WHEN category_text LIKE '%nội thất%'
+                        OR category_text LIKE '%noi that%' THEN 'Nội thất lớn'
+                    WHEN category_text LIKE '%máy giặt%'
+                        OR category_text LIKE '%may giat%'
+                        OR category_text LIKE '%tủ lạnh%'
+                        OR category_text LIKE '%tu lanh%'
+                        OR category_text LIKE '%máy lạnh%'
+                        OR category_text LIKE '%may lanh%'
+                        OR category_text LIKE '%máy điều hòa%'
+                        OR category_text LIKE '%may dieu hoa%' THEN 'Điện máy lớn'
+                    ELSE NULL
+                END AS exclusion_reason
+            FROM source
+            WHERE category_id IS NOT NULL AND category_name IS NOT NULL
         )
         SELECT
-            COALESCE(category_id, tiki_category_id) AS category_id,
-            name,
-            url,
-            level_1,
-            level_2,
-            level_3,
-            level_4,
-            level_5,
+            category_id,
+            category_name,
+            NULLIF(category_path, ''),
             root_category_name,
-            CASE
-                WHEN lower(concat_ws(' ', level_1, root_category_name, name))
-                    LIKE '%dien tu dien lanh%' THEN 'home_appliance'
-                WHEN lower(concat_ws(' ', level_1, root_category_name, name))
-                    LIKE '%dien gia dung%' THEN 'home_appliance'
-                WHEN lower(concat_ws(' ', level_1, root_category_name, name))
-                    LIKE '%nha cua doi song%' THEN 'home_living'
-                WHEN lower(concat_ws(' ', level_1, root_category_name, name))
-                    LIKE '%nhà cửa%' THEN 'home_living'
-                ELSE 'other'
-            END AS market_scope,
-            CASE
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%nhạc cụ%'
-                    THEN 'excluded_other'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%đồ thờ%'
-                    THEN 'excluded_other'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%sửa chữa%'
-                    THEN 'excluded_other'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%nội thất%'
-                    THEN 'excluded_other'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%máy giặt%'
-                    THEN 'excluded_other'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%tủ lạnh%'
-                    THEN 'excluded_other'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%máy lạnh%'
-                    THEN 'excluded_other'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%dụng cụ nhà bếp%'
-                    THEN 'kitchen_cooking'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%phòng ăn%'
-                    THEN 'kitchen_cooking'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%nhà tắm%'
-                    THEN 'bathroom'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%vệ sinh%'
-                    THEN 'cleaning_homecare'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%giá, móc%'
-                    THEN 'storage_organization'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%đèn%'
-                    THEN 'decor_living'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%trang trí%'
-                    THEN 'decor_living'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%máy nước nóng%'
-                    THEN 'home_comfort'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%máy rửa chén%'
-                    THEN 'home_comfort'
-                ELSE 'excluded_other'
-            END AS home_segment,
-            CASE
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE ANY (
-                    ARRAY[
-                        '%nhạc cụ%', '%đồ thờ%', '%sửa chữa%', '%nội thất%',
-                        '%máy giặt%', '%tủ lạnh%', '%máy lạnh%'
-                    ]
-                ) THEN FALSE
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE ANY (
-                    ARRAY[
-                        '%dụng cụ nhà bếp%', '%phòng ăn%', '%nhà tắm%', '%vệ sinh%',
-                        '%giá, móc%', '%đèn%', '%trang trí%', '%máy nước nóng%',
-                        '%máy rửa chén%'
-                    ]
-                ) THEN TRUE
-                ELSE FALSE
-            END AS is_analysis_target,
-            CASE
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%nhạc cụ%'
-                    THEN 'musical_instrument'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%đồ thờ%'
-                    THEN 'religious_item'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%sửa chữa%'
-                    THEN 'construction_repair'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%nội thất%'
-                    THEN 'large_furniture'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE ANY (
-                    ARRAY['%máy giặt%', '%tủ lạnh%', '%máy lạnh%']
-                ) THEN 'large_appliance'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE ANY (
-                    ARRAY[
-                        '%dụng cụ nhà bếp%', '%phòng ăn%', '%nhà tắm%', '%vệ sinh%',
-                        '%giá, móc%', '%đèn%', '%trang trí%', '%máy nước nóng%',
-                        '%máy rửa chén%'
-                    ]
-                ) THEN NULL
-                ELSE 'uncategorized'
-            END AS exclusion_reason,
+            market_scope,
+            home_segment,
+            home_segment <> 'Ngoài scope',
+            CASE WHEN home_segment = 'Ngoài scope' THEN COALESCE(exclusion_reason, 'Chưa phân loại') END,
             CURRENT_TIMESTAMP
-        FROM categories
-        WHERE COALESCE(category_id, tiki_category_id) IS NOT NULL
+        FROM classified
         ON CONFLICT (category_id) DO UPDATE SET
             category_name = EXCLUDED.category_name,
-            category_url = EXCLUDED.category_url,
-            level_1 = EXCLUDED.level_1,
-            level_2 = EXCLUDED.level_2,
-            level_3 = EXCLUDED.level_3,
-            level_4 = EXCLUDED.level_4,
-            level_5 = EXCLUDED.level_5,
+            category_path = EXCLUDED.category_path,
             root_category_name = EXCLUDED.root_category_name,
             market_scope = EXCLUDED.market_scope,
             home_segment = EXCLUDED.home_segment,
@@ -462,26 +532,38 @@ def _refresh_dim_seller(cursor: Any, schema: str) -> int:
     cursor.execute(
         f"""
         INSERT INTO {schema}."dim_seller" (
-            seller_id, seller_name, seller_display_name, seller_type, is_official, updated_at
+            seller_id, seller_name, seller_type, updated_at
         )
-        SELECT
-            COALESCE(tiki_seller_id, id::text) AS seller_id,
-            name,
-            COALESCE(NULLIF(name, ''), 'Unknown Seller') AS seller_display_name,
-            CASE
-                WHEN is_official IS TRUE THEN 'official'
-                WHEN COALESCE(tiki_seller_id, name) IS NULL THEN 'unknown'
-                ELSE 'marketplace'
-            END AS seller_type,
-            is_official,
-            CURRENT_TIMESTAMP
-        FROM sellers
-        WHERE COALESCE(tiki_seller_id, id::text) IS NOT NULL
+        SELECT seller_id, seller_name, seller_type, CURRENT_TIMESTAMP
+        FROM (
+            SELECT DISTINCT ON (seller_id)
+                seller_id,
+                seller_name,
+                seller_type
+            FROM (
+                SELECT
+                    NULLIF(tiki_seller_id, '') AS seller_id,
+                    NULLIF(name, '') AS seller_name,
+                    CASE WHEN is_official IS TRUE THEN 'Official' ELSE 'Marketplace' END
+                        AS seller_type,
+                    1 AS source_priority
+                FROM sellers
+                UNION ALL
+                SELECT
+                    NULLIF(seller_id, '') AS seller_id,
+                    NULLIF(seller_name, '') AS seller_name,
+                    CASE WHEN seller_is_official IS TRUE THEN 'Official' ELSE 'Marketplace' END
+                        AS seller_type,
+                    2 AS source_priority
+                FROM products
+            ) candidates
+            WHERE seller_id IS NOT NULL
+              AND seller_name IS NOT NULL
+            ORDER BY seller_id, source_priority
+        ) source
         ON CONFLICT (seller_id) DO UPDATE SET
             seller_name = EXCLUDED.seller_name,
-            seller_display_name = EXCLUDED.seller_display_name,
             seller_type = EXCLUDED.seller_type,
-            is_official = EXCLUDED.is_official,
             updated_at = CURRENT_TIMESTAMP
         """
     )
@@ -492,331 +574,239 @@ def _refresh_dim_product(cursor: Any, schema: str) -> int:
     cursor.execute(
         f"""
         INSERT INTO {schema}."dim_product" (
-            product_id, product_name, short_name, brand, product_url, image_url,
-            category_id, seller_id, market_scope, home_segment, is_analysis_target,
-            exclusion_reason, updated_at
+            product_id, product_name, short_name, brand, category_id, seller_id,
+            product_url, image_url, updated_at
+        )
+        WITH product_source AS (
+            SELECT
+                p.product_id,
+                NULLIF(p.name, '') AS product_name,
+                NULLIF(p.short_name, '') AS short_name,
+                NULLIF(p.brand, '') AS brand,
+                COALESCE(NULLIF(p.category_id, ''), NULLIF(c.category_id, '')) AS category_id,
+                COALESCE(NULLIF(p.seller_id, ''), NULLIF(s.tiki_seller_id, '')) AS seller_id,
+                NULLIF(p.url, '') AS product_url,
+                p.image_url
+            FROM products p
+            LEFT JOIN LATERAL (
+                SELECT c.*
+                FROM categories c
+                WHERE c.category_id = p.category_id
+                   OR c.tiki_category_id = p.category_id
+                ORDER BY c.id
+                LIMIT 1
+            ) c ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT s.*
+                FROM sellers s
+                WHERE s.id = p.seller_pk
+                   OR s.tiki_seller_id = p.seller_id
+                ORDER BY s.id
+                LIMIT 1
+            ) s ON TRUE
         )
         SELECT
-            p.product_id,
-            p.name,
-            p.short_name,
-            p.brand,
-            p.url,
-            p.image_url,
-            p.category_id,
-            COALESCE(p.seller_id, p.seller_pk::text),
-            COALESCE(dc.market_scope, 'other'),
-            COALESCE(dc.home_segment, 'excluded_other'),
-            COALESCE(dc.is_analysis_target, FALSE),
-            COALESCE(dc.exclusion_reason, 'uncategorized'),
+            ps.product_id,
+            ps.product_name,
+            ps.short_name,
+            ps.brand,
+            ps.category_id,
+            ps.seller_id,
+            ps.product_url,
+            ps.image_url,
             CURRENT_TIMESTAMP
-        FROM products p
-        LEFT JOIN {schema}."dim_category" dc ON dc.category_id = p.category_id
-        WHERE p.product_id IS NOT NULL
+        FROM product_source ps
+        JOIN {schema}."dim_category" c
+            ON c.category_id = ps.category_id
+            AND c.is_analysis_target IS TRUE
+        JOIN {schema}."dim_seller" s ON s.seller_id = ps.seller_id
+        WHERE ps.product_id IS NOT NULL
+          AND ps.product_name IS NOT NULL
+          AND ps.product_url IS NOT NULL
         ON CONFLICT (product_id) DO UPDATE SET
             product_name = EXCLUDED.product_name,
             short_name = EXCLUDED.short_name,
             brand = EXCLUDED.brand,
-            product_url = EXCLUDED.product_url,
-            image_url = EXCLUDED.image_url,
             category_id = EXCLUDED.category_id,
             seller_id = EXCLUDED.seller_id,
-            market_scope = EXCLUDED.market_scope,
-            home_segment = EXCLUDED.home_segment,
-            is_analysis_target = EXCLUDED.is_analysis_target,
-            exclusion_reason = EXCLUDED.exclusion_reason,
+            product_url = EXCLUDED.product_url,
+            image_url = EXCLUDED.image_url,
             updated_at = CURRENT_TIMESTAMP
         """
     )
     return cursor.rowcount
 
 
-def _refresh_fact_product_daily(cursor: Any, schema: str) -> int:
+def _refresh_dim_snapshot(cursor: Any, schema: str) -> int:
     cursor.execute(
         f"""
-        INSERT INTO {schema}."fact_product_daily" (
-            product_id, snapshot_date, crawl_run_id, price, original_price,
-            discount_percent, price_bucket, discount_bucket, rating_average,
-            rating_bucket, review_count, review_bucket, sales_count, sold_bucket,
-            seller_id, category_id, market_scope, home_segment, is_analysis_target,
-            value_score, market_position, recorded_at, updated_at
+        INSERT INTO {schema}."dim_snapshot" (snapshot_at, source, crawl_run_id)
+        SELECT
+            COALESCE(MAX(COALESCE(p.crawled_at, p.updated_at)), CURRENT_TIMESTAMP),
+            'core_current',
+            NULL
+        FROM products p
+        JOIN {schema}."dim_product" dp ON dp.product_id = p.product_id
+        ON CONFLICT (source, snapshot_at) DO UPDATE SET
+            created_at = {schema}."dim_snapshot".created_at
+        """
+    )
+    return cursor.rowcount
+
+
+def _current_snapshot_cte(schema: str) -> str:
+    return f"""
+        current_snapshot AS (
+            SELECT snapshot_id
+            FROM {schema}."dim_snapshot"
+            WHERE source = 'core_current'
+            ORDER BY snapshot_at DESC, snapshot_id DESC
+            LIMIT 1
         )
-        SELECT DISTINCT ON (p.product_id, COALESCE(pp.recorded_at, p.crawled_at)::date)
-            p.product_id,
-            COALESCE(pp.recorded_at, p.crawled_at)::date AS snapshot_date,
-            pp.crawl_run_id,
-            CASE WHEN COALESCE(pp.price, p.price) > 0 THEN COALESCE(pp.price, p.price) END,
-            CASE
-                WHEN COALESCE(pp.original_price, p.original_price) >= COALESCE(pp.price, p.price)
-                    THEN COALESCE(pp.original_price, p.original_price)
-                ELSE NULL
-            END,
-            CASE
-                WHEN COALESCE(pp.original_price, p.original_price) > 0
-                    AND COALESCE(pp.original_price, p.original_price) >= COALESCE(pp.price, p.price)
-                    THEN ROUND(
-                        (
-                            COALESCE(pp.original_price, p.original_price)
-                            - COALESCE(pp.price, p.price)
-                        ) / COALESCE(pp.original_price, p.original_price) * 100,
-                        2
-                    )
-                ELSE NULL
-            END AS discount_percent,
-            CASE
-                WHEN COALESCE(pp.price, p.price) IS NULL THEN 'price_unknown'
-                WHEN COALESCE(pp.price, p.price) < 100000 THEN 'low'
-                WHEN COALESCE(pp.price, p.price) < 500000 THEN 'mid'
-                WHEN COALESCE(pp.price, p.price) < 2000000 THEN 'high'
-                ELSE 'premium'
-            END AS price_bucket,
-            CASE
-                WHEN COALESCE(pp.discount_rate, p.discount_percent) IS NULL THEN 'discount_unknown'
-                WHEN COALESCE(pp.discount_rate, p.discount_percent) < 10 THEN 'low_discount'
-                WHEN COALESCE(pp.discount_rate, p.discount_percent) < 30 THEN 'mid_discount'
-                ELSE 'high_discount'
-            END AS discount_bucket,
-            COALESCE(pm.rating_average, p.rating_average),
-            CASE
-                WHEN COALESCE(pm.rating_average, p.rating_average) IS NULL THEN 'rating_unknown'
-                WHEN COALESCE(pm.rating_average, p.rating_average) < 3.5 THEN 'rating_low'
-                WHEN COALESCE(pm.rating_average, p.rating_average) < 4.5 THEN 'rating_mid'
-                ELSE 'rating_high'
-            END,
-            COALESCE(pm.review_count, p.review_count),
-            CASE
-                WHEN COALESCE(pm.review_count, p.review_count) IS NULL THEN 'review_unknown'
-                WHEN COALESCE(pm.review_count, p.review_count) < 10 THEN 'no_or_low_review'
-                WHEN COALESCE(pm.review_count, p.review_count) < 100 THEN 'moderate_review'
-                ELSE 'high_review'
-            END,
-            COALESCE(pm.quantity_sold, p.sales_count),
-            CASE
-                WHEN COALESCE(pm.quantity_sold, p.sales_count) IS NULL THEN 'sold_unknown'
-                WHEN COALESCE(pm.quantity_sold, p.sales_count) < 10 THEN 'low_sold'
-                WHEN COALESCE(pm.quantity_sold, p.sales_count) < 100 THEN 'moderate_sold'
-                ELSE 'high_sold'
-            END,
-            dp.seller_id,
+    """
+
+
+def _refresh_fact_product_snapshot(cursor: Any, schema: str) -> int:
+    cursor.execute(
+        f"""
+        WITH {_current_snapshot_cte(schema)}
+        DELETE FROM {schema}."fact_product_snapshot" f
+        USING current_snapshot cs
+        WHERE f.snapshot_id = cs.snapshot_id
+        """
+    )
+    cursor.execute(
+        f"""
+        INSERT INTO {schema}."fact_product_snapshot" (
+            snapshot_id, product_id, category_id, seller_id,
+            rating_average, rating_bucket, review_count, review_bucket,
+            sales_count, sold_bucket, value_score, market_position,
+            normalized_at, updated_at
+        )
+        WITH {_current_snapshot_cte(schema)}
+        SELECT
+            cs.snapshot_id,
+            dp.product_id,
             dp.category_id,
-            dp.market_scope,
-            dp.home_segment,
-            dp.is_analysis_target,
-            (
-                COALESCE(COALESCE(pm.rating_average, p.rating_average), 0) * 20
-                + LEAST(COALESCE(pm.review_count, p.review_count, 0), 1000) / 20.0
-                + COALESCE(pp.discount_rate, p.discount_percent, 0) / 2.0
-            ) AS value_score,
+            dp.seller_id,
+            p.rating_average,
             CASE
-                WHEN COALESCE(pp.price, p.price) < 500000
-                    AND COALESCE(pm.review_count, p.review_count, 0) >= 100 THEN 'cheap_popular'
-                WHEN COALESCE(pp.price, p.price) >= 500000
-                    AND COALESCE(pm.rating_average, p.rating_average, 0) >= 4.5
-                    THEN 'premium_quality'
-                WHEN COALESCE(pp.discount_rate, p.discount_percent, 0) >= 30 THEN 'high_discount'
-                WHEN COALESCE(pm.rating_average, p.rating_average, 5) < 3.5
-                    OR COALESCE(pm.review_count, p.review_count, 0) < 10 THEN 'low_trust'
-                ELSE 'normal'
-            END,
-            COALESCE(pp.recorded_at, p.crawled_at),
+                WHEN p.rating_average IS NULL THEN 'Thiếu rating'
+                WHEN p.rating_average = 0 THEN 'Rating 0'
+                WHEN p.rating_average < 3.5 THEN 'Đánh giá thấp'
+                WHEN p.rating_average < 4.5 THEN 'Đánh giá TB'
+                ELSE 'Đánh giá cao'
+            END AS rating_bucket,
+            p.review_count,
+            CASE
+                WHEN p.review_count IS NULL THEN 'Thiếu review'
+                WHEN p.review_count = 0 THEN '0 review'
+                WHEN p.review_count < 10 THEN 'Ít review'
+                WHEN p.review_count < 100 THEN 'Review TB'
+                ELSE 'Nhiều review'
+            END AS review_bucket,
+            p.sales_count,
+            CASE
+                WHEN p.sales_count IS NULL THEN 'Thiếu sold'
+                WHEN p.sales_count = 0 THEN '0 sold'
+                WHEN p.sales_count < 10 THEN 'Sold thấp'
+                WHEN p.sales_count < 100 THEN 'Sold TB'
+                ELSE 'Sold cao'
+            END AS sold_bucket,
+            CASE
+                WHEN p.rating_average IS NULL OR p.review_count IS NULL THEN NULL
+                ELSE ROUND(
+                    p.rating_average * 20
+                    + LEAST(GREATEST(p.review_count, 0), 1000) / 20.0
+                    + COALESCE(p.discount_percent, 0) / 2.0,
+                    2
+                )
+            END AS value_score,
+            CASE
+                WHEN p.rating_average IS NULL OR p.review_count IS NULL THEN 'Thiếu tín hiệu'
+                WHEN p.price < 500000 AND p.review_count >= 100 THEN 'Giá tốt'
+                WHEN p.price >= 500000 AND p.rating_average >= 4.5 THEN 'Cao cấp tốt'
+                WHEN p.discount_percent >= 30 THEN 'KM mạnh'
+                WHEN p.rating_average < 3.5 OR p.review_count < 10 THEN 'Tin cậy thấp'
+                ELSE 'Bình thường'
+            END AS market_position,
+            COALESCE(p.crawled_at, p.updated_at, CURRENT_TIMESTAMP),
             CURRENT_TIMESTAMP
         FROM products p
         JOIN {schema}."dim_product" dp ON dp.product_id = p.product_id
-        LEFT JOIN product_prices pp ON pp.product_id = p.id
-        LEFT JOIN product_metrics pm
-            ON pm.product_id = p.id
-            AND pm.crawl_run_id IS NOT DISTINCT FROM pp.crawl_run_id
-        WHERE p.product_id IS NOT NULL
-          AND COALESCE(pp.recorded_at, p.crawled_at) IS NOT NULL
-        ORDER BY
-            p.product_id,
-            COALESCE(pp.recorded_at, p.crawled_at)::date,
-            COALESCE(pp.recorded_at, p.crawled_at) DESC
-        ON CONFLICT (product_id, snapshot_date) DO UPDATE SET
-            crawl_run_id = EXCLUDED.crawl_run_id,
-            price = EXCLUDED.price,
-            original_price = EXCLUDED.original_price,
-            discount_percent = EXCLUDED.discount_percent,
-            price_bucket = EXCLUDED.price_bucket,
-            discount_bucket = EXCLUDED.discount_bucket,
+        CROSS JOIN current_snapshot cs
+        WHERE p.price > 0
+        ON CONFLICT (snapshot_id, product_id) DO UPDATE SET
+            category_id = EXCLUDED.category_id,
+            seller_id = EXCLUDED.seller_id,
             rating_average = EXCLUDED.rating_average,
             rating_bucket = EXCLUDED.rating_bucket,
             review_count = EXCLUDED.review_count,
             review_bucket = EXCLUDED.review_bucket,
             sales_count = EXCLUDED.sales_count,
             sold_bucket = EXCLUDED.sold_bucket,
-            seller_id = EXCLUDED.seller_id,
-            category_id = EXCLUDED.category_id,
-            market_scope = EXCLUDED.market_scope,
-            home_segment = EXCLUDED.home_segment,
-            is_analysis_target = EXCLUDED.is_analysis_target,
             value_score = EXCLUDED.value_score,
             market_position = EXCLUDED.market_position,
-            recorded_at = EXCLUDED.recorded_at,
+            normalized_at = EXCLUDED.normalized_at,
             updated_at = CURRENT_TIMESTAMP
         """
     )
     return cursor.rowcount
 
 
-def _refresh_fact_category_daily(cursor: Any, schema: str) -> int:
-    cursor.execute(f'DELETE FROM {schema}."fact_category_daily"')
+def _refresh_fact_price_snapshot(cursor: Any, schema: str) -> int:
     cursor.execute(
         f"""
-        INSERT INTO {schema}."fact_category_daily" (
-            snapshot_date, category_id, market_scope, home_segment, product_count,
-            avg_price, avg_discount_percent, avg_rating, total_reviews, total_sold, updated_at
-        )
-        SELECT
-            snapshot_date,
-            COALESCE(category_id, 'unknown'),
-            market_scope,
-            home_segment,
-            COUNT(DISTINCT product_id),
-            ROUND(AVG(price), 2),
-            ROUND(AVG(discount_percent), 2),
-            ROUND(AVG(rating_average), 2),
-            SUM(review_count),
-            SUM(sales_count),
-            CURRENT_TIMESTAMP
-        FROM {schema}."fact_product_daily"
-        GROUP BY snapshot_date, COALESCE(category_id, 'unknown'), market_scope, home_segment
+        WITH {_current_snapshot_cte(schema)}
+        DELETE FROM {schema}."fact_price_snapshot" f
+        USING current_snapshot cs
+        WHERE f.snapshot_id = cs.snapshot_id
         """
     )
-    return cursor.rowcount
-
-
-def _refresh_fact_seller_daily(cursor: Any, schema: str) -> int:
-    cursor.execute(f'DELETE FROM {schema}."fact_seller_daily"')
     cursor.execute(
         f"""
-        INSERT INTO {schema}."fact_seller_daily" (
-            snapshot_date, seller_id, seller_type, market_scope, home_segment, product_count,
-            avg_price, avg_discount_percent, avg_rating, total_reviews, total_sold, updated_at
+        INSERT INTO {schema}."fact_price_snapshot" (
+            snapshot_id, product_id, price, original_price, discount_percent,
+            price_bucket, discount_bucket, normalized_at, updated_at
         )
+        WITH {_current_snapshot_cte(schema)}
         SELECT
-            f.snapshot_date,
-            COALESCE(f.seller_id, 'unknown'),
-            COALESCE(ds.seller_type, 'unknown'),
-            f.market_scope,
-            f.home_segment,
-            COUNT(DISTINCT f.product_id),
-            ROUND(AVG(f.price), 2),
-            ROUND(AVG(f.discount_percent), 2),
-            ROUND(AVG(f.rating_average), 2),
-            SUM(f.review_count),
-            SUM(f.sales_count),
-            CURRENT_TIMESTAMP
-        FROM {schema}."fact_product_daily" f
-        LEFT JOIN {schema}."dim_seller" ds ON ds.seller_id = f.seller_id
-        GROUP BY
-            f.snapshot_date,
-            COALESCE(f.seller_id, 'unknown'),
-            COALESCE(ds.seller_type, 'unknown'),
-            f.market_scope,
-            f.home_segment
-        """
-    )
-    return cursor.rowcount
-
-
-def _refresh_fact_price_change(cursor: Any, schema: str) -> int:
-    cursor.execute(
-        f"""
-        INSERT INTO {schema}."fact_price_change" (
-            product_id, crawl_run_id, crawled_at, price, previous_price,
-            price_change, price_change_percent, change_direction, updated_at
-        )
-        SELECT
-            product_id,
-            crawl_run_id,
-            COALESCE(crawled_at, updated_at, CURRENT_TIMESTAMP),
-            price,
-            previous_price,
-            price_change,
-            price_change_percent,
+            cs.snapshot_id,
+            dp.product_id,
+            p.price,
+            CASE WHEN p.original_price >= p.price THEN p.original_price END AS original_price,
             CASE
-                WHEN price_change > 0 THEN 'increase'
-                WHEN price_change < 0 THEN 'decrease'
-                WHEN price_change = 0 THEN 'unchanged'
-                ELSE 'unknown'
-            END,
+                WHEN p.discount_percent >= 0 THEN p.discount_percent
+                WHEN p.original_price > 0 AND p.original_price >= p.price THEN
+                    ROUND((p.original_price - p.price) / p.original_price * 100, 2)
+                ELSE NULL
+            END AS discount_percent,
+            CASE
+                WHEN p.price < 100000 THEN 'Giá thấp'
+                WHEN p.price < 500000 THEN 'Giá TB'
+                WHEN p.price < 2000000 THEN 'Giá cao'
+                ELSE 'Cao cấp'
+            END AS price_bucket,
+            CASE
+                WHEN p.discount_percent IS NULL OR p.discount_percent = 0 THEN 'Không KM'
+                WHEN p.discount_percent < 10 THEN 'KM thấp'
+                WHEN p.discount_percent < 30 THEN 'KM TB'
+                ELSE 'KM cao'
+            END AS discount_bucket,
+            COALESCE(p.crawled_at, p.updated_at, CURRENT_TIMESTAMP),
             CURRENT_TIMESTAMP
-        FROM crawl_history
-        WHERE product_id IS NOT NULL
-          AND COALESCE(crawled_at, updated_at) IS NOT NULL
-        ON CONFLICT (product_id, crawled_at) DO UPDATE SET
-            crawl_run_id = EXCLUDED.crawl_run_id,
+        FROM products p
+        JOIN {schema}."dim_product" dp ON dp.product_id = p.product_id
+        CROSS JOIN current_snapshot cs
+        WHERE p.price > 0
+        ON CONFLICT (snapshot_id, product_id) DO UPDATE SET
             price = EXCLUDED.price,
-            previous_price = EXCLUDED.previous_price,
-            price_change = EXCLUDED.price_change,
-            price_change_percent = EXCLUDED.price_change_percent,
-            change_direction = EXCLUDED.change_direction,
+            original_price = EXCLUDED.original_price,
+            discount_percent = EXCLUDED.discount_percent,
+            price_bucket = EXCLUDED.price_bucket,
+            discount_bucket = EXCLUDED.discount_bucket,
+            normalized_at = EXCLUDED.normalized_at,
             updated_at = CURRENT_TIMESTAMP
-        """
-    )
-    return cursor.rowcount
-
-
-def _refresh_fact_crawl_quality(cursor: Any, schema: str) -> int:
-    cursor.execute(
-        f"""
-        INSERT INTO {schema}."fact_crawl_quality" (
-            crawl_run_id, airflow_dag_id, airflow_run_id, started_at, finished_at,
-            status, total_raw_items, total_transformed_items, total_loaded_items,
-            raw_product_count, task_count, failed_task_count, detail_product_count,
-            avg_data_quality_score, updated_at
-        )
-        SELECT
-            cr.id,
-            cr.airflow_dag_id,
-            cr.airflow_run_id,
-            cr.started_at,
-            cr.finished_at,
-            cr.status,
-            cr.total_raw_items,
-            cr.total_transformed_items,
-            cr.total_loaded_items,
-            COUNT(DISTINCT rp.id),
-            COUNT(DISTINCT ct.id),
-            COUNT(DISTINCT ct.id) FILTER (WHERE ct.status IN ('failed', 'error')),
-            COUNT(DISTINCT p.id) FILTER (WHERE p.detail_status IS NOT NULL),
-            ROUND(AVG(p.data_quality_score), 2),
-            CURRENT_TIMESTAMP
-        FROM crawl_runs cr
-        LEFT JOIN raw_products rp ON rp.crawl_run_id = cr.id
-        LEFT JOIN crawl_tasks ct ON ct.crawl_run_id = cr.id
-        LEFT JOIN product_prices pp ON pp.crawl_run_id = cr.id
-        LEFT JOIN products p ON p.id = pp.product_id
-        GROUP BY cr.id
-        ON CONFLICT (crawl_run_id) DO UPDATE SET
-            airflow_dag_id = EXCLUDED.airflow_dag_id,
-            airflow_run_id = EXCLUDED.airflow_run_id,
-            started_at = EXCLUDED.started_at,
-            finished_at = EXCLUDED.finished_at,
-            status = EXCLUDED.status,
-            total_raw_items = EXCLUDED.total_raw_items,
-            total_transformed_items = EXCLUDED.total_transformed_items,
-            total_loaded_items = EXCLUDED.total_loaded_items,
-            raw_product_count = EXCLUDED.raw_product_count,
-            task_count = EXCLUDED.task_count,
-            failed_task_count = EXCLUDED.failed_task_count,
-            detail_product_count = EXCLUDED.detail_product_count,
-            avg_data_quality_score = EXCLUDED.avg_data_quality_score,
-            updated_at = CURRENT_TIMESTAMP
-        """
-    )
-    return cursor.rowcount
-
-
-def _refresh_product_analysis_ready(cursor: Any, schema: str) -> int:
-    cursor.execute(f'DELETE FROM {schema}."product_analysis_ready"')
-    cursor.execute(
-        f"""
-        INSERT INTO {schema}."product_analysis_ready"
-        SELECT *
-        FROM {schema}."fact_product_daily"
-        WHERE is_analysis_target = TRUE
         """
     )
     return cursor.rowcount

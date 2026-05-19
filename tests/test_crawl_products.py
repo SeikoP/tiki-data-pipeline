@@ -8,6 +8,7 @@ import pytest
 # Thêm đường dẫn src vào sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from pipelines.crawl.crawl_categories_optimized import safe_print
 from pipelines.crawl.crawl_products import (
     crawl_category_products,
     crawl_products_from_categories,
@@ -59,6 +60,22 @@ def test_parse_products_from_html():
     assert products[0].get("name") == "Sản phẩm Test 1", "Tên sản phẩm không đúng"
 
     print("✅ Test parse HTML thành công!\n")
+
+
+def test_category_progress_output_ignores_closed_stdout(monkeypatch):
+    class ClosedStdout:
+        closed = True
+        encoding = "cp1252"
+
+        def write(self, _message):
+            raise ValueError("I/O operation on closed file")
+
+        def flush(self):
+            raise ValueError("I/O operation on closed file")
+
+    monkeypatch.setattr(sys, "stdout", ClosedStdout())
+
+    safe_print("danh mục ✅", flush=True)
 
 
 def test_crawl_single_category():

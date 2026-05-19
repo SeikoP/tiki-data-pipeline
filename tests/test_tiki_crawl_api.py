@@ -37,6 +37,8 @@ async def test_crawl_product_detail_via_api_success():
     # Mock aiohttp session
     mock_response = AsyncMock()
     mock_response.status = 200
+    mock_response.content_type = "application/json"
+    mock_response.url = "https://tiki.vn/api/v2/products/12345"
     mock_response.json.return_value = mock_api_data
 
     # Setup context manager for session.get()
@@ -55,6 +57,9 @@ async def test_crawl_product_detail_via_api_success():
     assert result["brand"] == "Test Brand"
     assert result["sales_count"] == 99
     assert result["specifications"]["Color"] == "Blue"
+    headers = mock_session.get.call_args.kwargs["headers"]
+    assert "Cache-Control" not in headers
+    assert "Pragma" not in headers
 
 
 @pytest.mark.asyncio
@@ -97,6 +102,9 @@ async def test_crawl_product_detail_via_api_reports_html_response_reason():
     assert result is None
     assert failure_details["reason"] == "api_html_instead_of_json"
     assert failure_details["status"] == "200 (HTML instead of JSON)"
+    assert failure_details["attempt_count"] == 1
+    assert failure_details["elapsed_ms"] >= 0
+    assert mock_session.get.call_count == 1
 
 
 @pytest.mark.asyncio

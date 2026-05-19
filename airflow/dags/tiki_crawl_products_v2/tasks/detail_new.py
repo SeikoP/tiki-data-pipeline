@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from common.settings import get_float_setting, get_int_setting, get_setting
 from tiki_crawl_products_v2.bootstrap import (  # crawl_product_detail_async,  <-- REMOVED
     Any,
@@ -87,6 +89,65 @@ def _detail_request_delay(index: int, rate_limit_delay: float) -> float:
     return max(0, index) * max(0.0, rate_limit_delay)
 
 
+def _nearest_rank_percentile(values: list[int], percentile: int) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    index = max(0, math.ceil((percentile / 100) * len(ordered)) - 1)
+    return ordered[min(index, len(ordered) - 1)]
+
+
+def _summarize_detail_metrics(
+    results: list[dict[str, Any]], *, slowest_limit: int = 5
+) -> dict[str, Any]:
+    """Build compact latency and failure diagnostics for one detail batch."""
+    durations = [
+        int((result.get("metrics") or {}).get("duration_ms", 0))
+        for result in results
+        if isinstance(result, dict) and (result.get("metrics") or {}).get("duration_ms") is not None
+    ]
+    failure_reasons: dict[str, int] = {}
+    api_statuses: dict[str, int] = {}
+
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        metrics = result.get("metrics") or {}
+        reason = metrics.get("api_reason")
+        if reason:
+            failure_reasons[str(reason)] = failure_reasons.get(str(reason), 0) + 1
+        status = metrics.get("api_status")
+        if status is not None:
+            status_key = str(status)
+            api_statuses[status_key] = api_statuses.get(status_key, 0) + 1
+
+    slowest = sorted(
+        [
+            {
+                "product_id": result.get("product_id"),
+                "status": result.get("status"),
+                "duration_ms": int((result.get("metrics") or {}).get("duration_ms", 0)),
+                "api_reason": (result.get("metrics") or {}).get("api_reason"),
+            }
+            for result in results
+            if isinstance(result, dict) and (result.get("metrics") or {}).get("duration_ms")
+        ],
+        key=lambda item: item["duration_ms"],
+        reverse=True,
+    )[:slowest_limit]
+
+    return {
+        "count": len(durations),
+        "avg_ms": (sum(durations) / len(durations)) if durations else 0,
+        "p50_ms": _nearest_rank_percentile(durations, 50),
+        "p95_ms": _nearest_rank_percentile(durations, 95),
+        "max_ms": max(durations) if durations else 0,
+        "failure_reasons": failure_reasons,
+        "api_statuses": api_statuses,
+        "slowest": slowest,
+    }
+
+
 def _write_detail_batch_results(
     results: list[dict[str, Any]], batch_index: int, context: dict[str, Any]
 ) -> str:
@@ -120,6 +181,7 @@ def _write_detail_batch_results(
 
 async def _crawl_fast_internal(product_batch, logger, session=None):
     import asyncio
+    import time
 
     # Setup aiohttp session
     own_session = session is None
@@ -170,8 +232,10 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
 
     async def crawl_single(product_info):
         async with semaphore:
+            started_at = time.perf_counter()
             product_id = product_info.get("product_id", "unknown")
             product_url = product_info.get("url", "")
+            failure_details: dict[str, Any] = {}
 
             result = {
                 "product_id": product_id,
@@ -184,13 +248,12 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
             }
 
             try:
-                failure_details: dict[str, Any] = {}
                 # Force NO Selenium fallback
                 detail = await crawl_product_detail_async(
                     product_url,
                     session=session,
                     use_selenium_fallback=False,
-                    verbose=True,  # Enable Verbose Logging
+                    verbose=False,
                     failure_details=failure_details,
                 )
 
@@ -230,6 +293,12 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
             except Exception as e:
                 result["error"] = str(e)
                 result["status"] = "failed"
+                failure_details = {
+                    "reason": "task_exception",
+                    "message": str(e),
+                    "attempt_count": failure_details.get("attempt_count"),
+                    "status": failure_details.get("status"),
+                }
                 # LOG TO FILE
                 try:
                     with open("/tmp/debug_crawl.log", "a") as f:
@@ -237,6 +306,19 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
                 except Exception:
                     pass
 
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            metrics = {
+                "duration_ms": duration_ms,
+                "api_attempts": failure_details.get("attempt_count")
+                or (1 if result["status"] in {"success_api", "partial_needs_enrichment"} else None),
+                "api_status": failure_details.get("status")
+                or (
+                    200 if result["status"] in {"success_api", "partial_needs_enrichment"} else None
+                ),
+                "api_reason": failure_details.get("reason"),
+                "api_elapsed_ms": failure_details.get("elapsed_ms"),
+            }
+            result["metrics"] = {key: value for key, value in metrics.items() if value is not None}
             return result
 
     # Create tasks with delay
@@ -321,6 +403,7 @@ def crawl_product_batch_fast(
                     "detail": {},
                     "needs_enrichment": False,
                     "crawl_quality": "unknown",
+                    "metrics": {"api_reason": "task_exception"},
                 }
             )
             continue
@@ -347,9 +430,11 @@ def crawl_product_batch_fast(
                 "detail": detail,  # Trả về detail qua XCom
                 "needs_enrichment": detail.get("needs_enrichment", False),
                 "crawl_quality": detail.get("crawl_quality", "unknown"),
+                "metrics": r.get("metrics") or {},
             }
         )
 
+    detail_metrics = _summarize_detail_metrics(final_results)
     logger.info(
         "✅ FAST BATCH DONE: success=%s partial=%s failed=%s total=%s needs_enrichment=%s saved=%s",
         success,
@@ -358,6 +443,18 @@ def crawl_product_batch_fast(
         len(product_batch),
         needs_enrich,
         saved_count,
+    )
+    logger.info(
+        "⏱️ FAST DETAIL TIMING: count=%s avg_ms=%.1f p50_ms=%s p95_ms=%s max_ms=%s "
+        "failure_reasons=%s api_statuses=%s slowest=%s",
+        detail_metrics["count"],
+        detail_metrics["avg_ms"],
+        detail_metrics["p50_ms"],
+        detail_metrics["p95_ms"],
+        detail_metrics["max_ms"],
+        detail_metrics["failure_reasons"],
+        detail_metrics["api_statuses"],
+        detail_metrics["slowest"],
     )
     _track_detail_results(final_results, context, logger)
     results_file = _write_detail_batch_results(final_results, batch_index, context)
@@ -371,6 +468,7 @@ def crawl_product_batch_fast(
             "partial": partial,
             "failed": failed,
             "needs_enrichment": needs_enrich,
+            "detail_metrics": detail_metrics,
         },
     }
 

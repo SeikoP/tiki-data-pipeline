@@ -154,6 +154,18 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         description="Only crawl leaf categories",
         airflow_variable=True,
     ),
+    "TIKI_CATEGORY_SELECTION_MODE": SettingSpec(
+        "TIKI_CATEGORY_SELECTION_MODE",
+        "window",
+        description="Category selection mode: window or segment_quota",
+        airflow_variable=True,
+    ),
+    "TIKI_CATEGORY_SEGMENT_QUOTAS": SettingSpec(
+        "TIKI_CATEGORY_SEGMENT_QUOTAS",
+        "kitchen_cooking:30,cleaning_homecare:30,storage_organization:25,bathroom:20,laundry_garment:20,home_comfort:30,decor_living:25",
+        description="Comma-separated category quotas per analytics home segment",
+        airflow_variable=True,
+    ),
     "TIKI_MAX_PAGES_PER_CATEGORY": SettingSpec(
         "TIKI_MAX_PAGES_PER_CATEGORY",
         20,

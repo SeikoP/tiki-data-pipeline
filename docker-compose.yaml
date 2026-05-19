@@ -1,9 +1,6 @@
 x-airflow-common:
   &airflow-common
   image: tiki-airflow
-  build:
-    context: .
-    dockerfile: airflow/Dockerfile
   env_file:
     - ${ENV_FILE_PATH:-.env}
   environment:
@@ -11,6 +8,8 @@ x-airflow-common:
     TZ: Asia/Ho_Chi_Minh
     # Simplified PYTHONPATH for faster imports
     PYTHONPATH: "/opt/airflow/src:/opt/airflow/dags"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${_AIRFLOW_WWW_USER_USERNAME:?_AIRFLOW_WWW_USER_USERNAME is required}:Admin"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: "/opt/airflow/external/passwords.json"
     
     AIRFLOW__CORE__INTERNAL_API_URL: "http://airflow-webserver:8080"
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-webserver:8080/execution/"
@@ -24,7 +23,7 @@ x-airflow-common:
     - ./scripts:/opt/airflow/scripts:ro
     - ./airflow/setup:/opt/airflow/airflow/setup:ro
     - ./backups:/opt/airflow/backups
-    - ./passwords.json:/opt/airflow/external/passwords.json
+    - airflow-external:/opt/airflow/external
   depends_on:
     postgres:
       condition: service_healthy
@@ -113,6 +112,9 @@ services:
 
   airflow-webserver:
     <<: *airflow-common
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
     entrypoint: /bin/bash
     command:
       - -c
@@ -182,7 +184,7 @@ services:
         exec airflow dag-processor
     hostname: airflow-dag-processor
     healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --local || exit 1"]
+      test: ["CMD-SHELL", "python -c \"from pathlib import Path; import sys; cmd = Path('/proc/1/cmdline').read_bytes().replace(b'\\0', b' '); sys.exit(0 if b'airflow dag-processor' in cmd else 1)\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -276,8 +278,38 @@ services:
         chmod -R 775 /opt/airflow/data || echo "Warning: chmod failed"
 
         # Create directories
-        mkdir -p /opt/airflow/logs /opt/airflow/plugins /opt/airflow/data
-        
+        mkdir -p /opt/airflow/logs /opt/airflow/plugins /opt/airflow/data /opt/airflow/external
+
+        echo "🔐 Syncing Airflow simple auth password from environment..."
+        python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        username = os.environ.get("_AIRFLOW_WWW_USER_USERNAME", "").strip()
+        password = os.environ.get("_AIRFLOW_WWW_USER_PASSWORD", "")
+        password_file = Path(
+            os.environ.get(
+                "AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE",
+                "/opt/airflow/external/passwords.json",
+            )
+        )
+
+        if not username:
+            raise SystemExit("_AIRFLOW_WWW_USER_USERNAME is required")
+        if not password:
+            raise SystemExit("_AIRFLOW_WWW_USER_PASSWORD is required")
+
+        password_file.parent.mkdir(parents=True, exist_ok=True)
+        password_file.write_text(
+            json.dumps({username: password}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        PY
+        chown -R "$${AIRFLOW_UID:-50000}:0" /opt/airflow/external || echo "Warning: external chown failed"
+        chmod 750 /opt/airflow/external || echo "Warning: external chmod failed"
+        chmod 640 /opt/airflow/external/passwords.json || echo "Warning: password file chmod failed"
+         
         echo "Updating Airflow DB..."
         su airflow -c "airflow db migrate"
         
@@ -310,3 +342,4 @@ networks:
 volumes:
   postgres-shared-volume:
   redis-data:
+  airflow-external:

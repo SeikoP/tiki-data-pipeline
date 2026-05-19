@@ -119,6 +119,14 @@ def test_extract_product_id():
             ("https://tiki.vn/p/123456", "123456"),
             ("https://tiki.vn/product-p123456.html", "123456"),
             ("https://tiki.vn/something-p789012.html", "789012"),
+            (
+                "https://tiki.vn/amply-pronest-p6-800-loa-p263437011.html?spid=263437012",
+                "263437011",
+            ),
+            (
+                "https://tiki.vn/binh-nuoc-nhua-2-1l-locknlock-p-00052-hang-c-p278691165.html",
+                "278691165",
+            ),
             ("invalid", None),
         ]
 

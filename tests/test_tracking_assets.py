@@ -33,7 +33,7 @@ def test_publish_core_tables_asset_returns_asset_metadata_on_success():
     assert result == {
         "status": "success",
         "crawl_run_id": 42,
-        "asset_uri": "postgres://tiki/public/core_product_tables",
+        "asset_uri": "postgres://postgres:5432/tiki/public/core_product_tables",
     }
 
 

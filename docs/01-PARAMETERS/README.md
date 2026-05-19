@@ -13,6 +13,8 @@ Runtime defaults are defined in `src/common/settings.py`; Airflow setup, docs an
 | `TIKI_MIN_CATEGORY_LEVEL` | Airflow Variable, fallback `2` | Minimum category tree level selected for category crawl |
 | `TIKI_MAX_CATEGORY_LEVEL` | Airflow Variable, fallback `4` | Maximum category tree level selected for category crawl |
 | `TIKI_MAX_CATEGORIES` | Airflow Variable, fallback `0` | Optional rotating category window; `0` means no category cap |
+| `TIKI_CATEGORY_SELECTION_MODE` | Airflow Variable, fallback `window` | Category selection strategy: `window` or `segment_quota` |
+| `TIKI_CATEGORY_SEGMENT_QUOTAS` | Airflow Variable | Comma-separated per-segment category quotas for broad analysis crawls |
 | `TIKI_MAX_PAGES_PER_CATEGORY` | Airflow Variable, fallback `20` | Listing pages crawled for each selected category |
 | `TIKI_PRODUCTS_PER_DAY` | Airflow Variable, fallback `1000` | Detail candidates selected per run |
 | `TIKI_MAX_PRODUCTS_FOR_DETAIL` | Airflow Variable, fallback `0` | Hard cap for detail candidates; `0` means no extra cap |

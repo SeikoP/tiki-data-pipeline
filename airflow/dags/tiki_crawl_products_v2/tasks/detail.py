@@ -288,12 +288,39 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
 
         logger.info(f"🔄 Bắt đầu kiểm tra {len(products)} products...")
 
+        category_lookup: dict[str, list[Any]] = {}
+        try:
+            ti = context.get("ti")
+            categories_meta = None
+            if ti:
+                categories_meta = ti.xcom_pull(task_ids="pre_crawl.load_categories")
+            categories_file = None
+            if isinstance(categories_meta, dict):
+                categories_file = categories_meta.get("categories_file")
+            categories_path = Path(
+                categories_file or "/opt/airflow/data/processed/loaded_categories.json"
+            )
+            if categories_path.exists():
+                with open(categories_path, encoding="utf-8") as f:
+                    loaded_categories = json.load(f)
+                for category in loaded_categories:
+                    category_url = category.get("url")
+                    category_path = category.get("category_path")
+                    if category_url and category_path:
+                        category_lookup[category_url] = category_path
+                logger.info(
+                    f"🧭 Loaded category lookup for detail balancing: {len(category_lookup)}"
+                )
+        except Exception as e:
+            logger.warning(f"⚠️  Không thể load category lookup để cân bằng detail: {e}")
+
         products_to_crawl = _select_products_for_detail(
             products,
             existing_product_ids_in_db=existing_product_ids_in_db,
             products_per_day=products_per_day,
             max_products=max_products,
             force_crawl=force_crawl,
+            category_lookup=category_lookup,
         )
         if not force_crawl:
             db_hits = sum(
@@ -346,6 +373,7 @@ def _select_products_for_detail(
     products_per_day: int,
     max_products: int,
     force_crawl: bool,
+    category_lookup: dict[str, list[Any]] | None = None,
 ) -> list[dict[str, Any]]:
     effective_limit = max(0, products_per_day)
     if max_products > 0:
@@ -353,7 +381,7 @@ def _select_products_for_detail(
     if effective_limit <= 0:
         return []
 
-    selected = []
+    candidates = []
     for product in products:
         product_id = product.get("product_id")
         product_url = product.get("url")
@@ -361,17 +389,64 @@ def _select_products_for_detail(
             continue
         if not force_crawl and product_id in existing_product_ids_in_db:
             continue
-        selected.append(
-            {
-                "product_id": product_id,
-                "url": product_url,
-                "name": product.get("name", ""),
-                "product": product,
-            }
-        )
-        if len(selected) >= effective_limit:
+        category_path = product.get("category_path")
+        if not category_path and category_lookup:
+            category_path = category_lookup.get(product.get("category_url"))
+
+        enriched_product = product
+        if category_path and not product.get("category_path"):
+            enriched_product = dict(product)
+            enriched_product["category_path"] = category_path
+
+        item = {
+            "product_id": product_id,
+            "url": product_url,
+            "name": product.get("name", ""),
+            "product": enriched_product,
+        }
+
+        segment = None
+        if category_path:
+            try:
+                from pipelines.analytics.normalizer import classify_category_path
+
+                classification = classify_category_path(category_path)
+                if classification.get("is_analysis_target"):
+                    segment = classification.get("home_segment")
+            except Exception:
+                segment = None
+        candidates.append((segment, item))
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    ungrouped: list[dict[str, Any]] = []
+    for segment, item in candidates:
+        if segment:
+            grouped.setdefault(segment, []).append(item)
+        else:
+            ungrouped.append(item)
+
+    if len(grouped) < 2:
+        return [item for _, item in candidates[:effective_limit]]
+
+    selected: list[dict[str, Any]] = []
+    cursors = dict.fromkeys(grouped, 0)
+    while len(selected) < effective_limit:
+        added = False
+        for segment, segment_items in grouped.items():
+            cursor = cursors[segment]
+            if cursor >= len(segment_items):
+                continue
+            selected.append(segment_items[cursor])
+            cursors[segment] = cursor + 1
+            added = True
+            if len(selected) >= effective_limit:
+                break
+        if not added:
             break
-    return selected
+
+    if len(selected) < effective_limit:
+        selected.extend(ungrouped[: effective_limit - len(selected)])
+    return selected[:effective_limit]
 
 
 def crawl_product_batch(

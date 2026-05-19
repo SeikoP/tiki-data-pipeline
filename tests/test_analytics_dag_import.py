@@ -35,7 +35,7 @@ def test_tiki_core_tables_asset_has_stable_non_secret_uri():
 
     from tiki_assets import TIKI_CORE_TABLES_ASSET, TIKI_CORE_TABLES_ASSET_URI
 
-    assert TIKI_CORE_TABLES_ASSET_URI == "postgres://tiki/public/core_product_tables"
+    assert TIKI_CORE_TABLES_ASSET_URI == "postgres://postgres:5432/tiki/public/core_product_tables"
     assert "password" not in TIKI_CORE_TABLES_ASSET_URI
     assert getattr(TIKI_CORE_TABLES_ASSET, "uri", str(TIKI_CORE_TABLES_ASSET)) in {
         TIKI_CORE_TABLES_ASSET_URI,

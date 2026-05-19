@@ -100,6 +100,8 @@ Manual/debug scripts in `tests/`, `scripts/helper/`, and `scripts/imp/` are usef
 
 Documentation is organized under `docs/01-PARAMETERS` through `docs/07-GUIDES` with `docs/INDEX.md` as the index. Update docs and `.env.example` when changing behavior, commands, schema expectations, or environment variables. Configuration docs are partially enforced by `scripts/config/sync_config_docs.py`.
 
+Keep `graduation_docs/` aligned with analytics, normalization, dashboard, schema, and data-quality changes. When adding or changing Vietnamese aliases, labels, buckets, statuses, or presentation views, update the matching `graduation_docs/` files in the same task. Vietnamese dashboard labels should stay short, especially for numeric fields and chart legends; prefer compact labels such as `Giá TB`, `KM cao`, `Rating 0`, `0 review`, and `Sold TB` over long explanatory text.
+
 Operational scripts include backup/cleanup, Airflow optimization setup, schema updates, Redis management, profiling, benchmark, and admin repair utilities. Before deleting or renaming scripts, tasks, tests, or docs, verify references with `rg` when available and avoid breaking Airflow task imports or CI scripts.
 
 ## Security & Configuration Tips

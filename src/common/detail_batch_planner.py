@@ -24,6 +24,12 @@ def plan_detail_batches(
 
     target_batches = max(active_batches, math.ceil(total_products / base_batch_size))
     target_batches = min(total_products, target_batches)
+    if total_products > active_batches and target_batches > active_batches:
+        remainder = target_batches % active_batches
+        if remainder == 1:
+            target_batches -= 1
+        elif remainder:
+            target_batches = min(total_products, target_batches + active_batches - remainder)
     batch_size = max(1, math.ceil(total_products / target_batches))
 
     batches = [products[i : i + batch_size] for i in range(0, total_products, batch_size)]

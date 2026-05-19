@@ -29,7 +29,7 @@ Airflow UI: `http://localhost:8080/ui/`
 | `REDIS_PASSWORD` | Redis auth |
 | `AIRFLOW__CORE__FERNET_KEY` | Airflow encryption key |
 | `_AIRFLOW__API_AUTH__JWT_SECRET`, `_AIRFLOW__CORE__SECRET_KEY` | Airflow API/session security |
-| `_AIRFLOW_WWW_USER_USERNAME` | Airflow admin username override |
+| `_AIRFLOW_WWW_USER_USERNAME`, `_AIRFLOW_WWW_USER_PASSWORD` | Airflow SimpleAuth admin login; `airflow-init` writes the runtime password file from these values |
 | `DISCORD_ENABLED` | Enables final Discord notification path |
 
 ## Runtime Paths
@@ -37,6 +37,7 @@ Airflow UI: `http://localhost:8080/ui/`
 | Path | Git policy |
 | --- | --- |
 | `.env` | Local secret file, ignored |
+| Docker volume `airflow-external` | Runtime Airflow SimpleAuth password file generated from `.env` |
 | `data/` | Generated crawl data, ignored |
 | `backups/` | Generated DB backups, ignored except placeholder |
 | `airflow/logs/` | Runtime logs, ignored |

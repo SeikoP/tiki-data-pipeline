@@ -1,3 +1,5 @@
+"""Airflow DAG for normalizing loaded Tiki data into analytics star schema."""
+
 from __future__ import annotations
 
 import logging
@@ -101,7 +103,7 @@ dag_config = dict(DAG_CONFIG or {})
 dag_config.update(
     {
         "dag_id": "tiki_analytics_normalize",
-        "description": "Normalize loaded Tiki crawl data into analytics-ready marts",
+        "description": "Normalize loaded Tiki crawl data into snapshot facts and dimensions",
         "schedule": [TIKI_CORE_TABLES_ASSET],
         "catchup": False,
         "tags": ["tiki", "analytics", "graduation", "power-bi"],
@@ -113,7 +115,10 @@ with DAG(**dag_config) as dag:
         task_id="resolve_analytics_context",
         python_callable=resolve_analytics_context,
         execution_timeout=timedelta(minutes=1),
-        doc_md="Resolve analytics schema and optional crawl_run_id from dag_run.conf.",
+        doc_md=(
+            "Resolve the analytics schema configured by `TIKI_ANALYTICS_SCHEMA`. "
+            "`crawl_run_id` may be present in dag_run.conf for traceability."
+        ),
     )
 
     task_ensure_schema = PythonOperator(
@@ -121,7 +126,10 @@ with DAG(**dag_config) as dag:
         python_callable=ensure_schema_task,
         execution_timeout=timedelta(minutes=2),
         pool="fast_pool",
-        doc_md="Create analytics schema and mart tables if they do not exist.",
+        doc_md=(
+            "Create analytics dimensions, snapshot facts, price facts, and the "
+            "`product_analysis_ready` view. Legacy daily/quality/summary tables are dropped."
+        ),
     )
 
     task_refresh_dimensions = PythonOperator(
@@ -129,70 +137,49 @@ with DAG(**dag_config) as dag:
         python_callable=lambda **context: _run_refresh("refresh_dimensions"),
         execution_timeout=timedelta(minutes=10),
         pool="fast_pool",
-        doc_md="Refresh category, seller, and product dimensions.",
+        doc_md=(
+            "Refresh `dim_category`, `dim_seller`, and `dim_product` from core tables. "
+            "Rows with invalid category/seller keys are not loaded into product dimensions."
+        ),
     )
 
-    task_refresh_product_daily = PythonOperator(
-        task_id="refresh_product_daily_fact",
-        python_callable=lambda **context: _run_refresh("refresh_product_daily_fact"),
-        execution_timeout=timedelta(minutes=20),
+    task_refresh_snapshot = PythonOperator(
+        task_id="refresh_snapshot",
+        python_callable=lambda **context: _run_refresh("refresh_snapshot"),
+        execution_timeout=timedelta(minutes=5),
         pool="fast_pool",
-        doc_md="Refresh product daily fact snapshots.",
+        doc_md=(
+            "Create or reuse the latest `dim_snapshot` row. Snapshot grain is crawl/normalize "
+            "time, not calendar day."
+        ),
     )
 
-    task_refresh_category_daily = PythonOperator(
-        task_id="refresh_category_daily_fact",
-        python_callable=lambda **context: _run_refresh("refresh_category_daily_fact"),
+    task_refresh_product_fact = PythonOperator(
+        task_id="refresh_product_snapshot_fact",
+        python_callable=lambda **context: _run_refresh("refresh_product_snapshot_fact"),
         execution_timeout=timedelta(minutes=10),
         pool="fast_pool",
-        doc_md="Refresh category daily aggregate facts.",
+        doc_md=(
+            "Refresh `fact_product_snapshot` for the current snapshot with rating, review, "
+            "sold, value score, and market position."
+        ),
     )
 
-    task_refresh_seller_daily = PythonOperator(
-        task_id="refresh_seller_daily_fact",
-        python_callable=lambda **context: _run_refresh("refresh_seller_daily_fact"),
+    task_refresh_price_fact = PythonOperator(
+        task_id="refresh_price_snapshot_fact",
+        python_callable=lambda **context: _run_refresh("refresh_price_snapshot_fact"),
         execution_timeout=timedelta(minutes=10),
         pool="fast_pool",
-        doc_md="Refresh seller daily aggregate facts.",
-    )
-
-    task_refresh_price_change = PythonOperator(
-        task_id="refresh_price_change_fact",
-        python_callable=lambda **context: _run_refresh("refresh_price_change_fact"),
-        execution_timeout=timedelta(minutes=10),
-        pool="fast_pool",
-        doc_md="Refresh price-change fact events.",
-    )
-
-    task_refresh_crawl_quality = PythonOperator(
-        task_id="refresh_crawl_quality_fact",
-        python_callable=lambda **context: _run_refresh("refresh_crawl_quality_fact"),
-        execution_timeout=timedelta(minutes=10),
-        pool="fast_pool",
-        doc_md="Refresh crawl quality fact rows.",
-    )
-
-    task_refresh_analysis_ready = PythonOperator(
-        task_id="refresh_product_analysis_ready",
-        python_callable=lambda **context: _run_refresh("refresh_product_analysis_ready"),
-        execution_timeout=timedelta(minutes=10),
-        pool="fast_pool",
-        doc_md="Refresh filtered product rows for the main Power BI dashboard.",
+        doc_md=(
+            "Refresh `fact_price_snapshot` for the current snapshot with price, original "
+            "price, discount, and price buckets."
+        ),
     )
 
     (
         task_resolve_context
         >> task_ensure_schema
         >> task_refresh_dimensions
-        >> task_refresh_product_daily
-    )
-    (
-        task_refresh_product_daily
-        >> [
-            task_refresh_category_daily,
-            task_refresh_seller_daily,
-            task_refresh_price_change,
-            task_refresh_crawl_quality,
-        ]
-        >> task_refresh_analysis_ready
+        >> task_refresh_snapshot
+        >> [task_refresh_product_fact, task_refresh_price_fact]
     )

@@ -4,6 +4,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from threading import Lock
 from urllib.parse import parse_qs, urljoin
 
@@ -1288,6 +1289,9 @@ def crawl_products_from_categories(
     if not output_file:
         output_file = DEFAULT_PRODUCTS_DIR / "products.json"
 
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     logger.info(f"\n💾 Đang lưu kết quả vào: {output_file}")
     logger.info("📝 Lưu ý: Crawl thông tin cơ bản (ID, tên, URL, hình, số lượng bán)")
     logger.info("          Giá, đánh giá chi tiết sẽ được crawl detail sau")
@@ -1297,7 +1301,7 @@ def crawl_products_from_categories(
         if "sales_count" not in product:
             product["sales_count"] = None
 
-    with open(output_file, "w", encoding="utf-8") as f:
+    with output_path.open("w", encoding="utf-8") as f:
         json.dump(
             {
                 "total_products": len(unique_products),
