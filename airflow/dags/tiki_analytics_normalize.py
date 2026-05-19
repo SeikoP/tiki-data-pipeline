@@ -1,4 +1,4 @@
-"""Airflow DAG for normalizing loaded Tiki data into a clean analytics table."""
+"""Airflow DAG for normalizing loaded Tiki data into analytics star schema."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ dag_config = dict(DAG_CONFIG or {})
 dag_config.update(
     {
         "dag_id": "tiki_analytics_normalize",
-        "description": "Normalize loaded Tiki crawl data into a current product analytics table",
+        "description": "Normalize loaded Tiki crawl data into snapshot facts and dimensions",
         "schedule": [TIKI_CORE_TABLES_ASSET],
         "catchup": False,
         "tags": ["tiki", "analytics", "graduation", "power-bi"],
@@ -117,8 +117,7 @@ with DAG(**dag_config) as dag:
         execution_timeout=timedelta(minutes=1),
         doc_md=(
             "Resolve the analytics schema configured by `TIKI_ANALYTICS_SCHEMA`. "
-            "`crawl_run_id` may be present in dag_run.conf for traceability, but this DAG "
-            "builds only the latest clean product snapshot."
+            "`crawl_run_id` may be present in dag_run.conf for traceability."
         ),
     )
 
@@ -128,21 +127,59 @@ with DAG(**dag_config) as dag:
         execution_timeout=timedelta(minutes=2),
         pool="fast_pool",
         doc_md=(
-            "Recreate the analytics schema as a derived layer. The schema contains only "
-            "`product_analysis_ready` and drops legacy daily/quality/summary tables."
+            "Create analytics dimensions, snapshot facts, price facts, and the "
+            "`product_analysis_ready` view. Legacy daily/quality/summary tables are dropped."
         ),
     )
 
-    task_refresh_analysis_ready = PythonOperator(
-        task_id="refresh_product_analysis_ready",
-        python_callable=lambda **context: _run_refresh("refresh_product_analysis_ready"),
+    task_refresh_dimensions = PythonOperator(
+        task_id="refresh_dimensions",
+        python_callable=lambda **context: _run_refresh("refresh_dimensions"),
         execution_timeout=timedelta(minutes=10),
         pool="fast_pool",
         doc_md=(
-            "Build one clean current-snapshot row per analysis-ready product. This node "
-            "joins core product, category, and seller data; removes incomplete rows; and "
-            "writes Vietnamese bucket values directly into the base columns."
+            "Refresh `dim_category`, `dim_seller`, and `dim_product` from core tables. "
+            "Rows with invalid category/seller keys are not loaded into product dimensions."
         ),
     )
 
-    task_resolve_context >> task_ensure_schema >> task_refresh_analysis_ready
+    task_refresh_snapshot = PythonOperator(
+        task_id="refresh_snapshot",
+        python_callable=lambda **context: _run_refresh("refresh_snapshot"),
+        execution_timeout=timedelta(minutes=5),
+        pool="fast_pool",
+        doc_md=(
+            "Create or reuse the latest `dim_snapshot` row. Snapshot grain is crawl/normalize "
+            "time, not calendar day."
+        ),
+    )
+
+    task_refresh_product_fact = PythonOperator(
+        task_id="refresh_product_snapshot_fact",
+        python_callable=lambda **context: _run_refresh("refresh_product_snapshot_fact"),
+        execution_timeout=timedelta(minutes=10),
+        pool="fast_pool",
+        doc_md=(
+            "Refresh `fact_product_snapshot` for the current snapshot with rating, review, "
+            "sold, value score, and market position."
+        ),
+    )
+
+    task_refresh_price_fact = PythonOperator(
+        task_id="refresh_price_snapshot_fact",
+        python_callable=lambda **context: _run_refresh("refresh_price_snapshot_fact"),
+        execution_timeout=timedelta(minutes=10),
+        pool="fast_pool",
+        doc_md=(
+            "Refresh `fact_price_snapshot` for the current snapshot with price, original "
+            "price, discount, and price buckets."
+        ),
+    )
+
+    (
+        task_resolve_context
+        >> task_ensure_schema
+        >> task_refresh_dimensions
+        >> task_refresh_snapshot
+        >> [task_refresh_product_fact, task_refresh_price_fact]
+    )

@@ -29,7 +29,8 @@ Phạm vi phân tích hiện tập trung vào các nhóm hàng gia đình như `
 Tiki API
 -> raw files / raw_products
 -> core normalized tables
--> analytics.product_analysis_ready
+-> analytics dimensions + snapshot facts
+-> analytics.product_analysis_ready view
 -> Power BI / SQL analysis / báo cáo
 ```
 
@@ -38,19 +39,19 @@ Các lớp chính:
 - **Raw layer**: giữ payload crawl gốc để audit và debug.
 - **Core normalized layer**: lưu sản phẩm, category, seller, price/metric snapshot
   trong PostgreSQL.
-- **Analytics layer**: tạo bảng `analytics.product_analysis_ready`, mỗi dòng là
-  một sản phẩm hiện tại đã đủ điều kiện phân tích.
+- **Analytics layer**: tạo star schema gồm dimensions, snapshot facts và view
+  `analytics.product_analysis_ready` để đọc nhanh.
 
-Analytics schema hiện tại theo hướng **current snapshot only**. Dự án không giả
-định crawl hằng ngày, nên không tạo bảng `daily`; cũng không đưa crawl status hay
-quality monitoring vào analytics layer.
+Analytics schema hiện tại theo hướng **snapshot-based star schema**. Dự án không
+giả định crawl hằng ngày, nên không tạo bảng `daily`; lịch sử giá được lưu theo
+từng snapshot crawl/normalize qua `fact_price_snapshot`.
 
 ## Airflow DAGs
 
 | DAG | Vai trò |
 | --- | --- |
 | `tiki_crawl_fast` | Crawl category/product list/detail, transform và load vào core tables |
-| `tiki_analytics_normalize` | Tạo lại bảng phân tích sạch `analytics.product_analysis_ready` sau khi core tables cập nhật |
+| `tiki_analytics_normalize` | Tạo dimensions, snapshot facts và view phân tích sau khi core tables cập nhật |
 
 `tiki_crawl_fast` dùng file output cho payload lớn và chỉ đẩy metadata qua XCom
 để tránh làm phình Airflow metadata database.
@@ -60,23 +61,32 @@ quality monitoring vào analytics layer.
 ```text
 resolve_analytics_context
 -> ensure_analytics_schema
--> refresh_product_analysis_ready
+-> refresh_dimensions
+-> refresh_snapshot
+-> refresh_product_snapshot_fact
+-> refresh_price_snapshot_fact
 ```
 
 ## Analytics Output
 
-Bảng chính cho phân tích:
+Các bảng chính cho phân tích:
 
 ```text
-analytics.product_analysis_ready
+analytics.dim_snapshot
+analytics.dim_category
+analytics.dim_seller
+analytics.dim_product
+analytics.fact_product_snapshot
+analytics.fact_price_snapshot
+analytics.product_analysis_ready -- view join sẵn cho Power BI/SQL nhanh
 ```
 
 Đặc điểm:
 
-- 1 dòng = 1 sản phẩm hiện tại đủ điều kiện phân tích.
+- Fact grain = 1 sản phẩm tại 1 snapshot crawl/normalize.
 - Không có seller giả `unknown`; sản phẩm thiếu seller hợp lệ bị loại.
 - Không có cột `*_label`; các cột phân loại chứa tiếng Việt trực tiếp.
-- Không có bảng summary phụ; Power BI hoặc SQL có thể `GROUP BY` từ bảng chính.
+- Không có bảng summary phụ; Power BI hoặc SQL có thể `GROUP BY` từ fact/view.
 
 Nhóm cột tiêu biểu:
 
@@ -102,7 +112,7 @@ Ví dụ bucket dùng trực tiếp trong dashboard: `Giá TB`, `KM cao`, `Ratin
 | `src/pipelines/crawl/` | Crawl category, product list và product detail |
 | `src/pipelines/transform/` | Chuẩn hóa dữ liệu sản phẩm |
 | `src/pipelines/load/` | Load dữ liệu vào PostgreSQL |
-| `src/pipelines/analytics/` | Tạo bảng phân tích `product_analysis_ready` |
+| `src/pipelines/analytics/` | Tạo dimensions, snapshot facts và view phân tích |
 | `tests/` | Test hợp đồng dữ liệu, DAG import, transform/load và profiling |
 | `docs/` | Tài liệu kỹ thuật và cấu hình |
 | `graduation_docs/` | Tài liệu đồ án, data dictionary và query dashboard |

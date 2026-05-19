@@ -31,9 +31,18 @@ def test_analytics_schema_sql_contains_required_tables():
 
     ddl = "\n".join(build_schema_sql("analytics"))
 
-    assert REQUIRED_ANALYTICS_TABLES == {"product_analysis_ready"}
+    assert REQUIRED_ANALYTICS_TABLES == {
+        "dim_snapshot",
+        "dim_category",
+        "dim_seller",
+        "dim_product",
+        "fact_product_snapshot",
+        "fact_price_snapshot",
+    }
     for table_name in REQUIRED_ANALYTICS_TABLES:
-        assert f'CREATE TABLE "analytics"."{table_name}"' in ddl
+        assert f'CREATE TABLE IF NOT EXISTS "analytics"."{table_name}"' in ddl
+
+    assert 'CREATE OR REPLACE VIEW "analytics"."product_analysis_ready"' in ddl
 
 
 def test_analytics_schema_sql_removes_legacy_operational_tables():
@@ -47,9 +56,6 @@ def test_analytics_schema_sql_removes_legacy_operational_tables():
         "fact_seller_daily",
         "fact_price_change",
         "fact_crawl_quality",
-        "dim_product",
-        "dim_category",
-        "dim_seller",
         "mart_product_wide",
         "mart_crawl_quality",
         "category_summary",
@@ -63,6 +69,21 @@ def test_analytics_schema_sql_removes_legacy_operational_tables():
     assert 'CREATE TABLE "analytics"."fact_product_daily"' not in ddl
     assert 'CREATE TABLE "analytics"."fact_crawl_quality"' not in ddl
     assert 'CREATE VIEW "analytics"."mart_crawl_quality"' not in ddl
+
+
+def test_analytics_schema_sql_uses_snapshot_facts_not_daily_facts():
+    from pipelines.analytics.normalizer import build_schema_sql
+
+    ddl = "\n".join(build_schema_sql("analytics"))
+
+    assert 'CREATE TABLE IF NOT EXISTS "analytics"."dim_snapshot"' in ddl
+    assert 'CREATE TABLE IF NOT EXISTS "analytics"."fact_product_snapshot"' in ddl
+    assert 'CREATE TABLE IF NOT EXISTS "analytics"."fact_price_snapshot"' in ddl
+    assert "PRIMARY KEY (snapshot_id, product_id)" in ddl
+    assert "UNIQUE (source, snapshot_at)" in ddl
+    assert "fact_product_daily" not in ddl.replace(
+        'DROP TABLE IF EXISTS "analytics"."fact_product_daily"', ""
+    )
 
 
 def test_analytics_schema_sql_has_no_extra_label_columns():
@@ -98,8 +119,8 @@ def test_analytics_schema_sql_has_no_extra_label_columns():
         assert column_name not in ddl
 
 
-def test_product_analysis_ready_refresh_builds_clean_current_snapshot():
-    from pipelines.analytics.normalizer import _refresh_product_analysis_ready
+def test_product_snapshot_fact_refresh_builds_current_snapshot_fact():
+    from pipelines.analytics.normalizer import _refresh_fact_product_snapshot
 
     class Cursor:
         rowcount = 0
@@ -111,25 +132,66 @@ def test_product_analysis_ready_refresh_builds_clean_current_snapshot():
             self.statements.append(sql)
 
     cursor = Cursor()
-    _refresh_product_analysis_ready(cursor, '"analytics"')
+    _refresh_fact_product_snapshot(cursor, '"analytics"')
     sql = "\n".join(cursor.statements)
 
     assert len(cursor.statements) == 2
-    assert 'INSERT INTO "analytics"."product_analysis_ready"' in sql
-    assert "seller_id IS NOT NULL" in sql
-    assert "seller_name IS NOT NULL" in sql
-    assert "home_segment <> 'Ngoài scope'" in sql
+    assert 'INSERT INTO "analytics"."fact_product_snapshot"' in sql
+    assert 'JOIN "analytics"."dim_product" dp' in sql
+    assert "current_snapshot AS" in sql
     assert "price > 0" in sql
     assert "COALESCE(f.seller_id, 'unknown')" not in sql
     assert "Unknown Seller" not in sql
-    assert "Giá TB" in sql
-    assert "KM cao" in sql
     assert "Rating 0" in sql
     assert "0 review" in sql
     assert "0 sold" in sql
     assert "Thiếu tín hiệu" in sql
+
+
+def test_price_snapshot_fact_refresh_tracks_price_by_snapshot():
+    from pipelines.analytics.normalizer import _refresh_fact_price_snapshot
+
+    class Cursor:
+        rowcount = 0
+
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, sql):
+            self.statements.append(sql)
+
+    cursor = Cursor()
+    _refresh_fact_price_snapshot(cursor, '"analytics"')
+    sql = "\n".join(cursor.statements)
+
+    assert len(cursor.statements) == 2
+    assert 'INSERT INTO "analytics"."fact_price_snapshot"' in sql
+    assert "snapshot_id, product_id, price" in sql
+    assert "Giá TB" in sql
+    assert "KM cao" in sql
+    assert "price > 0" in sql
+    assert "ON CONFLICT (snapshot_id, product_id)" in sql
+
+
+def test_dim_category_refresh_outputs_vietnamese_analysis_values():
+    from pipelines.analytics.normalizer import _refresh_dim_category
+
+    class Cursor:
+        rowcount = 0
+
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, sql):
+            self.statements.append(sql)
+
+    cursor = Cursor()
+    _refresh_dim_category(cursor, '"analytics"')
+    sql = "\n".join(cursor.statements)
+
     assert "Nhà cửa" in sql
     assert "Bếp" in sql
+    assert "home_segment <> 'Ngoài scope'" in sql
 
 
 @pytest.mark.parametrize(

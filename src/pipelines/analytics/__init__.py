@@ -6,7 +6,11 @@ from .normalizer import (
     classify_category_path,
     ensure_analytics_schema,
     refresh_analytics_mart,
+    refresh_dimensions,
+    refresh_price_snapshot_fact,
     refresh_product_analysis_ready,
+    refresh_product_snapshot_fact,
+    refresh_snapshot,
     validate_schema_name,
 )
 
@@ -16,6 +20,10 @@ __all__ = [
     "classify_category_path",
     "ensure_analytics_schema",
     "refresh_analytics_mart",
+    "refresh_dimensions",
+    "refresh_price_snapshot_fact",
     "refresh_product_analysis_ready",
+    "refresh_product_snapshot_fact",
+    "refresh_snapshot",
     "validate_schema_name",
 ]
