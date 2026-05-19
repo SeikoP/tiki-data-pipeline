@@ -1732,6 +1732,8 @@ def _record_api_failure(
     product_id: str,
     status: str | int | None = None,
     message: str | None = None,
+    attempt_count: int | None = None,
+    elapsed_ms: int | None = None,
 ) -> None:
     if failure_details is None:
         return
@@ -1753,6 +1755,10 @@ def _record_api_failure(
             "message": message or default_messages.get(reason, reason),
         }
     )
+    if attempt_count is not None:
+        failure_details["attempt_count"] = attempt_count
+    if elapsed_ms is not None:
+        failure_details["elapsed_ms"] = elapsed_ms
 
 
 async def crawl_product_detail_via_api(
@@ -1775,6 +1781,10 @@ async def crawl_product_detail_via_api(
         return None
 
     api_url = f"https://tiki.vn/api/v2/products/{product_id}"
+    started_at = time.perf_counter()
+
+    def elapsed_ms() -> int:
+        return int((time.perf_counter() - started_at) * 1000)
 
     def build_headers() -> dict[str, str]:
         try:
@@ -1827,6 +1837,8 @@ async def crawl_product_detail_via_api(
                             product_id=product_id,
                             status=response.status,
                             message=str(json_err),
+                            attempt_count=attempt + 1,
+                            elapsed_ms=elapsed_ms(),
                         )
                         logger.warning(
                             "[API] ⚠️ Failed to decode JSON for %s: %s", product_id, json_err
@@ -1853,6 +1865,8 @@ async def crawl_product_detail_via_api(
                         reason=reason,
                         product_id=product_id,
                         status=status_desc,
+                        attempt_count=attempt + 1,
+                        elapsed_ms=elapsed_ms(),
                     )
 
                     is_last_attempt = attempt == max_retries - 1
@@ -1878,6 +1892,8 @@ async def crawl_product_detail_via_api(
                         reason="api_http_error",
                         product_id=product_id,
                         status=response.status,
+                        attempt_count=attempt + 1,
+                        elapsed_ms=elapsed_ms(),
                     )
                     if verbose:
                         text = await response.text()
@@ -1904,6 +1920,8 @@ async def crawl_product_detail_via_api(
                 reason="api_exception",
                 product_id=product_id,
                 message=str(e),
+                attempt_count=attempt + 1,
+                elapsed_ms=elapsed_ms(),
             )
             logger.error("[API] ❌ Lỗi attempt %d: %s", attempt + 1, e)
             if attempt < max_retries - 1:

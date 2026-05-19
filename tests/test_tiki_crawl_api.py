@@ -97,6 +97,8 @@ async def test_crawl_product_detail_via_api_reports_html_response_reason():
     assert result is None
     assert failure_details["reason"] == "api_html_instead_of_json"
     assert failure_details["status"] == "200 (HTML instead of JSON)"
+    assert failure_details["attempt_count"] == 3
+    assert failure_details["elapsed_ms"] >= 0
 
 
 @pytest.mark.asyncio

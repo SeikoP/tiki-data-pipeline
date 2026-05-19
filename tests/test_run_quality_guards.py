@@ -18,7 +18,10 @@ from tiki_crawl_products_v2.tasks.detail import (  # noqa: E402
     _select_products_for_detail,
     _validate_detail_results_available,
 )
-from tiki_crawl_products_v2.tasks.detail_new import _get_detail_concurrency  # noqa: E402
+from tiki_crawl_products_v2.tasks.detail_new import (  # noqa: E402
+    _get_detail_concurrency,
+    _summarize_detail_metrics,
+)
 from tiki_crawl_products_v2.tasks.loader import _resolve_product_load_mode  # noqa: E402
 from tiki_crawl_products_v2.tasks.product import (  # noqa: E402
     _resolve_detail_output_file,
@@ -204,6 +207,50 @@ def test_detail_request_delay_staggers_by_configured_interval():
     assert _detail_request_delay(index=3, rate_limit_delay=0.05) == pytest.approx(0.15)
 
 
+def test_summarize_detail_metrics_reports_latency_and_reasons():
+    results = [
+        {
+            "product_id": "p1",
+            "status": "success_api",
+            "metrics": {"duration_ms": 100, "api_attempts": 1, "api_status": 200},
+        },
+        {
+            "product_id": "p2",
+            "status": "failed",
+            "metrics": {
+                "duration_ms": 400,
+                "api_attempts": 3,
+                "api_status": "200 (HTML instead of JSON)",
+                "api_reason": "api_html_instead_of_json",
+            },
+        },
+        {
+            "product_id": "p3",
+            "status": "failed",
+            "metrics": {
+                "duration_ms": 250,
+                "api_attempts": 2,
+                "api_status": 429,
+                "api_reason": "api_retriable_http_status",
+            },
+        },
+    ]
+
+    summary = _summarize_detail_metrics(results, slowest_limit=2)
+
+    assert summary["count"] == 3
+    assert summary["avg_ms"] == pytest.approx(250)
+    assert summary["p50_ms"] == 250
+    assert summary["p95_ms"] == 400
+    assert summary["max_ms"] == 400
+    assert summary["failure_reasons"] == {
+        "api_html_instead_of_json": 1,
+        "api_retriable_http_status": 1,
+    }
+    assert summary["api_statuses"] == {"200": 1, "200 (HTML instead of JSON)": 1, "429": 1}
+    assert [item["product_id"] for item in summary["slowest"]] == ["p2", "p3"]
+
+
 def test_resolve_product_load_mode_auto_threshold():
     assert _resolve_product_load_mode("auto", product_count=999, threshold=1000) == "safe"
     assert _resolve_product_load_mode("auto", product_count=1000, threshold=1000) == "optimized"
@@ -230,10 +277,26 @@ def test_parse_segment_quotas_accepts_comma_separated_pairs():
 
 def test_select_categories_by_segment_quota_balances_target_segments():
     categories = [
-        {"category_id": "k1", "name": "Bình đựng nước", "category_path": ["Nhà cửa đời sống", "Đồ dùng phòng ăn", "Bình đựng nước"]},
-        {"category_id": "k2", "name": "Dụng cụ nhà bếp", "category_path": ["Nhà cửa đời sống", "Dụng cụ nhà bếp"]},
-        {"category_id": "b1", "name": "Kệ nhà tắm", "category_path": ["Nhà cửa đời sống", "Nhà tắm"]},
-        {"category_id": "x1", "name": "Amply", "category_path": ["Nhà cửa đời sống", "Nhạc cụ", "Amply"]},
+        {
+            "category_id": "k1",
+            "name": "Bình đựng nước",
+            "category_path": ["Nhà cửa đời sống", "Đồ dùng phòng ăn", "Bình đựng nước"],
+        },
+        {
+            "category_id": "k2",
+            "name": "Dụng cụ nhà bếp",
+            "category_path": ["Nhà cửa đời sống", "Dụng cụ nhà bếp"],
+        },
+        {
+            "category_id": "b1",
+            "name": "Kệ nhà tắm",
+            "category_path": ["Nhà cửa đời sống", "Nhà tắm"],
+        },
+        {
+            "category_id": "x1",
+            "name": "Amply",
+            "category_path": ["Nhà cửa đời sống", "Nhạc cụ", "Amply"],
+        },
     ]
 
     selected = _select_categories_by_segment_quota(
