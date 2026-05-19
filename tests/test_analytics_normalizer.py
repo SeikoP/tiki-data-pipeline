@@ -31,41 +31,46 @@ def test_analytics_schema_sql_contains_required_tables():
 
     ddl = "\n".join(build_schema_sql("analytics"))
 
-    assert REQUIRED_ANALYTICS_TABLES == {
-        "dim_category",
-        "dim_seller",
-        "dim_product",
+    assert REQUIRED_ANALYTICS_TABLES == {"product_analysis_ready"}
+    for table_name in REQUIRED_ANALYTICS_TABLES:
+        assert f'CREATE TABLE "analytics"."{table_name}"' in ddl
+
+
+def test_analytics_schema_sql_removes_legacy_operational_tables():
+    from pipelines.analytics.normalizer import build_schema_sql
+
+    ddl = "\n".join(build_schema_sql("analytics"))
+
+    legacy_objects = [
         "fact_product_daily",
         "fact_category_daily",
         "fact_seller_daily",
         "fact_price_change",
         "fact_crawl_quality",
-        "product_analysis_ready",
-    }
-    for table_name in REQUIRED_ANALYTICS_TABLES:
-        assert f'CREATE TABLE IF NOT EXISTS "analytics"."{table_name}"' in ddl
+        "dim_product",
+        "dim_category",
+        "dim_seller",
+        "mart_product_wide",
+        "mart_crawl_quality",
+        "category_summary",
+        "seller_summary",
+    ]
+    for object_name in legacy_objects:
+        assert f'DROP TABLE IF EXISTS "analytics"."{object_name}"' in ddl or (
+            f'DROP VIEW IF EXISTS "analytics"."{object_name}"' in ddl
+        )
+
+    assert 'CREATE TABLE "analytics"."fact_product_daily"' not in ddl
+    assert 'CREATE TABLE "analytics"."fact_crawl_quality"' not in ddl
+    assert 'CREATE VIEW "analytics"."mart_crawl_quality"' not in ddl
 
 
-def test_analytics_schema_sql_creates_bi_mart_views():
+def test_analytics_schema_sql_has_no_extra_label_columns():
     from pipelines.analytics.normalizer import build_schema_sql
 
     ddl = "\n".join(build_schema_sql("analytics"))
 
-    assert 'CREATE OR REPLACE VIEW "analytics"."mart_product_wide"' in ddl
-    assert 'CREATE OR REPLACE VIEW "analytics"."mart_category_summary"' in ddl
-    assert 'CREATE OR REPLACE VIEW "analytics"."mart_seller_summary"' in ddl
-    assert 'CREATE OR REPLACE VIEW "analytics"."mart_crawl_quality"' in ddl
-    assert "COALESCE(s.seller_display_name, 'Unknown Seller')" in ddl
-    assert "home_segment_label" in ddl
-    assert "market_scope_label" in ddl
-
-
-def test_analytics_schema_sql_contains_analysis_labels_and_statuses():
-    from pipelines.analytics.normalizer import build_schema_sql
-
-    ddl = "\n".join(build_schema_sql("analytics"))
-
-    expected_columns = [
+    removed_columns = [
         "price_bucket_label",
         "price_status",
         "price_status_label",
@@ -89,33 +94,12 @@ def test_analytics_schema_sql_contains_analysis_labels_and_statuses():
         "change_direction_label",
         "status_label",
     ]
-    for column_name in expected_columns:
-        assert column_name in ddl
-
-    assert 'ALTER TABLE "analytics"."fact_product_daily"' in ddl
-    assert 'ALTER TABLE "analytics"."product_analysis_ready"' in ddl
+    for column_name in removed_columns:
+        assert column_name not in ddl
 
 
-def test_analytics_fact_sql_normalizes_missing_seller_to_unknown():
-    from pipelines.analytics.normalizer import _refresh_fact_product_daily
-
-    class DummyCursor:
-        def __init__(self):
-            self.statements = []
-            self.rowcount = 0
-
-        def execute(self, sql):
-            self.statements.append(sql)
-
-    cursor = DummyCursor()
-    _refresh_fact_product_daily(cursor, '"analytics"')
-    sql = "\n".join(cursor.statements)
-
-    assert "COALESCE(dp.seller_id, 'unknown')" in sql
-
-
-def test_product_daily_refresh_distinguishes_missing_zero_and_labels():
-    from pipelines.analytics.normalizer import _refresh_fact_product_daily
+def test_product_analysis_ready_refresh_builds_clean_current_snapshot():
+    from pipelines.analytics.normalizer import _refresh_product_analysis_ready
 
     class Cursor:
         rowcount = 0
@@ -127,18 +111,22 @@ def test_product_daily_refresh_distinguishes_missing_zero_and_labels():
             self.statements.append(sql)
 
     cursor = Cursor()
-    _refresh_fact_product_daily(cursor, '"analytics"')
+    _refresh_product_analysis_ready(cursor, '"analytics"')
     sql = "\n".join(cursor.statements)
 
     assert len(cursor.statements) == 2
-    assert "WHEN raw_price IS NULL THEN 'price_unknown'" in sql
-    assert "WHEN raw_price = 0 THEN 'price_zero'" in sql
-    assert "WHEN rating_average IS NULL THEN 'missing_rating'" in sql
-    assert "WHEN rating_average = 0 THEN 'zero_rating'" in sql
-    assert "WHEN review_count IS NULL THEN 'missing_review_count'" in sql
-    assert "WHEN review_count = 0 THEN 'zero_review'" in sql
-    assert "WHEN sales_count IS NULL THEN 'missing_sales_count'" in sql
-    assert "WHEN sales_count = 0 THEN 'zero_sold'" in sql
+    assert 'INSERT INTO "analytics"."product_analysis_ready"' in sql
+    assert "seller_id IS NOT NULL" in sql
+    assert "seller_name IS NOT NULL" in sql
+    assert "home_segment <> 'Ngoài scope'" in sql
+    assert "price > 0" in sql
+    assert "COALESCE(f.seller_id, 'unknown')" not in sql
+    assert "Unknown Seller" not in sql
+    assert "Giá TB" in sql
+    assert "KM cao" in sql
+    assert "Rating 0" in sql
+    assert "0 review" in sql
+    assert "0 sold" in sql
     assert "Thiếu tín hiệu" in sql
     assert "Nhà cửa" in sql
     assert "Bếp" in sql
@@ -147,36 +135,36 @@ def test_product_daily_refresh_distinguishes_missing_zero_and_labels():
 @pytest.mark.parametrize(
     ("path", "expected_segment", "expected_target", "expected_reason"),
     [
-        (["Nha Cua Doi Song", "Dụng cụ nhà bếp", "Nồi"], "kitchen_cooking", True, None),
+        (["Nha Cua Doi Song", "Dụng cụ nhà bếp", "Nồi"], "Bếp", True, None),
         (
             ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm", "Kệ phòng tắm"],
-            "bathroom",
+            "Nhà tắm",
             True,
             None,
         ),
         (
             ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm", "Dụng cụ vệ sinh"],
-            "cleaning_homecare",
+            "Vệ sinh",
             True,
             None,
         ),
         (
             ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm", "Phụ kiện giặt ủi"],
-            "laundry_garment",
+            "Giặt ủi",
             True,
             None,
         ),
         (
             ["Dien Tu Dien Lanh", "Máy giặt", "Máy giặt cửa trước"],
-            "excluded_other",
+            "Ngoài scope",
             False,
-            "large_appliance",
+            "Điện máy lớn",
         ),
         (
             ["Nha Cua Doi Song", "Nhạc cụ", "Amply"],
-            "excluded_other",
+            "Ngoài scope",
             False,
-            "musical_instrument",
+            "Nhạc cụ",
         ),
     ],
 )
