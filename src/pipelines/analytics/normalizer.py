@@ -204,7 +204,32 @@ def build_schema_sql(schema_name: str) -> list[str]:
 
 
 def _drop_legacy_analytics_sql(schema: str) -> list[str]:
+    schema_name = schema.strip('"')
     return [
+        f"""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM pg_class cls
+                JOIN pg_namespace ns ON ns.oid = cls.relnamespace
+                WHERE ns.nspname = {schema_name!r}
+                  AND cls.relname = 'product_analysis_ready'
+                  AND cls.relkind IN ('r', 'p')
+            ) THEN
+                EXECUTE 'DROP TABLE {schema}."product_analysis_ready" CASCADE';
+            ELSIF EXISTS (
+                SELECT 1
+                FROM pg_class cls
+                JOIN pg_namespace ns ON ns.oid = cls.relnamespace
+                WHERE ns.nspname = {schema_name!r}
+                  AND cls.relname = 'product_analysis_ready'
+                  AND cls.relkind = 'v'
+            ) THEN
+                EXECUTE 'DROP VIEW {schema}."product_analysis_ready" CASCADE';
+            END IF;
+        END $$;
+        """,
         f'DROP VIEW IF EXISTS {schema}."product_analysis_ready" CASCADE',
         f'DROP VIEW IF EXISTS {schema}."mart_crawl_quality" CASCADE',
         f'DROP VIEW IF EXISTS {schema}."mart_seller_summary" CASCADE',
