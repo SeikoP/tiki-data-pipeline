@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-TIKI_CORE_TABLES_ASSET_URI = "postgres://tiki/public/core_product_tables"
+TIKI_CORE_TABLES_ASSET_URI = "postgres://postgres:5432/tiki/public/core_product_tables"
 
 try:
     from airflow.sdk import Asset

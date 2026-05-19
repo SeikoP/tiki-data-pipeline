@@ -37,6 +37,7 @@ def _normalize_text(value: Any) -> str:
     text = "" if value is None else str(value)
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.replace("đ", "d").replace("Đ", "D")
     return text.casefold()
 
 
@@ -78,10 +79,10 @@ def classify_category_path(category_path: Iterable[Any]) -> dict[str, Any]:
 
     segment_rules = [
         (("dung cu nha bep", "do dung phong an", "binh dung nuoc"), "kitchen_cooking"),
-        (("nha tam", "phong tam"), "bathroom"),
         (("ve sinh", "don dep", "hut bui", "loc khong khi"), "cleaning_homecare"),
-        (("gia, moc", "cay treo", "hop dung", "luu tru"), "storage_organization"),
         (("giat", "ui", "say quan ao"), "laundry_garment"),
+        (("gia, moc", "cay treo", "hop dung", "luu tru"), "storage_organization"),
+        (("nha tam", "phong tam"), "bathroom"),
         (("may nuoc nong", "may rua chen", "quat", "tao am", "may suoi"), "home_comfort"),
         (("trang tri", "den", "chieu sang"), "decor_living"),
     ]
@@ -119,9 +120,12 @@ def build_schema_sql(schema_name: str) -> list[str]:
             level_5 VARCHAR(255),
             root_category_name VARCHAR(255),
             market_scope VARCHAR(50) NOT NULL,
+            market_scope_label VARCHAR(100),
             home_segment VARCHAR(80) NOT NULL,
+            home_segment_label VARCHAR(100),
             is_analysis_target BOOLEAN NOT NULL,
             exclusion_reason VARCHAR(80),
+            exclusion_reason_label VARCHAR(120),
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
@@ -131,6 +135,7 @@ def build_schema_sql(schema_name: str) -> list[str]:
             seller_name VARCHAR(500),
             seller_display_name VARCHAR(500) NOT NULL,
             seller_type VARCHAR(50) NOT NULL,
+            seller_type_label VARCHAR(100),
             is_official BOOLEAN,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -146,9 +151,12 @@ def build_schema_sql(schema_name: str) -> list[str]:
             category_id VARCHAR(255),
             seller_id VARCHAR(255),
             market_scope VARCHAR(50) NOT NULL,
+            market_scope_label VARCHAR(100),
             home_segment VARCHAR(80) NOT NULL,
+            home_segment_label VARCHAR(100),
             is_analysis_target BOOLEAN NOT NULL,
             exclusion_reason VARCHAR(80),
+            exclusion_reason_label VARCHAR(120),
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
@@ -161,20 +169,38 @@ def build_schema_sql(schema_name: str) -> list[str]:
             original_price NUMERIC(12, 2),
             discount_percent NUMERIC(7, 2),
             price_bucket VARCHAR(50),
+            price_bucket_label VARCHAR(100),
+            price_status VARCHAR(50),
+            price_status_label VARCHAR(100),
             discount_bucket VARCHAR(50),
+            discount_bucket_label VARCHAR(100),
+            discount_status VARCHAR(50),
+            discount_status_label VARCHAR(100),
             rating_average NUMERIC(4, 2),
             rating_bucket VARCHAR(50),
+            rating_bucket_label VARCHAR(100),
+            rating_status VARCHAR(50),
+            rating_status_label VARCHAR(100),
             review_count INTEGER,
             review_bucket VARCHAR(50),
+            review_bucket_label VARCHAR(100),
+            review_status VARCHAR(50),
+            review_status_label VARCHAR(100),
             sales_count INTEGER,
             sold_bucket VARCHAR(50),
+            sold_bucket_label VARCHAR(100),
+            sold_status VARCHAR(50),
+            sold_status_label VARCHAR(100),
             seller_id VARCHAR(255),
             category_id VARCHAR(255),
             market_scope VARCHAR(50) NOT NULL,
+            market_scope_label VARCHAR(100),
             home_segment VARCHAR(80) NOT NULL,
+            home_segment_label VARCHAR(100),
             is_analysis_target BOOLEAN NOT NULL,
             value_score NUMERIC(8, 2),
             market_position VARCHAR(80),
+            market_position_label VARCHAR(120),
             recorded_at TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (product_id, snapshot_date)
@@ -185,7 +211,9 @@ def build_schema_sql(schema_name: str) -> list[str]:
             snapshot_date DATE NOT NULL,
             category_id VARCHAR(255) NOT NULL,
             market_scope VARCHAR(50) NOT NULL,
+            market_scope_label VARCHAR(100),
             home_segment VARCHAR(80) NOT NULL,
+            home_segment_label VARCHAR(100),
             product_count INTEGER NOT NULL,
             avg_price NUMERIC(12, 2),
             avg_discount_percent NUMERIC(7, 2),
@@ -201,8 +229,11 @@ def build_schema_sql(schema_name: str) -> list[str]:
             snapshot_date DATE NOT NULL,
             seller_id VARCHAR(255) NOT NULL,
             seller_type VARCHAR(50) NOT NULL,
+            seller_type_label VARCHAR(100),
             market_scope VARCHAR(50) NOT NULL,
+            market_scope_label VARCHAR(100),
             home_segment VARCHAR(80) NOT NULL,
+            home_segment_label VARCHAR(100),
             product_count INTEGER NOT NULL,
             avg_price NUMERIC(12, 2),
             avg_discount_percent NUMERIC(7, 2),
@@ -223,6 +254,7 @@ def build_schema_sql(schema_name: str) -> list[str]:
             price_change NUMERIC(12, 2),
             price_change_percent NUMERIC(7, 2),
             change_direction VARCHAR(20),
+            change_direction_label VARCHAR(100),
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (product_id, crawled_at)
         )
@@ -235,6 +267,7 @@ def build_schema_sql(schema_name: str) -> list[str]:
             started_at TIMESTAMP,
             finished_at TIMESTAMP,
             status VARCHAR(30),
+            status_label VARCHAR(100),
             total_raw_items INTEGER,
             total_transformed_items INTEGER,
             total_loaded_items INTEGER,
@@ -250,6 +283,62 @@ def build_schema_sql(schema_name: str) -> list[str]:
         CREATE TABLE IF NOT EXISTS {schema}."product_analysis_ready" (
             LIKE {schema}."fact_product_daily" INCLUDING ALL
         )
+        """,
+        *[
+            f"""
+            ALTER TABLE {schema}."{table_name}"
+                ADD COLUMN IF NOT EXISTS price_bucket_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS price_status VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS price_status_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS discount_bucket_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS discount_status VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS discount_status_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS rating_bucket_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS rating_status VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS rating_status_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS review_bucket_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS review_status VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS review_status_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS sold_bucket_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS sold_status VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS sold_status_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS market_scope_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS home_segment_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS market_position_label VARCHAR(120)
+            """
+            for table_name in ("fact_product_daily", "product_analysis_ready")
+        ],
+        *[
+            f"""
+            ALTER TABLE {schema}."{table_name}"
+                ADD COLUMN IF NOT EXISTS market_scope_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS home_segment_label VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS exclusion_reason_label VARCHAR(120)
+            """
+            for table_name in ("dim_category", "dim_product")
+        ],
+        f"""
+        ALTER TABLE {schema}."dim_seller"
+            ADD COLUMN IF NOT EXISTS seller_type_label VARCHAR(100)
+        """,
+        f"""
+        ALTER TABLE {schema}."fact_category_daily"
+            ADD COLUMN IF NOT EXISTS market_scope_label VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS home_segment_label VARCHAR(100)
+        """,
+        f"""
+        ALTER TABLE {schema}."fact_seller_daily"
+            ADD COLUMN IF NOT EXISTS seller_type_label VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS market_scope_label VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS home_segment_label VARCHAR(100)
+        """,
+        f"""
+        ALTER TABLE {schema}."fact_price_change"
+            ADD COLUMN IF NOT EXISTS change_direction_label VARCHAR(100)
+        """,
+        f"""
+        ALTER TABLE {schema}."fact_crawl_quality"
+            ADD COLUMN IF NOT EXISTS status_label VARCHAR(100)
         """,
     ]
 
@@ -383,12 +472,30 @@ def _refresh_dim_category(cursor: Any, schema: str) -> int:
                     THEN 'kitchen_cooking'
                 WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%phòng ăn%'
                     THEN 'kitchen_cooking'
-                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%nhà tắm%'
-                    THEN 'bathroom'
                 WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%vệ sinh%'
                     THEN 'cleaning_homecare'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%dọn dẹp%'
+                    THEN 'cleaning_homecare'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%hút bụi%'
+                    THEN 'cleaning_homecare'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%giặt%'
+                    THEN 'laundry_garment'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%ủi%'
+                    THEN 'laundry_garment'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%sấy quần áo%'
+                    THEN 'laundry_garment'
                 WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%giá, móc%'
                     THEN 'storage_organization'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%cây treo%'
+                    THEN 'storage_organization'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%hộp đựng%'
+                    THEN 'storage_organization'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%lưu trữ%'
+                    THEN 'storage_organization'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%nhà tắm%'
+                    THEN 'bathroom'
+                WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%phòng tắm%'
+                    THEN 'bathroom'
                 WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%đèn%'
                     THEN 'decor_living'
                 WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE '%trang trí%'
@@ -408,8 +515,10 @@ def _refresh_dim_category(cursor: Any, schema: str) -> int:
                 ) THEN FALSE
                 WHEN lower(concat_ws(' ', level_2, level_3, name)) LIKE ANY (
                     ARRAY[
-                        '%dụng cụ nhà bếp%', '%phòng ăn%', '%nhà tắm%', '%vệ sinh%',
-                        '%giá, móc%', '%đèn%', '%trang trí%', '%máy nước nóng%',
+                        '%dụng cụ nhà bếp%', '%phòng ăn%', '%nhà tắm%', '%phòng tắm%',
+                        '%vệ sinh%', '%dọn dẹp%', '%hút bụi%', '%giặt%', '%ủi%',
+                        '%sấy quần áo%', '%giá, móc%', '%cây treo%', '%hộp đựng%',
+                        '%lưu trữ%', '%đèn%', '%trang trí%', '%máy nước nóng%',
                         '%máy rửa chén%'
                     ]
                 ) THEN TRUE
@@ -455,7 +564,9 @@ def _refresh_dim_category(cursor: Any, schema: str) -> int:
             updated_at = CURRENT_TIMESTAMP
         """
     )
-    return cursor.rowcount
+    refreshed_rows = cursor.rowcount
+    _backfill_dim_category_labels(cursor, schema)
+    return refreshed_rows
 
 
 def _refresh_dim_seller(cursor: Any, schema: str) -> int:
@@ -485,7 +596,85 @@ def _refresh_dim_seller(cursor: Any, schema: str) -> int:
             updated_at = CURRENT_TIMESTAMP
         """
     )
-    return cursor.rowcount
+    refreshed_rows = cursor.rowcount
+    _backfill_dim_seller_labels(cursor, schema)
+    return refreshed_rows
+
+
+def _label_market_scope_sql(column: str = "market_scope") -> str:
+    return f"""
+        CASE
+            WHEN {column} = 'home_living' THEN 'Nhà cửa'
+            WHEN {column} = 'home_appliance' THEN 'Điện GD'
+            WHEN {column} = 'mixed' THEN 'Đa scope'
+            ELSE 'Khác'
+        END
+    """
+
+
+def _label_home_segment_sql(column: str = "home_segment") -> str:
+    return f"""
+        CASE
+            WHEN {column} = 'kitchen_cooking' THEN 'Bếp'
+            WHEN {column} = 'cleaning_homecare' THEN 'Vệ sinh'
+            WHEN {column} = 'laundry_garment' THEN 'Giặt ủi'
+            WHEN {column} = 'storage_organization' THEN 'Lưu trữ'
+            WHEN {column} = 'bathroom' THEN 'Nhà tắm'
+            WHEN {column} = 'home_comfort' THEN 'Tiện nghi'
+            WHEN {column} = 'decor_living' THEN 'Trang trí'
+            ELSE 'Ngoài scope'
+        END
+    """
+
+
+def _label_exclusion_reason_sql(column: str = "exclusion_reason") -> str:
+    return f"""
+        CASE
+            WHEN {column} IS NULL THEN 'Trong scope'
+            WHEN {column} = 'large_appliance' THEN 'Điện máy lớn'
+            WHEN {column} = 'large_furniture' THEN 'Nội thất lớn'
+            WHEN {column} = 'musical_instrument' THEN 'Nhạc cụ'
+            WHEN {column} = 'religious_item' THEN 'Đồ thờ'
+            WHEN {column} = 'construction_repair' THEN 'Sửa chữa'
+            WHEN {column} = 'uncategorized' THEN 'Chưa phân loại'
+            ELSE 'Khác'
+        END
+    """
+
+
+def _label_seller_type_sql(column: str = "seller_type") -> str:
+    return f"""
+        CASE
+            WHEN {column} = 'official' THEN 'Official'
+            WHEN {column} = 'marketplace' THEN 'Marketplace'
+            WHEN {column} = 'mixed' THEN 'Đa loại'
+            ELSE 'Không rõ'
+        END
+    """
+
+
+def _backfill_dim_category_labels(cursor: Any, schema: str) -> None:
+    cursor.execute(
+        f"""
+        UPDATE {schema}."dim_category"
+        SET
+            market_scope_label = {_label_market_scope_sql()},
+            home_segment_label = {_label_home_segment_sql()},
+            exclusion_reason_label = {_label_exclusion_reason_sql()},
+            updated_at = CURRENT_TIMESTAMP
+        """
+    )
+
+
+def _backfill_dim_seller_labels(cursor: Any, schema: str) -> None:
+    cursor.execute(
+        f"""
+        UPDATE {schema}."dim_seller"
+        SET
+            seller_type_label = {_label_seller_type_sql()},
+            updated_at = CURRENT_TIMESTAMP
+        """
+    )
 
 
 def _refresh_dim_product(cursor: Any, schema: str) -> int:
@@ -528,7 +717,22 @@ def _refresh_dim_product(cursor: Any, schema: str) -> int:
             updated_at = CURRENT_TIMESTAMP
         """
     )
-    return cursor.rowcount
+    refreshed_rows = cursor.rowcount
+    _backfill_dim_product_labels(cursor, schema)
+    return refreshed_rows
+
+
+def _backfill_dim_product_labels(cursor: Any, schema: str) -> None:
+    cursor.execute(
+        f"""
+        UPDATE {schema}."dim_product"
+        SET
+            market_scope_label = {_label_market_scope_sql()},
+            home_segment_label = {_label_home_segment_sql()},
+            exclusion_reason_label = {_label_exclusion_reason_sql()},
+            updated_at = CURRENT_TIMESTAMP
+        """
+    )
 
 
 def _refresh_fact_product_daily(cursor: Any, schema: str) -> int:
@@ -536,127 +740,471 @@ def _refresh_fact_product_daily(cursor: Any, schema: str) -> int:
         f"""
         INSERT INTO {schema}."fact_product_daily" (
             product_id, snapshot_date, crawl_run_id, price, original_price,
-            discount_percent, price_bucket, discount_bucket, rating_average,
-            rating_bucket, review_count, review_bucket, sales_count, sold_bucket,
-            seller_id, category_id, market_scope, home_segment, is_analysis_target,
-            value_score, market_position, recorded_at, updated_at
+            discount_percent, price_bucket, price_bucket_label, price_status,
+            price_status_label, discount_bucket, discount_bucket_label, discount_status,
+            discount_status_label,
+            rating_average, rating_bucket, rating_bucket_label, rating_status,
+            rating_status_label, review_count, review_bucket, review_bucket_label,
+            review_status, review_status_label, sales_count, sold_bucket, sold_bucket_label,
+            sold_status, sold_status_label,
+            seller_id, category_id, market_scope, market_scope_label, home_segment,
+            home_segment_label, is_analysis_target, value_score, market_position,
+            market_position_label, recorded_at, updated_at
         )
-        SELECT DISTINCT ON (p.product_id, COALESCE(pp.recorded_at, p.crawled_at)::date)
+        WITH latest_product_snapshot AS (
+            SELECT DISTINCT ON (p.product_id, COALESCE(pp.recorded_at, p.crawled_at)::date)
+                p.product_id,
+                COALESCE(pp.recorded_at, p.crawled_at)::date AS snapshot_date,
+                pp.crawl_run_id,
+                COALESCE(pp.price, p.price) AS raw_price,
+                COALESCE(pp.original_price, p.original_price) AS raw_original_price,
+                COALESCE(pp.discount_rate, p.discount_percent) AS raw_discount_percent,
+                COALESCE(pm.rating_average, p.rating_average) AS rating_average,
+                COALESCE(pm.review_count, p.review_count) AS review_count,
+                COALESCE(pm.quantity_sold, p.sales_count) AS sales_count,
+                dp.seller_id,
+                dp.category_id,
+                dp.market_scope,
+                dp.home_segment,
+                dp.is_analysis_target,
+                COALESCE(pp.recorded_at, p.crawled_at) AS recorded_at
+            FROM products p
+            JOIN {schema}."dim_product" dp ON dp.product_id = p.product_id
+            LEFT JOIN product_prices pp ON pp.product_id = p.id
+            LEFT JOIN product_metrics pm
+                ON pm.product_id = p.id
+                AND pm.crawl_run_id IS NOT DISTINCT FROM pp.crawl_run_id
+            WHERE p.product_id IS NOT NULL
+              AND COALESCE(pp.recorded_at, p.crawled_at) IS NOT NULL
+            ORDER BY
+                p.product_id,
+                COALESCE(pp.recorded_at, p.crawled_at)::date,
+                COALESCE(pp.recorded_at, p.crawled_at) DESC
+        ),
+        normalized_snapshot AS (
+            SELECT
+                product_id,
+                snapshot_date,
+                crawl_run_id,
+                raw_price,
+                CASE WHEN raw_price > 0 THEN raw_price END AS price,
+                CASE
+                    WHEN raw_original_price >= raw_price THEN raw_original_price
+                    ELSE NULL
+                END AS original_price,
+                CASE
+                    WHEN raw_original_price > 0 AND raw_original_price >= raw_price THEN
+                        ROUND((raw_original_price - raw_price) / raw_original_price * 100, 2)
+                    WHEN raw_discount_percent >= 0 THEN raw_discount_percent
+                    ELSE NULL
+                END AS discount_percent,
+                rating_average,
+                review_count,
+                sales_count,
+                seller_id,
+                category_id,
+                market_scope,
+                home_segment,
+                is_analysis_target,
+                recorded_at
+            FROM latest_product_snapshot
+        ),
+        classified_snapshot AS (
+            SELECT
+                *,
+                CASE
+                    WHEN raw_price IS NULL THEN 'price_unknown'
+                    WHEN raw_price = 0 THEN 'price_zero'
+                    WHEN price < 100000 THEN 'low'
+                    WHEN price < 500000 THEN 'mid'
+                    WHEN price < 2000000 THEN 'high'
+                    ELSE 'premium'
+                END AS price_bucket,
+                CASE
+                    WHEN raw_price IS NULL THEN 'missing_price'
+                    WHEN raw_price = 0 THEN 'zero_price'
+                    ELSE 'has_price'
+                END AS price_status,
+                CASE
+                    WHEN discount_percent IS NULL THEN 'discount_unknown'
+                    WHEN discount_percent = 0 THEN 'no_discount'
+                    WHEN discount_percent < 10 THEN 'low_discount'
+                    WHEN discount_percent < 30 THEN 'mid_discount'
+                    ELSE 'high_discount'
+                END AS discount_bucket,
+                CASE
+                    WHEN discount_percent IS NULL THEN 'missing_discount'
+                    WHEN discount_percent = 0 THEN 'zero_discount'
+                    ELSE 'has_discount'
+                END AS discount_status,
+                CASE
+                    WHEN rating_average IS NULL THEN 'rating_unknown'
+                    WHEN rating_average = 0 THEN 'rating_zero'
+                    WHEN rating_average < 3.5 THEN 'rating_low'
+                    WHEN rating_average < 4.5 THEN 'rating_mid'
+                    ELSE 'rating_high'
+                END AS rating_bucket,
+                CASE
+                    WHEN rating_average IS NULL THEN 'missing_rating'
+                    WHEN rating_average = 0 THEN 'zero_rating'
+                    ELSE 'has_rating'
+                END AS rating_status,
+                CASE
+                    WHEN review_count IS NULL THEN 'review_unknown'
+                    WHEN review_count = 0 THEN 'no_review'
+                    WHEN review_count < 10 THEN 'low_review'
+                    WHEN review_count < 100 THEN 'moderate_review'
+                    ELSE 'high_review'
+                END AS review_bucket,
+                CASE
+                    WHEN review_count IS NULL THEN 'missing_review_count'
+                    WHEN review_count = 0 THEN 'zero_review'
+                    ELSE 'has_reviews'
+                END AS review_status,
+                CASE
+                    WHEN sales_count IS NULL THEN 'sold_unknown'
+                    WHEN sales_count = 0 THEN 'no_sold'
+                    WHEN sales_count < 10 THEN 'low_sold'
+                    WHEN sales_count < 100 THEN 'moderate_sold'
+                    ELSE 'high_sold'
+                END AS sold_bucket,
+                CASE
+                    WHEN sales_count IS NULL THEN 'missing_sales_count'
+                    WHEN sales_count = 0 THEN 'zero_sold'
+                    ELSE 'has_sales'
+                END AS sold_status
+            FROM normalized_snapshot
+        )
+        SELECT
             p.product_id,
-            COALESCE(pp.recorded_at, p.crawled_at)::date AS snapshot_date,
-            pp.crawl_run_id,
-            CASE WHEN COALESCE(pp.price, p.price) > 0 THEN COALESCE(pp.price, p.price) END,
+            p.snapshot_date,
+            p.crawl_run_id,
+            p.price,
+            p.original_price,
+            p.discount_percent,
+            p.price_bucket,
             CASE
-                WHEN COALESCE(pp.original_price, p.original_price) >= COALESCE(pp.price, p.price)
-                    THEN COALESCE(pp.original_price, p.original_price)
-                ELSE NULL
-            END,
+                WHEN p.price_bucket = 'price_unknown' THEN 'Thiếu giá'
+                WHEN p.price_bucket = 'price_zero' THEN 'Giá bằng 0'
+                WHEN p.price_bucket = 'low' THEN 'Giá thấp'
+                WHEN p.price_bucket = 'mid' THEN 'Giá TB'
+                WHEN p.price_bucket = 'high' THEN 'Giá cao'
+                ELSE 'Cao cấp'
+            END AS price_bucket_label,
+            p.price_status,
             CASE
-                WHEN COALESCE(pp.original_price, p.original_price) > 0
-                    AND COALESCE(pp.original_price, p.original_price) >= COALESCE(pp.price, p.price)
-                    THEN ROUND(
-                        (
-                            COALESCE(pp.original_price, p.original_price)
-                            - COALESCE(pp.price, p.price)
-                        ) / COALESCE(pp.original_price, p.original_price) * 100,
-                        2
-                    )
-                ELSE NULL
-            END AS discount_percent,
+                WHEN p.price_status = 'missing_price' THEN 'Thiếu giá'
+                WHEN p.price_status = 'zero_price' THEN 'Giá 0'
+                ELSE 'Có giá'
+            END AS price_status_label,
+            p.discount_bucket,
             CASE
-                WHEN COALESCE(pp.price, p.price) IS NULL THEN 'price_unknown'
-                WHEN COALESCE(pp.price, p.price) < 100000 THEN 'low'
-                WHEN COALESCE(pp.price, p.price) < 500000 THEN 'mid'
-                WHEN COALESCE(pp.price, p.price) < 2000000 THEN 'high'
-                ELSE 'premium'
-            END AS price_bucket,
+                WHEN p.discount_bucket = 'discount_unknown' THEN 'Thiếu KM'
+                WHEN p.discount_bucket = 'no_discount' THEN 'Không KM'
+                WHEN p.discount_bucket = 'low_discount' THEN 'KM thấp'
+                WHEN p.discount_bucket = 'mid_discount' THEN 'KM TB'
+                ELSE 'KM cao'
+            END AS discount_bucket_label,
+            p.discount_status,
             CASE
-                WHEN COALESCE(pp.discount_rate, p.discount_percent) IS NULL THEN 'discount_unknown'
-                WHEN COALESCE(pp.discount_rate, p.discount_percent) < 10 THEN 'low_discount'
-                WHEN COALESCE(pp.discount_rate, p.discount_percent) < 30 THEN 'mid_discount'
-                ELSE 'high_discount'
-            END AS discount_bucket,
-            COALESCE(pm.rating_average, p.rating_average),
+                WHEN p.discount_status = 'missing_discount' THEN 'Thiếu KM'
+                WHEN p.discount_status = 'zero_discount' THEN 'Không KM'
+                ELSE 'Có KM'
+            END AS discount_status_label,
+            p.rating_average,
+            p.rating_bucket,
             CASE
-                WHEN COALESCE(pm.rating_average, p.rating_average) IS NULL THEN 'rating_unknown'
-                WHEN COALESCE(pm.rating_average, p.rating_average) < 3.5 THEN 'rating_low'
-                WHEN COALESCE(pm.rating_average, p.rating_average) < 4.5 THEN 'rating_mid'
-                ELSE 'rating_high'
-            END,
-            COALESCE(pm.review_count, p.review_count),
+                WHEN p.rating_bucket = 'rating_unknown' THEN 'Thiếu rating'
+                WHEN p.rating_bucket = 'rating_zero' THEN 'Rating 0'
+                WHEN p.rating_bucket = 'rating_low' THEN 'Đánh giá thấp'
+                WHEN p.rating_bucket = 'rating_mid' THEN 'Đánh giá TB'
+                ELSE 'Đánh giá cao'
+            END AS rating_bucket_label,
+            p.rating_status,
             CASE
-                WHEN COALESCE(pm.review_count, p.review_count) IS NULL THEN 'review_unknown'
-                WHEN COALESCE(pm.review_count, p.review_count) < 10 THEN 'no_or_low_review'
-                WHEN COALESCE(pm.review_count, p.review_count) < 100 THEN 'moderate_review'
-                ELSE 'high_review'
-            END,
-            COALESCE(pm.quantity_sold, p.sales_count),
+                WHEN p.rating_status = 'missing_rating' THEN 'Thiếu rating'
+                WHEN p.rating_status = 'zero_rating' THEN 'Rating 0'
+                ELSE 'Có rating'
+            END AS rating_status_label,
+            p.review_count,
+            p.review_bucket,
             CASE
-                WHEN COALESCE(pm.quantity_sold, p.sales_count) IS NULL THEN 'sold_unknown'
-                WHEN COALESCE(pm.quantity_sold, p.sales_count) < 10 THEN 'low_sold'
-                WHEN COALESCE(pm.quantity_sold, p.sales_count) < 100 THEN 'moderate_sold'
-                ELSE 'high_sold'
-            END,
-            dp.seller_id,
-            dp.category_id,
-            dp.market_scope,
-            dp.home_segment,
-            dp.is_analysis_target,
-            (
-                COALESCE(COALESCE(pm.rating_average, p.rating_average), 0) * 20
-                + LEAST(COALESCE(pm.review_count, p.review_count, 0), 1000) / 20.0
-                + COALESCE(pp.discount_rate, p.discount_percent, 0) / 2.0
-            ) AS value_score,
+                WHEN p.review_bucket = 'review_unknown' THEN 'Thiếu review'
+                WHEN p.review_bucket = 'no_review' THEN '0 review'
+                WHEN p.review_bucket = 'low_review' THEN 'Ít review'
+                WHEN p.review_bucket = 'moderate_review' THEN 'Review TB'
+                ELSE 'Nhiều review'
+            END AS review_bucket_label,
+            p.review_status,
             CASE
-                WHEN COALESCE(pp.price, p.price) < 500000
-                    AND COALESCE(pm.review_count, p.review_count, 0) >= 100 THEN 'cheap_popular'
-                WHEN COALESCE(pp.price, p.price) >= 500000
-                    AND COALESCE(pm.rating_average, p.rating_average, 0) >= 4.5
-                    THEN 'premium_quality'
-                WHEN COALESCE(pp.discount_rate, p.discount_percent, 0) >= 30 THEN 'high_discount'
-                WHEN COALESCE(pm.rating_average, p.rating_average, 5) < 3.5
-                    OR COALESCE(pm.review_count, p.review_count, 0) < 10 THEN 'low_trust'
+                WHEN p.review_status = 'missing_review_count' THEN 'Thiếu review'
+                WHEN p.review_status = 'zero_review' THEN '0 review'
+                ELSE 'Có review'
+            END AS review_status_label,
+            p.sales_count,
+            p.sold_bucket,
+            CASE
+                WHEN p.sold_bucket = 'sold_unknown' THEN 'Thiếu sold'
+                WHEN p.sold_bucket = 'no_sold' THEN '0 sold'
+                WHEN p.sold_bucket = 'low_sold' THEN 'Sold thấp'
+                WHEN p.sold_bucket = 'moderate_sold' THEN 'Sold TB'
+                ELSE 'Sold cao'
+            END AS sold_bucket_label,
+            p.sold_status,
+            CASE
+                WHEN p.sold_status = 'missing_sales_count' THEN 'Thiếu sold'
+                WHEN p.sold_status = 'zero_sold' THEN '0 sold'
+                ELSE 'Có sold'
+            END AS sold_status_label,
+            p.seller_id,
+            p.category_id,
+            p.market_scope,
+            CASE
+                WHEN p.market_scope = 'home_living' THEN 'Nhà cửa'
+                WHEN p.market_scope = 'home_appliance' THEN 'Điện GD'
+                WHEN p.market_scope = 'mixed' THEN 'Đa scope'
+                ELSE 'Khác'
+            END AS market_scope_label,
+            p.home_segment,
+            CASE
+                WHEN p.home_segment = 'kitchen_cooking' THEN 'Bếp'
+                WHEN p.home_segment = 'cleaning_homecare' THEN 'Vệ sinh'
+                WHEN p.home_segment = 'laundry_garment' THEN 'Giặt ủi'
+                WHEN p.home_segment = 'storage_organization' THEN 'Lưu trữ'
+                WHEN p.home_segment = 'bathroom' THEN 'Nhà tắm'
+                WHEN p.home_segment = 'home_comfort' THEN 'Tiện nghi'
+                WHEN p.home_segment = 'decor_living' THEN 'Trang trí'
+                ELSE 'Ngoài scope'
+            END AS home_segment_label,
+            p.is_analysis_target,
+            CASE
+                WHEN p.rating_average IS NULL OR p.review_count IS NULL THEN NULL
+                ELSE (
+                    p.rating_average * 20
+                    + LEAST(GREATEST(p.review_count, 0), 1000) / 20.0
+                    + COALESCE(p.discount_percent, 0) / 2.0
+                )
+            END AS value_score,
+            CASE
+                WHEN p.rating_average IS NULL OR p.review_count IS NULL THEN 'insufficient_data'
+                WHEN p.price < 500000 AND p.review_count >= 100 THEN 'cheap_popular'
+                WHEN p.price >= 500000 AND p.rating_average >= 4.5 THEN 'premium_quality'
+                WHEN p.discount_percent >= 30 THEN 'high_discount'
+                WHEN p.rating_average < 3.5 OR p.review_count < 10 THEN 'low_trust'
                 ELSE 'normal'
-            END,
-            COALESCE(pp.recorded_at, p.crawled_at),
+            END AS market_position,
+            CASE
+                WHEN p.rating_average IS NULL OR p.review_count IS NULL THEN 'Thiếu tín hiệu'
+                WHEN p.price < 500000 AND p.review_count >= 100 THEN 'Giá tốt'
+                WHEN p.price >= 500000 AND p.rating_average >= 4.5 THEN 'Cao cấp tốt'
+                WHEN p.discount_percent >= 30 THEN 'KM mạnh'
+                WHEN p.rating_average < 3.5 OR p.review_count < 10 THEN 'Tin cậy thấp'
+                ELSE 'Bình thường'
+            END AS market_position_label,
+            p.recorded_at,
             CURRENT_TIMESTAMP
-        FROM products p
-        JOIN {schema}."dim_product" dp ON dp.product_id = p.product_id
-        LEFT JOIN product_prices pp ON pp.product_id = p.id
-        LEFT JOIN product_metrics pm
-            ON pm.product_id = p.id
-            AND pm.crawl_run_id IS NOT DISTINCT FROM pp.crawl_run_id
-        WHERE p.product_id IS NOT NULL
-          AND COALESCE(pp.recorded_at, p.crawled_at) IS NOT NULL
-        ORDER BY
-            p.product_id,
-            COALESCE(pp.recorded_at, p.crawled_at)::date,
-            COALESCE(pp.recorded_at, p.crawled_at) DESC
+        FROM classified_snapshot p
         ON CONFLICT (product_id, snapshot_date) DO UPDATE SET
             crawl_run_id = EXCLUDED.crawl_run_id,
             price = EXCLUDED.price,
             original_price = EXCLUDED.original_price,
             discount_percent = EXCLUDED.discount_percent,
             price_bucket = EXCLUDED.price_bucket,
+            price_bucket_label = EXCLUDED.price_bucket_label,
+            price_status = EXCLUDED.price_status,
+            price_status_label = EXCLUDED.price_status_label,
             discount_bucket = EXCLUDED.discount_bucket,
+            discount_bucket_label = EXCLUDED.discount_bucket_label,
+            discount_status = EXCLUDED.discount_status,
+            discount_status_label = EXCLUDED.discount_status_label,
             rating_average = EXCLUDED.rating_average,
             rating_bucket = EXCLUDED.rating_bucket,
+            rating_bucket_label = EXCLUDED.rating_bucket_label,
+            rating_status = EXCLUDED.rating_status,
+            rating_status_label = EXCLUDED.rating_status_label,
             review_count = EXCLUDED.review_count,
             review_bucket = EXCLUDED.review_bucket,
+            review_bucket_label = EXCLUDED.review_bucket_label,
+            review_status = EXCLUDED.review_status,
+            review_status_label = EXCLUDED.review_status_label,
             sales_count = EXCLUDED.sales_count,
             sold_bucket = EXCLUDED.sold_bucket,
+            sold_bucket_label = EXCLUDED.sold_bucket_label,
+            sold_status = EXCLUDED.sold_status,
+            sold_status_label = EXCLUDED.sold_status_label,
             seller_id = EXCLUDED.seller_id,
             category_id = EXCLUDED.category_id,
             market_scope = EXCLUDED.market_scope,
+            market_scope_label = EXCLUDED.market_scope_label,
             home_segment = EXCLUDED.home_segment,
+            home_segment_label = EXCLUDED.home_segment_label,
             is_analysis_target = EXCLUDED.is_analysis_target,
             value_score = EXCLUDED.value_score,
             market_position = EXCLUDED.market_position,
+            market_position_label = EXCLUDED.market_position_label,
             recorded_at = EXCLUDED.recorded_at,
             updated_at = CURRENT_TIMESTAMP
         """
     )
-    return cursor.rowcount
+    refreshed_rows = cursor.rowcount
+    _backfill_fact_product_daily_labels(cursor, schema)
+    return refreshed_rows
+
+
+def _backfill_fact_product_daily_labels(cursor: Any, schema: str) -> None:
+    cursor.execute(
+        f"""
+        UPDATE {schema}."fact_product_daily"
+        SET
+            price_status = COALESCE(
+                price_status,
+                CASE
+                    WHEN price IS NULL THEN 'missing_price'
+                    WHEN price = 0 THEN 'zero_price'
+                    ELSE 'has_price'
+                END
+            ),
+            price_status_label = CASE
+                    WHEN COALESCE(price_status, '') = 'missing_price' THEN 'Thiếu giá'
+                    WHEN COALESCE(price_status, '') = 'zero_price' THEN 'Giá 0'
+                    WHEN price IS NULL THEN 'Thiếu giá'
+                    WHEN price = 0 THEN 'Giá 0'
+                    ELSE 'Có giá'
+                END,
+            discount_status = COALESCE(
+                discount_status,
+                CASE
+                    WHEN discount_percent IS NULL THEN 'missing_discount'
+                    WHEN discount_percent = 0 THEN 'zero_discount'
+                    ELSE 'has_discount'
+                END
+            ),
+            discount_status_label = CASE
+                    WHEN COALESCE(discount_status, '') = 'missing_discount' THEN 'Thiếu KM'
+                    WHEN COALESCE(discount_status, '') = 'zero_discount' THEN 'Không KM'
+                    WHEN discount_percent IS NULL THEN 'Thiếu KM'
+                    WHEN discount_percent = 0 THEN 'Không KM'
+                    ELSE 'Có KM'
+                END,
+            rating_status = COALESCE(
+                rating_status,
+                CASE
+                    WHEN rating_average IS NULL THEN 'missing_rating'
+                    WHEN rating_average = 0 THEN 'zero_rating'
+                    ELSE 'has_rating'
+                END
+            ),
+            rating_status_label = CASE
+                    WHEN COALESCE(rating_status, '') = 'missing_rating' THEN 'Thiếu rating'
+                    WHEN COALESCE(rating_status, '') = 'zero_rating' THEN 'Rating 0'
+                    WHEN rating_average IS NULL THEN 'Thiếu rating'
+                    WHEN rating_average = 0 THEN 'Rating 0'
+                    ELSE 'Có rating'
+                END,
+            review_status = COALESCE(
+                review_status,
+                CASE
+                    WHEN review_count IS NULL THEN 'missing_review_count'
+                    WHEN review_count = 0 THEN 'zero_review'
+                    ELSE 'has_reviews'
+                END
+            ),
+            review_status_label = CASE
+                    WHEN COALESCE(review_status, '') = 'missing_review_count'
+                        THEN 'Thiếu review'
+                    WHEN COALESCE(review_status, '') = 'zero_review' THEN '0 review'
+                    WHEN review_count IS NULL THEN 'Thiếu review'
+                    WHEN review_count = 0 THEN '0 review'
+                    ELSE 'Có review'
+                END,
+            sold_status = COALESCE(
+                sold_status,
+                CASE
+                    WHEN sales_count IS NULL THEN 'missing_sales_count'
+                    WHEN sales_count = 0 THEN 'zero_sold'
+                    ELSE 'has_sales'
+                END
+            ),
+            sold_status_label = CASE
+                    WHEN COALESCE(sold_status, '') = 'missing_sales_count' THEN 'Thiếu sold'
+                    WHEN COALESCE(sold_status, '') = 'zero_sold' THEN '0 sold'
+                    WHEN sales_count IS NULL THEN 'Thiếu sold'
+                    WHEN sales_count = 0 THEN '0 sold'
+                    ELSE 'Có sold'
+                END,
+            price_bucket_label = CASE
+                    WHEN price_bucket = 'price_unknown' THEN 'Thiếu giá'
+                    WHEN price_bucket = 'price_zero' THEN 'Giá bằng 0'
+                    WHEN price_bucket = 'low' THEN 'Giá thấp'
+                    WHEN price_bucket = 'mid' THEN 'Giá TB'
+                    WHEN price_bucket = 'high' THEN 'Giá cao'
+                    WHEN price_bucket = 'premium' THEN 'Cao cấp'
+                    ELSE 'Chưa phân nhóm giá'
+                END,
+            discount_bucket_label = CASE
+                    WHEN discount_bucket = 'discount_unknown'
+                        THEN 'Thiếu KM'
+                    WHEN discount_bucket = 'no_discount' THEN 'Không KM'
+                    WHEN discount_bucket = 'low_discount' THEN 'KM thấp'
+                    WHEN discount_bucket = 'mid_discount' THEN 'KM TB'
+                    WHEN discount_bucket = 'high_discount' THEN 'KM cao'
+                    ELSE 'Chưa phân nhóm giảm giá'
+                END,
+            rating_bucket_label = CASE
+                    WHEN rating_bucket = 'rating_unknown' THEN 'Thiếu rating'
+                    WHEN rating_bucket = 'rating_zero' THEN 'Rating 0'
+                    WHEN rating_bucket = 'rating_low' THEN 'Đánh giá thấp'
+                    WHEN rating_bucket = 'rating_mid' THEN 'Đánh giá TB'
+                    WHEN rating_bucket = 'rating_high' THEN 'Đánh giá cao'
+                    ELSE 'Chưa phân nhóm đánh giá'
+                END,
+            review_bucket_label = CASE
+                    WHEN review_bucket = 'review_unknown'
+                        THEN 'Thiếu review'
+                    WHEN review_bucket = 'no_review' THEN '0 review'
+                    WHEN review_bucket = 'low_review' THEN 'Ít review'
+                    WHEN review_bucket = 'moderate_review' THEN 'Review TB'
+                    WHEN review_bucket = 'high_review' THEN 'Nhiều review'
+                    ELSE 'Chưa phân nhóm lượt đánh giá'
+                END,
+            sold_bucket_label = CASE
+                    WHEN sold_bucket = 'sold_unknown' THEN 'Thiếu sold'
+                    WHEN sold_bucket = 'no_sold' THEN '0 sold'
+                    WHEN sold_bucket = 'low_sold' THEN 'Sold thấp'
+                    WHEN sold_bucket = 'moderate_sold' THEN 'Sold TB'
+                    WHEN sold_bucket = 'high_sold' THEN 'Sold cao'
+                    ELSE 'Chưa phân nhóm lượt bán'
+                END,
+            market_scope_label = CASE
+                    WHEN market_scope = 'home_living' THEN 'Nhà cửa'
+                    WHEN market_scope = 'home_appliance' THEN 'Điện GD'
+                    WHEN market_scope = 'mixed' THEN 'Đa scope'
+                    ELSE 'Khác'
+                END,
+            home_segment_label = CASE
+                    WHEN home_segment = 'kitchen_cooking' THEN 'Bếp'
+                    WHEN home_segment = 'cleaning_homecare'
+                        THEN 'Vệ sinh'
+                    WHEN home_segment = 'laundry_garment'
+                        THEN 'Giặt ủi'
+                    WHEN home_segment = 'storage_organization' THEN 'Lưu trữ'
+                    WHEN home_segment = 'bathroom' THEN 'Nhà tắm'
+                    WHEN home_segment = 'home_comfort' THEN 'Tiện nghi'
+                    WHEN home_segment = 'decor_living' THEN 'Trang trí'
+                    ELSE 'Ngoài scope'
+                END,
+            market_position_label = CASE
+                    WHEN market_position = 'insufficient_data' THEN 'Thiếu tín hiệu'
+                    WHEN market_position = 'cheap_popular' THEN 'Giá tốt'
+                    WHEN market_position = 'premium_quality' THEN 'Cao cấp tốt'
+                    WHEN market_position = 'high_discount' THEN 'KM mạnh'
+                    WHEN market_position = 'low_trust' THEN 'Tin cậy thấp'
+                    WHEN market_position = 'normal' THEN 'Bình thường'
+                    ELSE 'Chưa phân loại vị trí'
+                END,
+            updated_at = CURRENT_TIMESTAMP
+        """
+    )
 
 
 def _refresh_fact_category_daily(cursor: Any, schema: str) -> int:
@@ -683,7 +1231,21 @@ def _refresh_fact_category_daily(cursor: Any, schema: str) -> int:
         GROUP BY snapshot_date, COALESCE(category_id, 'unknown'), market_scope, home_segment
         """
     )
-    return cursor.rowcount
+    refreshed_rows = cursor.rowcount
+    _backfill_fact_category_daily_labels(cursor, schema)
+    return refreshed_rows
+
+
+def _backfill_fact_category_daily_labels(cursor: Any, schema: str) -> None:
+    cursor.execute(
+        f"""
+        UPDATE {schema}."fact_category_daily"
+        SET
+            market_scope_label = {_label_market_scope_sql()},
+            home_segment_label = {_label_home_segment_sql()},
+            updated_at = CURRENT_TIMESTAMP
+        """
+    )
 
 
 def _refresh_fact_seller_daily(cursor: Any, schema: str) -> int:
@@ -697,8 +1259,11 @@ def _refresh_fact_seller_daily(cursor: Any, schema: str) -> int:
         SELECT
             f.snapshot_date,
             COALESCE(f.seller_id, 'unknown'),
-            COALESCE(ds.seller_type, 'unknown'),
-            f.market_scope,
+            MIN(COALESCE(ds.seller_type, 'unknown')),
+            CASE
+                WHEN COUNT(DISTINCT f.market_scope) > 1 THEN 'mixed'
+                ELSE MIN(f.market_scope)
+            END,
             f.home_segment,
             COUNT(DISTINCT f.product_id),
             ROUND(AVG(f.price), 2),
@@ -712,12 +1277,25 @@ def _refresh_fact_seller_daily(cursor: Any, schema: str) -> int:
         GROUP BY
             f.snapshot_date,
             COALESCE(f.seller_id, 'unknown'),
-            COALESCE(ds.seller_type, 'unknown'),
-            f.market_scope,
             f.home_segment
         """
     )
-    return cursor.rowcount
+    refreshed_rows = cursor.rowcount
+    _backfill_fact_seller_daily_labels(cursor, schema)
+    return refreshed_rows
+
+
+def _backfill_fact_seller_daily_labels(cursor: Any, schema: str) -> None:
+    cursor.execute(
+        f"""
+        UPDATE {schema}."fact_seller_daily"
+        SET
+            seller_type_label = {_label_seller_type_sql()},
+            market_scope_label = {_label_market_scope_sql()},
+            home_segment_label = {_label_home_segment_sql()},
+            updated_at = CURRENT_TIMESTAMP
+        """
+    )
 
 
 def _refresh_fact_price_change(cursor: Any, schema: str) -> int:
@@ -755,12 +1333,56 @@ def _refresh_fact_price_change(cursor: Any, schema: str) -> int:
             updated_at = CURRENT_TIMESTAMP
         """
     )
-    return cursor.rowcount
+    refreshed_rows = cursor.rowcount
+    _backfill_fact_price_change_labels(cursor, schema)
+    return refreshed_rows
+
+
+def _backfill_fact_price_change_labels(cursor: Any, schema: str) -> None:
+    cursor.execute(
+        f"""
+        UPDATE {schema}."fact_price_change"
+        SET
+            change_direction_label = CASE
+                WHEN change_direction = 'increase' THEN 'Tăng'
+                WHEN change_direction = 'decrease' THEN 'Giảm'
+                WHEN change_direction = 'unchanged' THEN 'Không đổi'
+                ELSE 'Không rõ'
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        """
+    )
 
 
 def _refresh_fact_crawl_quality(cursor: Any, schema: str) -> int:
     cursor.execute(
         f"""
+        WITH raw_counts AS (
+            SELECT crawl_run_id, COUNT(*) AS raw_product_count
+            FROM raw_products
+            WHERE crawl_run_id IS NOT NULL
+            GROUP BY crawl_run_id
+        ),
+        task_counts AS (
+            SELECT
+                crawl_run_id,
+                COUNT(*) AS task_count,
+                COUNT(*) FILTER (WHERE status IN ('failed', 'error')) AS failed_task_count
+            FROM crawl_tasks
+            WHERE crawl_run_id IS NOT NULL
+            GROUP BY crawl_run_id
+        ),
+        detail_quality AS (
+            SELECT
+                pp.crawl_run_id,
+                COUNT(DISTINCT p.id) FILTER (WHERE p.detail_status IS NOT NULL)
+                    AS detail_product_count,
+                ROUND(AVG(p.data_quality_score), 2) AS avg_data_quality_score
+            FROM product_prices pp
+            JOIN products p ON p.id = pp.product_id
+            WHERE pp.crawl_run_id IS NOT NULL
+            GROUP BY pp.crawl_run_id
+        )
         INSERT INTO {schema}."fact_crawl_quality" (
             crawl_run_id, airflow_dag_id, airflow_run_id, started_at, finished_at,
             status, total_raw_items, total_transformed_items, total_loaded_items,
@@ -777,18 +1399,16 @@ def _refresh_fact_crawl_quality(cursor: Any, schema: str) -> int:
             cr.total_raw_items,
             cr.total_transformed_items,
             cr.total_loaded_items,
-            COUNT(DISTINCT rp.id),
-            COUNT(DISTINCT ct.id),
-            COUNT(DISTINCT ct.id) FILTER (WHERE ct.status IN ('failed', 'error')),
-            COUNT(DISTINCT p.id) FILTER (WHERE p.detail_status IS NOT NULL),
-            ROUND(AVG(p.data_quality_score), 2),
+            COALESCE(rc.raw_product_count, 0),
+            COALESCE(tc.task_count, 0),
+            COALESCE(tc.failed_task_count, 0),
+            COALESCE(dq.detail_product_count, 0),
+            dq.avg_data_quality_score,
             CURRENT_TIMESTAMP
         FROM crawl_runs cr
-        LEFT JOIN raw_products rp ON rp.crawl_run_id = cr.id
-        LEFT JOIN crawl_tasks ct ON ct.crawl_run_id = cr.id
-        LEFT JOIN product_prices pp ON pp.crawl_run_id = cr.id
-        LEFT JOIN products p ON p.id = pp.product_id
-        GROUP BY cr.id
+        LEFT JOIN raw_counts rc ON rc.crawl_run_id = cr.id
+        LEFT JOIN task_counts tc ON tc.crawl_run_id = cr.id
+        LEFT JOIN detail_quality dq ON dq.crawl_run_id = cr.id
         ON CONFLICT (crawl_run_id) DO UPDATE SET
             airflow_dag_id = EXCLUDED.airflow_dag_id,
             airflow_run_id = EXCLUDED.airflow_run_id,
@@ -806,7 +1426,26 @@ def _refresh_fact_crawl_quality(cursor: Any, schema: str) -> int:
             updated_at = CURRENT_TIMESTAMP
         """
     )
-    return cursor.rowcount
+    refreshed_rows = cursor.rowcount
+    _backfill_fact_crawl_quality_labels(cursor, schema)
+    return refreshed_rows
+
+
+def _backfill_fact_crawl_quality_labels(cursor: Any, schema: str) -> None:
+    cursor.execute(
+        f"""
+        UPDATE {schema}."fact_crawl_quality"
+        SET
+            status_label = CASE
+                WHEN status = 'success' THEN 'Thành công'
+                WHEN status = 'failed' THEN 'Thất bại'
+                WHEN status = 'running' THEN 'Đang chạy'
+                WHEN status = 'partial' THEN 'Một phần'
+                ELSE 'Không rõ'
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        """
+    )
 
 
 def _refresh_product_analysis_ready(cursor: Any, schema: str) -> int:

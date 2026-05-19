@@ -8,7 +8,11 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "airflow" / "dags"))
 
 from tiki_crawl_products_v2.tasks import loader as dag_loader  # noqa: E402
-from tiki_crawl_products_v2.tasks.category import _window_categories_for_run  # noqa: E402
+from tiki_crawl_products_v2.tasks.category import (  # noqa: E402
+    _parse_segment_quotas,
+    _select_categories_by_segment_quota,
+    _window_categories_for_run,
+)
 from tiki_crawl_products_v2.tasks.detail import (  # noqa: E402
     _extend_detail_results_from_xcom,
     _select_products_for_detail,
@@ -217,6 +221,70 @@ def test_window_categories_for_run_rotates_by_run_key():
     assert [cat["category_id"] for cat in second] == ["c3", "c4"]
 
 
+def test_parse_segment_quotas_accepts_comma_separated_pairs():
+    assert _parse_segment_quotas("kitchen_cooking:30,bathroom:20, bad:0,invalid") == {
+        "kitchen_cooking": 30,
+        "bathroom": 20,
+    }
+
+
+def test_select_categories_by_segment_quota_balances_target_segments():
+    categories = [
+        {"category_id": "k1", "name": "Bình đựng nước", "category_path": ["Nhà cửa đời sống", "Đồ dùng phòng ăn", "Bình đựng nước"]},
+        {"category_id": "k2", "name": "Dụng cụ nhà bếp", "category_path": ["Nhà cửa đời sống", "Dụng cụ nhà bếp"]},
+        {"category_id": "b1", "name": "Kệ nhà tắm", "category_path": ["Nhà cửa đời sống", "Nhà tắm"]},
+        {"category_id": "x1", "name": "Amply", "category_path": ["Nhà cửa đời sống", "Nhạc cụ", "Amply"]},
+    ]
+
+    selected = _select_categories_by_segment_quota(
+        categories,
+        segment_quotas={"kitchen_cooking": 1, "bathroom": 1, "home_comfort": 1},
+        max_categories=10,
+        run_key="1",
+    )
+
+    assert [cat["category_id"] for cat in selected] == ["k1", "b1", "k2"]
+    assert [cat["home_segment"] for cat in selected] == [
+        "kitchen_cooking",
+        "bathroom",
+        "kitchen_cooking",
+    ]
+
+
+def test_select_categories_by_segment_quota_refills_underfilled_segments():
+    categories = [
+        {
+            "category_id": "k1",
+            "name": "Dụng cụ nhà bếp 1",
+            "category_path": ["Nhà cửa đời sống", "Dụng cụ nhà bếp", "Nồi"],
+        },
+        {
+            "category_id": "k2",
+            "name": "Dụng cụ nhà bếp 2",
+            "category_path": ["Nhà cửa đời sống", "Dụng cụ nhà bếp", "Chảo"],
+        },
+        {
+            "category_id": "k3",
+            "name": "Dụng cụ nhà bếp 3",
+            "category_path": ["Nhà cửa đời sống", "Dụng cụ nhà bếp", "Dao"],
+        },
+        {
+            "category_id": "b1",
+            "name": "Kệ nhà tắm",
+            "category_path": ["Nhà cửa đời sống", "Nhà tắm", "Kệ nhà tắm"],
+        },
+    ]
+
+    selected = _select_categories_by_segment_quota(
+        categories,
+        segment_quotas={"kitchen_cooking": 1, "bathroom": 1, "cleaning_homecare": 2},
+        max_categories=4,
+        run_key="1",
+    )
+
+    assert [cat["category_id"] for cat in selected] == ["k1", "b1", "k2", "k3"]
+
+
 def test_select_products_for_detail_applies_effective_limit_and_skips_recent_db_hits():
     products = [
         {"product_id": "p1", "url": "https://tiki.vn/p1.html", "name": "P1"},
@@ -234,6 +302,51 @@ def test_select_products_for_detail_applies_effective_limit_and_skips_recent_db_
 
     assert [item["product_id"] for item in selected] == ["p2"]
     assert selected[0]["product"] == products[1]
+
+
+def test_select_products_for_detail_balances_analysis_segments():
+    products = [
+        {
+            "product_id": "k1",
+            "url": "https://tiki.vn/k1.html",
+            "name": "K1",
+            "category_path": ["Nha Cua Doi Song", "Dụng cụ nhà bếp"],
+        },
+        {
+            "product_id": "k2",
+            "url": "https://tiki.vn/k2.html",
+            "name": "K2",
+            "category_path": ["Nha Cua Doi Song", "Dụng cụ nhà bếp"],
+        },
+        {
+            "product_id": "k3",
+            "url": "https://tiki.vn/k3.html",
+            "name": "K3",
+            "category_path": ["Nha Cua Doi Song", "Dụng cụ nhà bếp"],
+        },
+        {
+            "product_id": "b1",
+            "url": "https://tiki.vn/b1.html",
+            "name": "B1",
+            "category_path": ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm"],
+        },
+        {
+            "product_id": "d1",
+            "url": "https://tiki.vn/d1.html",
+            "name": "D1",
+            "category_path": ["Nha Cua Doi Song", "Trang trí nhà cửa"],
+        },
+    ]
+
+    selected = _select_products_for_detail(
+        products,
+        existing_product_ids_in_db=set(),
+        products_per_day=4,
+        max_products=0,
+        force_crawl=False,
+    )
+
+    assert [item["product_id"] for item in selected] == ["k1", "b1", "d1", "k2"]
 
 
 def test_select_products_for_detail_force_crawl_ignores_recent_db_hits():

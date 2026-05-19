@@ -594,10 +594,23 @@ def extract_product_id_from_url(url: str) -> str | None:
     Returns:
         Product ID hoặc None
     """
-    # Pattern: /p{product_id}.html hoặc -p{product_id}.html hoặc /p/{product_id}
-    match = re.search(r"[\/-]p[/-]?(\d+)", url)
-    if match:
-        return match.group(1)
+    if not url:
+        return None
+
+    # Tiki product URLs often contain other "-p..." fragments in the slug
+    # (for example model names like "-p6-800-"). Prefer the canonical product
+    # id immediately before ".html" so we do not crawl detail with a model code.
+    canonical_match = re.search(r"(?:^|[-/])p(\d+)\.html(?:[?#].*)?$", url)
+    if canonical_match:
+        return canonical_match.group(1)
+
+    path_match = re.search(r"/p/(\d+)(?:[/?#]|$)", url)
+    if path_match:
+        return path_match.group(1)
+
+    legacy_match = re.search(r"(?:^|[-/])p(\d+)(?:[/?#]|$)", url)
+    if legacy_match:
+        return legacy_match.group(1)
     return None
 
 

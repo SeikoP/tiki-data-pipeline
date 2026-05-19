@@ -1,3 +1,5 @@
+"""Airflow DAG for normalizing loaded Tiki data into analytics marts."""
+
 from __future__ import annotations
 
 import logging

@@ -94,6 +94,95 @@ def _window_categories_for_run(
     return rotated[:max_categories]
 
 
+def _rotate_categories_for_run(
+    categories: list[dict[str, Any]],
+    *,
+    run_key: str | None,
+) -> list[dict[str, Any]]:
+    if len(categories) <= 1:
+        return categories
+    offset = _category_window_offset(len(categories), 1, run_key)
+    return categories[offset:] + categories[:offset]
+
+
+def _parse_segment_quotas(raw_value: str | None) -> dict[str, int]:
+    """Parse segment quota config such as ``kitchen_cooking:30,bathroom:20``."""
+    quotas: dict[str, int] = {}
+    for item in str(raw_value or "").split(","):
+        if ":" not in item:
+            continue
+        segment, raw_quota = item.split(":", 1)
+        segment = segment.strip()
+        if not segment:
+            continue
+        try:
+            quota = int(raw_quota.strip())
+        except ValueError:
+            continue
+        if quota > 0:
+            quotas[segment] = quota
+    return quotas
+
+
+def _select_categories_by_segment_quota(
+    categories: list[dict[str, Any]],
+    *,
+    segment_quotas: dict[str, int],
+    max_categories: int,
+    run_key: str | None,
+) -> list[dict[str, Any]]:
+    """Return a balanced category set grouped by analytics home segment."""
+    if not segment_quotas:
+        return categories
+
+    from pipelines.analytics.normalizer import classify_category_path
+
+    grouped: dict[str, list[dict[str, Any]]] = {segment: [] for segment in segment_quotas}
+    for category in categories:
+        category_path = category.get("category_path") or [category.get("name")]
+        classification = classify_category_path(category_path)
+        if not classification.get("is_analysis_target"):
+            continue
+
+        segment = classification.get("home_segment")
+        if segment not in grouped:
+            continue
+
+        enriched = dict(category)
+        enriched.update(classification)
+        grouped[segment].append(enriched)
+
+    selected: list[dict[str, Any]] = []
+    segment_candidates: dict[str, list[dict[str, Any]]] = {}
+    cursors: dict[str, int] = {}
+    for segment, quota in segment_quotas.items():
+        segment_categories = _rotate_categories_for_run(grouped.get(segment, []), run_key=run_key)
+        segment_candidates[segment] = segment_categories
+        if not segment_categories:
+            continue
+        selected.extend(segment_categories[:quota])
+        cursors[segment] = min(quota, len(segment_categories))
+
+    if max_categories > 0 and len(selected) > max_categories:
+        selected = selected[:max_categories]
+    elif max_categories > 0 and len(selected) < max_categories:
+        while len(selected) < max_categories:
+            added = False
+            for segment in segment_quotas:
+                cursor = cursors.get(segment, 0)
+                candidates = segment_candidates.get(segment, [])
+                if cursor >= len(candidates):
+                    continue
+                selected.append(candidates[cursor])
+                cursors[segment] = cursor + 1
+                added = True
+                if len(selected) >= max_categories:
+                    break
+            if not added:
+                break
+    return selected
+
+
 def load_categories(**context) -> list[dict[str, Any]]:
     """
     Task 1: Load danh sách danh mục từ file
@@ -161,12 +250,28 @@ def load_categories(**context) -> list[dict[str, Any]]:
             dag_run = context.get("dag_run")
             run_key = getattr(dag_run, "run_id", None)
 
+        selection_mode = get_setting("TIKI_CATEGORY_SELECTION_MODE").strip().lower()
         original_filtered_count = len(categories)
-        categories = _window_categories_for_run(
-            categories,
-            max_categories=max_categories,
-            run_key=run_key,
-        )
+        if selection_mode == "segment_quota":
+            segment_quotas = _parse_segment_quotas(get_setting("TIKI_CATEGORY_SEGMENT_QUOTAS"))
+            categories = _select_categories_by_segment_quota(
+                categories,
+                segment_quotas=segment_quotas,
+                max_categories=max_categories,
+                run_key=run_key,
+            )
+            logger.info(
+                "🎯 Segment quota selection: %s/%s categories across %s configured segments",
+                len(categories),
+                original_filtered_count,
+                len(segment_quotas),
+            )
+        else:
+            categories = _window_categories_for_run(
+                categories,
+                max_categories=max_categories,
+                run_key=run_key,
+            )
         if len(categories) != original_filtered_count:
             logger.info(
                 "🪟 Giới hạn category window: %s/%s categories (run_key=%s)",

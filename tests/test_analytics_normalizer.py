@@ -46,6 +46,72 @@ def test_analytics_schema_sql_contains_required_tables():
         assert f'CREATE TABLE IF NOT EXISTS "analytics"."{table_name}"' in ddl
 
 
+def test_analytics_schema_sql_contains_analysis_labels_and_statuses():
+    from pipelines.analytics.normalizer import build_schema_sql
+
+    ddl = "\n".join(build_schema_sql("analytics"))
+
+    expected_columns = [
+        "price_bucket_label",
+        "price_status",
+        "price_status_label",
+        "discount_bucket_label",
+        "discount_status",
+        "discount_status_label",
+        "rating_bucket_label",
+        "rating_status",
+        "rating_status_label",
+        "review_bucket_label",
+        "review_status",
+        "review_status_label",
+        "sold_bucket_label",
+        "sold_status",
+        "sold_status_label",
+        "market_scope_label",
+        "home_segment_label",
+        "market_position_label",
+        "exclusion_reason_label",
+        "seller_type_label",
+        "change_direction_label",
+        "status_label",
+    ]
+    for column_name in expected_columns:
+        assert column_name in ddl
+
+    assert 'ALTER TABLE "analytics"."fact_product_daily"' in ddl
+    assert 'ALTER TABLE "analytics"."product_analysis_ready"' in ddl
+
+
+def test_product_daily_refresh_distinguishes_missing_zero_and_labels():
+    from pipelines.analytics.normalizer import _refresh_fact_product_daily
+
+    class Cursor:
+        rowcount = 0
+
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, sql):
+            self.statements.append(sql)
+
+    cursor = Cursor()
+    _refresh_fact_product_daily(cursor, '"analytics"')
+    sql = "\n".join(cursor.statements)
+
+    assert len(cursor.statements) == 2
+    assert "WHEN raw_price IS NULL THEN 'price_unknown'" in sql
+    assert "WHEN raw_price = 0 THEN 'price_zero'" in sql
+    assert "WHEN rating_average IS NULL THEN 'missing_rating'" in sql
+    assert "WHEN rating_average = 0 THEN 'zero_rating'" in sql
+    assert "WHEN review_count IS NULL THEN 'missing_review_count'" in sql
+    assert "WHEN review_count = 0 THEN 'zero_review'" in sql
+    assert "WHEN sales_count IS NULL THEN 'missing_sales_count'" in sql
+    assert "WHEN sales_count = 0 THEN 'zero_sold'" in sql
+    assert "Thiếu tín hiệu" in sql
+    assert "Nhà cửa" in sql
+    assert "Bếp" in sql
+
+
 @pytest.mark.parametrize(
     ("path", "expected_segment", "expected_target", "expected_reason"),
     [
@@ -53,6 +119,18 @@ def test_analytics_schema_sql_contains_required_tables():
         (
             ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm", "Kệ phòng tắm"],
             "bathroom",
+            True,
+            None,
+        ),
+        (
+            ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm", "Dụng cụ vệ sinh"],
+            "cleaning_homecare",
+            True,
+            None,
+        ),
+        (
+            ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm", "Phụ kiện giặt ủi"],
+            "laundry_garment",
             True,
             None,
         ),

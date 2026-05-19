@@ -47,8 +47,42 @@ def parse_categories(*args, **kwargs):
     return _get_extract_module().parse_categories(*args, **kwargs)
 
 
-# Set UTF-8 encoding cho stdout trên Windows
-if sys.platform == "win32":
+def safe_print(*args, **kwargs):
+    """Print without crashing on Windows consoles that cannot encode Unicode."""
+    if sys.stdout.closed:
+        return
+
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        sep = kwargs.get("sep", " ")
+        end = kwargs.get("end", "\n")
+        flush = kwargs.get("flush", False)
+        message = sep.join(str(arg) for arg in args) + end
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        safe_message = message.encode(encoding, errors="backslashreplace").decode(encoding)
+        sys.stdout.write(safe_message)
+        if flush:
+            sys.stdout.flush()
+    except ValueError:
+        # stdout may be closed by Airflow/test capture teardown; progress output is non-critical.
+        return
+
+
+def stdout_supports_unicode() -> bool:
+    """Return False when the current stdout encoding cannot print common Unicode logs."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        "danh mục ✅".encode(encoding)
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+# Set UTF-8 encoding cho stdout trên Windows khi chạy trực tiếp trong terminal.
+# Không ép encoding khi stdout bị capture/pipe vì PowerShell hoặc CI có thể decode
+# theo codepage hiện tại và làm log tiếng Việt bị mojibake.
+if sys.platform == "win32" and sys.stdout.isatty():
     try:
         import io
 
@@ -82,17 +116,23 @@ class SafeProgress:
         self.iterable = iterable
         self.total = total or (len(iterable) if iterable else 0)
         self.desc = desc
+        self.unit = kwargs.get("unit", "items")
         self.n = 0
+        self.postfix = ""
         self.start_time = time.time()
         self.last_print_time = 0.0
         self.print_interval = 5.0
+        self.next_percent_marker = 10
 
     def __enter__(self):
-        print(f"{self.desc}: starting {self.total} items", flush=True)
+        safe_print(f"{self.desc}: starting 0/{self.total} {self.unit}", flush=True)
         return self
 
     def __exit__(self, *args):
-        print(f"{self.desc}: completed {self.n}/{self.total} items", flush=True)
+        safe_print(
+            f"{self.desc}: completed {self.n}/{self.total} {self.unit}{self.postfix}",
+            flush=True,
+        )
 
     def __iter__(self):
         if self.iterable:
@@ -105,31 +145,83 @@ class SafeProgress:
     def update(self, n=1):
         self.n += n
         now = time.time()
-        if self.n == self.total or now - self.last_print_time >= self.print_interval:
-            pct = (self.n / self.total * 100) if self.total else 100.0
+        pct = (self.n / self.total * 100) if self.total else 100.0
+        should_print = (
+            self.n == 1
+            or self.n == self.total
+            or now - self.last_print_time >= self.print_interval
+            or pct >= self.next_percent_marker
+        )
+
+        if should_print:
             elapsed = now - self.start_time
             rate = self.n / elapsed if elapsed > 0 else 0.0
-            print(
-                f"{self.desc}: {self.n}/{self.total} ({pct:.1f}%) | {rate:.2f} items/s",
+            safe_print(
+                f"{self.desc}: {self.n}/{self.total} {self.unit} "
+                f"({pct:.1f}%) | {rate:.2f} {self.unit}/s{self.postfix}",
                 flush=True,
             )
             self.last_print_time = now
+            while pct >= self.next_percent_marker:
+                self.next_percent_marker += 10
 
     def set_description(self, desc):
         self.desc = desc
 
     def set_postfix(self, _postfix=None, **kwargs):
-        pass
+        data = {}
+        if isinstance(_postfix, dict):
+            data.update(_postfix)
+        kwargs.pop("refresh", None)
+        data.update(kwargs)
+
+        if not data:
+            self.postfix = ""
+            return
+
+        parts = []
+        for key, value in data.items():
+            label = str(key)
+            if not stdout_supports_unicode():
+                label = label.replace("✅", "ok").replace("❌", "fail").replace("📦", "items")
+            parts.append(f"{label}={value}")
+        self.postfix = " | " + ", ".join(parts)
 
 
 def progress_bar(*args, **kwargs):
-    if not HAS_TQDM or tqdm is None or sys.stdout.closed:
+    if not HAS_TQDM or tqdm is None or sys.stdout.closed or not stdout_supports_unicode():
+        if not stdout_supports_unicode() and kwargs.get("unit"):
+            kwargs = {**kwargs, "unit": "categories"}
         return SafeProgress(*args, **kwargs)
     try:
+        kwargs.setdefault("dynamic_ncols", True)
+        kwargs.setdefault("mininterval", 0.5)
+        kwargs.setdefault("smoothing", 0.1)
+        if kwargs.get("unit") == "danh mục":
+            kwargs = {**kwargs, "unit": "cat"}
         return tqdm(*args, file=sys.stdout, **kwargs)
     except Exception as exc:
         logger.warning("Progress bar unavailable, continuing without tqdm: %s", exc)
         return SafeProgress(*args, **kwargs)
+
+
+class ProgressLoggingHandler(logging.StreamHandler):
+    """Logging handler that does not corrupt active tqdm progress bars."""
+
+    def emit(self, record):
+        try:
+            message = self.format(record)
+            if (
+                HAS_TQDM
+                and tqdm is not None
+                and not sys.stdout.closed
+                and stdout_supports_unicode()
+            ):
+                tqdm.write(message, file=sys.stdout)
+            else:
+                safe_print(message)
+        except Exception:
+            self.handleError(record)
 
 
 # Tạo thư mục output (deferred to avoid import-time side effects)
@@ -286,6 +378,10 @@ def crawl_level_parallel(
     if not tasks:
         return results
 
+    level_success = 0
+    level_failed = 0
+    level_found = 0
+
     # Tạo progress bar
     desc = f"Level {level}"
     with progress_bar(total=len(tasks), desc=desc, unit="danh mục") as pbar:
@@ -305,35 +401,75 @@ def crawl_level_parallel(
                 )
                 future_to_url[future] = (url, parent_url)
 
-            # Xử lý kết quả khi hoàn thành
-            for future in as_completed(future_to_url):
-                url, parent_url = future_to_url[future]
-                try:
-                    success, categories, error = future.result(timeout=300)  # Timeout 5 phút
-                    results[url] = (success, categories, error)
+            pbar.set_postfix(
+                {
+                    "running": min(max_workers, len(tasks)),
+                    "ok": level_success,
+                    "fail": level_failed,
+                    "found": level_found,
+                }
+            )
+            if hasattr(pbar, "refresh"):
+                pbar.refresh()
 
-                    # Đánh dấu đã crawl (dù thành công hay thất bại)
-                    visited_urls.add(url)
+            try:
+                # Xử lý kết quả khi hoàn thành
+                for future in as_completed(future_to_url):
+                    url, parent_url = future_to_url[future]
+                    try:
+                        success, categories, error = future.result(timeout=300)  # Timeout 5 phút
+                        results[url] = (success, categories, error)
 
-                    if success:
+                        # Đánh dấu đã crawl (dù thành công hay thất bại)
+                        visited_urls.add(url)
+
+                        if success:
+                            level_success += 1
+                            level_found += len(categories)
+                        else:
+                            level_failed += 1
+                            logger.error(f"\n  ❌ Lỗi crawl {url}: {error}")
+                    except Exception as e:
+                        error_msg = str(e)
+                        error_type = type(e).__name__
+                        results[url] = (False, [], error_msg)
+                        visited_urls.add(url)  # Đánh dấu đã thử crawl
+                        level_failed += 1
                         with stats_lock:
-                            pbar.set_postfix({"✅": len(categories), "❌": stats["total_failed"]})
-                    else:
-                        with stats_lock:
-                            pbar.set_postfix(
-                                {"✅": stats["total_success"], "❌": stats["total_failed"]}
-                            )
-                        logger.error(f"\n  ❌ Lỗi crawl {url}: {error}")
-                except Exception as e:
-                    error_msg = str(e)
-                    error_type = type(e).__name__
-                    results[url] = (False, [], error_msg)
-                    visited_urls.add(url)  # Đánh dấu đã thử crawl
+                            stats["total_failed"] += 1
+                        logger.error(
+                            f"\n  ❌ Exception khi crawl {url}: [{error_type}] {error_msg}"
+                        )
+
                     with stats_lock:
-                        stats["total_failed"] += 1
-                    logger.error(f"\n  ❌ Exception khi crawl {url}: [{error_type}] {error_msg}")
+                        postfix = {
+                            "ok": level_success,
+                            "fail": level_failed,
+                            "found": level_found,
+                        }
+                        if HAS_TQDM and tqdm is not None and hasattr(pbar, "set_postfix"):
+                            pbar.set_postfix(postfix, refresh=False)
+                        else:
+                            pbar.set_postfix(postfix)
+                    pbar.update(1)
+            except KeyboardInterrupt:
+                logger.warning(
+                    "⏹️  Đã nhận Ctrl+C ở Level %s. Đang hủy %s task chưa hoàn tất...",
+                    level,
+                    sum(1 for future in future_to_url if not future.done()),
+                )
+                for future in future_to_url:
+                    future.cancel()
 
-                pbar.update(1)
+                with stats_lock:
+                    pbar.set_postfix(
+                        {
+                            "interrupted": True,
+                            "ok": level_success,
+                            "fail": level_failed,
+                            "found": level_found,
+                        }
+                    )
 
     return results
 
@@ -491,7 +627,8 @@ def print_stats():
         logger.info(f"⏱  Thời gian: {elapsed:.1f}s")
         logger.info(f"📥 Đã crawl: {stats['total_crawled']} danh mục")
         logger.info(f"✅ Thành công: {stats['total_success']}")
-        logger.error(f"❌ Thất bại: {stats['total_failed']}")
+        failed_log = logger.error if stats["total_failed"] else logger.info
+        failed_log(f"❌ Thất bại: {stats['total_failed']}")
         logger.info(f"📊 Tổng danh mục tìm được: {stats['total_categories']}")
         logger.info(f"⚡ Tốc độ: {rate:.2f} danh mục/s")
 
@@ -505,9 +642,12 @@ def main():
     """
     Hàm main để crawl đệ quy với tối ưu.
     """
+    log_handler = ProgressLoggingHandler()
+    log_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[log_handler],
+        force=True,
     )
 
     # Hỗ trợ nhiều root categories từ config file hoặc tham số
@@ -529,21 +669,21 @@ def main():
                 elif isinstance(config_data, dict) and "root_urls" in config_data:
                     root_urls = config_data["root_urls"]
                 else:
-                    print(f"⚠️  Config file có cấu trúc không hợp lệ: {config_file}")
+                    safe_print(f"⚠️  Config file có cấu trúc không hợp lệ: {config_file}")
                     root_urls = []
 
                 # Chỉ print success message nếu thực sự load được URLs
                 if root_urls:
-                    print(f"✅ Đã load {len(root_urls)} root categories từ {config_file}")
+                    safe_print(f"✅ Đã load {len(root_urls)} root categories từ {config_file}")
         except Exception as e:
-            print(f"⚠️  Không thể đọc config file: {e}")
+            safe_print(f"⚠️  Không thể đọc config file: {e}")
 
     # Thử đọc từ biến môi trường
     if not root_urls:
         env_urls = os.getenv("TIKI_ROOT_CATEGORIES", "")
         if env_urls:
             root_urls = [url.strip() for url in env_urls.split(",") if url.strip()]
-            print(f"✅ Đã load {len(root_urls)} root categories từ biến môi trường")
+            safe_print(f"✅ Đã load {len(root_urls)} root categories từ biến môi trường")
 
     # Default: danh sách mặc định nếu không có config
     if not root_urls:
@@ -553,7 +693,7 @@ def main():
             "https://tiki.vn/nha-cua-doi-song/c1883",
             "https://tiki.vn/dien-tu-dien-lanh/c4221",
         ]
-        print("ℹ️  Sử dụng root categories mặc định")
+        safe_print("ℹ️  Sử dụng root categories mặc định")
 
     # Độ sâu tối đa
     max_level = int(os.getenv("TIKI_MAX_CATEGORY_LEVEL", "5"))
@@ -561,16 +701,16 @@ def main():
     # Số thread song song (giới hạn để tránh quá tải server)
     max_workers = int(os.getenv("TIKI_CRAWL_MAX_WORKERS", "3"))
 
-    print("=" * 70)
-    print("🚀 CRAWL ĐỆ QUY CÁC DANH MỤC TIKI (TỐI ƯU)")
-    print("=" * 70)
-    print(f"Số root categories: {len(root_urls)}")
+    safe_print("=" * 70)
+    safe_print("🚀 CRAWL ĐỆ QUY CÁC DANH MỤC TIKI (TỐI ƯU)")
+    safe_print("=" * 70)
+    safe_print(f"Số root categories: {len(root_urls)}")
     for i, url in enumerate(root_urls, 1):
-        print(f"  {i}. {url}")
-    print(f"Độ sâu tối đa: {max_level}")
-    print(f"Số thread song song: {max_workers}")
-    print(f"Cache: {DEFAULT_CATEGORY_CACHE_DIR}")
-    print("=" * 70)
+        safe_print(f"  {i}. {url}")
+    safe_print(f"Độ sâu tối đa: {max_level}")
+    safe_print(f"Số thread song song: {max_workers}")
+    safe_print(f"Cache: {DEFAULT_CATEGORY_CACHE_DIR}")
+    safe_print("=" * 70)
 
     # Reset stats
     global stats
@@ -607,8 +747,8 @@ def main():
     # In thống kê
     print_stats()
 
-    print(f"\n💾 Đã lưu vào: {output_file}")
-    print(f"📦 Tổng số danh mục unique: {len(unique_categories)}")
+    safe_print(f"\n💾 Đã lưu vào: {output_file}")
+    safe_print(f"📦 Tổng số danh mục unique: {len(unique_categories)}")
 
     # Thống kê theo level
     level_counts = defaultdict(int)
@@ -617,9 +757,9 @@ def main():
         level_counts[level] += 1
 
     if level_counts:
-        print("\n📋 Thống kê theo level:")
+        safe_print("\n📋 Thống kê theo level:")
         for level in sorted(level_counts.keys()):
-            print(f"  Level {level}: {level_counts[level]} danh mục")
+            safe_print(f"  Level {level}: {level_counts[level]} danh mục")
 
 
 if __name__ == "__main__":
