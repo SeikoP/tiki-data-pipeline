@@ -340,6 +340,148 @@ def build_schema_sql(schema_name: str) -> list[str]:
         ALTER TABLE {schema}."fact_crawl_quality"
             ADD COLUMN IF NOT EXISTS status_label VARCHAR(100)
         """,
+        *_build_mart_view_sql(schema),
+    ]
+
+
+def _build_mart_view_sql(schema: str) -> list[str]:
+    """Return idempotent BI-facing mart view DDL."""
+    return [
+        f'DROP VIEW IF EXISTS {schema}."mart_product_wide"',
+        f'DROP VIEW IF EXISTS {schema}."mart_product_analysis_ready"',
+        f'DROP VIEW IF EXISTS {schema}."mart_category_summary"',
+        f'DROP VIEW IF EXISTS {schema}."mart_seller_summary"',
+        f'DROP VIEW IF EXISTS {schema}."mart_crawl_quality"',
+        f"""
+        CREATE OR REPLACE VIEW {schema}."mart_product_analysis_ready" AS
+        SELECT *
+        FROM {schema}."product_analysis_ready"
+        """,
+        f"""
+        CREATE OR REPLACE VIEW {schema}."mart_product_wide" AS
+        SELECT
+            f.product_id,
+            p.product_name,
+            p.short_name,
+            p.brand,
+            f.category_id,
+            COALESCE(c.category_name, 'Unknown Category') AS category_name,
+            c.level_1,
+            c.level_2,
+            c.level_3,
+            c.level_4,
+            COALESCE(c.exclusion_reason, f.market_position) AS exclusion_reason,
+            COALESCE(c.exclusion_reason_label, 'Trong scope') AS exclusion_reason_label,
+            COALESCE(f.seller_id, 'unknown') AS seller_id,
+            COALESCE(s.seller_display_name, 'Unknown Seller') AS seller_display_name,
+            COALESCE(s.seller_type, 'unknown') AS seller_type,
+            COALESCE(s.seller_type_label, 'Không rõ') AS seller_type_label,
+            f.snapshot_date,
+            f.home_segment,
+            f.home_segment_label,
+            f.market_scope,
+            f.market_scope_label,
+            f.price,
+            f.original_price,
+            f.discount_percent,
+            f.price_bucket,
+            f.price_bucket_label,
+            f.price_status,
+            f.price_status_label,
+            f.discount_bucket,
+            f.discount_bucket_label,
+            f.discount_status,
+            f.discount_status_label,
+            f.rating_average,
+            f.rating_bucket,
+            f.rating_bucket_label,
+            f.rating_status,
+            f.rating_status_label,
+            f.review_count,
+            f.review_bucket,
+            f.review_bucket_label,
+            f.review_status,
+            f.review_status_label,
+            f.sales_count,
+            f.sold_bucket,
+            f.sold_bucket_label,
+            f.sold_status,
+            f.sold_status_label,
+            f.value_score,
+            f.market_position,
+            f.market_position_label,
+            p.product_url,
+            p.image_url
+        FROM {schema}."product_analysis_ready" f
+        LEFT JOIN {schema}."dim_product" p ON p.product_id = f.product_id
+        LEFT JOIN {schema}."dim_category" c ON c.category_id = f.category_id
+        LEFT JOIN {schema}."dim_seller" s ON s.seller_id = COALESCE(f.seller_id, 'unknown')
+        """,
+        f"""
+        CREATE OR REPLACE VIEW {schema}."mart_category_summary" AS
+        SELECT
+            snapshot_date,
+            home_segment,
+            home_segment_label,
+            market_scope,
+            market_scope_label,
+            COUNT(DISTINCT category_id) AS category_count,
+            SUM(product_count) AS product_count,
+            ROUND(AVG(avg_price), 0) AS avg_price,
+            ROUND(AVG(avg_discount_percent), 2) AS avg_discount_percent,
+            ROUND(AVG(avg_rating), 2) AS avg_rating,
+            SUM(total_reviews) AS total_reviews,
+            SUM(total_sold) AS total_sold
+        FROM {schema}."fact_category_daily"
+        GROUP BY
+            snapshot_date,
+            home_segment,
+            home_segment_label,
+            market_scope,
+            market_scope_label
+        """,
+        f"""
+        CREATE OR REPLACE VIEW {schema}."mart_seller_summary" AS
+        SELECT
+            f.snapshot_date,
+            COALESCE(f.seller_id, 'unknown') AS seller_id,
+            COALESCE(s.seller_display_name, 'Unknown Seller') AS seller_display_name,
+            COALESCE(f.seller_type, 'unknown') AS seller_type,
+            COALESCE(f.seller_type_label, 'Không rõ') AS seller_type_label,
+            f.home_segment,
+            f.home_segment_label,
+            f.market_scope,
+            f.market_scope_label,
+            f.product_count,
+            f.avg_price,
+            f.avg_discount_percent,
+            f.avg_rating,
+            f.total_reviews,
+            f.total_sold
+        FROM {schema}."fact_seller_daily" f
+        LEFT JOIN {schema}."dim_seller" s ON s.seller_id = COALESCE(f.seller_id, 'unknown')
+        """,
+        f"""
+        CREATE OR REPLACE VIEW {schema}."mart_crawl_quality" AS
+        SELECT
+            crawl_run_id,
+            airflow_dag_id,
+            airflow_run_id,
+            started_at,
+            finished_at,
+            status,
+            status_label,
+            total_raw_items,
+            total_transformed_items,
+            total_loaded_items,
+            raw_product_count,
+            task_count,
+            failed_task_count,
+            detail_product_count,
+            avg_data_quality_score,
+            updated_at
+        FROM {schema}."fact_crawl_quality"
+        """,
     ]
 
 
@@ -597,6 +739,20 @@ def _refresh_dim_seller(cursor: Any, schema: str) -> int:
         """
     )
     refreshed_rows = cursor.rowcount
+    cursor.execute(
+        f"""
+        INSERT INTO {schema}."dim_seller" (
+            seller_id, seller_name, seller_display_name, seller_type, is_official, updated_at
+        )
+        VALUES ('unknown', NULL, 'Unknown Seller', 'unknown', NULL, CURRENT_TIMESTAMP)
+        ON CONFLICT (seller_id) DO UPDATE SET
+            seller_name = EXCLUDED.seller_name,
+            seller_display_name = EXCLUDED.seller_display_name,
+            seller_type = EXCLUDED.seller_type,
+            is_official = EXCLUDED.is_official,
+            updated_at = CURRENT_TIMESTAMP
+        """
+    )
     _backfill_dim_seller_labels(cursor, schema)
     return refreshed_rows
 
@@ -693,7 +849,7 @@ def _refresh_dim_product(cursor: Any, schema: str) -> int:
             p.url,
             p.image_url,
             p.category_id,
-            COALESCE(p.seller_id, p.seller_pk::text),
+            COALESCE(p.seller_id, p.seller_pk::text, 'unknown'),
             COALESCE(dc.market_scope, 'other'),
             COALESCE(dc.home_segment, 'excluded_other'),
             COALESCE(dc.is_analysis_target, FALSE),
@@ -762,7 +918,7 @@ def _refresh_fact_product_daily(cursor: Any, schema: str) -> int:
                 COALESCE(pm.rating_average, p.rating_average) AS rating_average,
                 COALESCE(pm.review_count, p.review_count) AS review_count,
                 COALESCE(pm.quantity_sold, p.sales_count) AS sales_count,
-                dp.seller_id,
+                COALESCE(dp.seller_id, 'unknown') AS seller_id,
                 dp.category_id,
                 dp.market_scope,
                 dp.home_segment,

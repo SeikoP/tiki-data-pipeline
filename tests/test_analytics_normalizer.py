@@ -46,6 +46,20 @@ def test_analytics_schema_sql_contains_required_tables():
         assert f'CREATE TABLE IF NOT EXISTS "analytics"."{table_name}"' in ddl
 
 
+def test_analytics_schema_sql_creates_bi_mart_views():
+    from pipelines.analytics.normalizer import build_schema_sql
+
+    ddl = "\n".join(build_schema_sql("analytics"))
+
+    assert 'CREATE OR REPLACE VIEW "analytics"."mart_product_wide"' in ddl
+    assert 'CREATE OR REPLACE VIEW "analytics"."mart_category_summary"' in ddl
+    assert 'CREATE OR REPLACE VIEW "analytics"."mart_seller_summary"' in ddl
+    assert 'CREATE OR REPLACE VIEW "analytics"."mart_crawl_quality"' in ddl
+    assert "COALESCE(s.seller_display_name, 'Unknown Seller')" in ddl
+    assert "home_segment_label" in ddl
+    assert "market_scope_label" in ddl
+
+
 def test_analytics_schema_sql_contains_analysis_labels_and_statuses():
     from pipelines.analytics.normalizer import build_schema_sql
 
@@ -80,6 +94,24 @@ def test_analytics_schema_sql_contains_analysis_labels_and_statuses():
 
     assert 'ALTER TABLE "analytics"."fact_product_daily"' in ddl
     assert 'ALTER TABLE "analytics"."product_analysis_ready"' in ddl
+
+
+def test_analytics_fact_sql_normalizes_missing_seller_to_unknown():
+    from pipelines.analytics.normalizer import _refresh_fact_product_daily
+
+    class DummyCursor:
+        def __init__(self):
+            self.statements = []
+            self.rowcount = 0
+
+        def execute(self, sql):
+            self.statements.append(sql)
+
+    cursor = DummyCursor()
+    _refresh_fact_product_daily(cursor, '"analytics"')
+    sql = "\n".join(cursor.statements)
+
+    assert "COALESCE(dp.seller_id, 'unknown')" in sql
 
 
 def test_product_daily_refresh_distinguishes_missing_zero_and_labels():
