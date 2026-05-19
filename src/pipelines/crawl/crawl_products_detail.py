@@ -1796,8 +1796,6 @@ async def crawl_product_detail_via_api(
                     "Referer": url,
                     "Origin": "https://tiki.vn",
                     "X-Guest-Token": "no-token",
-                    "Cache-Control": "no-cache",
-                    "Pragma": "no-cache",
                 }
             )
         except ImportError:
@@ -1808,8 +1806,6 @@ async def crawl_product_detail_via_api(
                 "Referer": url,
                 "Origin": "https://tiki.vn",
                 "X-Guest-Token": "no-token",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache",
             }
 
     max_retries = 3
@@ -1868,6 +1864,17 @@ async def crawl_product_detail_via_api(
                         attempt_count=attempt + 1,
                         elapsed_ms=elapsed_ms(),
                     )
+
+                    if reason == "api_html_instead_of_json":
+                        if verbose:
+                            logger.info(
+                                "[API] Attempt %d/%d got status %s for ID %s. Giving up.",
+                                attempt + 1,
+                                max_retries,
+                                status_desc,
+                                product_id,
+                            )
+                        return None
 
                     is_last_attempt = attempt == max_retries - 1
                     if verbose:

@@ -253,7 +253,7 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
                     product_url,
                     session=session,
                     use_selenium_fallback=False,
-                    verbose=True,  # Enable Verbose Logging
+                    verbose=False,
                     failure_details=failure_details,
                 )
 

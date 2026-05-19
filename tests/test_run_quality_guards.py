@@ -19,6 +19,7 @@ from tiki_crawl_products_v2.tasks.detail import (  # noqa: E402
     _validate_detail_results_available,
 )
 from tiki_crawl_products_v2.tasks.detail_new import (  # noqa: E402
+    _crawl_fast_internal,
     _get_detail_concurrency,
     _summarize_detail_metrics,
 )
@@ -136,6 +137,21 @@ def test_detail_batch_planner_fills_active_wave(product_count, active_batches, e
     assert [batch["batch_index"] for batch in batches] == list(range(expected_batches))
 
 
+def test_detail_batch_planner_avoids_singleton_final_wave():
+    products = [{"product_id": str(i)} for i in range(3000)]
+
+    batches = plan_detail_batches(
+        products,
+        active_batches=3,
+        base_batch_size=300,
+    )
+
+    assert len(batches) == 9
+    assert len(batches) % 3 == 0
+    assert max(len(batch["product_batch"]) for batch in batches) <= 334
+    assert sum(len(batch["product_batch"]) for batch in batches) == 3000
+
+
 def test_detail_xcom_file_metadata_expands_to_results(tmp_path):
     results_file = tmp_path / "detail_batch.json"
     results_file.write_text(
@@ -249,6 +265,50 @@ def test_summarize_detail_metrics_reports_latency_and_reasons():
     }
     assert summary["api_statuses"] == {"200": 1, "200 (HTML instead of JSON)": 1, "429": 1}
     assert [item["product_id"] for item in summary["slowest"]] == ["p2", "p3"]
+
+
+def test_fast_detail_internal_disables_per_request_verbose(monkeypatch):
+    captured = {}
+
+    async def fake_crawl_product_detail_async(*args, **kwargs):
+        captured.update(kwargs)
+        return {
+            "name": "P1",
+            "brand": "Brand",
+            "seller": {"name": "Seller"},
+            "price": {"current_price": 1000},
+            "_metadata": {"extraction_method": "api"},
+        }
+
+    monkeypatch.setattr(
+        "pipelines.crawl.crawl_products_detail.crawl_product_detail_async",
+        fake_crawl_product_detail_async,
+    )
+    monkeypatch.setattr(
+        "tiki_crawl_products_v2.tasks.detail_new.get_float_setting",
+        lambda name: 0.0,
+    )
+    monkeypatch.setattr(
+        "tiki_crawl_products_v2.tasks.detail_new.get_int_setting",
+        lambda name: {
+            "TIKI_DETAIL_MAX_CONCURRENT_TASKS": 1,
+            "TIKI_DETAIL_CONCURRENCY_MIN": 1,
+            "TIKI_DETAIL_CONCURRENCY_MAX": 1,
+        }[name],
+    )
+    logger = type("Logger", (), {"info": lambda *args: None, "warning": lambda *args: None})()
+
+    import asyncio
+
+    results = asyncio.run(
+        _crawl_fast_internal(
+            [{"product_id": "p1", "url": "https://tiki.vn/product-p1.html"}],
+            logger,
+        )
+    )
+
+    assert results[0]["status"] == "success_api"
+    assert captured["verbose"] is False
 
 
 def test_resolve_product_load_mode_auto_threshold():
