@@ -135,36 +135,36 @@ def test_product_analysis_ready_refresh_builds_clean_current_snapshot():
 @pytest.mark.parametrize(
     ("path", "expected_segment", "expected_target", "expected_reason"),
     [
-        (["Nha Cua Doi Song", "Dụng cụ nhà bếp", "Nồi"], "Bếp", True, None),
+        (["Nha Cua Doi Song", "Dụng cụ nhà bếp", "Nồi"], "kitchen_cooking", True, None),
         (
             ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm", "Kệ phòng tắm"],
-            "Nhà tắm",
+            "bathroom",
             True,
             None,
         ),
         (
             ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm", "Dụng cụ vệ sinh"],
-            "Vệ sinh",
+            "cleaning_homecare",
             True,
             None,
         ),
         (
             ["Nha Cua Doi Song", "Đồ dùng và thiết bị nhà tắm", "Phụ kiện giặt ủi"],
-            "Giặt ủi",
+            "laundry_garment",
             True,
             None,
         ),
         (
             ["Dien Tu Dien Lanh", "Máy giặt", "Máy giặt cửa trước"],
-            "Ngoài scope",
+            "excluded_other",
             False,
-            "Điện máy lớn",
+            "large_appliance",
         ),
         (
             ["Nha Cua Doi Song", "Nhạc cụ", "Amply"],
-            "Ngoài scope",
+            "excluded_other",
             False,
-            "Nhạc cụ",
+            "musical_instrument",
         ),
     ],
 )

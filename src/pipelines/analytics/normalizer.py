@@ -37,46 +37,46 @@ def classify_category_path(category_path: Iterable[Any]) -> dict[str, Any]:
     """Classify a category path into the graduation-project home taxonomy."""
     text = " ".join(_normalize_text(part) for part in category_path if part)
 
-    market_scope = "Khác"
+    market_scope = "other"
     if "nha cua doi song" in text or "nha bep" in text or "phong an" in text:
-        market_scope = "Nhà cửa"
+        market_scope = "home_living"
     if (
         "dien gia dung" in text
         or "dien tu dien lanh" in text
         or "may giat" in text
         or "tu lanh" in text
     ):
-        market_scope = "Điện GD"
+        market_scope = "home_appliance"
 
     excluded_rules = [
-        ("nhac cu", "Nhạc cụ"),
-        ("do tho cung", "Đồ thờ"),
-        ("sua chua nha cua", "Sửa chữa"),
-        ("noi that", "Nội thất lớn"),
-        ("may giat", "Điện máy lớn"),
-        ("tu lanh", "Điện máy lớn"),
-        ("may lanh", "Điện máy lớn"),
-        ("may dieu hoa", "Điện máy lớn"),
-        ("tu dong", "Điện máy lớn"),
-        ("tu mat", "Điện máy lớn"),
+        ("nhac cu", "musical_instrument"),
+        ("do tho cung", "religious_item"),
+        ("sua chua nha cua", "construction_repair"),
+        ("noi that", "large_furniture"),
+        ("may giat", "large_appliance"),
+        ("tu lanh", "large_appliance"),
+        ("may lanh", "large_appliance"),
+        ("may dieu hoa", "large_appliance"),
+        ("tu dong", "large_appliance"),
+        ("tu mat", "large_appliance"),
     ]
     for keyword, reason in excluded_rules:
         if keyword in text:
             return {
                 "market_scope": market_scope,
-                "home_segment": "Ngoài scope",
+                "home_segment": "excluded_other",
                 "is_analysis_target": False,
                 "exclusion_reason": reason,
             }
 
     segment_rules = [
-        (("dung cu nha bep", "do dung phong an", "binh dung nuoc"), "Bếp"),
-        (("ve sinh", "don dep", "hut bui", "loc khong khi"), "Vệ sinh"),
-        (("giat", "ui", "say quan ao"), "Giặt ủi"),
-        (("gia, moc", "cay treo", "hop dung", "luu tru"), "Lưu trữ"),
-        (("nha tam", "phong tam"), "Nhà tắm"),
-        (("may nuoc nong", "may rua chen", "quat", "tao am", "may suoi"), "Tiện nghi"),
-        (("trang tri", "den", "chieu sang"), "Trang trí"),
+        (("dung cu nha bep", "do dung phong an", "binh dung nuoc"), "kitchen_cooking"),
+        (("ve sinh", "don dep", "hut bui", "loc khong khi"), "cleaning_homecare"),
+        (("giat", "ui", "say quan ao"), "laundry_garment"),
+        (("gia, moc", "cay treo", "hop dung", "luu tru"), "storage_organization"),
+        (("nha tam", "phong tam"), "bathroom"),
+        (("may nuoc nong", "may rua chen", "quat", "tao am", "may suoi"), "home_comfort"),
+        (("trang tri", "den", "chieu sang"), "decor_living"),
     ]
     for keywords, segment in segment_rules:
         if any(keyword in text for keyword in keywords):
@@ -89,9 +89,9 @@ def classify_category_path(category_path: Iterable[Any]) -> dict[str, Any]:
 
     return {
         "market_scope": market_scope,
-        "home_segment": "Ngoài scope",
+        "home_segment": "excluded_other",
         "is_analysis_target": False,
-        "exclusion_reason": "Chưa phân loại",
+        "exclusion_reason": "uncategorized",
     }
 
 

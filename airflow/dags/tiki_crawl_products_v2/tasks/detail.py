@@ -297,7 +297,9 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
             categories_file = None
             if isinstance(categories_meta, dict):
                 categories_file = categories_meta.get("categories_file")
-            categories_path = Path(categories_file or "/opt/airflow/data/processed/loaded_categories.json")
+            categories_path = Path(
+                categories_file or "/opt/airflow/data/processed/loaded_categories.json"
+            )
             if categories_path.exists():
                 with open(categories_path, encoding="utf-8") as f:
                     loaded_categories = json.load(f)
@@ -306,7 +308,9 @@ def prepare_products_for_detail(**context) -> list[dict[str, Any]]:
                     category_path = category.get("category_path")
                     if category_url and category_path:
                         category_lookup[category_url] = category_path
-                logger.info(f"🧭 Loaded category lookup for detail balancing: {len(category_lookup)}")
+                logger.info(
+                    f"🧭 Loaded category lookup for detail balancing: {len(category_lookup)}"
+                )
         except Exception as e:
             logger.warning(f"⚠️  Không thể load category lookup để cân bằng detail: {e}")
 
