@@ -133,10 +133,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.25'
-          memory: 1280M
+          cpus: '1.5'
+          memory: 2G
         reservations:
-          memory: 512M
+          memory: 768M
     restart: unless-stopped
     networks:
       - backend
@@ -162,10 +162,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 1536M
+          cpus: '2.5'
+          memory: 2G
         reservations:
-          memory: 768M
+          memory: 1G
     stop_grace_period: 30s
     restart: unless-stopped
     networks:
@@ -192,10 +192,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.75'
-          memory: 768M
+          cpus: '1.0'
+          memory: 1G
         reservations:
-          memory: 384M
+          memory: 512M
     stop_grace_period: 30s
     restart: unless-stopped
     networks:
@@ -224,10 +224,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '0.5'
+          memory: 512M
         reservations:
-          memory: 128M
+          memory: 256M
     restart: unless-stopped
     networks:
       - backend
