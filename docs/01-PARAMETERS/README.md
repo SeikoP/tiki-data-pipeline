@@ -51,7 +51,7 @@ Defined in `src/pipelines/crawl/config.py`.
 | Setting | Current value | Purpose |
 | --- | ---: | --- |
 | `REDIS_CACHE_TTL_PRODUCT_DETAIL` | `604800` | Product detail cache TTL, 7 days |
-| `REDIS_CACHE_TTL_PRODUCT_LIST` | `43200` | Product list cache TTL, 12 hours |
+| `REDIS_CACHE_TTL_PRODUCT_LIST` | `604800` | Product list cache TTL, 7 days |
 | `REDIS_CACHE_TTL_HTML` | `604800` | HTML cache TTL, 7 days |
 | `CACHE_ACCEPT_PARTIAL_DATA` | `True` | Allows partial cached records when useful |
 

@@ -311,6 +311,85 @@ def test_fast_detail_internal_disables_per_request_verbose(monkeypatch):
     assert captured["verbose"] is False
 
 
+def test_fast_detail_internal_logs_simple_progress(monkeypatch):
+    async def fake_crawl_product_detail_async(url, *args, **kwargs):
+        failure_details = kwargs.get("failure_details")
+        if "p2" in url:
+            failure_details.update(
+                {
+                    "reason": "api_html_instead_of_json",
+                    "message": "API returned HTML instead of JSON",
+                    "status": "200 (HTML instead of JSON)",
+                }
+            )
+            return None
+        return {
+            "name": "P1",
+            "brand": "Brand",
+            "seller": {"name": "Seller"},
+            "price": {"current_price": 1000},
+            "_metadata": {"extraction_method": "api"},
+        }
+
+    monkeypatch.setattr(
+        "pipelines.crawl.crawl_products_detail.crawl_product_detail_async",
+        fake_crawl_product_detail_async,
+    )
+    monkeypatch.setattr(
+        "tiki_crawl_products_v2.tasks.detail_new.get_float_setting",
+        lambda name: 0.0,
+    )
+    monkeypatch.setattr(
+        "tiki_crawl_products_v2.tasks.detail_new.get_int_setting",
+        lambda name: {
+            "TIKI_DETAIL_MAX_CONCURRENT_TASKS": 1,
+            "TIKI_DETAIL_CONCURRENCY_MIN": 1,
+            "TIKI_DETAIL_CONCURRENCY_MAX": 1,
+        }[name],
+    )
+
+    class CapturingLogger:
+        def __init__(self):
+            self.messages = []
+
+        def info(self, message, *args):
+            self.messages.append(message % args if args else message)
+
+        def warning(self, *args):
+            pass
+
+        def error(self, *args):
+            pass
+
+    logger = CapturingLogger()
+
+    import asyncio
+
+    asyncio.run(
+        _crawl_fast_internal(
+            [
+                {"product_id": f"p{i}", "url": f"https://tiki.vn/product-p{i}.html"}
+                for i in range(1, 4)
+            ],
+            logger,
+            batch_index=7,
+        )
+    )
+
+    item_messages = [message for message in logger.messages if "FAST BATCH 7 item" in message]
+    progress_messages = [
+        message for message in logger.messages if "FAST BATCH 7 progress" in message
+    ]
+
+    assert item_messages[0].startswith("FAST BATCH 7 item 1/3 product_id=p1 status=success_api")
+    assert item_messages[1].startswith("FAST BATCH 7 item 2/3 product_id=p2 status=failed")
+    assert "reason=api_html_instead_of_json" in item_messages[1]
+    assert progress_messages
+    assert progress_messages[-1] == (
+        "FAST BATCH 7 progress: 3/3 done, success=2, partial=0, failed=1"
+    )
+
+
 def test_resolve_product_load_mode_auto_threshold():
     assert _resolve_product_load_mode("auto", product_count=999, threshold=1000) == "safe"
     assert _resolve_product_load_mode("auto", product_count=1000, threshold=1000) == "optimized"

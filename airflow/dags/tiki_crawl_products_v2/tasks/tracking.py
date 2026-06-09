@@ -4,11 +4,14 @@ from tiki_crawl_products_v2.bootstrap import Any, get_logger
 from tiki_crawl_products_v2.tasks.common import _fix_sys_path_for_pipelines_import  # noqa: F401
 
 try:
-    from airflow.exceptions import AirflowSkipException
+    from airflow.sdk.exceptions import AirflowSkipException
 except Exception:
+    try:
+        from airflow.exceptions import AirflowSkipException
+    except Exception:
 
-    class AirflowSkipException(Exception):
-        """Fallback for local tests without a usable Airflow runtime."""
+        class AirflowSkipException(Exception):
+            """Fallback for local tests without a usable Airflow runtime."""
 
 
 def _context_ids(context: dict[str, Any]) -> tuple[str | None, str | None]:

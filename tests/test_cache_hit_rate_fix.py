@@ -12,6 +12,8 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from pipelines.crawl.storage import redis_cache as redis_cache_module
+from src.pipelines.crawl import crawl_products
 from src.pipelines.crawl.config import (
     CACHE_ACCEPT_PARTIAL_DATA,
     REDIS_CACHE_TTL_HTML,
@@ -28,12 +30,12 @@ def test_config_constants():
     print("=" * 70)
 
     assert REDIS_CACHE_TTL_PRODUCT_DETAIL == 604800, "Product detail TTL should be 7 days (604800s)"
-    assert REDIS_CACHE_TTL_PRODUCT_LIST == 43200, "Product list TTL should be 12 hours (43200s)"
+    assert REDIS_CACHE_TTL_PRODUCT_LIST == 604800, "Product list TTL should be 7 days (604800s)"
     assert REDIS_CACHE_TTL_HTML == 604800, "HTML cache TTL should be 7 days (604800s)"
     assert CACHE_ACCEPT_PARTIAL_DATA is True, "Should accept partial cache data"
 
     print(f"✅ REDIS_CACHE_TTL_PRODUCT_DETAIL: {REDIS_CACHE_TTL_PRODUCT_DETAIL}s (7 days)")
-    print(f"✅ REDIS_CACHE_TTL_PRODUCT_LIST: {REDIS_CACHE_TTL_PRODUCT_LIST}s (12 hours)")
+    print(f"✅ REDIS_CACHE_TTL_PRODUCT_LIST: {REDIS_CACHE_TTL_PRODUCT_LIST}s (7 days)")
     print(f"✅ REDIS_CACHE_TTL_HTML: {REDIS_CACHE_TTL_HTML}s (7 days)")
     print(f"✅ CACHE_ACCEPT_PARTIAL_DATA: {CACHE_ACCEPT_PARTIAL_DATA}")
     print("✅ TEST 1 PASSED\n")
@@ -226,6 +228,90 @@ def test_cache_hit_scenario():
 
     print("\n✅ Same product from different categories → CACHE HIT (10% → 60-80%)")
     print("✅ TEST 5 PASSED\n")
+
+
+class _FakeRedisCache:
+    def __init__(self):
+        self.cached_calls = []
+
+    def get_cache_key(self, category_url, cache_type):
+        return f"{cache_type}:{category_url}"
+
+    def get_cached_products(self, category_url):
+        return None
+
+    def exists(self, key):
+        return False
+
+    def cache_products(self, category_url, products, ttl=None):
+        self.cached_calls.append({"category_url": category_url, "products": products, "ttl": ttl})
+        return True
+
+
+def test_crawl_listing_api_uses_product_list_ttl(monkeypatch):
+    """Product list cache TTL should come from REDIS_CACHE_TTL_PRODUCT_LIST."""
+    fake_cache = _FakeRedisCache()
+    expected_ttl = 123
+    products = [{"product_id": "p1", "name": "Cached product"}]
+
+    monkeypatch.setattr(crawl_products, "REDIS_CACHE_TTL_PRODUCT_LIST", expected_ttl, raising=False)
+    monkeypatch.setattr(
+        redis_cache_module,
+        "get_redis_cache",
+        lambda _redis_url: fake_cache,
+    )
+    monkeypatch.setattr(
+        crawl_products,
+        "get_products_via_listing_api",
+        lambda *args, **kwargs: [product.copy() for product in products],
+    )
+
+    result = crawl_products.crawl_category_products(
+        "https://tiki.vn/c/test-cat",
+        cache_dir=None,
+        use_redis_cache=True,
+    )
+
+    assert result == [
+        {
+            "product_id": "p1",
+            "name": "Cached product",
+            "category_url": "https://tiki.vn/c/test-cat",
+        }
+    ]
+    assert fake_cache.cached_calls[-1]["ttl"] == expected_ttl
+
+
+def test_crawl_html_fallback_uses_product_list_ttl(monkeypatch):
+    """HTML product list cache should use the same product list TTL setting."""
+    fake_cache = _FakeRedisCache()
+    expected_ttl = 123
+
+    monkeypatch.setattr(crawl_products, "REDIS_CACHE_TTL_PRODUCT_LIST", expected_ttl, raising=False)
+    monkeypatch.setattr(
+        redis_cache_module,
+        "get_redis_cache",
+        lambda _redis_url: fake_cache,
+    )
+    monkeypatch.setattr(crawl_products, "get_products_via_listing_api", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        crawl_products, "get_page_with_requests", lambda *args, **kwargs: "<html />"
+    )
+    monkeypatch.setattr(
+        crawl_products,
+        "parse_products_from_html",
+        lambda *args, **kwargs: [{"product_id": "p1", "name": "HTML product"}],
+    )
+    monkeypatch.setattr(crawl_products, "get_total_pages", lambda _html: 1)
+
+    result = crawl_products.crawl_category_products(
+        "https://tiki.vn/c/test-cat",
+        cache_dir=None,
+        use_redis_cache=True,
+    )
+
+    assert result == [{"product_id": "p1", "name": "HTML product"}]
+    assert fake_cache.cached_calls[-1]["ttl"] == expected_ttl
 
 
 def main():

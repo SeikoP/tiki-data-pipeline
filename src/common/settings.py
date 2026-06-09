@@ -473,7 +473,7 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "REDIS_CACHE_TTL_PRODUCT_DETAIL", 604800, "int", description="Product detail cache TTL"
     ),
     "REDIS_CACHE_TTL_PRODUCT_LIST": SettingSpec(
-        "REDIS_CACHE_TTL_PRODUCT_LIST", 43200, "int", description="Product list cache TTL"
+        "REDIS_CACHE_TTL_PRODUCT_LIST", 604800, "int", description="Product list cache TTL"
     ),
     "REDIS_CACHE_TTL_HTML": SettingSpec(
         "REDIS_CACHE_TTL_HTML", 604800, "int", description="HTML cache TTL"

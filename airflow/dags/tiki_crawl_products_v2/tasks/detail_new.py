@@ -179,7 +179,7 @@ def _write_detail_batch_results(
     return str(output_path)
 
 
-async def _crawl_fast_internal(product_batch, logger, session=None):
+async def _crawl_fast_internal(product_batch, logger, session=None, batch_index: int = -1):
     import asyncio
     import time
 
@@ -321,23 +321,99 @@ async def _crawl_fast_internal(product_batch, logger, session=None):
             result["metrics"] = {key: value for key, value in metrics.items() if value is not None}
             return result
 
+    total_items = len(product_batch)
+
+    def classify_progress_status(result: Any) -> str:
+        if isinstance(result, Exception):
+            return "failed"
+        if not isinstance(result, dict):
+            return "failed"
+
+        status = result.get("status")
+        if status in {"success", "success_api"}:
+            return "success"
+        if status == "partial_needs_enrichment":
+            return "partial"
+        return "failed"
+
+    def summarize_product_result(result: Any) -> tuple[str, str | None, int | None]:
+        if isinstance(result, Exception):
+            return "failed", str(result), None
+        if not isinstance(result, dict):
+            return "failed", "invalid_result", None
+
+        metrics = result.get("metrics") or {}
+        status = str(result.get("status") or "unknown")
+        reason = metrics.get("api_reason") or result.get("error")
+        duration_ms = metrics.get("duration_ms")
+        return status, reason, duration_ms
+
     # Create tasks with delay
     tasks = []
     for i, product in enumerate(product_batch):
         delay = _detail_request_delay(i, rate_limit_delay)
 
-        async def task_with_delay(p, d):
+        async def task_with_delay(index, p, d):
             if d > 0:
                 await asyncio.sleep(d)
-            return await crawl_single(p)
+            return index, await crawl_single(p)
 
-        tasks.append(task_with_delay(product, delay))
+        tasks.append(asyncio.create_task(task_with_delay(i, product, delay)))
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    results: list[Any] = [None] * total_items
+    completed = 0
+    success_count = 0
+    partial_count = 0
+    failed_count = 0
+    progress_interval = max(1, total_items // 5)
 
-    # Close session if we created it
-    if own_session and session:
-        await session.close()
+    try:
+        for task in asyncio.as_completed(tasks):
+            try:
+                result_index, result = await task
+            except Exception as exc:
+                result_index = completed
+                result = exc
+
+            results[result_index] = result
+            completed += 1
+
+            product_info = product_batch[result_index] if result_index < total_items else {}
+            product_id = product_info.get("product_id", "unknown")
+            product_status, product_reason, product_duration_ms = summarize_product_result(result)
+            logger.info(
+                "FAST BATCH %s item %s/%s product_id=%s status=%s duration_ms=%s reason=%s",
+                batch_index,
+                completed,
+                total_items,
+                product_id,
+                product_status,
+                product_duration_ms if product_duration_ms is not None else "-",
+                product_reason or "-",
+            )
+
+            progress_status = classify_progress_status(result)
+            if progress_status == "success":
+                success_count += 1
+            elif progress_status == "partial":
+                partial_count += 1
+            else:
+                failed_count += 1
+
+            if completed == total_items or completed % progress_interval == 0:
+                logger.info(
+                    "FAST BATCH %s progress: %s/%s done, success=%s, partial=%s, failed=%s",
+                    batch_index,
+                    completed,
+                    total_items,
+                    success_count,
+                    partial_count,
+                    failed_count,
+                )
+    finally:
+        # Close session if we created it
+        if own_session and session:
+            await session.close()
 
     return results
 
@@ -379,7 +455,9 @@ def crawl_product_batch_fast(
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    results = loop.run_until_complete(_crawl_fast_internal(product_batch, logger))
+    results = loop.run_until_complete(
+        _crawl_fast_internal(product_batch, logger, batch_index=batch_index)
+    )
 
     # Post-process: Skip direct DB write, let transform_and_load handle it
     saved_count = 0

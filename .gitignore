@@ -9,6 +9,7 @@ data/test_output/*.html/
 airflow/config/airflow.cfg
 airflow/passwords.json
 data/
+exports/
 # C extensions
 *.so
 # Distribution / packaging
@@ -131,3 +132,4 @@ htmlcov/
 # Environment files (already covered, but explicit)
 .env.local
 .env.*.local
+.claude/*

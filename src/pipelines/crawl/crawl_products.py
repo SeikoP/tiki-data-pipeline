@@ -14,6 +14,7 @@ import requests
 from common.profiling import profile, profile_crawler
 
 # Import shared utilities
+from .config import REDIS_CACHE_TTL_PRODUCT_LIST
 from .crawl_utils import (
     DEFAULT_PRODUCT_LIST_CACHE_DIR,
     DEFAULT_PRODUCTS_DIR,
@@ -933,7 +934,9 @@ def crawl_category_products(
                             try:
                                 # CRITICAL: Drop 'page' param for category-level product listing cache
                                 success = redis_cache.cache_products(
-                                    category_url, cached_products, ttl=259200
+                                    category_url,
+                                    cached_products,
+                                    ttl=REDIS_CACHE_TTL_PRODUCT_LIST,
                                 )
                                 if success:
                                     logger.info(
@@ -975,8 +978,14 @@ def crawl_category_products(
         # Tối ưu: Cache ngay lập tức sau khi lấy từ API thành công
         if redis_cache:
             try:
-                redis_cache.cache_products(category_url, api_products, ttl=259200)  # 3 ngày
-                logger.info(f"[Redis Cache] ✅ Cached {len(api_products)} products with TTL=3 days")
+                redis_cache.cache_products(
+                    category_url, api_products, ttl=REDIS_CACHE_TTL_PRODUCT_LIST
+                )
+                logger.info(
+                    "[Redis Cache] ✅ Cached %s products with TTL=%ss",
+                    len(api_products),
+                    REDIS_CACHE_TTL_PRODUCT_LIST,
+                )
             except Exception as e:
                 logger.warning(f"[Redis Cache] ⚠️ Failed to cache: {e}")
 
@@ -1108,7 +1117,11 @@ def crawl_category_products(
         # Redis cache (nhanh, distributed)
         if redis_cache:
             try:
-                redis_cache.cache_products(category_url, unique_products, ttl=43200)  # 12 giờ
+                redis_cache.cache_products(
+                    category_url,
+                    unique_products,
+                    ttl=REDIS_CACHE_TTL_PRODUCT_LIST,
+                )
                 logger.info(
                     f"[Redis Cache] ✅ Đã cache {len(unique_products)} products cho {category_url[:60]}..."
                 )
