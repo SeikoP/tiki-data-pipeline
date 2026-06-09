@@ -381,12 +381,8 @@ def test_fast_detail_internal_logs_simple_progress(monkeypatch):
         message for message in logger.messages if "FAST BATCH 7 progress" in message
     ]
 
-    assert item_messages[0].startswith(
-        "FAST BATCH 7 item 1/3 product_id=p1 status=success_api"
-    )
-    assert item_messages[1].startswith(
-        "FAST BATCH 7 item 2/3 product_id=p2 status=failed"
-    )
+    assert item_messages[0].startswith("FAST BATCH 7 item 1/3 product_id=p1 status=success_api")
+    assert item_messages[1].startswith("FAST BATCH 7 item 2/3 product_id=p2 status=failed")
     assert "reason=api_html_instead_of_json" in item_messages[1]
     assert progress_messages
     assert progress_messages[-1] == (
