@@ -638,7 +638,7 @@ def print_stats():
                 logger.info(f"  Level {level}: {stats['by_level'][level]} danh mục")
 
 
-def main():
+def main() -> dict[str, int | str]:
     """
     Hàm main để crawl đệ quy với tối ưu.
     """
@@ -760,6 +760,13 @@ def main():
         safe_print("\n📋 Thống kê theo level:")
         for level in sorted(level_counts.keys()):
             safe_print(f"  Level {level}: {level_counts[level]} danh mục")
+
+    return {
+        "total_success": int(stats["total_success"]),
+        "total_failed": int(stats["total_failed"]),
+        "total_categories": int(stats["total_categories"]),
+        "output_file": output_file,
+    }
 
 
 if __name__ == "__main__":

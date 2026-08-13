@@ -1,4 +1,4 @@
-# Dockerfile (LITE MODE) - Airflow Mới Nhất (3.x), Không Chrome/Selenium
+# Dockerfile - Airflow 3.x with Chromium support for Selenium category preparation
 FROM apache/airflow:3.2.1
 
 USER root
@@ -7,7 +7,8 @@ USER root
 ENV TZ=Asia/Ho_Chi_Minh
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        wget gnupg ca-certificates tzdata postgresql-client curl redis-tools && \
+        wget gnupg ca-certificates tzdata postgresql-client curl redis-tools \
+        chromium chromium-driver && \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
